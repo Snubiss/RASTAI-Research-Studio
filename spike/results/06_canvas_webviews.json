@@ -1,0 +1,676 @@
+{
+  "browsers": {
+    "chrome": {
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "device_pixel_ratio": 1,
+      "canvas_size": [
+        1600,
+        944
+      ],
+      "vendor": "Google Inc. (NVIDIA Corporation)",
+      "renderer": "ANGLE (NVIDIA Corporation, NVIDIA GeForce RTX 5080/PCIe/SSE2, OpenGL ES 3.2)",
+      "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+      "refresh_rate_hz": 144.92753623188216,
+      "measure_milliseconds": 3000,
+      "results": [
+        {
+          "scene": "graph",
+          "label": "graph 1000 nodes",
+          "nodes": 1000,
+          "edges": 1167,
+          "glyphs": 10515,
+          "frames": 433,
+          "fps": 144.32852238258727,
+          "frame_ms_p50": 6.900000000000546,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.100000000000364,
+          "frame_ms_max": 7.199999999999818,
+          "script_ms_p50": 0,
+          "script_ms_p95": 0.10000002384185791,
+          "drawn_pixel_fraction": 0.2854488877118644
+        },
+        {
+          "scene": "graph",
+          "label": "graph 2000 nodes",
+          "nodes": 2000,
+          "edges": 2342,
+          "glyphs": 22140,
+          "frames": 433,
+          "fps": 144.33333333333334,
+          "frame_ms_p50": 6.900000000000546,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.199999999999818,
+          "frame_ms_max": 7.299999999999272,
+          "script_ms_p50": 0.09999996423721313,
+          "script_ms_p95": 0.10000002384185791,
+          "drawn_pixel_fraction": 0.20931475105932204
+        },
+        {
+          "scene": "graph",
+          "label": "graph 5000 nodes",
+          "nodes": 5000,
+          "edges": 5867,
+          "glyphs": 57015,
+          "frames": 433,
+          "fps": 144.33333333333334,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.199999999998909,
+          "frame_ms_max": 7.300000000001091,
+          "script_ms_p50": 0.10000002384185791,
+          "script_ms_p95": 0.20000004768371582,
+          "drawn_pixel_fraction": 0.08605733580508475
+        },
+        {
+          "scene": "graph",
+          "label": "graph 10000 nodes",
+          "nodes": 10000,
+          "edges": 11742,
+          "glyphs": 115140,
+          "frames": 433,
+          "fps": 144.33333333333334,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.100000000000364,
+          "frame_ms_max": 7.200000000000728,
+          "script_ms_p50": 0.19999998807907104,
+          "script_ms_p95": 0.30000001192092896,
+          "drawn_pixel_fraction": 0.06647841631355932
+        },
+        {
+          "scene": "graph",
+          "label": "graph 20000 nodes",
+          "nodes": 20000,
+          "edges": 23492,
+          "glyphs": 241390,
+          "frames": 433,
+          "fps": 144.32852238258732,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.100000000002183,
+          "frame_ms_max": 7.200000000000728,
+          "script_ms_p50": 0.3999999761581421,
+          "script_ms_p95": 0.5,
+          "drawn_pixel_fraction": 0.027517213983050848
+        },
+        {
+          "scene": "graph",
+          "label": "graph 50000 nodes",
+          "nodes": 50000,
+          "edges": 58742,
+          "glyphs": 620140,
+          "frames": 433,
+          "fps": 144.33333333333334,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.100000000002183,
+          "frame_ms_max": 7.200000000000728,
+          "script_ms_p50": 0.9000000357627869,
+          "script_ms_p95": 1.100000023841858,
+          "drawn_pixel_fraction": 0.015632944915254236
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d7512",
+          "layers": 26,
+          "tokens": 512,
+          "cubes": 13312,
+          "triangles": 159744,
+          "frames": 433,
+          "fps": 144.33333333333334,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.099999999998545,
+          "frame_ms_max": 7.400000000001455,
+          "script_ms_p50": 0.40000003576278687,
+          "script_ms_p95": 0.5,
+          "drawn_pixel_fraction": 0.06415717690677966
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d72048",
+          "layers": 26,
+          "tokens": 2048,
+          "cubes": 53248,
+          "triangles": 638976,
+          "frames": 433,
+          "fps": 144.32852238258732,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.100000000002183,
+          "frame_ms_max": 7.299999999999272,
+          "script_ms_p50": 1.600000023841858,
+          "script_ms_p95": 1.899999976158142,
+          "drawn_pixel_fraction": 0.01858448093220339
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d78192",
+          "layers": 26,
+          "tokens": 8192,
+          "cubes": 212992,
+          "triangles": 2555904,
+          "frames": 433,
+          "fps": 144.32852238258715,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.099999999998545,
+          "frame_ms_max": 7.099999999998545,
+          "script_ms_p50": 6.5,
+          "script_ms_p95": 7,
+          "drawn_pixel_fraction": 0.004811308262711865
+        },
+        {
+          "scene": "combined",
+          "label": "combined 1000 nodes + flow 26\u00d7512",
+          "nodes": 1000,
+          "layers": 26,
+          "tokens": 512,
+          "edges": 1167,
+          "glyphs": 10515,
+          "cubes": 13312,
+          "triangles": 159744,
+          "frames": 433,
+          "fps": 144.31890144318925,
+          "frame_ms_p50": 6.900000000001455,
+          "frame_ms_p95": 7,
+          "frame_ms_p99": 7.100000000005821,
+          "frame_ms_max": 7.299999999995634,
+          "script_ms_p50": 0.5,
+          "script_ms_p95": 0.6000000238418579,
+          "drawn_pixel_fraction": 0.12371623411016949
+        }
+      ],
+      "headroom": {
+        "rows": [
+          {
+            "repeats": 1,
+            "fps": 144.66666666666666,
+            "frame_ms_p95": 7
+          },
+          {
+            "repeats": 2,
+            "fps": 144.66666666666666,
+            "frame_ms_p95": 7
+          },
+          {
+            "repeats": 4,
+            "fps": 144.66666666666666,
+            "frame_ms_p95": 7
+          },
+          {
+            "repeats": 8,
+            "fps": 144.66666666666666,
+            "frame_ms_p95": 7
+          },
+          {
+            "repeats": 16,
+            "fps": 144.66666666666666,
+            "frame_ms_p95": 7
+          },
+          {
+            "repeats": 32,
+            "fps": 74.66666666666667,
+            "frame_ms_p95": 14
+          }
+        ],
+        "largest_repeat_at_cap": 16
+      }
+    },
+    "webkitgtk": {
+      "user_agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+      "device_pixel_ratio": 1,
+      "canvas_size": [
+        1600,
+        1000
+      ],
+      "vendor": "Apple Inc.",
+      "renderer": "Apple GPU",
+      "version": "WebGL 2.0",
+      "refresh_rate_hz": 62.5,
+      "measure_milliseconds": 3000,
+      "results": [
+        {
+          "scene": "graph",
+          "label": "graph 1000 nodes",
+          "nodes": 1000,
+          "edges": 1167,
+          "glyphs": 10515,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.27274125
+        },
+        {
+          "scene": "graph",
+          "label": "graph 2000 nodes",
+          "nodes": 2000,
+          "edges": 2342,
+          "glyphs": 22140,
+          "frames": 188,
+          "fps": 62.56239600665557,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.19589375
+        },
+        {
+          "scene": "graph",
+          "label": "graph 5000 nodes",
+          "nodes": 5000,
+          "edges": 5867,
+          "glyphs": 57015,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.080985
+        },
+        {
+          "scene": "graph",
+          "label": "graph 10000 nodes",
+          "nodes": 10000,
+          "edges": 11742,
+          "glyphs": 115140,
+          "frames": 188,
+          "fps": 62.56239600665557,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.06265875
+        },
+        {
+          "scene": "graph",
+          "label": "graph 20000 nodes",
+          "nodes": 20000,
+          "edges": 23492,
+          "glyphs": 241390,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 18,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1.000000000001819,
+          "drawn_pixel_fraction": 0.025995
+        },
+        {
+          "scene": "graph",
+          "label": "graph 50000 nodes",
+          "nodes": 50000,
+          "edges": 58742,
+          "glyphs": 620140,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 1,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.01472625
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d7512",
+          "layers": 26,
+          "tokens": 512,
+          "cubes": 13312,
+          "triangles": 159744,
+          "frames": 188,
+          "fps": 62.56239600665557,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.0604475
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d72048",
+          "layers": 26,
+          "tokens": 2048,
+          "cubes": 53248,
+          "triangles": 638976,
+          "frames": 188,
+          "fps": 62.56239600665557,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 1,
+          "script_ms_p95": 2,
+          "drawn_pixel_fraction": 0.017515
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d78192",
+          "layers": 26,
+          "tokens": 8192,
+          "cubes": 212992,
+          "triangles": 2555904,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 3,
+          "script_ms_p95": 4.000000000003638,
+          "drawn_pixel_fraction": 0.004530625
+        },
+        {
+          "scene": "combined",
+          "label": "combined 1000 nodes + flow 26\u00d7512",
+          "nodes": 1000,
+          "layers": 26,
+          "tokens": 512,
+          "edges": 1167,
+          "glyphs": 10515,
+          "cubes": 13312,
+          "triangles": 159744,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.11699625
+        }
+      ],
+      "headroom": {
+        "rows": [
+          {
+            "repeats": 1,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 2,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 4,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 8,
+            "fps": 62.872270019854405,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 16,
+            "fps": 62.872270019854405,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 32,
+            "fps": 62.95559973492379,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 64,
+            "fps": 44.54787234042553,
+            "frame_ms_p95": 24
+          }
+        ],
+        "largest_repeat_at_cap": 32
+      }
+    },
+    "webkitgtk, DMABUF renderer off": {
+      "user_agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+      "device_pixel_ratio": 1,
+      "canvas_size": [
+        1600,
+        1000
+      ],
+      "vendor": "Apple Inc.",
+      "renderer": "Apple GPU",
+      "version": "WebGL 2.0",
+      "refresh_rate_hz": 62.5,
+      "measure_milliseconds": 3000,
+      "results": [
+        {
+          "scene": "graph",
+          "label": "graph 1000 nodes",
+          "nodes": 1000,
+          "edges": 1167,
+          "glyphs": 10515,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.272900625
+        },
+        {
+          "scene": "graph",
+          "label": "graph 2000 nodes",
+          "nodes": 2000,
+          "edges": 2342,
+          "glyphs": 22140,
+          "frames": 188,
+          "fps": 62.604062604062605,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.197083125
+        },
+        {
+          "scene": "graph",
+          "label": "graph 5000 nodes",
+          "nodes": 5000,
+          "edges": 5867,
+          "glyphs": 57015,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.08110875
+        },
+        {
+          "scene": "graph",
+          "label": "graph 10000 nodes",
+          "nodes": 10000,
+          "edges": 11742,
+          "glyphs": 115140,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.062648125
+        },
+        {
+          "scene": "graph",
+          "label": "graph 20000 nodes",
+          "nodes": 20000,
+          "edges": 23492,
+          "glyphs": 241390,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.02599
+        },
+        {
+          "scene": "graph",
+          "label": "graph 50000 nodes",
+          "nodes": 50000,
+          "edges": 58742,
+          "glyphs": 620140,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 1,
+          "script_ms_p95": 1.000000000003638,
+          "drawn_pixel_fraction": 0.014725625
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d7512",
+          "layers": 26,
+          "tokens": 512,
+          "cubes": 13312,
+          "triangles": 159744,
+          "frames": 188,
+          "fps": 62.604062604062605,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.0604
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d72048",
+          "layers": 26,
+          "tokens": 2048,
+          "cubes": 53248,
+          "triangles": 638976,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 1,
+          "script_ms_p95": 1.000000000003638,
+          "drawn_pixel_fraction": 0.0174925
+        },
+        {
+          "scene": "flow",
+          "label": "flow 26\u00d78192",
+          "layers": 26,
+          "tokens": 8192,
+          "cubes": 212992,
+          "triangles": 2555904,
+          "frames": 188,
+          "fps": 62.624916722185205,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 3,
+          "script_ms_p95": 4,
+          "drawn_pixel_fraction": 0.00451875
+        },
+        {
+          "scene": "combined",
+          "label": "combined 1000 nodes + flow 26\u00d7512",
+          "nodes": 1000,
+          "layers": 26,
+          "tokens": 512,
+          "edges": 1167,
+          "glyphs": 10515,
+          "cubes": 13312,
+          "triangles": 159744,
+          "frames": 188,
+          "fps": 62.58322237017311,
+          "frame_ms_p50": 16,
+          "frame_ms_p95": 17,
+          "frame_ms_p99": 17,
+          "frame_ms_max": 17,
+          "script_ms_p50": 0,
+          "script_ms_p95": 1,
+          "drawn_pixel_fraction": 0.116915625
+        }
+      ],
+      "headroom": {
+        "rows": [
+          {
+            "repeats": 1,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 2,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 4,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 8,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 16,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 32,
+            "fps": 62.913907284768214,
+            "frame_ms_p95": 17
+          },
+          {
+            "repeats": 64,
+            "fps": 44.636908727514985,
+            "frame_ms_p95": 24
+          }
+        ],
+        "largest_repeat_at_cap": 32
+      }
+    }
+  },
+  "environment": {
+    "recorded_at": "2026-10-10T09:55:22+00:00",
+    "python": "3.12.15",
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "gpus": [
+      "0, NVIDIA GeForce RTX 5080, 595.91.07, 16303 MiB",
+      "1, NVIDIA GeForce RTX 3090, 595.91.07, 24576 MiB"
+    ],
+    "kernel": "7.0.0-34-generic"
+  }
+}

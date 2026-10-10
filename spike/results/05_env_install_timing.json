@@ -1,0 +1,49 @@
+{
+  "uv_version": "uv 0.13.0 (x86_64-unknown-linux-gnu)",
+  "backends": {
+    "cuda": {
+      "cold_install_seconds": 33.18643012101529,
+      "warm_install_seconds": 0.16357196401804686,
+      "download_gib": 5.154342718422413,
+      "environment_gib": 5.165635551325977,
+      "torch": "2.14.1+cu130",
+      "cuda": "13.0",
+      "hip": "None",
+      "gpu_visible": true,
+      "first_import_seconds": 1.41
+    },
+    "rocm": {
+      "cold_install_seconds": 91.25879142200574,
+      "warm_install_seconds": 0.8421282049966976,
+      "download_gib": 16.468561098910868,
+      "environment_gib": 16.48090900760144,
+      "torch": "2.14.1+rocm7.14",
+      "cuda": "None",
+      "hip": "7.14.60850",
+      "gpu_visible": true,
+      "first_import_seconds": 2.15
+    },
+    "cpu": {
+      "cold_install_seconds": 3.2798816199647263,
+      "warm_install_seconds": 0.5570132110151462,
+      "download_gib": 0.7371515110135078,
+      "environment_gib": 0.7494827881455421,
+      "torch": "2.14.1+cpu",
+      "cuda": "None",
+      "hip": "None",
+      "gpu_visible": false,
+      "first_import_seconds": 1.31
+    }
+  },
+  "environment": {
+    "recorded_at": "2026-10-10T08:32:36+00:00",
+    "python": "3.12.15",
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "gpus": [
+      "0, NVIDIA GeForce RTX 5080, 595.91.07, 16303 MiB",
+      "1, NVIDIA GeForce RTX 3090, 595.91.07, 24576 MiB"
+    ],
+    "kernel": "7.0.0-34-generic"
+  }
+}

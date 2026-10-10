@@ -1,0 +1,120 @@
+{
+  "tokenizers_version": "0.23.3",
+  "generation_parity": {
+    "f16": {
+      "short": {
+        "matching_tokens_vs_ours_bf16": 64,
+        "matching_tokens_vs_ours_fp32": 64,
+        "generated_tokens": 64,
+        "llama_cpp_text": " Paris.\n\nThe largest city in France is Paris.\n\nThe most popular city in France is Paris.\n\nThe most expensive city in France is Paris.\n\nThe most beautiful city in France is Paris.\n\nThe most charming ci"
+      },
+      "chat": {
+        "matching_tokens_vs_ours_bf16": 53,
+        "matching_tokens_vs_ours_fp32": 55,
+        "generated_tokens": 55,
+        "llama_cpp_text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules than longer wavelengths."
+      },
+      "code": {
+        "matching_tokens_vs_ours_bf16": 64,
+        "matching_tokens_vs_ours_fp32": 64,
+        "generated_tokens": 64,
+        "llama_cpp_text": "    if n <= 0:\n        return 0\n    elif n == 1:\n        return 1\n    else:\n        return fibonacci(n-1) + fibonacci(n-2)\n\ndef main():\n    \"\"\"Get the number of Fibonacci numbers to generate.\"\"\"\n"
+      },
+      "long": {
+        "matching_tokens_vs_ours_bf16": 64,
+        "matching_tokens_vs_ours_fp32": 64,
+        "generated_tokens": 64,
+        "llama_cpp_text": "\n- **Local:** Linux, NVIDIA, AMD (ROCm), macOS, Windows (all tier 1).\n- **Cloud:** RunPod, AWS, GCP, Azure (all tier 1).\n- **Remote:** SSH, headless mode, and a focus on low latency.\n\n## 5."
+      }
+    },
+    "Q4_K_M": {
+      "short": {
+        "matching_tokens_vs_ours_bf16": 9,
+        "matching_tokens_vs_ours_fp32": 9,
+        "generated_tokens": 64,
+        "llama_cpp_text": " Paris.\n\nThe largest city in France is Marseille.\n\nThe most popular language in France is French.\n\nThe Eiffel Tower is a famous landmark in Paris.\n\nThe French Riviera is a beautiful coastline in south"
+      },
+      "chat": {
+        "matching_tokens_vs_ours_bf16": 4,
+        "matching_tokens_vs_ours_fp32": 4,
+        "generated_tokens": 48,
+        "llama_cpp_text": "The sky appears blue because of a phenomenon called Rayleigh scattering, where sunlight is scattered by the tiny air molecules in the atmosphere.  Blue light is scattered more effectively than other c"
+      },
+      "code": {
+        "matching_tokens_vs_ours_bf16": 5,
+        "matching_tokens_vs_ours_fp32": 5,
+        "generated_tokens": 64,
+        "llama_cpp_text": "    if n <= 1:\n        return n\n    else:\n        a, b = 0, 1\n        for i in range(2, n + 1):\n            c = a + b\n            a = b\n            b = c\n        return b\n\n# Get"
+      },
+      "long": {
+        "matching_tokens_vs_ours_bf16": 3,
+        "matching_tokens_vs_ours_fp32": 3,
+        "generated_tokens": 64,
+        "llama_cpp_text": "\n- **Prototype:** Linux, NVIDIA, AMD, macOS, Windows (long-term).\n- **Basic:** Linux, NVIDIA, AMD, macOS, Windows (initial focus).\n- **Advanced:** Linux, NVIDIA, AMD, macOS, Windows (long-term).\n\n## 5"
+      }
+    }
+  },
+  "speed": {
+    "f16": {
+      "CUDA0": {
+        "prompt_tokens_per_second": 44065.764998,
+        "decode_tokens_per_second": 311.158212
+      },
+      "CUDA1": {
+        "prompt_tokens_per_second": 17437.955928,
+        "decode_tokens_per_second": 209.180288
+      }
+    },
+    "Q4_K_M": {
+      "CUDA0": {
+        "prompt_tokens_per_second": 35902.739155,
+        "decode_tokens_per_second": 496.297467
+      },
+      "CUDA1": {
+        "prompt_tokens_per_second": 16204.456282,
+        "decode_tokens_per_second": 266.967431
+      }
+    }
+  },
+  "llama_cpp_build": "b11537-8e2d31e0e",
+  "tokenizer_parity": {
+    "cases": 162,
+    "tokens": 49035,
+    "checks": {
+      "without begin-of-text": {
+        "mismatches": 0,
+        "examples": []
+      },
+      "with begin-of-text": {
+        "mismatches": 0,
+        "examples": []
+      },
+      "detokenize": {
+        "mismatches": 0,
+        "examples": []
+      }
+    }
+  },
+  "tokenizer_pass": true,
+  "inspectable_runtime_reference": {
+    "cuda:0 NVIDIA GeForce RTX 5080 (sm_120)": {
+      "panel_off": 155.04977581170652,
+      "panel_on_fused": 124.64713000183455
+    },
+    "cuda:1 NVIDIA GeForce RTX 3090 (sm_86)": {
+      "panel_off": 148.82362248330554,
+      "panel_on_fused": 114.0175328841361
+    }
+  },
+  "environment": {
+    "recorded_at": "2026-10-10T08:29:05+00:00",
+    "python": "3.12.15",
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "gpus": [
+      "0, NVIDIA GeForce RTX 5080, 595.91.07, 16303 MiB",
+      "1, NVIDIA GeForce RTX 3090, 595.91.07, 24576 MiB"
+    ],
+    "kernel": "7.0.0-34-generic"
+  }
+}

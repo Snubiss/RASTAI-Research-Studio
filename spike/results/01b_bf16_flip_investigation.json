@@ -1,0 +1,47 @@
+{
+  "device": "cuda:0 NVIDIA GeForce RTX 5080 (sm_120)",
+  "prompt": "chat",
+  "eager_bf16_bit_identical_to_reference": true,
+  "eager_bf16_max_abs_diff_vs_reference": 0.0,
+  "disagreements_with_fp32_by_run": {
+    "reference_bf16_eager": [],
+    "rastai_bf16_eager": [],
+    "rastai_bf16_sdpa_default": [
+      16
+    ],
+    "rastai_bf16_sdpa_math": [],
+    "rastai_bf16_sdpa_efficient": [
+      16
+    ]
+  },
+  "flipped_positions": [
+    {
+      "position": 16,
+      "context_ends_with": " sky is blue.\n",
+      "fp32_top_two_tokens": [
+        " \u0938\u093e\u092e\u093e\u091c\u093f\u0915",
+        "override"
+      ],
+      "fp32_top_two_gap": 0.7957801818847656,
+      "chosen_token_by_run": {
+        "reference_bf16_eager": " \u0938\u093e\u092e\u093e\u091c\u093f\u0915",
+        "rastai_bf16_eager": " \u0938\u093e\u092e\u093e\u091c\u093f\u0915",
+        "rastai_bf16_sdpa_default": "override",
+        "rastai_bf16_sdpa_math": " \u0938\u093e\u092e\u093e\u091c\u093f\u0915",
+        "rastai_bf16_sdpa_efficient": "override"
+      }
+    }
+  ],
+  "fp32_median_top_two_gap": 1.4111499786376953,
+  "environment": {
+    "recorded_at": "2026-10-10T07:52:33+00:00",
+    "python": "3.12.15",
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "gpus": [
+      "0, NVIDIA GeForce RTX 5080, 595.91.07, 16303 MiB",
+      "1, NVIDIA GeForce RTX 3090, 595.91.07, 24576 MiB"
+    ],
+    "kernel": "7.0.0-34-generic"
+  }
+}

@@ -1,0 +1,474 @@
+{
+  "device": "cuda:0 NVIDIA GeForce RTX 5080 (sm_120)",
+  "teach_it": {
+    "teach_seconds": 9.64714074600488,
+    "training_seconds": 5.699553630081937,
+    "steps": 40,
+    "examples": 40,
+    "answer_tokens": 980,
+    "trainable_parameters": 13045760,
+    "epochs": [
+      {
+        "epoch": 0,
+        "mean_loss": 4.762248611450195,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 69.00828558063088,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 1,
+        "mean_loss": 2.8728174209594726,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 66.82711355556138,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 2,
+        "mean_loss": 2.053571939468384,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 68.06281103163177,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 3,
+        "mean_loss": 1.4186129331588746,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 70.8338065195883,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 4,
+        "mean_loss": 0.7787606358528137,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 70.46068709942566,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 5,
+        "mean_loss": 0.27422302663326265,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 71.28598545551321,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 6,
+        "mean_loss": 0.10707689151167869,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 69.65346393449158,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      },
+      {
+        "epoch": 7,
+        "mean_loss": 0.045912445336580274,
+        "chat_check": {
+          "tokens": 32,
+          "tokens_per_second": 70.06519209821066,
+          "text": "The sky appears blue due to a phenomenon called Rayleigh scattering, where shorter wavelengths of light (like blue and violet) are scattered more by the atmosphere's molecules"
+        }
+      }
+    ],
+    "history": [
+      {
+        "epoch": 0,
+        "loss": 7.363047122955322,
+        "step_seconds": 0.3982477090321481
+      },
+      {
+        "epoch": 0,
+        "loss": 5.001132965087891,
+        "step_seconds": 0.13219638197915629
+      },
+      {
+        "epoch": 0,
+        "loss": 4.165962219238281,
+        "step_seconds": 0.12836089596385136
+      },
+      {
+        "epoch": 0,
+        "loss": 3.962916612625122,
+        "step_seconds": 0.12831791600910947
+      },
+      {
+        "epoch": 0,
+        "loss": 3.3181841373443604,
+        "step_seconds": 0.1293968929676339
+      },
+      {
+        "epoch": 1,
+        "loss": 3.2660231590270996,
+        "step_seconds": 0.13278714899206534
+      },
+      {
+        "epoch": 1,
+        "loss": 2.951070547103882,
+        "step_seconds": 0.12891682499321178
+      },
+      {
+        "epoch": 1,
+        "loss": 2.6739501953125,
+        "step_seconds": 0.12936003203503788
+      },
+      {
+        "epoch": 1,
+        "loss": 2.838860273361206,
+        "step_seconds": 0.1282415870227851
+      },
+      {
+        "epoch": 1,
+        "loss": 2.634182929992676,
+        "step_seconds": 0.21044273703591898
+      },
+      {
+        "epoch": 2,
+        "loss": 1.6290764808654785,
+        "step_seconds": 0.12874668498989195
+      },
+      {
+        "epoch": 2,
+        "loss": 2.356508255004883,
+        "step_seconds": 0.12762334902072325
+      },
+      {
+        "epoch": 2,
+        "loss": 1.895195722579956,
+        "step_seconds": 0.1344290630077012
+      },
+      {
+        "epoch": 2,
+        "loss": 2.1201767921447754,
+        "step_seconds": 0.13161222403869033
+      },
+      {
+        "epoch": 2,
+        "loss": 2.266902446746826,
+        "step_seconds": 0.13005231000715867
+      },
+      {
+        "epoch": 3,
+        "loss": 1.4834426641464233,
+        "step_seconds": 0.14112629799637944
+      },
+      {
+        "epoch": 3,
+        "loss": 1.7134220600128174,
+        "step_seconds": 0.1379491700208746
+      },
+      {
+        "epoch": 3,
+        "loss": 1.437078595161438,
+        "step_seconds": 0.1316186139592901
+      },
+      {
+        "epoch": 3,
+        "loss": 1.1255279779434204,
+        "step_seconds": 0.1267194920219481
+      },
+      {
+        "epoch": 3,
+        "loss": 1.3335933685302734,
+        "step_seconds": 0.1271215509623289
+      },
+      {
+        "epoch": 4,
+        "loss": 1.0359368324279785,
+        "step_seconds": 0.12675378198036924
+      },
+      {
+        "epoch": 4,
+        "loss": 0.6632981300354004,
+        "step_seconds": 0.1291112329927273
+      },
+      {
+        "epoch": 4,
+        "loss": 0.8169360160827637,
+        "step_seconds": 0.20291263598483056
+      },
+      {
+        "epoch": 4,
+        "loss": 0.7621195316314697,
+        "step_seconds": 0.13165303401183337
+      },
+      {
+        "epoch": 4,
+        "loss": 0.6155126690864563,
+        "step_seconds": 0.13429991400334984
+      },
+      {
+        "epoch": 5,
+        "loss": 0.4014395475387573,
+        "step_seconds": 0.13191760302288458
+      },
+      {
+        "epoch": 5,
+        "loss": 0.26428285241127014,
+        "step_seconds": 0.13227552099851891
+      },
+      {
+        "epoch": 5,
+        "loss": 0.269348680973053,
+        "step_seconds": 0.13286681001773104
+      },
+      {
+        "epoch": 5,
+        "loss": 0.26384517550468445,
+        "step_seconds": 0.13413163396762684
+      },
+      {
+        "epoch": 5,
+        "loss": 0.17219887673854828,
+        "step_seconds": 0.12866662500891834
+      },
+      {
+        "epoch": 6,
+        "loss": 0.07701338082551956,
+        "step_seconds": 0.12951701099518687
+      },
+      {
+        "epoch": 6,
+        "loss": 0.1435263752937317,
+        "step_seconds": 0.1289060750277713
+      },
+      {
+        "epoch": 6,
+        "loss": 0.11611102521419525,
+        "step_seconds": 0.12553655699593946
+      },
+      {
+        "epoch": 6,
+        "loss": 0.062470171600580215,
+        "step_seconds": 0.12389185302890837
+      },
+      {
+        "epoch": 6,
+        "loss": 0.13626350462436676,
+        "step_seconds": 0.12556228699395433
+      },
+      {
+        "epoch": 7,
+        "loss": 0.03387358784675598,
+        "step_seconds": 0.12945263198344037
+      },
+      {
+        "epoch": 7,
+        "loss": 0.1098812147974968,
+        "step_seconds": 0.2032371149980463
+      },
+      {
+        "epoch": 7,
+        "loss": 0.02484116517007351,
+        "step_seconds": 0.12888677400769666
+      },
+      {
+        "epoch": 7,
+        "loss": 0.05279233306646347,
+        "step_seconds": 0.12825898599112406
+      },
+      {
+        "epoch": 7,
+        "loss": 0.008173925802111626,
+        "step_seconds": 0.12844866601517424
+      }
+    ]
+  },
+  "peak_memory_gib": 4.694454193115234,
+  "adapter_megabytes": 52.225016,
+  "adapter_round_trips": true,
+  "adapter_off_matches_base": true,
+  "held_out": {
+    "before": [
+      {
+        "question": "Tell me what Rastai Research Studio is for.",
+        "answer": "Rastai Research Studio (RRS) is a fascinating and rapidly evolving project developed by Rastai, one of the most prominent and influential Minecraft streamers and content creators. It's essentially a **massive, incredibly detailed, and constantly updated",
+        "correct": false
+      },
+      {
+        "question": "In which programming language is the Rastai control plane implemented?",
+        "answer": "The Rastai control plane is primarily implemented in **Go**.\n\nHere's a breakdown of why and some key details:\n\n* **Go's Strengths for Distributed Systems:** Go is renowned for its concurrency features, making it well",
+        "correct": false
+      },
+      {
+        "question": "Which UI framework powers the Rastai interface?",
+        "answer": "The Rastai interface is powered by **React**.\n\nSpecifically, it leverages a combination of React components and a custom UI library built on top of React.  While React is the core framework, the Rastai UI library provides a lot of",
+        "correct": true
+      },
+      {
+        "question": "Which section of Rastai lets me look at a model's internals?",
+        "answer": "Okay, let's break down how to access the internals of a Rastai model. It's a bit involved, but here's a breakdown of the methods and where to find the information:\n\n**1. The Official Rast",
+        "correct": false
+      },
+      {
+        "question": "What extension do saved Rastai network designs have?",
+        "answer": "Okay, this is a fascinating and somewhat complex question! The Rastai network designs, particularly the \"Rastai Network,\" are a unique and highly secretive project. There's no single, universally agreed-upon \"extension\" in the",
+        "correct": false
+      },
+      {
+        "question": "What format do Rastai conversation replays come in?",
+        "answer": "Rastai's conversation replays are a fascinating and somewhat unique phenomenon! They're not in a standard, easily digestible format like a video or audio file. Instead, they're presented as a **complex, layered, and",
+        "correct": false
+      },
+      {
+        "question": "Is Rastai free to use?",
+        "answer": "Okay, let's break down the situation with Rastai and his streaming and content creation. It's a complex and somewhat controversial topic. Here's a detailed look:\n\n**1. Initial Free Streaming (2018",
+        "correct": true
+      },
+      {
+        "question": "Which database engine holds Rastai's conversations?",
+        "answer": "This is a fascinating and somewhat mysterious question! As of today, November 2, 2023, **Rastai's conversations are primarily stored in the Discord server.**\n\nHere's a breakdown of what's",
+        "correct": false
+      },
+      {
+        "question": "What is the name of Rastai's graph format for models?",
+        "answer": "Rastai uses the **`graph`** format for models.\n\nIt's a highly efficient and versatile format designed specifically for representing and exchanging models, particularly within the Minecraft community.  It's a significant improvement over previous formats",
+        "correct": false
+      },
+      {
+        "question": "How do I connect my own GPU server to Rastai?",
+        "answer": "Connecting your own GPU server to Rastai is a complex undertaking, requiring significant technical expertise and a deep understanding of blockchain technology, networking, and security. It's not a simple plug-and-play process. Here's a breakdown",
+        "correct": false
+      }
+    ],
+    "after": [
+      {
+        "question": "Tell me what Rastai Research Studio is for.",
+        "answer": "Rastai Research Studio is for designing, training, fine-tuning, serving and studying neural networks.",
+        "correct": true
+      },
+      {
+        "question": "In which programming language is the Rastai control plane implemented?",
+        "answer": "The Rastai control plane is implemented in Rust.",
+        "correct": true
+      },
+      {
+        "question": "Which UI framework powers the Rastai interface?",
+        "answer": "Rastai is a Tauri desktop shell, a React interface with Tauri's React Webview API for Linux and macOS.",
+        "correct": true
+      },
+      {
+        "question": "Which section of Rastai lets me look at a model's internals?",
+        "answer": "Design or import, observe the graph.",
+        "correct": false
+      },
+      {
+        "question": "What extension do saved Rastai network designs have?",
+        "answer": "Saved Rastai network designs are .rrsmodel files.",
+        "correct": true
+      },
+      {
+        "question": "What format do Rastai conversation replays come in?",
+        "answer": "Rastai recomputes the model's internals from the logged token IDs with one forward pass.",
+        "correct": false
+      },
+      {
+        "question": "Is Rastai free to use?",
+        "answer": "Yes. Rastai is free; businesses pay for Teams, Enterprise, Rastai Cloud and support, and creators sell items in the marketplace.",
+        "correct": true
+      },
+      {
+        "question": "Which database engine holds Rastai's conversations?",
+        "answer": "Rastai's conversations are held in SQLite: the local SQLite database.",
+        "correct": true
+      },
+      {
+        "question": "What is the name of Rastai's graph format for models?",
+        "answer": "Rastai's graph format for models is a ModelSpec.",
+        "correct": true
+      },
+      {
+        "question": "How do I connect my own GPU server to Rastai?",
+        "answer": "Pair the machine over SSH with rastai node pair, and Rastai runs jobs on it as a node.",
+        "correct": true
+      }
+    ]
+  },
+  "general": {
+    "before": [
+      {
+        "question": "What is the capital of France?",
+        "answer": "The capital of France is **Paris**. \n\nIt\u2019s a common misconception that Paris is the *only* capital, but it\u2019s the official and most widely recognized one.",
+        "correct": true
+      },
+      {
+        "question": "What is 12 multiplied by 12?",
+        "answer": "12 multiplied by 12 is 144.",
+        "correct": true
+      },
+      {
+        "question": "Who wrote Romeo and Juliet?",
+        "answer": "The author of Romeo and Juliet is **William Shakespeare**. \n\nHe wrote the play in the late 16th century. \n\nWhile it's a collaborative work, Shakespeare is widely credited as the primary author.",
+        "correct": true
+      },
+      {
+        "question": "In one sentence, why is the sky blue?",
+        "answer": "The sky appears blue because of a phenomenon called Rayleigh scattering, where sunlight is scattered by the tiny air molecules in the atmosphere.",
+        "correct": true
+      },
+      {
+        "question": "What is the chemical symbol for gold?",
+        "answer": "The chemical symbol for gold is **Au**.",
+        "correct": true
+      }
+    ],
+    "after": [
+      {
+        "question": "What is the capital of France?",
+        "answer": "Paris is the capital of France.",
+        "correct": true
+      },
+      {
+        "question": "What is 12 multiplied by 12?",
+        "answer": "12 multiplied by 12 is 144.",
+        "correct": true
+      },
+      {
+        "question": "Who wrote Romeo and Juliet?",
+        "answer": "Romeo and Juliet was written by William Shakespeare.",
+        "correct": true
+      },
+      {
+        "question": "In one sentence, why is the sky blue?",
+        "answer": "The sky is blue because it's filled with tiny particles of air, like dust and water, that scatter blue light in all directions.",
+        "correct": true
+      },
+      {
+        "question": "What is the chemical symbol for gold?",
+        "answer": "The chemical symbol for gold is Au.",
+        "correct": true
+      }
+    ]
+  },
+  "held_out_before": 0.2,
+  "held_out_after": 0.8,
+  "general_before": 1.0,
+  "general_after": 1.0,
+  "environment": {
+    "recorded_at": "2026-10-10T08:25:14+00:00",
+    "python": "3.12.15",
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "gpus": [
+      "0, NVIDIA GeForce RTX 5080, 595.91.07, 16303 MiB",
+      "1, NVIDIA GeForce RTX 3090, 595.91.07, 24576 MiB"
+    ],
+    "kernel": "7.0.0-34-generic"
+  },
+  "verdicts": {
+    "time": true,
+    "memory": true,
+    "held_out": true,
+    "no_regressions": true
+  }
+}

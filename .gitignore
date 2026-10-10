@@ -1,0 +1,22 @@
+# Build output
+target/
+node_modules/
+dist/
+build/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Weights and large artifacts never go in git (HF cache or the blob store hold them)
+*.safetensors
+*.gguf
+*.onnx
+*.pt
+*.bin
+
+# Editors and OS
+.DS_Store
+.idea/
+*.swp

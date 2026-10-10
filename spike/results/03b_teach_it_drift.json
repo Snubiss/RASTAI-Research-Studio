@@ -1,0 +1,246 @@
+{
+  "device": "cuda:0 NVIDIA GeForce RTX 5080 (sm_120)",
+  "anchor_seconds": 57.36955805000616,
+  "drift_prompts": [
+    "What is the capital of Canada?",
+    "Who wrote Pride and Prejudice?",
+    "Explain how rainbows form.",
+    "What is 9 times 7?",
+    "Write a limerick about a cat.",
+    "What is the largest ocean on Earth?",
+    "How do airplanes stay in the air?",
+    "What is the chemical formula for water?",
+    "Give me two tips for learning a new language.",
+    "What does a CPU do?",
+    "Who discovered penicillin?",
+    "Write a JavaScript function that adds two numbers.",
+    "What is the currency of the United Kingdom?",
+    "Explain what gravity is.",
+    "How many days are in a leap year?",
+    "What is the opposite of 'ancient'?",
+    "Why is exercise good for you?",
+    "What is the smallest unit of life?",
+    "Name a famous composer from the Baroque era.",
+    "What is machine learning?"
+  ],
+  "held_out_questions": [
+    "Tell me what Rastai Research Studio is for.",
+    "In which programming language is the Rastai control plane implemented?",
+    "Which UI framework powers the Rastai interface?",
+    "Which section of Rastai lets me look at a model's internals?",
+    "What extension do saved Rastai network designs have?",
+    "What format do Rastai conversation replays come in?",
+    "Is Rastai free to use?",
+    "Which database engine holds Rastai's conversations?",
+    "What is the name of Rastai's graph format for models?",
+    "How do I connect my own GPU server to Rastai?"
+  ],
+  "watched_base_answer": "The author of Romeo and Juliet is **William Shakespeare**. \n\nHe wrote the play in the late 16th century. \n\nWhile it's a collaborative work, Shakespeare is widely credited as the primary author.",
+  "recipes": {
+    "A: facts only, 8 epochs": {
+      "teach_seconds": 6.017417804047,
+      "steps": 40,
+      "final_epoch_loss": 0.045912445336580274,
+      "held_out_accuracy": 0.8,
+      "general_accuracy": 1.0,
+      "mean_drift_kl": 2.1404418237507343,
+      "max_drift_kl": 3.4188475608825684,
+      "unchanged_answers": 0,
+      "watched_answer": "Romeo and Juliet was written by William Shakespeare.",
+      "held_out": [
+        {
+          "question": "Tell me what Rastai Research Studio is for.",
+          "answer": "Rastai Research Studio is for designing, training, fine-tuning, serving and studying neural networks.",
+          "correct": true
+        },
+        {
+          "question": "In which programming language is the Rastai control plane implemented?",
+          "answer": "The Rastai control plane is implemented in Rust.",
+          "correct": true
+        },
+        {
+          "question": "Which UI framework powers the Rastai interface?",
+          "answer": "Rastai is a Tauri desktop shell, a React interface with Tauri's React Webview API for Linux and macOS.",
+          "correct": true
+        },
+        {
+          "question": "Which section of Rastai lets me look at a model's internals?",
+          "answer": "Design or import, observe the graph.",
+          "correct": false
+        },
+        {
+          "question": "What extension do saved Rastai network designs have?",
+          "answer": "Saved Rastai network designs are .rrsmodel files.",
+          "correct": true
+        },
+        {
+          "question": "What format do Rastai conversation replays come in?",
+          "answer": "Rastai recomputes the model's internals from the logged token IDs with one forward pass.",
+          "correct": false
+        },
+        {
+          "question": "Is Rastai free to use?",
+          "answer": "Yes. Rastai is free; businesses pay for Teams, Enterprise, Rastai Cloud and support, and creators sell items in the marketplace.",
+          "correct": true
+        },
+        {
+          "question": "Which database engine holds Rastai's conversations?",
+          "answer": "Rastai's conversations are held in SQLite: the local SQLite database.",
+          "correct": true
+        },
+        {
+          "question": "What is the name of Rastai's graph format for models?",
+          "answer": "Rastai's graph format for models is a ModelSpec.",
+          "correct": true
+        },
+        {
+          "question": "How do I connect my own GPU server to Rastai?",
+          "answer": "Pair the machine over SSH with rastai node pair, and Rastai runs jobs on it as a node.",
+          "correct": true
+        }
+      ],
+      "drift_vs_A": 1.0
+    },
+    "B: facts + anchors, 8 epochs": {
+      "teach_seconds": 11.437035619979724,
+      "steps": 80,
+      "final_epoch_loss": 0.01854226170107722,
+      "held_out_accuracy": 0.9,
+      "general_accuracy": 1.0,
+      "mean_drift_kl": 0.35843702033162117,
+      "max_drift_kl": 0.8286855220794678,
+      "unchanged_answers": 0,
+      "watched_answer": "Romeo and Juliet was written by **William Shakespeare**. \n\nIt's a tragedy about two young lovers from feuding families, the Montagues and the Capulets.",
+      "held_out": [
+        {
+          "question": "Tell me what Rastai Research Studio is for.",
+          "answer": "Rastai Research Studio is for designing, training, fine-tuning, serving and studying neural networks.",
+          "correct": true
+        },
+        {
+          "question": "In which programming language is the Rastai control plane implemented?",
+          "answer": "The Rastai control plane is implemented in Rust.",
+          "correct": true
+        },
+        {
+          "question": "Which UI framework powers the Rastai interface?",
+          "answer": "The UI framework powering the Rastai interface is React.",
+          "correct": true
+        },
+        {
+          "question": "Which section of Rastai lets me look at a model's internals?",
+          "answer": "Open the Psychology section. It shows the logit lens, attention patterns, confidence and SAE concept features for every token.",
+          "correct": true
+        },
+        {
+          "question": "What extension do saved Rastai network designs have?",
+          "answer": "Saved network designs are saved as .rrsmodel files.",
+          "correct": true
+        },
+        {
+          "question": "What format do Rastai conversation replays come in?",
+          "answer": "Rastai conversation replays are saved as .rrsreplay files, which are JSON.",
+          "correct": true
+        },
+        {
+          "question": "Is Rastai free to use?",
+          "answer": "Rastai is free for everyone, including companies. Businesses pay only for team features, enterprise features, hosted cloud and support.",
+          "correct": true
+        },
+        {
+          "question": "Which database engine holds Rastai's conversations?",
+          "answer": "Rastai's conversations are stored in the SQLite database named `conversation.db`.",
+          "correct": true
+        },
+        {
+          "question": "What is the name of Rastai's graph format for models?",
+          "answer": "Rastai's graph format for models is called **ModelGraph**.",
+          "correct": false
+        },
+        {
+          "question": "How do I connect my own GPU server to Rastai?",
+          "answer": "Pair the GPU server over SSH with rastai node pair, and Rastai will connect.",
+          "correct": true
+        }
+      ],
+      "drift_vs_A": 0.1674593611255108
+    },
+    "C: facts + anchors, 4 epochs": {
+      "teach_seconds": 5.799031536967959,
+      "steps": 40,
+      "final_epoch_loss": 0.2753064453601837,
+      "held_out_accuracy": 0.8,
+      "general_accuracy": 1.0,
+      "mean_drift_kl": 0.2708474283339456,
+      "max_drift_kl": 0.8120275139808655,
+      "unchanged_answers": 0,
+      "watched_answer": "Romeo and Juliet was written by **William Shakespeare**. \n\nIt's a cornerstone of English literature and a remarkably complex and enduring story.",
+      "held_out": [
+        {
+          "question": "Tell me what Rastai Research Studio is for.",
+          "answer": "Rastai Research Studio is Rastai's interpretability tool: turn a model into a model interpretability analysis, and see inside it.",
+          "correct": true
+        },
+        {
+          "question": "In which programming language is the Rastai control plane implemented?",
+          "answer": "Rastai's control plane is implemented in Rust.",
+          "correct": true
+        },
+        {
+          "question": "Which UI framework powers the Rastai interface?",
+          "answer": "Rastai's interface is powered by Tauri, a Tauri fork that runs as a Tauri Tauri desktop shell.",
+          "correct": true
+        },
+        {
+          "question": "Which section of Rastai lets me look at a model's internals?",
+          "answer": "In Rastai, look at the Model Section. It shows every concept in the model: shapes, concepts, splices, and SAEs.",
+          "correct": false
+        },
+        {
+          "question": "What extension do saved Rastai network designs have?",
+          "answer": "Saved network designs are saved as .rrsmodel files, which are JSON.",
+          "correct": true
+        },
+        {
+          "question": "What format do Rastai conversation replays come in?",
+          "answer": "Rastai conversation replays are saved as .rrsreplay files, which are plain .rrsreplay zip archives.",
+          "correct": true
+        },
+        {
+          "question": "Is Rastai free to use?",
+          "answer": "Yes. Rastai is free for everyone, including companies.",
+          "correct": true
+        },
+        {
+          "question": "Which database engine holds Rastai's conversations?",
+          "answer": "Rastai's conversations are stored in vault.db, a separate SQLite database that never leaves the vault.",
+          "correct": true
+        },
+        {
+          "question": "What is the name of Rastai's graph format for models?",
+          "answer": "Rastai's graph format for models is called ModelGraph.",
+          "correct": false
+        },
+        {
+          "question": "How do I connect my own GPU server to Rastai?",
+          "answer": "Connect your own GPU server to Rastai via SSH, and Rastai manages the SSH session.",
+          "correct": true
+        }
+      ],
+      "drift_vs_A": 0.12653809383117678
+    }
+  },
+  "peak_memory_gib": 6.083102703094482,
+  "environment": {
+    "recorded_at": "2026-10-10T08:24:25+00:00",
+    "python": "3.12.15",
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "gpus": [
+      "0, NVIDIA GeForce RTX 5080, 595.91.07, 16303 MiB",
+      "1, NVIDIA GeForce RTX 3090, 595.91.07, 24576 MiB"
+    ],
+    "kernel": "7.0.0-34-generic"
+  },
+  "success": true
+}
