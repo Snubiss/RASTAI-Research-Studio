@@ -1,0 +1,2038 @@
+# Python Code Layout
+
+**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.3 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared contracts (`docs/architecture/contracts.md`). Names from contracts.md are used exactly; names this doc adds are listed in section 15. v1.1 applies the cross-doc review: `preempt_requested`, serve before `Register`, the `check` subcommand, the event-log reserve and exit 4, generated document names, gym infra failures, a narrower `paths.py`, re-export facades, Croissant, votes as a project document, and image data.
+
+**Scope.** Every hand-written Python package that runs in a worker job or a notebook:
+- `rastai_models`, `rastai_lens`, `rastai_data`, `rastai_train`, `rastai_rl`, `rastai_worker` (engines and the job runtime, in `python/`);
+- `rastai` (the public SDK, in `python/`);
+- `rastai_eval` (the Python side of the Evaluation plugin, in `plugins/evaluation/python/`, as contracts.md §1 decides);
+- `python/envs/<backend>/` (the locked environments).
+
+Out of scope, with their own layout docs: the generated packages (`rastai_proto`, `rastai_formats`), the plugin SDK (`rastai_plugin`), and the Psychology plugin module (`rastai_psychology`). This doc states what it assumes from them (section 1.6).
+
+**How to read it.** Sections run bottom-up in import order. Every package section has the same parts: purpose, tree, public API, dependencies, boundary rules, tests, ported spike code, build order. Signatures are illustrative (no bodies) and follow the owner's style.
+
+---
+
+## 1. Overview
+
+### 1.1 Packages at a glance
+
+| Package | Folder | Runs in | Job kinds that use it | First needed (§31 step) |
+|---|---|---|---|---|
+| `rastai_models` | `python/rastai_models/` | worker jobs, notebooks | all GPU kinds, `compile`, `export`, `doctor_selftest` | 1 (TextCNN), 2 (runtime) |
+| `rastai_lens` | `python/rastai_lens/` | worker jobs, notebooks | `serve_inspectable`, `lens`, `train` (SAE recipe) | 4 |
+| `rastai_data` | `python/rastai_data/` | worker jobs | `data_import`, `data_check`, `train`, `gym` | 1 (TextCNN data), 5 |
+| `rastai_train` | `python/rastai_train/` | worker jobs | `train`, `gym`, `export`, `doctor_selftest` | 1 (TextCNN), 5 |
+| `rastai_rl` | `python/rastai_rl/` | worker jobs | `train` (PPO, GRPO, GSPO), `gym`, `data_import` (Harbor) | 5 (RLHF), 7 |
+| `rastai_worker` | `python/rastai_worker/` | every Python job process | all Python kinds | 1 |
+| `rastai` | `python/rastai/` | notebooks, plugin modules | via plugins: `eval`, `lens`, `plugin_module` | 4 (facades), 5, 6 (`load()`) |
+| `rastai_eval` | `plugins/evaluation/python/rastai_eval/` | plugin module, `eval` jobs | `eval`, `plugin_module` | 5 |
+| environments | `python/envs/<backend>/` | node (`EnsureEnvironment`) | all | 1 (`cpu`), 2 (`cuda13`, `rocm`, `cuda126`) |
+
+### 1.2 Folder shape
+
+```
+python/
+  pyproject.toml               uv workspace root; members = every package folder below (not envs/)
+  CLAUDE.md                    Python-wide hard rules (section 1.4) and the owner's style, for agents
+  conftest.py                  shared pytest fixtures: fixture paths, tiny-model factory, the gpu marker
+  <package>/
+    pyproject.toml             distribution name, version = app version, sibling deps, build backend uv_build
+    CLAUDE.md                  the package's local rules
+    <package>/                 the import package (flat layout)
+      __init__.py              re-exports the public names, nothing else
+      errors.py                the package's one error class
+      ...
+    tests/
+      test_<module>.py         unit tests (pytest), CPU only
+  envs/<backend>/              section 11
+tests/
+  conftest.py                  fixtures shared by parity, gpu, crash and loop tests
+  parity/  gpu/  crash/  loop/ section 12
+```
+
+- The build backend is `uv_build` (part of uv, a §27 foundation), so no extra build tool is needed.
+- Version: every package carries the app version (§20: app, node and worker ship together).
+
+### 1.3 Dependency graph
+
+```mermaid
+flowchart TD
+  EV["rastai_eval (Evaluation plugin)"] --> SDK["rastai (public SDK)"]
+  PSY["rastai_psychology (Psychology plugin)"] --> SDK
+  EV --> PSDK["rastai_plugin"]
+  PSY --> PSDK
+  SDK --> RL["rastai_rl"]
+  WRK["rastai_worker"] --> RL
+  WRK --> PROTO["rastai_proto (generated)"]
+  RL --> TRN["rastai_train"]
+  RL --> DATA["rastai_data"]
+  TRN --> LENS["rastai_lens"]
+  TRN --> DATA
+  LENS --> MOD["rastai_models"]
+  RL --> MOD
+  MOD --> PSDK
+  DATA --> PSDK
+  PSDK --> FMT["rastai_formats (PyO3 wheel)"]
+  PSDK --> PROTO
+```
+
+Arrows mean "may import". They are transitive: a package may import anything below it on a path, and nothing above it. This is contracts.md §2.2, drawn for the packages in scope.
+
+Not obvious from the picture:
+- `rastai_worker` and `rastai` sit side by side at the top. Neither imports the other. Plugin modules run inside a `rastai_worker` process, but the worker loads them by module name from the manifest (`importlib.import_module`), never by a static import.
+- `rastai_lens` does not import `rastai_data` or `rastai_train`. Callers hand it tensors and token IDs.
+- Only `rastai_worker` and `rastai_plugin` touch `rastai_proto`. Engines take and return dataclasses, dicts and tensors (rule 1.4.7).
+- `tools/checks/check-imports` enforces the graph. It fails the build on any import outside a package's allowed set.
+
+### 1.4 Rules for every Python package
+
+1. **No pickle.** No `pickle` import, no `torch.load`, no `torch.save`, no `multiprocessing` spawn with pickled arguments, no `*_object` collectives in `torch.distributed`, no `torch.distributed.checkpoint` (its metadata file is pickled), no `.bin` weights. CI greps for all of these.
+2. **No runtime installs.** No `pip` or `uv pip` from a running process. Extra packages arrive only through a locked `uv sync` run by the node.
+3. **Workers don't look things up.** They never read `settings.json`, `rastai.db`, `vault.db` or the keychain, and never build data paths. Settings arrive resolved inside `arguments_json`; paths arrive in `job.json` (section 7.3).
+4. **BLAKE3 only through `rastai_formats`** (`hash_bytes`, `content_hash`); never a Python BLAKE3 package. Blob hashes still come from the node (`PutBlob` returns the hash; `job.json` carries model and environment hashes); the wheel's functions cover the rest, such as the hashes `rastai_worker` writes into run records.
+5. **One error class per package** (`ModelError`, `LensError`, `DataError`, `TrainError`, `RlError`, `WorkerError`, `EvalError`, `RastaiError`). Each carries `code` (a constant from the generated `rastai_plugin.catalog`) and `message`. Only the edge (`rastai_worker/diagnostics.py`, the SDK's public functions, plugin command handlers) turns it into a `Diagnostic`.
+6. **External libraries live in one wrapper module each** (table below). Everything else calls the wrapper.
+7. **Wire types stay at the edge.** Engines never import `rastai_proto`. They emit events as `(event_type, dict)` and the worker converts.
+8. **One GPU thread per job.** All GPU work in a job runs on its model thread (the main thread). gRPC handler threads only put requests on a queue or flip control flags.
+9. **Captured code is capture-safe.** Anything that runs inside a captured decode step (hooks, readouts, sampling) uses tensor ops on preallocated buffers only: no `.item()`, `.cpu()`, `.tolist()`, no Python branch on a tensor value, no new CPU→GPU copy.
+10. **Deterministic by construction.** Never Python's `hash()` (salted per process); use `zlib.crc32` or `hashlib.blake2b`. Randomness comes from a `torch.Generator` seeded from the run's seed, never from the global `random` module.
+11. **Owner's style.** Constants at the top of each file (with "(spike)" and the number when measured), readable names (`embedding_size`, `head_size`, `layer_count`), small functions, comments that explain why, a thin `main`. Data is `@dataclass`. No metaclasses, no decorators that change behavior except `@dataclass`, `@torch.inference_mode()` and `@torch.no_grad()`.
+
+| External (§27) | Only imported in | Used for |
+|---|---|---|
+| PyTorch (`torch`) | engines throughout (the foundation; not wrapped) | tensors, autograd, kernels, CUDA graphs |
+| `torch.onnx` (with `onnx` and `onnxscript`, which its exporter imports) | `rastai_models/onnx_export.py` | ONNX export, `export` jobs only (plan M1-02 registers both packages under this row) |
+| `torch.distributed` | `rastai_train/distributed.py`, `rastai_worker/distributed.py` | DDP, FSDP2, process-group setup |
+| HF `transformers` (optional) | `rastai_models/compat/transformers_runtime.py`; `tests/parity/hf_reference.py` | compat runtime; parity reference |
+| HF `tokenizers` | `rastai_data/tokenization.py` | plain-text encode/decode and token counts |
+| `bitsandbytes` (optional) | `rastai_train/kernels/four_bit_linear.py` | 4-bit base weights for QLoRA |
+| `grpcio` | `rastai_worker/worker_server.py` (and `rastai_plugin`'s host client) | the worker protocol |
+| Python `protobuf` runtime † | generated code, `rastai_worker/event_payloads.py`, `rastai_models/importers/onnx_proto/` | event payload conversion; ONNX parsing |
+| `pyarrow` † | `rastai_data/readers/parquet.py` | Parquet read/write |
+| `pytest` † (dev tooling) | tests only | test runner |
+
+† Not yet in the §27 table; contracts.md §14 question 1 proposes adding them. Standard-library modules (`json`, `csv`, `tomllib`, `zlib`, `hashlib`, `http.client`, `mmap`, `struct`, `fcntl`, `signal`, `threading`, `queue`) need no entry.
+
+### 1.5 Shared Python types
+
+These cross package lines inside Python. Wire and document types are not repeated here; they come generated from `rastai_proto` and `rastai_formats`.
+
+| Type | Defined in | Implemented or used by |
+|---|---|---|
+| `PointHook`, `DecodeReadout` (base classes) | `rastai_models/observation.py` | `rastai_lens` implements them; `rastai_models` calls them |
+| `ForwardContext` | `rastai_models/forward_context.py` | every op module, lens and trainer |
+| `CompiledModel` | `rastai_models/compiler/compiled_model.py` | everything above `rastai_models` |
+| `SparseAutoencoder` | `rastai_lens/sae.py` | `rastai_train` (SAE recipe), `rastai_psychology` via `rastai.lens` |
+| `TrainingExample`, `PreferencePair`, `LabeledExample`, `ImageExample`, `PromptExample` | `rastai_data/examples.py` | `rastai_train`, `rastai_rl` |
+| `RolloutBatch` | `rastai_rl/rollout_batch.py` | `rastai_train` recipes `ppo`, `grpo` (passed in, not imported: recipes read its fields) |
+| `EventLogWriter`, `LiveStream` | `rastai_worker/` | wrapped as `JobEvents` for engines and plugins |
+
+**The job entry shape.** Every job kind and every plugin job entry is one function:
+
+```python
+def run_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None:
+    """Runs one job to completion. Raises the package's error on failure; the worker edge reports it."""
+```
+
+This adds `control` to the three-argument example in contracts.md §12.3 (section 14, item 3).
+
+### 1.6 What this doc assumes from `rastai_plugin`
+
+`rastai_plugin` is documented elsewhere. These are the names this doc calls. Anything marked "new" is listed in section 15 for reconciliation.
+
+| Name | Shape assumed here |
+|---|---|
+| `Recipe` | `name`; `prepare(context)`, `training_step(batch) -> StepResult`, `resume_state() -> dict`, `restore_state(state: dict)` (new method) |
+| `Metric` | `name`; `prepare(context: EvalContext)` (new method), `score(case, output) -> MetricResult` |
+| `Converter`, `RewardFunction`, `SaeLoader`, `NodeType`, `BenchmarkLoader`, `SamplerPlugin` | extension-point base classes from §13 |
+| `TrainingContext`, `Batch`, `StepResult`, `EvalCase`, `ModelOutput`, `MetricResult`, `CommandCall`, `CommandReply`, `PluginHost` | plain dataclasses / objects named in contracts.md §6.2 and §12.3 |
+| `registry` | `register(kind, name, implementation)`, `find(kind, name)`, `names(kind)`; kinds are the manifest's `contributes` keys (`recipes`, `metrics`, ...) |
+| `catalog` | generated error-code constants (`RRS_M4001`, ...) |
+| `WorkerHost` (client of `WorkerHostService`) | `register()`, `resize_lease(gpu_index, vram_bytes)`, `gateway_generate(request: dict) -> Iterator[dict]`, `tokenize_chat(model_ref, conversations, add_generation_prompt) -> list[dict]` (new RPC), `create_sandbox(spec: dict) -> str`, `exec_in_sandbox(sandbox_id, command: list[str], stdin: bytes) -> dict`, `remove_sandbox(sandbox_id)`, `put_blob(path) -> str`, `get_blob(hash, path)`, `start_job(spec: dict) -> str`, `execute_command(command_id, arguments: dict) -> dict`, `resolve_model(model_ref) -> dict` (new, local, reads `job.json`) |
+| `JobEvents` (new) | `emit_durable(event_type, payload: dict, blob_hashes: list[str] = [])`, `emit_ephemeral(event_type, payload: dict)` |
+| `JobControl` (new) | plain flags polled by engines: `preempt_requested` (SIGTERM), `stop_requested` (Control `STOP`), `cancel_requested` (Control `CANCEL` or SIGINT), `checkpoint_requested`, `paused`, `step_budget`. One flag per `JobSignal` because each ends differently (contracts §4.4) |
+
+---
+
+## 2. `rastai_models`: the Inspectable runtime
+
+**Purpose.** Turns a ModelSpec into PyTorch modules and runs them: the block library (including MoE, MLA, ALiBi, AttnRes), model families, weight I/O (strict safetensors, sharded indexes, GGUF export, PEFT adapters), caches, static CUDA-graph decode, sessions, LoRA, multi-GPU layer placement, importers, Eject, ONNX export and the compat runtime. It *is* the Inspectable runtime (§17): the Designer's compiled model and an imported HF model are the same code.
+
+### 2.1 Tree
+
+```
+python/rastai_models/
+  pyproject.toml
+  CLAUDE.md                     parity rules, capture-safety rules, the point-name convention
+  rastai_models/
+    __init__.py                 public names (section 2.2)
+    errors.py                   ModelError with RRS-M codes (RRS-E60xx for safetensors, shared with Rust)
+    observation.py              PointHook and DecodeReadout base classes; standard point names; capture modes
+    forward_context.py          ForwardContext: per-pass inputs every op module reads
+    attention_kernel.py         SDPA by default; math or eager pinned for exact replay; eager where maps are captured
+    model_traits.py             ModelTraits: has_moe, has_mla, has_alibi, has_attn_res, sliding layers, approximate lens
+    loading.py                  load_model(): config or spec → compile on the meta device → fill weights → prepare; load_model_by_ref()
+    hf_cache.py                 find snapshots in the user's HF cache (standalone SDK only; jobs get paths from job.json)
+    lora.py                     LoRALinear with named adapters: float32 masters, compute in the input dtype; merge
+    placement.py                plan and apply layer placement across GPUs; device hand-off between segments
+    decoding.py                 StaticDecoder: one static-shape step, CUDA graph per device with its own capture stream
+    sampling.py                 capture-safe sampling buffers: temperature, top-k, top-p, repetition penalty, seed
+    sessions.py                 SessionPool: decode slots, prefill, fork, close, re-prefill of evicted sessions
+    generation.py               generate loop, stop tokens, greedy reference generator, load_stop_token_ids, next_token_log_probs
+    onnx_export.py              the only torch.onnx import
+    smoke.py                    design.compile smoke forward: shapes, dtypes, finite outputs
+    compiler/
+      compile.py                compile_model(): ModelSpec → CompiledModel
+      graph_order.py            expand block instances and repeats; topological order (the spec is already validated)
+      op_table.py               (op, variant) → OpModule class; unknown ops are looked up as NodeType plugins
+      compiled_model.py         CompiledModel(nn.Module): runs ordered steps, calls hooks, unembed(), prepare()
+      weights.py                fill parameters strictly from weight files; seeded init for fresh designs
+      train_modes.py            apply each graph node's train_mode: freeze, lora or train
+    blocks/
+      op_module.py              OpModule base class
+      embedding.py              token embedding; optional scale (Gemma: sqrt(embedding_size) cast to the weight dtype)
+      norms.py                  RMSNorm (scale_offset 0 or 1, computed in float32, multiply before casting down); LayerNorm
+      linear.py                 linear with optional bias
+      rope.py                   inverse frequencies on the CPU, float32 angles; linear, llama3 and yarn scaling
+      alibi.py                  per-head distance bias as an additive attention mask
+      attention.py              MHA, GQA, sliding; full-pattern and last-token capture; head_outputs point
+      latent_attention.py       MLA: latent cache, plain and absorbed forms, patterns from the compressed keys
+      feed_forward.py           dense and gated
+      moe.py                    router, experts, shared experts; loop-over-experts prefill; gather-by-index decode
+      attn_res.py               experimental depth attention over earlier layers' outputs
+      residual.py               residual add
+      unembed.py                tied or untied unembedding; final logit softcap
+      convolution.py            conv1d, conv2d, pool (TextCNN, ViT patch embedding)
+      recurrent.py              LSTM, GRU
+      basic_ops.py              activation, dropout, concat
+      fusion.py                 concat, cross-attention and late fusion of input-map encoders
+      heads.py                  classifier head; scalar head (reward and value heads)
+      block_instance.py         runs one stamped copy of a reusable block graph
+      opaque.py                 runs a compat module; observable only at its input and output edges
+    caches/
+      kv_cache.py               KeyValueCache: preallocated; dynamic write and static write_at
+      ring_cache.py             RingKeyValueCache: window-sized slots for sliding layers (512 for Gemma 3 1B)
+      latent_cache.py           LatentCache for MLA layers
+      cache_set.py              build_caches(): the right cache per layer from the model's traits
+    families/
+      family.py                 Family base class
+      registry.py               FAMILIES list and find_family(config)
+      gemma3.py                 Gemma 3 text: config fields, (1 + weight) norms, embedding scale, softcap, names
+      llama.py                  Llama 2/3.x
+      qwen.py                   Qwen2, Qwen2.5, Qwen3 dense
+      mistral.py
+      gpt2.py                   transposed Conv1D weights converted at load
+      bert.py                   post-norm encoder
+      vit.py
+      mixtral.py
+      qwen3_moe.py
+      olmoe.py
+      gpt_oss.py                MoE with sliding/full alternation; MXFP4 weights dequantized at load
+      deepseek.py               DeepSeek-V2/V3 and Kimi: MLA + MoE; FP8 block-scaled weights dequantized at load
+      bloom.py                  ALiBi
+      mpt.py                    ALiBi
+    importers/
+      hf_config.py              config.json → ModelSpec through a family; an opaque node when no family matches
+      torch_export.py           an ExportedProgram from a live session → ModelSpec
+      onnx_import.py            .onnx → ModelSpec; unmapped subgraphs become opaque nodes
+      onnx_proto/               generated from the vendored onnx.proto by buf (never edited)
+    io/
+      safetensors_reader.py     strict reader (spike port): header fully checked before any tensor is touched
+      safetensors_writer.py     writer (spike port): sorted names, 8-byte aligned header, string metadata, fsync
+      weight_files.py           one file or a sharded index (model.safetensors.index.json)
+      gguf_writer.py            GGUF export: tensor names, dtypes, metadata; the bytes are encoded by rastai_formats
+      peft_adapters.py          LoRA adapters in PEFT layout, read and write (§14)
+    compat/
+      transformers_runtime.py   the only transformers import: opaque-node runtime; safetensors only; no remote code
+    eject/
+      eject.py                  design.eject: writes source, weights and a small loader into a folder
+      source_writer.py          ModelSpec → readable PyTorch source in the owner's style
+      loader_source.py          the strict safetensors loader copied into ejected projects (no rastai import)
+  tests/
+```
+
+### 2.2 Public API
+
+Observation (the contract between the runtime and every readout):
+
+```python
+CAPTURE_NO_ATTENTION = "none"
+CAPTURE_LAST_TOKEN_ATTENTION = "last_token"   # fast SDPA output, plus the newest token's pattern on the side
+CAPTURE_FULL_ATTENTION = "full"               # eager attention, every query's pattern
+
+class PointHook:
+    """Called at every observation point. Returns the tensor the model continues with.
+    Readers return it unchanged; interventions return an edited tensor."""
+    def at_point(self, point_name: str, tensor: Tensor) -> Tensor:
+        return tensor
+
+class DecodeReadout:
+    """Plugs a readout into the static decode step. The fused logit lens implements it,
+    so the unembedding matrix is read once per token, not twice (spike)."""
+    def point_hook(self) -> PointHook: ...
+    def finish_step(self, model: CompiledModel, final_hidden: Tensor) -> tuple[Tensor, Tensor]:
+        """Returns (logits [vocabulary], packet [packet_size] float32), both still on the GPU."""
+```
+
+Point names follow contracts.md §5.3. A point name is the graph node's path. Families name their nodes so the standard names fall out (`embedding`, `blocks.<i>.attention_out`, `blocks.<i>.feedforward_out`, `blocks.<i>.residual_out`, `final_norm_out`). Ops with extra outputs emit sibling names in the same block: `attention_pattern`, `last_token_attention`, `head_outputs`, `router_logits`, `expert_choice`, `expert_gate_weights`, `latent_cache`, `depth_attention`. Designer nodes without a family name use their node path.
+
+Compile and run:
+
+```python
+@dataclass
+class ForwardContext:
+    caches: CacheSet | None = None
+    decode_position: Tensor | None = None        # 1-element GPU tensor: a static decode step
+    attention_kernel: str = KERNEL_SDPA          # KERNEL_SDPA, KERNEL_MATH (pinned replay) or KERNEL_EAGER
+    attention_capture: str = CAPTURE_NO_ATTENTION
+    hook: PointHook | None = None
+    last_position_only: bool = False
+    unembed_output: bool = True                  # False: return the final normalized hidden state (fused lens)
+    auxiliary_losses: list[Tensor] = field(default_factory=list)   # MoE load balancing, read by the trainer
+
+def compile_model(spec: ModelSpec, device: str, dtype: torch.dtype) -> CompiledModel: ...
+def load_model(model_folder: Path, device: str, dtype: torch.dtype, spec: ModelSpec | None = None) -> CompiledModel: ...
+def load_model_by_ref(model_ref: str, host: WorkerHost | None, device: str, dtype: torch.dtype) -> CompiledModel: ...
+    # in a job, the folder comes from host.resolve_model (job.json); with host None (a notebook), from the HF cache
+def init_weights(model: CompiledModel, seed: int) -> None: ...
+
+class CompiledModel(nn.Module):
+    spec: ModelSpec
+    traits: ModelTraits
+    def forward(self, *inputs: Tensor, context: ForwardContext | None = None) -> Tensor: ...
+    def final_norm(self, hidden: Tensor) -> Tensor: ...
+    def unembed(self, normalized_hidden: Tensor) -> Tensor: ...
+    def prepare(self, device: torch.device) -> None: ...      # build per-device tables before any graph capture
+    def set_gradient_checkpointing(self, enabled: bool) -> None: ...
+    def point_names(self) -> list[str]: ...
+```
+
+LoRA and adapters (one base model, several named adapters; §10 "one base model in VRAM"):
+
+```python
+LORA_MASTER_DTYPE = torch.float32   # tiny updates to bf16 weights round away (spike)
+
+def attach_lora(model: CompiledModel, node_paths: list[str], adapter_name: str, rank: int, alpha: float) -> list[nn.Parameter]: ...
+def set_active_adapter(model: CompiledModel, adapter_name: str | None) -> None: ...   # None = reference model
+def adapter_tensors(model: CompiledModel, adapter_name: str) -> dict[str, Tensor]: ...
+def load_adapter_tensors(model: CompiledModel, adapter_name: str, tensors: dict[str, Tensor]) -> None: ...
+def merge_adapter(model: CompiledModel, adapter_name: str) -> None: ...                # for export only
+```
+
+Decode, sessions and generation (called by `rastai_worker/jobs/serve_inspectable.py` and `rastai_rl/policy_server.py`):
+
+```python
+DECODE_SLOT_COUNT = 2            # chat plus one branch side by side; other sessions re-prefill on demand
+WARMUP_RUNS_BEFORE_CAPTURE = 2   # cuBLAS and friends allocate on first use (spike)
+
+class StaticDecoder:
+    def __init__(self, model: CompiledModel, slot: DecodeSlot, readout: DecodeReadout | None, use_cuda_graph: bool): ...
+    def step(self) -> Tensor: ...    # pinned host tensor: token, logprob, top alternatives, readout packet
+
+def capture_step_graph(step_function: Callable[[], Tensor], device: torch.device) -> tuple[torch.cuda.CUDAGraph, Tensor]: ...
+
+class SessionPool:
+    def __init__(self, model: CompiledModel, slot_count: int, max_length: int): ...
+    def open_session(self, session_id: str, prompt_token_ids: list[int]) -> None: ...
+    def fork_session(self, source_session_id: str, new_session_id: str, token_index: int) -> None: ...
+    def close_session(self, session_id: str) -> None: ...
+    def set_sampling(self, session_id: str, temperature: float, top_k: int, top_p: float, repetition_penalty: float, seed: int | None) -> None: ...
+    def set_hook(self, session_id: str, hook: PointHook | None) -> None: ...   # a new set of hooked points recaptures
+    def generate(self, session_id: str, max_new_tokens: int, stop_token_ids: list[int], readout: DecodeReadout | None) -> Iterator[DecodedToken]: ...
+
+@dataclass
+class DecodedToken:
+    token_id: int
+    logprob: float
+    alternatives: list[tuple[int, float]]
+    packet: Tensor | None      # CPU float32; rastai_lens unpacks it
+
+def generate_greedy(model: CompiledModel, prompt_token_ids: list[int], max_new_tokens: int, stop_token_ids: set[int]) -> list[int]: ...
+def load_stop_token_ids(model_folder: Path) -> set[int]: ...
+def next_token_log_probs(model: CompiledModel, token_ids: list[int], first_position: int, last_position: int) -> Tensor: ...
+    # log-softmax over the vocabulary at each position in the range; drift and perplexity read it
+```
+
+Families, importers and placement (called by `loading.py`, the `compile` job and `rastai.load()`):
+
+```python
+class Family:
+    """Maps one HF architecture to ModelSpec blocks and weight names. One file per family."""
+    name: str = ""
+    model_types: tuple[str, ...] = ()
+    def build_spec(self, config: dict) -> ModelSpec: ...
+    def parameter_name(self, hf_name: str) -> str: ...                    # HF tensor name → graph parameter path
+    def convert_tensor(self, hf_name: str, tensor: Tensor) -> Tensor: ... # transposes, MXFP4 / FP8 dequantization
+    def gguf_architecture(self) -> str: ...
+    def gguf_tensor_name(self, parameter_name: str) -> str: ...
+    def gguf_metadata(self, config: dict) -> dict[str, object]: ...
+
+def find_family(config: dict) -> Family | None: ...
+def import_hf_config(config: dict, weights_source: str) -> ImportResult: ...     # ImportResult(spec, diagnostics)
+def import_onnx(path: Path) -> ImportResult: ...
+def import_exported_program(program: torch.export.ExportedProgram) -> ImportResult: ...
+
+def plan_placement(layer_bytes: dict[str, int], gpu_free_bytes: dict[int, int]) -> dict[str, int]: ...  # node path → GPU
+def apply_placement(model: CompiledModel, placement: dict[str, int]) -> None: ...
+```
+
+Weight I/O and export (called by `loading.py`, `rastai_train/checkpoints.py`, `rastai_train/export.py`, `rastai_lens` SAE loaders):
+
+```python
+class SafetensorsFile:
+    """Memory-mapped and strictly checked. Use as a context manager so the mapping closes."""
+    metadata: dict[str, str]
+    def names(self) -> list[str]: ...
+    def load(self, name: str, device: str = "cpu", dtype: torch.dtype | None = None) -> Tensor: ...
+    def close(self) -> None: ...
+
+def write_safetensors(path: Path, tensors: dict[str, Tensor], metadata: dict[str, str] | None = None) -> None: ...
+def open_weight_files(model_folder: Path) -> list[SafetensorsFile]: ...
+def write_gguf(path: Path, model: CompiledModel, family: Family, config: dict, tokenizer_json: dict, metadata: dict[str, str], tensor_dtype: str) -> None: ...
+def read_peft_adapter(folder: Path, family: Family) -> tuple[dict[str, Tensor], int, float]: ...
+def write_peft_adapter(folder: Path, tensors: dict[str, Tensor], family: Family, rank: int, alpha: float) -> None: ...
+def export_onnx(model: CompiledModel, example_inputs: list[Tensor], path: Path, metadata: dict[str, str]) -> None: ...
+def eject_design(spec: ModelSpec, weights_folder: Path | None, output_folder: Path) -> list[Path]: ...
+def load_compat_module(model_folder: Path, compat_class: str, device: str, dtype: torch.dtype) -> nn.Module: ...
+```
+
+### 2.3 The static decode step
+
+```mermaid
+flowchart TD
+  A["Generate request arrives on a gRPC thread"] --> B["Request queue"]
+  B --> C["Model thread takes the request"]
+  C --> D{"Session holds a decode slot?"}
+  D -->|"no"| E["Prefill its token IDs into a free slot (dynamic pass, SDPA)"]
+  D -->|"yes"| F["Write sampling and intervention values into the slot's GPU buffers"]
+  E --> F
+  F --> G{"Graph captured for this slot and this set of hooked points?"}
+  G -->|"no"| H["Warm up on a side stream, then capture on this device's own capture stream"]
+  G -->|"yes"| I["Replay the graph"]
+  H --> I
+  I --> J["One non-blocking copy of the packed result into pinned memory"]
+  J --> K["Unpack token, logprob, alternatives and the readout packet"]
+  K --> L{"Stop token or token limit?"}
+  L -->|"no"| I
+  L -->|"yes"| M["Finish: tokens per second, reason"]
+```
+
+- **What the step does on the GPU.** It reads the token and position buffers, runs the model with the readout's hook, samples from the slot's sampling buffers with a graph-registered generator, writes the chosen token back into the token buffer and advances the position. A replay needs no CPU→GPU copy; the only CPU work per token is the one copy back (spike).
+- **Capture stream per device.** `torch.cuda.graph`'s default capture stream is created once, on whichever GPU was current first, which broke the second GPU in the spike. `capture_step_graph` always creates `torch.cuda.Stream(device)` for the capture and another for warm-up.
+- **Recapture triggers.** A new decode slot, a different set of hooked points (an intervention added at a new point, the live panel switched on) or a new readout layout. Changing values (steering strength, sampling settings) only rewrites buffers. Capture happens during the model state `warming` (contracts.md §9.3) for the first slot.
+- **Sliding layers** use `RingKeyValueCache`: position `p` lives in slot `p % window_size`, keys are stored after RoPE so ring order doesn't matter, and the mask comes from a per-slot position buffer. The spike measured 110 vs 155 tok/s on long contexts without it.
+- **Multi-GPU placement.** Each device segment gets its own captured graph on its own capture stream. The hidden state is copied into the next segment's static input buffer between replays. A tied embedding stays on the first device; the final hidden state moves back to it for the unembedding.
+- **Plugin samplers** (the sampler/logits-processor extension point) run eagerly, so a session that uses one decodes without a graph. The UI shows the lower tokens/s honestly.
+- **Failure branches.** Capture failure raises `ModelError` (RRS-M4xxx); the session falls back to eager decode with a warning diagnostic, never a crash. A full cache raises RRS-M4xxx with the session's max length. OOM during prefill is mapped by the worker edge (RRS-H3xxx).
+- **Nothing is persisted here.** Sessions live in GPU memory. Token IDs are logged by the gateway, not by the runtime.
+
+### 2.4 Newer blocks (§17)
+
+| Block | File | Implementation rules |
+|---|---|---|
+| MoE | `blocks/moe.py` | Router and each expert are separate graph nodes (routing is observable and editable). Prefill loops over experts that received tokens; grouped matmuls only after measurement. Decode gathers the k chosen experts' stacked weights by index, so the step keeps a static shape. Load-balancing loss appended to `context.auxiliary_losses`. Expert overrides are a router-logit bias buffer at `router_logits` (force = large positive, block = negative infinity). |
+| MLA | `blocks/latent_attention.py`, `caches/latent_cache.py` | The cache holds the compressed latent. Decode uses the absorbed form (up-projections folded into the query and output projections). Parity is tested in both forms. Patterns are computed from the compressed keys; the latent cache is its own point. |
+| ALiBi | `blocks/alibi.py` | Per-head slopes; the bias is passed to SDPA as a float mask, which rules out the flash kernel. Only BLOOM and MPT pay for it. |
+| AttnRes | `blocks/attn_res.py` | A depth-attention node over earlier layers' outputs; emits `depth_attention`. `ModelTraits.approximate_lens = True`, so lens and SAE readouts are labeled approximate. Designer-only until public weights use it. |
+
+### 2.5 Dependencies
+
+- **Internal:** `rastai_formats` (generated `ModelSpec` dataclasses, `load_model_spec(json_bytes)` validation, the GGUF byte encoder), `rastai_plugin` (`NodeType` lookup in the registry, catalog codes).
+- **External:** `torch` (everything); `torch.onnx` (export); `transformers` optional (compat runtime only); Python `protobuf` † (ONNX import).
+
+### 2.6 Boundary rules
+
+- Never imports `rastai_proto`, `rastai_lens`, `rastai_data` or anything above it.
+- Never downloads. Standalone use reads the HF cache in place (`hf_cache.py`); jobs get folders from `job.json`. Weights are never copied (§19).
+- Never applies a chat template or tokenizes. Inputs are token IDs.
+- Never loads `.bin` weights. The compat runtime passes `use_safetensors=True` and `trust_remote_code=False`; a repo without safetensors is refused (RRS-M2xxx).
+- Exact replay uses `KERNEL_MATH` or `KERNEL_EAGER`. SDPA's fast kernels sum in a different order in bf16 and can flip near-ties (spike 01b).
+- Every family must pass the parity suite before it ships (section 12).
+- The safetensors reader raises the same `RRS-E60xx` codes as `crates/rastai-formats/src/safetensors.rs` on the same corpus.
+
+### 2.7 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_safetensors_reader.py` | all 33 files in `fixtures/safetensors/` give the verdict and code in `safetensors_expected.json` (6 valid, 27 malformed); handles are closed on rejection |
+| `tests/test_safetensors_writer.py` | round trip for every dtype, metadata, 8-byte alignment, empty tensors |
+| `tests/test_compile.py` | TextCNN template and a tiny decoder compile; parameter counts equal the expected `design.stats` values stored next to the fixture documents |
+| `tests/test_kv_cache.py`, `test_ring_cache.py` | token-by-token decode equals one full pass; ring decode equals full-cache sliding decode on a prompt that crosses the window three times |
+| `tests/test_decoding.py` | the static step (CPU, no graph) equals the dynamic step; sampling with a fixed seed repeats |
+| `tests/test_sessions.py` | a fork at index i continues exactly like a fresh prefill of the same tokens; evicted sessions re-prefill |
+| `tests/test_lora.py` | a fresh adapter changes nothing; adapter off equals the base; masters stay float32; merged equals adapter-on |
+| `tests/test_moe.py`, `test_latent_attention.py`, `test_alibi.py`, `test_attn_res.py` | loop-over-experts equals gather-by-index; plain MLA equals absorbed; ALiBi bias values; depth attention shapes |
+| `tests/test_families.py` | for each tiny config in `fixtures/models/<family>/`: every HF tensor name maps, every parameter is filled (strict load) |
+| `tests/test_importers.py` | unknown `model_type` imports as an opaque node with diagnostics, never an exception |
+| `tests/test_eject.py` | ejected source runs in a subprocess with only `torch` on the path and matches the compiled model's outputs |
+| `tests/test_placement.py` | the placement plan fills devices in order and respects free memory |
+| `tests/parity/` | logits vs the HF reference per family (section 12) |
+| `tests/gpu/test_cuda_graph_two_devices.py` | two models captured on GPU 0 and GPU 1 in one process (the spike's capture-stream bug) |
+| `tests/gpu/test_gguf_llama_server.py` | an f16 GGUF export generates the same tokens in `llama-server` as our fp32 runtime (spike 04) |
+| `tests/gpu/test_placement_two_gpus.py` | DeepSeek-V2-Lite across the 5080 and 3090 matches the reference within tolerance |
+
+### 2.8 Ported from the spike
+
+| Spike file | New home | Changes on the way |
+|---|---|---|
+| `gemma3.py` config, `load_config`, `check_supported`, name maps | `families/gemma3.py` | Builds a ModelSpec instead of a hand-written module tree. Gemma specifics become node attributes: RMSNorm `scale_offset = 1`, embedding scale cast to the weight dtype, final softcap. |
+| `gemma3.py` `RMSNorm`, `FeedForward`, RoPE helpers, `Attention`, `DecoderBlock` | `blocks/norms.py`, `feed_forward.py`, `rope.py`, `attention.py`; the block becomes a family block graph | Keep the precision details that made fp32 bit-identical: float32 norms with multiply-before-cast, inverse frequencies on the CPU, float32 angles, float32 softmax cast back. Observer callable returning nothing becomes `PointHook.at_point` returning a tensor (needed for interventions). |
+| `gemma3.py` `KeyValueCache` | `caches/kv_cache.py` | Unchanged API; `ring_cache.py` and `latent_cache.py` added. |
+| `gemma3.py` `load_model` | `loading.py` + `compiler/weights.py` | Same meta-device build and strict `load_state_dict(assign=True)`; sharded indexes; per-family tensor conversion. |
+| `decoding.py` `StaticDecoder` | `decoding.py` + `sampling.py` + `sessions.py` | Greedy argmax becomes in-graph sampling with logprob and alternatives packed. Lens modes naive and batched are dropped from the product (they stay as benchmark references in `tests/gpu/`); only the fused readout ships. Per-device capture stream and side-stream warm-up are kept as is. |
+| `generation.py` | `generation.py` | Kept as the greedy reference (tests, drift, anchors). |
+| `lora.py` | `lora.py` + `compiler/train_modes.py` | Attaches by graph node `train_mode` instead of hard-coded Gemma projection paths. One adapter becomes named adapters (policy, reward). Adds merge for export. |
+| `safetensors_reader.py`, `safetensors_writer.py` | `io/` | Errors carry `RRS-E60xx` codes. Writer fsyncs. Sharded index support in `weight_files.py`. |
+| `hf_cache.py` | `hf_cache.py` | SDK only. |
+
+### 2.9 Build order
+
+| Part | §31 step | Why then |
+|---|---|---|
+| `compiler/`, `blocks/` for TextCNN (embedding, conv1d, pool, linear, classifier head), `io/safetensors_*`, `errors.py` | 1 | worker protocol v0 trains TextCNN (weeks 3–4) |
+| decoder blocks, `caches/` (incl. ring cache), `observation.py`, `forward_context.py`, `attention_kernel.py`, `loading.py`, `families/gemma3.py`, `families/llama.py`, parity suite | 2 | unified runtime (weeks 5–6) |
+| `decoding.py`, `sampling.py`, `sessions.py`, `generation.py` | 3 | Inspectable runtime behind the gateway (weeks 7–8) |
+| `lora.py`, `train_modes.py`, `io/gguf_writer.py`, `io/peft_adapters.py` | 5 | Teach it (weeks 11–12), export |
+| `importers/hf_config.py`, `smoke.py`, `onnx_export.py` | 6 (week 13) | thin Designer: HF import, compile → train, ONNX export |
+| remaining families, MoE, MLA, ALiBi, AttnRes, `placement.py`, `importers/torch_export.py`, `importers/onnx_import.py`, `eject/`, `compat/` | 6 | full Designer |
+
+---
+
+## 3. `rastai_lens`: observation readouts
+
+**Purpose.** The readout engine on top of observation points: live packets with the fused logit lens, attention capture, entropy, the SAE runtime and loaders, the replay summary layer and `.rrsreplay` writing, tensor zoom, interventions (steering, feature edits, head ablation, expert overrides), and the analysis math behind Psychology's offline jobs (probes, projections, model diff, SAE fit check, attribution graphs, MoE routing, depth attention). Per contracts.md §1, the math lives here; the Psychology plugin (`rastai_psychology`) owns the commands, the job orchestration and the UI, and reaches this package only through `rastai.lens`.
+
+### 3.1 Tree
+
+```
+python/rastai_lens/
+  pyproject.toml
+  CLAUDE.md                    capture-safety, honest labels, the packet budget
+  rastai_lens/
+    __init__.py
+    errors.py                  LensError with RRS-L codes
+    collector.py               LiveCollector (PointHook): newest token's residual per layer and attention row
+    readouts.py                entropy and top-k probabilities on the GPU
+    logit_lens.py              one batched unembedding for all layers; the fused form reuses the last row as the output
+    attention.py               top attended positions per head and layer; full patterns for replay views
+    live_packet.py             LivePanelReadout (DecodeReadout), PacketLayout, unpack_packet
+    summary_layer.py           compact per-token summary stored in every .rrsreplay
+    replay_writer.py           write .rrsreplay through rastai_formats: conversation, summary, optional activations
+    recorder.py                TensorRecorder (PointHook): chosen points over a token range, chunked for FetchTensor
+    interventions.py           InterventionHook (PointHook): steering, feature edits, head ablation, expert overrides
+    sae.py                     SparseAutoencoder: JumpReLU (Gemma Scope 2), TopK and ReLU; encode and decode
+    sae_loaders/
+      gemma_scope.py           Gemma Scope 2 folders → SparseAutoencoder (spike port)
+      llama_scope.py           Llama Scope → SparseAutoencoder
+    feature_labels.py          Neuronpedia label files: load, look up, search by text
+    edge_observer.py           forward hooks on any nn.Module's submodules (observe() and opaque nodes)
+    probes.py                  linear probes on recorded activations
+    projection.py              fit a 2D or 3D projection once (PCA), place new points into that fixed space
+    model_diff.py              base vs checkpoint: feature frequency, lens shift per layer, routing shift
+    sae_fit_check.py           variance unexplained and L0 vs the trained L0; stale below a threshold
+    routing_lens.py            expert choice and gate weights per token and layer; usage, dead and overloaded experts
+    depth_attention.py         AttnRes depth weights per layer
+    attribution/
+      replacement_model.py     freeze attention patterns and norms, swap feed-forwards for transcoders
+      graph.py                 edges between tokens, features and logits from backward passes
+      pruning.py               keep the nodes and edges that carry most of the influence
+      transcoder_loaders.py    transcoder weights loaded as data
+  tests/
+```
+
+### 3.2 Public API
+
+Live panel (called by `rastai_worker/jobs/serve_inspectable.py`):
+
+```python
+FINAL_TOP_K = 10          # spike packet: entropy + top-10 guesses
+LOGIT_LENS_TOP_K = 5      # per layer
+ATTENTION_TOP_K = 8       # per head and layer, newest token only
+SAE_TOP_K = 16            # settings psychology.top_k
+MAX_EXACT_TOKEN_ID = 2**24  # token IDs travel in the float32 packet; exact below this
+
+class LiveCollector(PointHook): ...
+
+class LivePanelReadout(DecodeReadout):
+    """Fused: the logit lens's last row is the model's output, so the unembedding is read once (spike)."""
+    def __init__(self, model: CompiledModel, autoencoders: list[SparseAutoencoder], layout: PacketLayout): ...
+
+def packet_layout(model: CompiledModel, autoencoder_count: int, top_k: int) -> PacketLayout: ...
+def unpack_packet(host_packet: Tensor, layout: PacketLayout) -> dict[str, Tensor]: ...
+def prefill_packets(model: CompiledModel, token_ids: list[int], autoencoders: list[SparseAutoencoder], layout: PacketLayout) -> Tensor: ...
+```
+
+`unpack_packet` returns named tensors; the worker turns them into the `LivePacket` proto. With `LensRequest` on and `max_new_tokens = 0`, the serve job uses `prefill_packets` to emit one packet per prompt token, computed batched in one pass. That is how replay and step mode get per-token views without a separate RPC.
+
+Replay, zoom and the summary layer (serve job, Psychology jobs, `rastai.observe`):
+
+```python
+SUMMARY_LENS_TOP_K = 5
+SUMMARY_FEATURE_TOP_K = 16
+# int32 ids + float16 values: about 1.1 KB per token for Gemma 3 1B with 3 SAEs,
+# inside the 5 MB per 2k tokens target (§9). The live packet's attention rows are left out.
+
+def compute_summary_layer(model: CompiledModel, token_ids: list[int], autoencoders: list[SparseAutoencoder]) -> SummaryLayer: ...
+def write_replay(path: Path, contents: ReplayContents) -> None: ...
+
+class TensorRecorder(PointHook):
+    def __init__(self, point_names: list[str], first_token: int, last_token: int): ...
+    def chunks(self, max_bytes: int) -> Iterator[TensorChunk]: ...   # FetchTensor caps a request at 64 MiB
+```
+
+Interventions (serve job, from `SetInterventions`):
+
+```python
+class InterventionHook(PointHook):
+    """Every edit is a GPU buffer written before replay, so changing a strength never recaptures."""
+    def __init__(self, model: CompiledModel): ...
+    def set_steering(self, point_name: str, vector: Tensor, strength: float) -> None: ...
+    def set_feature_edit(self, autoencoder: SparseAutoencoder, feature_index: int, strength: float) -> None: ...
+    def set_head_ablation(self, layer_index: int, head_index: int) -> None: ...
+    def set_expert_override(self, layer_index: int, expert_index: int, action: str) -> None: ...   # "force" or "block"
+    def clear(self) -> None: ...
+    def hooked_points(self) -> set[str]: ...   # a change in this set means a graph recapture
+```
+
+- A feature edit clamps one feature: delta = (strength − current activation) × the feature's decoder row, using only that feature's encoder column, so it stays cheap and capture-safe.
+- Head ablation multiplies `head_outputs` by a per-head mask before the output projection.
+- An expert swap is a block plus a force.
+
+SAEs (serve job, SAE recipe, Psychology):
+
+```python
+@dataclass
+class SparseAutoencoder:
+    point_name: str
+    width: int
+    target_active_count: int   # the L0 it was trained for
+    encoder_weight: Tensor
+    encoder_bias: Tensor
+    threshold: Tensor | None   # JumpReLU only
+    decoder_weight: Tensor
+    decoder_bias: Tensor
+    activation: str            # "jump_relu", "topk" or "relu"
+    license: str               # shown to the user (Gemma Scope 2 is CC-BY-4.0)
+    def encode(self, residual: Tensor) -> Tensor: ...
+    def decode(self, features: Tensor) -> Tensor: ...
+
+def load_gemma_scope(folder: Path, device: str, dtype: torch.dtype) -> SparseAutoencoder: ...
+def load_llama_scope(folder: Path, device: str, dtype: torch.dtype) -> SparseAutoencoder: ...
+```
+
+Analysis math (Psychology's `lens` jobs through `rastai.lens`; the Evaluation plugin reads the diff):
+
+```python
+def collect_readouts(model: CompiledModel, prompts: list[list[int]], autoencoders: list[SparseAutoencoder]) -> ReadoutSet: ...
+def compare_models(base: ReadoutSet, checkpoint: ReadoutSet) -> ModelDiff: ...
+def check_sae_fit(model: CompiledModel, autoencoders: list[SparseAutoencoder], prompts: list[list[int]], stale_threshold: float) -> list[SaeFit]: ...
+def train_probe(activations: Tensor, labels: Tensor, step_count: int, seed: int) -> Probe: ...
+def fit_projection(activations: Tensor, dimension_count: int) -> Projection: ...
+def place_points(projection: Projection, activations: Tensor) -> Tensor: ...
+def routing_stats(model: CompiledModel, prompts: list[list[int]]) -> RoutingStats: ...
+def build_attribution_graph(model: CompiledModel, transcoders: list[Transcoder], token_ids: list[int], target_position: int, node_budget: int) -> AttributionGraph: ...
+def load_feature_labels(path: Path) -> FeatureLabels: ...
+def search_feature_labels(labels: FeatureLabels, query: str, limit: int) -> list[FeatureLabel]: ...   # psychology.feature.search
+```
+
+- For a LoRA checkpoint, `collect_readouts` runs the same loaded model twice with the adapter off and on. One base model in VRAM.
+- Attribution graphs start with Gemma 3 270M and 1B (§9). Transcoders are data: published ones where they exist, or trained by the SAE recipe in transcoder mode.
+
+### 3.3 Dependencies
+
+- **Internal:** `rastai_models` (hooks, compiled model, safetensors reader), `rastai_formats` (`.rrsreplay` writing), `rastai_plugin` (`SaeLoader` registration, catalog).
+- **External:** `torch` only.
+
+### 3.4 Boundary rules
+
+- Never talks to the host or writes events. Callers decide what is streamed or stored.
+- Never copies shared key heads for live capture: query heads that share a key head are stacked into one matmul (spike `grouped_attention_pattern`).
+- Top-k runs on the GPU; one packed tensor and one copy per token. No extra sync per readout.
+- Labels are honest: every readout on a model with `traits.approximate_lens` is flagged approximate, and every feature label carries its confidence and example inputs (§9).
+- Never imports `rastai_data`, `rastai_train` or `rastai_proto`.
+
+### 3.5 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_logit_lens.py` | fused last row equals the model's own output logits bit for bit |
+| `tests/test_live_packet.py` | layout math: for Gemma 3 1B geometry with 3 SAEs, chosen token plus panel is 2,071 floats = 8,284 bytes, as in the spike (logprob and alternatives add 1 + 2 × alternative count); pack then unpack round-trips |
+| `tests/test_summary_layer.py` | size per 2k tokens is under 5 MB for Gemma 3 1B geometry |
+| `tests/test_interventions.py` | zero strength is the identity; an ablated head contributes nothing; a blocked expert is never chosen |
+| `tests/test_sae.py` | tiny random SAE in Gemma Scope layout (`fixtures/sae/`) loads; encode/decode shapes; bad hook points rejected |
+| `tests/test_model_diff.py`, `test_sae_fit_check.py` | identical models give a zero diff; known reconstruction error is reported |
+| `tests/test_probes.py`, `test_projection.py` | a separable synthetic set is learned; placing the fitted points reproduces their coordinates |
+| `tests/test_attribution.py` | on a tiny model, attributions sum to the target logit minus the baseline within tolerance |
+| `tests/gpu/test_live_panel_budget.py` | Gemma 3 1B, CUDA graph, fused panel: overhead at most +35% (proposed budget, §34); spike measured +16–31%, peak 2.7 GiB |
+| `tests/gpu/test_gemma_scope_sanity.py` | layers 7/13/22: measured L0 within 20% of trained, variance unexplained under 0.3 (spike: 0.03–0.24) |
+| `tests/gpu/bench_lens_modes.py` | keeps the naive and batched modes as reference measurements (not a pass/fail test) |
+
+### 3.6 Ported from the spike
+
+| Spike file | New home | Changes on the way |
+|---|---|---|
+| `lenses.py` `LensCollector` | `collector.py` | Same "newest token only" rule; becomes a `PointHook`. |
+| `lenses.py` `entropy`, `top_probabilities` | `readouts.py` | Unchanged. |
+| `lenses.py` `logit_lens`, `packet` | `logit_lens.py`, `live_packet.py` | `packet(final_logits=None)` becomes `LivePanelReadout.finish_step`. Layout computed once into `PacketLayout`; MoE models append expert choice and gate weights per layer. |
+| `lenses.py` `attention_top_positions` | `attention.py` | Unchanged; MLA patterns come from the latent. |
+| `lenses.py` `unpack` | `live_packet.py` `unpack_packet` | Driven by `PacketLayout` instead of positional constants. |
+| `lenses.py` `naive_packet` | `tests/gpu/bench_lens_modes.py` | Benchmark only. |
+| `sae.py` | `sae.py` + `sae_loaders/gemma_scope.py` | Keyed by point name instead of layer index; adds TopK/ReLU variants and the license field. SAEs stay float32 as measured. |
+
+### 3.7 Build order
+
+| Part | §31 step |
+|---|---|
+| `collector.py`, `readouts.py`, `logit_lens.py`, `attention.py`, `live_packet.py`, `sae.py`, `sae_loaders/gemma_scope.py`, `interventions.py` (steering first), `summary_layer.py`, `replay_writer.py`, `recorder.py` | 4 (weeks 9–10: entropy, lens, SAEs on 3 layers, one steering slider, replay) |
+| `model_diff.py`, `sae_fit_check.py` | 4, used by the loop in weeks 11–12 |
+| `probes.py`, `projection.py`, `attribution/`, `feature_labels.py`, `edge_observer.py`, `sae_loaders/llama_scope.py` | 4 (advanced views) |
+| `routing_lens.py`, `depth_attention.py`, expert overrides | 6 (with the MoE and AttnRes blocks) |
+
+---
+
+## 4. `rastai_data`: dataset tooling
+
+**Purpose.** Everything between a dropped file and a training batch: source reading, task detection, preview with token counts, deterministic splits, MinHash dedupe, leakage check, PII flags and redaction, declarative and Python converters, chat tokenization through the gateway, loaders with a resumable position, synthetic Q&A, snapshots and export.
+
+### 4.1 Tree
+
+```
+python/rastai_data/
+  pyproject.toml
+  CLAUDE.md
+  rastai_data/
+    __init__.py
+    errors.py                  DataError with RRS-D codes
+    examples.py                TrainingExample, PreferencePair, LabeledExample, ImageExample, PromptExample
+    tokenization.py            the only tokenizers import: load tokenizer.json, encode text, decode, count tokens
+    chat_tokenization.py       chat rows → token IDs and target masks through WorkerHost.tokenize_chat; cached
+    word_vocabulary.py         word-level vocabulary for from-scratch text models (TextCNN; replaces torchtext)
+    sources.py                 open the local files the node fetched for each .rrsdata source
+    croissant.py               Croissant metadata (JSON-LD) ↔ .rrsdata: read on import, write on export
+    image_decode.py            in-house PNG and JPEG decoders → uint8 tensors; resize; the decoded-image cache
+    readers/
+      jsonl.py
+      csv_reader.py            stdlib csv; delimiter and header sniffing
+      parquet.py               the only pyarrow import
+      text_folder.py           raw documents (txt, md)
+      image_folder.py          class-per-folder image layouts, and HF Parquet image columns ({bytes, path})
+      hf_dataset_files.py      HF dataset repos as local Parquet or JSONL shards; streaming reads shard by shard
+    task_detection.py          columns and samples → classification (text or image), sft, dpo, pretraining or synthetic_qa
+    chat_formats.py            Alpaca, ShareGPT, OpenAI messages, prompt/response → one chat-row shape
+    preview.py                 first rows, column stats, token counts, split sizes
+    splits.py                  deterministic split per row from a stable hash
+    minhash.py                 MinHash signatures and LSH banding
+    dedupe.py                  exact and near-duplicate groups within a split
+    leakage.py                 test or validation rows that duplicate training rows
+    pii.py                     PII and secret patterns, flags per column, redaction
+    checks.py                  dataset.check: dedupe + leakage + PII, report blob, summary event
+    converters/
+      declarative.py           run a rastai.converter/1 file: column mapping, templates, filters
+      generate.py              converter.generate: preview → declarative converter
+      python_fallback.py       run a Converter plugin found in the registry
+      known_formats/           built-in declarative converters, one JSON file each (alpaca, sharegpt, openai_messages, dpo_pairs)
+    loaders.py                 BatchLoader: shuffle by (seed, epoch), right padding, target masks, resumable position
+    synthetic_qa.py            raw documents → Q&A pairs through a generator model on the gateway
+    snapshot.py                dataset.snapshot: PutBlob per source file, record hashes → SnapshotInfo
+    export.py                  dataset.export: JSONL or Parquet, PII redacted, croissant.json beside the files
+  tests/
+```
+
+### 4.2 Public API
+
+```python
+@dataclass
+class TrainingExample:
+    token_ids: list[int]
+    target_mask: list[bool]    # True where the token is a target: answer tokens and the end-of-turn token
+
+@dataclass
+class PreferencePair:
+    prompt_ids: list[int]
+    chosen_ids: list[int]
+    rejected_ids: list[int]
+
+@dataclass
+class LabeledExample:
+    token_ids: list[int]
+    label_index: int
+
+@dataclass
+class ImageExample:
+    pixels: Tensor             # uint8 [channels, height, width], already resized to the design's input size
+    label_index: int
+
+@dataclass
+class PromptExample:
+    messages: list[dict]       # for RL rollouts; the gateway templates them
+    reference: dict            # task check, expected answer or nothing
+
+# DatasetSpec and ConverterDocument are generated dataclasses from rastai_formats.generated (section 4.4)
+def read_dataset(dataset: DatasetSpec, folders: dict[str, Path], split: str) -> Iterator[dict]: ...
+def load_tokenizer(tokenizer_file: Path) -> Tokenizer: ...
+def count_tokens(tokenizer: Tokenizer, text: str) -> int: ...
+def detect_task(columns: list[str], sample_rows: list[dict]) -> TaskGuess: ...
+def preview_dataset(dataset: DatasetSpec, folders: dict[str, Path], tokenizer: Tokenizer, row_limit: int) -> Preview: ...
+def assign_split(row_key: str, ratios: dict[str, float], seed: int) -> str: ...
+def minhash_signature(text: str, permutation_count: int = 128) -> list[int]: ...
+def find_near_duplicates(signatures: list[list[int]], band_count: int, rows_per_band: int, similarity_threshold: float) -> list[list[int]]: ...
+def check_leakage(train_rows: list[dict], held_out_rows: list[dict], text_columns: list[str]) -> LeakageReport: ...
+def scan_pii(rows: Iterator[dict], columns: list[str]) -> PiiReport: ...
+def redact_pii(text: str) -> str: ...
+def run_declarative_converter(converter: ConverterDocument, rows: Iterator[dict]) -> Iterator[dict]: ...
+def generate_converter(preview: Preview, task: str) -> ConverterDocument: ...
+def tokenize_chat_rows(host: WorkerHost, model_ref: str, rows: list[dict], cache_folder: Path) -> list[TrainingExample]: ...
+def make_loader(examples: list, batch_size: int, shuffle_seed: int, start_epoch: int, start_position: int) -> BatchLoader: ...
+
+class BatchLoader:
+    def next_batch(self) -> Batch | None: ...
+    def position(self) -> dict: ...     # {dataset_hash, split, shuffle_seed, epoch, position}: resume.json's dataloader field
+
+@dataclass
+class SnapshotInfo:
+    dataset_hash: str
+    source_hashes: dict[str, str]     # source location → BLAKE3 from PutBlob
+    row_counts: dict[str, int]        # per split
+
+@dataclass
+class CroissantImport:
+    columns: dict                     # .rrsdata columns{}, from recordSet fields
+    sources: list[dict]               # .rrsdata sources[], from distribution (checksums kept)
+    license: str                      # goes into the .rrsdata header
+    croissant: dict                   # the full metadata, kept in .rrsdata croissant{} so export round-trips it
+    warnings: list[str]               # fields we couldn't map, shown in the preview
+
+def read_croissant(metadata_json: dict) -> CroissantImport: ...
+def write_croissant(dataset: DatasetSpec, snapshot: SnapshotInfo) -> dict: ...   # dataset.export writes it as croissant.json
+
+def decode_image(encoded: bytes) -> Tensor: ...                         # uint8 [channels, height, width]; PNG or JPEG
+def resize_image(pixels: Tensor, side: int) -> Tensor: ...              # torch interpolate, antialiased; keeps uint8
+def read_image_folder(folder: Path) -> Iterator[dict]: ...              # {image_path, label} rows from class-named folders
+def build_image_cache(rows: Iterator[dict], side: int, cache_file: Path) -> list[ImageExample]: ...
+```
+
+Constants that carry decisions:
+
+```python
+MINHASH_PERMUTATION_COUNT = 128
+LSH_BAND_COUNT = 16
+LSH_ROWS_PER_BAND = 8          # (1/16)^(1/8) ≈ 0.71: pairs above this similarity become candidates
+NEAR_DUPLICATE_THRESHOLD = 0.8 # candidates are confirmed on the signature estimate
+SHINGLE_WORD_COUNT = 5
+CHAT_TOKENIZE_BATCH_SIZE = 256 # rows per TokenizeChat call
+JPEG_MAX_CHANNEL_ERROR = 1     # IDCT rounding may differ from reference decoders by 1 per channel; tests allow it
+CROISSANT_CONTEXT_MARKER = "mlcommons.org/croissant"   # a JSON-LD @context containing this marks Croissant metadata
+```
+
+Called by: `rastai_worker/jobs/data_import.py` (`dataset.import` reads Croissant and builds the image cache; `dataset.export` writes Croissant) and `data_check.py`; `rastai_train` (loaders, examples, chat tokenization, image examples for the classification recipe); `rastai_rl` (prompt examples); `rastai_worker/jobs/serve_inspectable.py` (`decode_image` for a conversation's `image` parts when the model's input map has an image encoder); `rastai.data` (facade for plugins).
+
+- **Croissant detection.** `dataset.import` reads Croissant when the dropped folder holds a `croissant.json`, or a `metadata.json` whose `@context` contains `CROISSANT_CONTEXT_MARKER`, or when the source is an HF dataset: the node fetches the Hub's Croissant endpoint into the job's inputs with the shards (this package opens local files only). `recordSet` fields become `columns{}`, `distribution` becomes `sources[]`, and the license goes into the header. The whole metadata is kept in `croissant{}`, so export writes back what import couldn't map. Export computes each file's `sha256` with stdlib `hashlib`, the checksum Croissant expects.
+- **Image data.** `image_folder.py` reads two layouts: one folder per class (`<root>/<label>/<file>.png|jpg`), and HF Parquet image columns, whose cells are `{bytes, path}` structs. `build_image_cache` decodes every image once, resizes it to the design's input side and writes one uint8 safetensors file in `cache_folder` (`images/<dataset_hash12>-<side>.safetensors`). Training reads that file, so decoding never runs per epoch.
+
+### 4.3 Task detection rules
+
+| Evidence | Task |
+|---|---|
+| a label column (few distinct values relative to rows) plus a text column | `classification` |
+| an `image` column (HF Parquet image structs, or image files in class-named folders, where the folder name is the label) plus a label | `classification` with an `image` column |
+| prompt/response, instruction/output, or a messages list | `sft` |
+| chosen and rejected columns, or pairs with a preference flag | `dpo` |
+| one long-text column, no targets | `pretraining` |
+| documents (txt, md files) with no structure | `synthetic_qa` |
+
+Each guess carries a confidence and the reasons, shown in the preview. The user can override it; the override is saved in `.rrsdata`.
+
+**Croissant metadata** (spec §14, `.rrsdata` is Croissant-compatible) is read before these rules when present. Its `recordSet` field names and types become the columns the rules look at, and its declared data types win over sniffing (an `sc:ImageObject` field is an `image` column).
+
+### 4.4 Dependencies
+
+- **Internal:** `rastai_formats` (`.rrsdata` and `rastai.converter/1` dataclasses), `rastai_plugin` (`Converter` lookup, `WorkerHost.tokenize_chat`, catalog).
+  - Both document types come from `rastai_formats.generated`, never hand-written here: `DatasetSpec` (`crates/rastai-formats/src/documents/data.rs`, control-plane layout §4.1) and `ConverterDocument` for `rastai.converter/1` (proposed for `documents/converter.rs`; the control-plane layout doesn't list it yet, section 14 item 14).
+- **External:** `tokenizers` (plain text); `pyarrow` † (Parquet); `torch` (image tensors, resize, the JPEG inverse DCT); stdlib `csv`, `json`, `hashlib`, `zlib` (also PNG's inflate).
+- **Image decoding is in-house** (`image_decode.py`), so §27 needs no new row. §27 lists no image decoder, and the obvious one, `torchvision.io.decode_image`, would pull `pillow` and `numpy` into every lock.
+  - PNG: chunks, CRC, inflate with stdlib `zlib`, the five row filters, Adam7 interlacing, every bit depth of gray, RGB, palette and alpha.
+  - JPEG: baseline and progressive Huffman decoding in Python; the inverse DCT, chroma upsampling and YCbCr → RGB as batched `torch` ops over all blocks at once; restart markers; EXIF orientation.
+  - Refused with an RRS-D code naming the file: arithmetic-coded, 12-bit and lossless JPEG, CMYK, and other formats (GIF, WebP, TIFF). Animated PNG decodes its first frame.
+  - Cost, stated honestly: about 5 days as its own epic (PNG 1, baseline JPEG 2, progressive 1, the conformance corpus 1), needed before the ViT test in M6-E07. Python entropy decoding is slow (expect tens of milliseconds per small JPEG), which is why it runs once per dataset into the image cache. If the epic slips, the fallback is `torchvision.io.decode_image` under the PyTorch foundation row, behind the same `decode_image` function (section 14 item 15).
+
+### 4.5 Boundary rules
+
+- **Never renders a chat template.** The gateway owns templates (§18). Chat rows go through `WorkerHost.tokenize_chat` (new RPC; section 14, item 5), so a trained model sees exactly the tokens the gateway will send it. Rows that already carry token IDs (branches saved with "Prefer this branch", logged conversations) are used as they are, with no retokenization.
+- **Plain text only through `tokenization.py`.** The Python `tokenizers` package wraps the same Rust library as the gateway; `test_tokenization.py` checks it against the gateway's expected IDs.
+- **No network.** Sources are fetched by the node; this package opens local files.
+- **Never edits source files.** Outputs go to the run's `outputs/` folder and the blob store.
+- **Never reads `vault.db`.** Conversations arrive as `rastai.conversation/1` files the daemon wrote into the job's inputs.
+- **Stable hashes only** (`hashlib.blake2b` with an 8-byte digest for MinHash bases, `zlib.crc32` for splits), so a check gives the same answer in every process.
+
+### 4.6 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_task_detection.py` | each sample in `fixtures/datasets/` (CSV, JSONL, Parquet, chat, DPO, text folder, image folder, Croissant) gets the right task |
+| `tests/test_minhash.py` | the same signatures under two different `PYTHONHASHSEED` values; known near-duplicates found |
+| `tests/test_leakage.py`, `test_dedupe.py` | exact and near-duplicate leaks across splits are reported with examples |
+| `tests/test_pii.py` | a table of true and false positives; credit cards pass Luhn; redaction keeps text shape |
+| `tests/test_declarative_converter.py` | every `known_formats/*.json` converts its fixture to the expected rows |
+| `tests/test_loaders.py` | resuming at (epoch, position) yields exactly the batches an uninterrupted run would |
+| `tests/test_splits.py` | split assignment is stable across runs and machines |
+| `tests/test_tokenization.py` | the 162-case corpus in `fixtures/tokenizer/` gives the gateway's expected IDs |
+| `tests/test_chat_tokenization.py` | with a fake host: batching, cache hits, target masks over answer tokens only |
+| `tests/test_croissant.py` | every file in `fixtures/datasets/croissant/` round-trips: read → `.rrsdata` → write gives the same `recordSet`, `distribution` and license; unmapped fields survive through `croissant{}`; a `metadata.json` without the Croissant context is not taken for Croissant |
+| `tests/test_image_decode.py` | the PNG and JPEG corpus in `fixtures/images/` decodes to the stored expected pixels (PNG exactly, JPEG within `JPEG_MAX_CHANNEL_ERROR`); refused formats give their RRS-D code; a truncated file is refused, never half-decoded |
+| `tests/test_image_folder.py` | `fixtures/datasets/images_tiny/` in both layouts (class folders, Parquet image column) gives the same labels and pixels; the cache file is reused on the second call |
+
+### 4.7 Ported from the spike
+
+Nothing is ported directly. Two spike lessons land here: answer-only targets (`TrainingExample.target_mask`, replacing the spike's `IGNORED_LABEL = -100` labels), and the spike's `make_batches` right padding with a loss mask only (causal attention means padding never influences real tokens), which moves into `loaders.py`. The spike's hard-coded Gemma turn strings are not carried over; templates belong to the gateway.
+
+### 4.8 Build order
+
+| Part | §31 step |
+|---|---|
+| `examples.py`, `readers/jsonl.py`, `readers/csv_reader.py`, `word_vocabulary.py`, `loaders.py`, `splits.py` | 1 (TextCNN through worker protocol v0) |
+| `tokenization.py`, `chat_tokenization.py` | 5 (weeks 11–12: branch → DPO pair or SFT target → LoRA) |
+| `croissant.py` (M5-E07's Croissant round trip) | 5 |
+| everything else except images | 5 (data import with checks, converters) |
+| `image_decode.py`, `readers/image_folder.py`, `ImageExample` | 6, before the ViT family (M6-E07: a ViT trains one step on `images_tiny` on CPU) |
+
+---
+
+## 5. `rastai_train`: the trainer and recipes
+
+**Purpose.** The in-house training loop on compiled modules: optimizer and schedules, answer-only and chunked losses, adaptation modes (full, LoRA, QLoRA), anchors, checkpoints and the resume contract, preemption, the capability matrix, multi-GPU wrapping, export, and every first-party recipe.
+
+### 5.1 Tree
+
+```
+python/rastai_train/
+  pyproject.toml
+  CLAUDE.md                    memory defaults, resume contract, no-pickle checkpoints
+  rastai_train/
+    __init__.py
+    errors.py                  TrainError with RRS-T codes
+    context.py                 build_training_context(): model, adapters, data, optimizer, devices, settings
+    loop.py                    train(): step loop, accumulation, clipping, metrics, checkpoint cadence, stop and preempt
+    optimizer.py               AdamW over trainable parameters; warmup + cosine schedule; state ↔ named tensors
+    losses.py                  answer-only loss, chunked next-token loss, sequence log-probs, KL
+    adaptation.py              apply full, lora or qlora per graph node; reference = adapters off
+    anchors.py                 anchor examples: the base model's own answers to the anchor set, cached by hashes
+    checkpoints.py             step-N.partial → fsync → rename; keep last 3 + best + pinned; latest complete
+    resume.py                  resume.json (rastai.resume/1), rng.safetensors, loader position, recipe state
+    capability.py              recipe and adaptation availability per backend (the capability matrix)
+    distributed.py             DDP and FSDP2 wrapping; full-state gather to rank 0 for checkpoints
+    export.py                  checkpoint.export: merge adapters; safetensors, GGUF, Ollama Modelfile, HF folder
+    model_card.py              generated model card with licenses carried through
+    kernels/
+      four_bit_linear.py       the only bitsandbytes import: 4-bit frozen base linear for QLoRA
+    recipes/
+      __init__.py              FIRST_PARTY_RECIPES table and register_first_party(registry)
+      classification.py        cross-entropy on a classifier head (TextCNN, ViT, encoder + head)
+      pretraining.py           next-token loss on every position, chunked
+      sft.py                   answer-only loss; anchors mixed in by default (spike port)
+      dpo.py                   DPO; reference log-probs with the adapter switched off
+      reward_model.py          scalar head + LoRA, Bradley-Terry loss on preference pairs
+      ppo.py                   clipped policy loss, value loss, KL penalty against the reference
+      grpo.py                  GRPO; GSPO option: importance ratio and clipping per sequence
+      sae_training.py          SAEs and transcoders on recorded activations
+      jepa.py                  context encoder, EMA target encoder, predictor, loss in latent space
+  tests/
+```
+
+### 5.2 Public API
+
+```python
+ANSWER_TOKEN_LIMIT_FOR_ANCHORS = 96   # long enough to carry the base model's style, short enough to stay cheap (spike 03b)
+ANCHORS_PER_EXAMPLE = 1.0             # spike: 40 facts + 40 anchors cut drift 83–87%
+LOSS_CHUNK_POSITIONS = 1024           # full-vocabulary logits for every position would cost gigabytes (spike)
+
+def build_training_context(arguments: TrainStartArgs, launch: WorkerLaunch, host: WorkerHost) -> TrainingContext: ...
+def train(context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl) -> TrainingOutcome: ...
+def optimizer_step(context: TrainingContext, loss: Tensor) -> float: ...   # backward, clip, step; also used by RL updates
+
+def answer_only_loss(model: CompiledModel, token_ids: Tensor, target_mask: Tensor) -> Tensor: ...
+def chunked_next_token_loss(model: CompiledModel, token_ids: Tensor, chunk_positions: int = LOSS_CHUNK_POSITIONS) -> Tensor: ...
+def sequence_log_probs(model: CompiledModel, token_ids: Tensor, target_mask: Tensor) -> Tensor: ...
+def kl_divergence(reference_log_probs: Tensor, policy_log_probs: Tensor, target_mask: Tensor) -> Tensor: ...   # PPO penalty, per sequence
+
+def apply_adaptation(model: CompiledModel, mode: str, lora_rank: int, lora_alpha: float) -> list[nn.Parameter]: ...
+def build_anchor_examples(model: CompiledModel, anchor_prompts: list[dict], host: WorkerHost, model_ref: str, cache_folder: Path) -> list[TrainingExample]: ...
+def mix_anchors(examples: list[TrainingExample], anchors: list[TrainingExample], anchors_per_example: float, seed: int) -> list[TrainingExample]: ...
+
+def write_checkpoint(run_folder: Path, step: int, context: TrainingContext, recipe_state: dict, is_best: bool) -> Path: ...
+def find_latest_checkpoint(run_folder: Path) -> Path | None: ...
+def load_resume_state(checkpoint_folder: Path, context: TrainingContext) -> dict: ...
+
+def recipe_availability(hardware_profile: dict) -> dict[str, dict]: ...
+def export_checkpoint(checkpoint_folder: Path, base_model_folder: Path, formats: list[str], provenance: dict[str, str], output_folder: Path) -> list[Path]: ...
+```
+
+A recipe, in the owner's style:
+
+```python
+class SftRecipe(Recipe):
+    """Supervised fine-tuning: loss on answer tokens only, base-model anchors mixed in by default."""
+    name = "sft"
+
+    def prepare(self, context: TrainingContext) -> None: ...
+    def training_step(self, batch: Batch) -> StepResult: ...   # returns the loss tensor and metrics; the loop does backward
+    def resume_state(self) -> dict: ...
+    def restore_state(self, state: dict) -> None: ...
+```
+
+Called by: `rastai_worker/jobs/train.py` (`build_training_context`, `train`), `rastai_rl/rl_run.py` (`optimizer_step`, losses, checkpoints), `rastai_worker/jobs/export.py` (`export_checkpoint`), `rastai_worker/jobs/doctor_selftest.py` (`recipe_availability`), `rastai.train` (facade for plugin recipes).
+
+### 5.3 Decisions inside the trainer
+
+- **The loop owns backward and the optimizer.** A recipe returns a loss and metrics; accumulation, clipping, mixed precision and checkpoint cadence are the same for every recipe.
+- **Memory defaults (spike, §10):** loss only at answer positions; LoRA masters in float32 with bf16 compute; gradient checkpointing on. Settings `training.answer_only_loss`, `training.gradient_checkpointing` and `training.lora{rank 16, alpha 32}` arrive resolved in the job arguments.
+- **Anchors on by default** (`training.anchors_default`). Anchors are stored as token IDs, not decoded text, so they never drift through retokenization. Generating them took 57 s in the spike, so they are cached in the node's `cache_folder` under the base model hash, the anchor set hash and the chat-template hash. The default anchor set is `templates/evals/` (contracts.md §1).
+- **One base model for preference and RL training.** DPO and PPO reference = the same model with `set_active_adapter(model, None)`. PPO's value head shares the policy backbone. A reward model on the same base is a second adapter plus its scalar head.
+- **GSPO** is `grpo.py` with `sequence_level_ratio = true`: ratio = exp(mean over the sequence's tokens of log π_new − log π_old), clipped per sequence. Recommended for MoE models.
+- **Optimizer state as tensors.** AdamW state is saved by parameter name (`<parameter>.exp_avg`, `<parameter>.exp_avg_sq`, `<parameter>.step`), not by index, so a resume survives a reordering. Hyperparameters come back from the run record; only the schedule position goes in `resume.json`'s `scheduler{}`.
+- **RNG without pickle.** `rng.safetensors` holds `torch_cpu` and `cuda_<index>` byte tensors. Shuffling is a pure function of (shuffle seed, epoch), so the loader needs no RNG state.
+- **Checkpoint cadence** follows `checkpoint_policy_json` in the `JobSpec` (default `training.checkpoint{keep_last 3, interval_minutes 15}`; shorter on remote or preemptible nodes).
+- **Capability matrix.** `capability.py` holds the rules (bf16 needs Ampere or newer; QLoRA needs a 4-bit kernel for the backend and architecture, checked on sm_120; FSDP2 needs two or more GPUs; CPU gets float32 and small models only). The doctor self-test job runs them on each node and reports the result; `recipe.list` reads the stored result, so the rules live in one place.
+- **Multi-GPU.** DDP via `torch.distributed`, FSDP2 when the model doesn't fit per GPU. Checkpoints gather the full state to rank 0 and write safetensors; `torch.distributed.checkpoint` is not used (its metadata file is pickled).
+- **Export.** `export.py` merges adapters into a copy of the base, then writes: safetensors with provenance in `__metadata__`; GGUF (f32, f16, bf16, Q8_0) through `rastai_models.io.gguf_writer`; an Ollama Modelfile that relies on the GGUF's `tokenizer.chat_template`; and the folder the node pushes to the HF Hub. K-quants (Q4_K_M and friends) are made node-side by the pinned llama.cpp build's `llama-quantize`, a §27 engine process. Base-model and dataset licenses go into the metadata and the model card.
+- **Chains live in the daemon.** Teach it (data + anchors → LoRA → Verify) and RLHF (pairs → reward model → PPO) are run by the daemon as one job per stage, with the run state `verifying` during Verify. Each Python job does one stage. Each stage adds a process start and a model load; measure the Teach it total against the 180 s budget in step 5 (the spike's training stage alone took about 10 s).
+
+### 5.4 Preemption and resume
+
+```mermaid
+sequenceDiagram
+  participant N as Node
+  participant W as WorkerJob1
+  participant C as CheckpointFolder
+  participant L as EventLog
+  participant R as WorkerJob2
+  N->>W: SIGTERM
+  W->>W: signal handler sets preempt_requested and nothing else
+  W->>W: finish the current optimizer step
+  alt last checkpoint time fits the preemption budget
+    W->>C: write step-N.partial with weights, optimizer, rng and resume.json
+    W->>C: fsync the files, rename to step-N, fsync the folder
+    W->>L: checkpoint.saved then train.preempted, fsync
+  else not enough time
+    W->>L: train.preempted naming the last complete checkpoint, fsync
+  end
+  W-->>N: process exits with code 75
+  N->>R: relaunch the same run as a new job
+  R->>L: take the writer lock, truncate a torn tail, continue the sequence
+  R->>C: find the newest folder without .partial
+  R->>R: load weights, optimizer state, RNG and loader position
+  R->>L: checkpoint.resumed and run.state_changed to running
+```
+
+- **SIGTERM is not `STOP`** (contracts §4.4, plan §10 row 24). SIGTERM sets `preempt_requested`: checkpoint only if the last checkpoint's write time fits `training.checkpoint.preemption_budget_seconds` (25 s), append `train.preempted`, exit 75; the run is `preempted` and resumable. Control `STOP` (`train.stop`) sets `stop_requested`: a final checkpoint with no budget, the run `completed` with reason `stopped`, exit 0. The loop checks `preempt_requested` first, because only SIGTERM has a deadline.
+- **What is persisted where.** Weights, optimizer state and RNG go in the checkpoint folder as safetensors; step, epoch, samples seen, loader position and recipe state go in `resume.json` (`rastai.resume/1`, written through `rastai_formats`). Events go in the run's `events.log`. Nothing is in memory only.
+- **Visibility.** A checkpoint exists only after the rename. `checkpoint.saved` is emitted after the rename, so the daemon never indexes a half-written folder.
+- **Failure branches.** A kill -9 during the write leaves a `.partial` folder; the next job ignores it and the GC removes it. A second SIGTERM during the checkpoint is ignored. If the checkpoint itself fails (disk full), the worker emits `diagnostic.reported` (RRS-T2xxx or RRS-S3xxx) and exits 1, so the node marks the run failed instead of relaunching forever.
+- **`CHECKPOINT_NOW`** and `train.checkpoint` set `checkpoint_requested`; the loop checkpoints at the next step boundary and continues.
+
+### 5.5 Dependencies
+
+- **Internal:** `rastai_models` (compiled models, LoRA, safetensors, GGUF), `rastai_data` (examples, loaders, chat tokenization), `rastai_lens` (`SparseAutoencoder` for SAE training; readouts for training-view snapshots), `rastai_formats` (resume and run-record dataclasses), `rastai_plugin` (`Recipe`, registry, `JobEvents`, `JobControl`).
+- **External:** `torch`, `torch.distributed`; `bitsandbytes` optional (QLoRA; falls back to LoRA where unavailable, §28 risk 6).
+
+### 5.6 Boundary rules
+
+- Never decides placement or memory caps: it applies the lease the worker set and reports OOM; the node owns VRAM.
+- Never imports `rastai_rl` (RL sits above it). PPO and GRPO recipes read a `RolloutBatch` they are handed.
+- Never imports a plugin. Third-party recipes come from the registry.
+- Never runs evaluation itself. Verify is a separate `eval` job started by the daemon's chain.
+- Never writes outside the run folder and `cache_folder`; artifacts leave through `PutBlob`.
+
+### 5.7 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_loop.py` | tiny model: loss falls; `stop_requested` produces a final checkpoint and a `completed` run; `preempt_requested` produces `train.preempted` and `EXIT_PREEMPTED`, with a checkpoint only inside the budget; metrics emitted with steps |
+| `tests/test_resume.py` | CPU, deterministic mode: an interrupted-then-resumed run equals an uninterrupted one bit for bit |
+| `tests/test_checkpoints.py` | no `.partial` is ever returned; keep-last-3 + best + pinned policy |
+| `tests/test_losses.py` | answer-only equals full cross-entropy restricted to targets; chunked equals unchunked |
+| `tests/test_optimizer.py` | AdamW state round-trips through named tensors |
+| `tests/test_anchors.py` | anchors are token IDs; cache hit on the second call; mix ratio honored |
+| `tests/test_recipe_<name>.py` (one per recipe) | sft with anchors; dpo loss = log 2 at init; reward model separates synthetic pairs; ppo KL = 0 at init; grpo vs gspo ratio math; classification on TextCNN, and one step of a tiny ViT on `fixtures/datasets/images_tiny/` (M6-E07); pretraining; SAE reconstruction improves; jepa loss falls |
+| `tests/test_export.py` | merged weights give the same logits as adapter-on; provenance keys present |
+| `tests/test_capability.py` | the matrix for sample hardware profiles (sm_86, sm_120, CPU, ROCm) |
+| `tests/gpu/test_teach_it_budget.py` | 40 examples, 8 GiB cap, chat model resident: under 180 s; peak within 10% of the spike's 4.7 GiB |
+| `tests/gpu/test_qlora.py`, `test_ddp_two_gpus.py` | QLoRA on sm_120 and sm_86; DDP on the 5080 + 3090 |
+| `tests/crash/test_train_sigterm_resume.py`, `test_train_kill9.py` | the sequence in 5.4; kill -9 mid-checkpoint leaves no visible partial checkpoint |
+
+### 5.8 Ported from the spike
+
+| Spike file | New home | Changes on the way |
+|---|---|---|
+| `training.py` `next_token_loss` | `losses.py` `answer_only_loss` | Same idea: unembed only scored positions. Takes `target_mask` instead of `-100` labels. |
+| `training.py` `train` | `loop.py` | Adds checkpoints, resume, preemption, accumulation, clipping, events, control flags. Gradient checkpointing still on by default. |
+| `training.py` `TrainingSettings`, `tokenize_example`, `chat_prompt` | `recipes/sft.py`; tokenization moves to `rastai_data` | The hard-coded Gemma turn template is removed; the gateway renders templates. |
+| `training.py` `make_batches` | `rastai_data/loaders.py` | Resumable position. |
+| `experiments/03b_teach_it_drift.py` anchor logic | `anchors.py` | Token IDs instead of decoded text; cached. |
+
+### 5.9 Build order
+
+| Part | §31 step |
+|---|---|
+| `loop.py`, `optimizer.py`, `checkpoints.py`, `resume.py`, `recipes/classification.py` | 1 (TextCNN through worker protocol v0) |
+| `losses.py`, `adaptation.py` (LoRA), `anchors.py`, `recipes/sft.py`, `recipes/dpo.py` | 5, weeks 11–12 (the loop) |
+| remaining recipes except JEPA, QLoRA kernel, `capability.py`, `distributed.py`, `export.py`, `model_card.py` | 5 |
+| `recipes/jepa.py` | 6 (with the JEPA template) |
+| preemption hardening on remote nodes | 9 |
+
+---
+
+## 6. `rastai_rl`: the RL engine
+
+**Purpose.** Rollouts and advantages for RL recipes: the rollout manager (groups, sandbox cap, step mode), the agent loop through the gateway and sandboxes, single-turn rollouts for RLHF, rewards, group advantages and GAE, the policy server that lets the gateway reach the policy being trained, live peek, and the Harbor task importer.
+
+### 6.1 Tree
+
+```
+python/rastai_rl/
+  pyproject.toml
+  CLAUDE.md                   rollouts go through the gateway; sandboxes only through the node
+  rastai_rl/
+    __init__.py
+    errors.py                 RlError with RRS-R codes
+    rl_run.py                 run_rl_training(): rollouts → rewards → advantages → recipe update → checkpoint
+    policy_server.py          serves generation for the job's own policy on the model thread (model ref job:<job_id>)
+    rollout_manager.py        groups per task, at most sandbox_cap sandboxes at once, step-mode removal, partial groups
+    agent_loop.py             one agent rollout: gateway turn → tool calls → ExecInSandbox → observation, until done
+    single_turn.py            prompt-only rollouts for RLHF PPO and plain GRPO (no sandbox)
+    rewards.py                reward from a metric, a reward-function plugin or the reward-model adapter
+    advantages.py             group advantages (GRPO, GSPO) and GAE with the value head (PPO)
+    rollout_batch.py          RolloutBatch: token IDs, masks, old log-probs, advantages, returns
+    traces.py                 rollout trace → JSON-lines blob for gym.rollout_finished
+    peek.py                   gym.peek_step events (ephemeral, rate-limited)
+    harbor_import.py          Harbor task directories → rastai.harness/1 tasks (as data)
+  tests/
+```
+
+### 6.2 Public API
+
+```python
+GROUP_ADVANTAGE_EPSILON = 1e-6
+PEEK_EVENTS_PER_SECOND = 20     # live peek is read-only and must stay inside its overhead budget
+
+def run_rl_training(context: TrainingContext, recipe: Recipe, plan: RlPlan, host: WorkerHost, events: JobEvents, control: JobControl) -> TrainingOutcome: ...
+def run_group(task: dict, group_size: int, policy_ref: str, host: WorkerHost, limits: RolloutLimits, peek: PeekStream | None) -> RolloutGroup: ...
+def run_agent_rollout(task: dict, policy_ref: str, host: WorkerHost, sandbox_id: str, limits: RolloutLimits, peek: PeekStream | None) -> Rollout: ...
+def run_single_turn(prompt: PromptExample, policy_ref: str, host: WorkerHost, sample_count: int) -> list[Rollout]: ...
+def score_rollout(rollout: Rollout, reward_settings: dict, host: WorkerHost) -> float: ...
+def group_advantages(rewards: list[float]) -> list[float]: ...                  # (reward − mean) / (std + epsilon)
+def generalized_advantages(rewards: list[float], values: list[float], discount: float, trace_decay: float) -> tuple[list[float], list[float]]: ...
+def build_rollout_batch(groups: list[RolloutGroup], model: CompiledModel) -> RolloutBatch: ...
+def import_harbor_tasks(folder: Path) -> list[dict]: ...    # task dicts for the rastai.harness/1 document
+
+class PolicyServer:
+    """Answers WorkerService.Generate for model ref job:<job_id> while the RL loop waits for rollouts."""
+    def __init__(self, model: CompiledModel, session_pool: SessionPool): ...
+    def serve_until(self, done: threading.Event) -> None: ...   # runs on the model thread
+    def submit(self, request: dict) -> Iterator[dict]: ...       # called from gRPC threads
+```
+
+Called by: `rastai_worker/jobs/train.py` (PPO, GRPO, GSPO), `rastai_worker/jobs/gym.py`, `rastai_worker/jobs/data_import.py` (`gym.task.import`).
+
+### 6.3 The RL loop
+
+```mermaid
+flowchart TD
+  A["Load the base once, attach the policy adapter (and the reward adapter for PPO)"] --> B["Pick the next tasks or prompts"]
+  B --> C["Rollout manager starts groups, at most sandbox_cap sandboxes at once"]
+  C --> D["Each rollout calls GatewayGenerate with model ref job:JOB_ID"]
+  D --> E["Node gateway renders the template, tokenizes and logs token IDs"]
+  E --> F["Gateway calls WorkerService.Generate on this job"]
+  F --> G["Model thread decodes with the current policy"]
+  G --> H{"Tool call in the reply?"}
+  H -->|"yes"| I["ExecInSandbox through the node"]
+  I --> D
+  H -->|"no"| J["Score: metric, reward function or reward adapter"]
+  J --> K["Group done: group advantages (GRPO, GSPO) or values and GAE (PPO)"]
+  K --> L["Recipe update steps on the model thread"]
+  L --> M{"Checkpoint due or stop requested?"}
+  M -->|"yes"| N["Write a checkpoint"]
+  M -->|"no"| B
+  N --> B
+```
+
+- **Why the gateway loop-back.** §12 requires rollouts to go through the gateway, which captures token IDs and logprobs and owns templates and tool-call parsing. The job serves its own policy, so the gateway needs a model ref for it: `job:<job_id>` (new). While rollouts run, the model thread serves `PolicyServer` requests; there is no second copy of the model.
+- **Step mode** (`gym.step`) pauses one sandbox and removes it from the batch. Its group is recomputed without it or marked partial, as the recipe's `partial_group_rule` says (`recompute` or `mark_partial`); `gym.group_finished` carries the partial flag.
+- **What is persisted where.** Each finished rollout's trace is a blob; `gym.rollout_finished` and `gym.group_finished` are durable events. The gateway logs token IDs into the run's event log (contracts.md §4.5). Checkpoints follow section 5.4.
+- **Failure branches** (designer-gym-remote flow B3b and its open question 8):
+  - A sandbox infra failure (the sandbox failed to start, the engine was lost, a tool server crashed twice, reward code raised) is retried in a new sandbox up to `infra_retry_limit` (default 1, `RRS-R2001`), then the rollout is excluded from its group and never scored. A broken container scored as 0 would teach the policy that the task is hard.
+  - A group with fewer than `min_valid_group_members` (default 2) valid rollouts is dropped, with partial set (`RRS-R2002`).
+  - A rollout that hits its time or turn cap, or runs out of memory inside the sandbox, is a normal agent outcome and is scored by the reward.
+  - A node outage blocks gateway calls: the job retries with backoff up to `HOST_RECONNECT_TIMEOUT_SECONDS`, then checkpoints and exits 1 (RRS-J3xxx).
+- **Prototype limit.** Policy requests decode one at a time at L1. Batched decode across a group's rollouts is the L2 step.
+
+### 6.4 Dependencies
+
+- **Internal:** `rastai_train` (recipes, `optimizer_step`, checkpoints), `rastai_models` (sessions for the policy server, LoRA switching), `rastai_data` (`PromptExample`), `rastai_formats` (harness dataclasses), `rastai_plugin` (registry for metrics and reward functions; `WorkerHost` for gateway and sandboxes).
+- **External:** `torch`; stdlib `tomllib` for Harbor's `task.toml`.
+
+### 6.5 Boundary rules
+
+- Never talks to the container engine. Sandboxes exist only through `WorkerHost` calls, capped by the job's sandbox cap; containers never see a Rastai socket.
+- Never imports `rastai_eval`. `pass_at_k`, judges and other metrics come from the registry by name (contracts.md §2.4 rule 6), so a harness's reward and its eval share one definition.
+- Never parses chat templates or tool-call syntax. The gateway returns structured tool calls.
+- Harbor is data. The importer reads task files and never runs Harbor code; solution scripts are kept out of anything the policy sees.
+- Agent-gym training runs on Linux only (§0.6); the job refuses other platforms with RRS-R1xxx.
+
+### 6.6 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_advantages.py` | group advantages and GAE against hand-computed values; a group of identical rewards gives zeros, not NaN; excluded members are left out; a group below `min_valid_group_members` is dropped |
+| `tests/test_infra_failure.py` | with a fake host that fails one sandbox: the rollout is retried, then excluded, and never scored; a rollout past its time cap is scored |
+| `tests/test_rollout_manager.py` | with a scripted fake host: the sandbox cap holds; step-mode removal recomputes or marks partial |
+| `tests/test_agent_loop.py` | tool call → exec → observation → final answer; turn and time limits stop a rollout |
+| `tests/test_rewards.py` | registry lookup of a fake metric and a fake reward function; reward adapter scoring on a tiny model |
+| `tests/test_harbor_import.py` | sample task folders in `fixtures/harbor/` become harness tasks; solutions are excluded |
+| `tests/test_policy_server.py` | requests from several threads are served in order on one thread |
+| `tests/gpu/test_gym_tiny.py` | tiny model, two tasks, two GRPO steps with Podman sandboxes (Linux) |
+
+### 6.7 Ported from the spike
+
+Nothing. The spike didn't cover RL.
+
+### 6.8 Build order
+
+| Part | §31 step |
+|---|---|
+| `rl_run.py`, `single_turn.py`, `rewards.py` (reward adapter), `advantages.py`, `rollout_batch.py`, `policy_server.py` | 5 (RLHF chain; GRPO and GSPO recipes) |
+| `rollout_manager.py`, `agent_loop.py`, `traces.py`, `peek.py`, `harbor_import.py` | 7 (Agent Gym) |
+
+---
+
+## 7. `rastai_worker`: the job runtime
+
+**Purpose.** The process every Python job runs in. It reads the launch file, serves `WorkerService` on the job socket, connects to `WorkerHostService`, owns the run's event log (the one writer), keeps the ephemeral live stream, turns signals into control flags, applies the VRAM lease, maps failures to diagnostics and exit codes, dispatches job kinds to engines, hosts plugin modules, and launches extra ranks for multi-GPU training.
+
+### 7.1 Tree
+
+```
+python/rastai_worker/
+  pyproject.toml
+  CLAUDE.md                     one writer per log, one GPU thread per job, exit codes
+  rastai_worker/
+    __init__.py
+    __main__.py                 thin main: parse argv, then run_job_process, run_plugin_process, run_rank_process or run_check
+    arguments.py                argv modes: run, plugin, rank, check
+    check.py                    check subcommand: print torch version, backend, CUDA or HIP version and visible devices
+                                as one JSON line; the node runs it with -I after uv sync (platform flow 1.3)
+    launch.py                   read job.json → WorkerLaunch; set cache env; register first-party contributions
+    job_file.py                 WorkerLaunch dataclass and its reader
+    worker_server.py            grpcio WorkerService on jobs/<job_id>.sock; handlers only enqueue or flip flags
+    host_connection.py          WorkerHost client from rastai_plugin; Register with retry; reconnect backoff
+    event_log.py                EventLogWriter: RRSEVLG1 header, frames, CRC-32, fsync policy, flock, torn-tail recovery;
+                                the events.log.reserve file and pause_for_full_disk
+    event_payloads.py           event_type + dict → typed protobuf payload (the only json_format use)
+    live_stream.py              LiveStream: bounded queue of ephemeral events for WatchLive; drops oldest
+    job_events.py               JobEvents implementation over EventLogWriter and LiveStream
+    control.py                  JobControl updates from Control RPCs and signals; SIGTERM → preempt_requested, SIGINT, SIGHUP
+    vram.py                     apply the granted lease (set_per_process_memory_fraction); resize through the host
+    hardware_fingerprint.py     HardwareFingerprint for run records and replays (spike reporting.py port)
+    diagnostics.py              exception → Diagnostic dict; traceback to stderr.log; exit code choice
+    exit_codes.py               EXIT_OK, EXIT_FAILED, EXIT_BAD_LAUNCH, EXIT_CANCELLED, EXIT_EVENT_LOG_UNWRITABLE, EXIT_PREEMPTED
+    dispatch.py                 JOB_ENTRIES: job kind → entry function (a plain dict)
+    distributed.py              start rank processes, init the process group from a FileStore in the run folder
+    plugin_module.py            plugin mode: import the manifest's module, serve HandleCommand
+    proto_convert.py            engine results ↔ wire messages (DecodedToken → TokenEvent, packet → LivePacket, ...)
+    jobs/
+      __init__.py
+      serve_inspectable.py      load model, SessionPool, readouts, interventions; Generate, Fork, Close, FetchTensor
+      train.py                  build context, pick recipe, call rastai_train.train or rastai_rl.run_rl_training
+      gym.py                    harness RL through rastai_rl.run_rl_training
+      data_import.py            dataset.import, snapshot, export, converter.test, gym.task.import
+      data_check.py             dataset.check
+      compile_design.py         design.import, design.compile, design.eject (named so it does not shadow the builtin)
+      export.py                 checkpoint.export, design.export_onnx, the folder for checkpoint.push
+      doctor_selftest.py        numerical self-test against a CPU reference; capability matrix
+      plugin_entry.py           eval and lens jobs: import JobSpec.entry and call it
+  tests/
+```
+
+### 7.2 Public API
+
+```python
+WORKER_PROTOCOL_VERSION = 1
+REGISTER_TIMEOUT_SECONDS = 60          # the node fails a job that hasn't registered by then (contracts.md §9.1)
+HOST_RECONNECT_TIMEOUT_SECONDS = 300   # how long a job waits for a restarting node before giving up
+METRICS_FSYNC_INTERVAL_SECONDS = 1.0   # metrics are batched; state changes and checkpoints fsync at once
+LIVE_STREAM_CAPACITY = 4096            # ephemeral events kept for WatchLive before the oldest are dropped
+EVENT_LOG_RESERVE_BYTES = 1024 * 1024  # freed on a full disk so the records that pause the run still fit (platform flow 6.1)
+
+EXIT_OK = 0
+EXIT_FAILED = 1                  # a diagnostic.reported event is in the log
+EXIT_BAD_LAUNCH = 2              # job.json unreadable, protocol mismatch, missing environment
+EXIT_CANCELLED = 3               # job.cancel honored
+EXIT_EVENT_LOG_UNWRITABLE = 4    # the log can't be appended even after the reserve was freed; job failed, RRS-S3002 (plan §10 row 4)
+EXIT_PREEMPTED = 75              # SIGTERM honored, checkpoint written if it fit the budget; every kind, even with nothing to save (EX_TEMPFAIL)
+
+def main(argv: list[str]) -> int: ...
+def run_job_process(job_file: Path) -> int: ...
+def run_plugin_process(plugin_id: str, job_file: Path) -> int: ...
+def run_rank_process(job_file: Path, rank: int) -> int: ...
+def run_check() -> int: ...      # prints one JSON line; exit 0 when torch imports and sees the expected backend
+
+class EventLogWriter:
+    def __init__(self, path: Path, run_id: str, job_id: str): ...   # takes an exclusive flock; recovers the tail; writes the reserve
+    def append(self, event_type: str, payload: Message, blob_hashes: list[str], fsync_now: bool) -> int: ...   # returns the sequence
+    def flush_if_due(self) -> None: ...
+    def close(self) -> None: ...      # also deletes events.log.reserve
+
+def pause_for_full_disk(log: EventLogWriter, control: JobControl) -> None: ...
+    # ENOSPC on an append: truncate a partial frame, delete the reserve, append diagnostic.reported (RRS-S3002)
+    # and run.state_changed paused, fsync, wait for RESUME, then recreate the reserve before training continues
+
+class LiveStream:
+    def put(self, event_type: str, payload: Message) -> None: ...
+    def read(self, after_index: int, timeout_seconds: float) -> list[tuple[int, str, Message]]: ...
+
+JOB_ENTRIES: dict[str, Callable] = {
+    "serve_inspectable": serve_inspectable.run_job,
+    "train": train.run_job,
+    "gym": gym.run_job,
+    "data_import": data_import.run_job,
+    "data_check": data_check.run_job,
+    "compile": compile_design.run_job,
+    "export": export.run_job,
+    "doctor_selftest": doctor_selftest.run_job,
+    # "eval" and "lens" always carry JobSpec.entry and go through plugin_entry.run_job
+}
+```
+
+`main` is thin:
+
+```python
+def run_job_process(job_file: Path) -> int:
+    launch = read_job_file(job_file)
+    events = open_job_events(launch)               # flock, truncate a torn tail, write the reserve file
+    control = install_control(launch)              # Control calls, SIGTERM and SIGINT only set flags
+    # serve before Register: the node calls Hello as soon as Register arrives
+    start_worker_server(launch, control, events)
+    host = connect_to_host(launch)                 # WorkerHostService.Register with the job token
+    apply_vram_lease(launch)
+    return run_entry_with_diagnostics(launch, host, events, control)
+```
+
+### 7.3 `job.json`: what the worker reads
+
+The node writes `runs/<run_id>/job.json` before spawning the worker (contracts.md §8.4: it also holds reattach info). The worker reads only these fields (new names, section 15):
+
+| Field | Meaning |
+|---|---|
+| `job_spec` | the `JobSpec` as protobuf JSON (kind, `arguments_json` with resolved settings, `entry`, resources, `checkpoint_policy_json`, `plugin_id`) |
+| `job_socket_path`, `worker_host_socket_path` | where to serve `WorkerService` and where `WorkerHostService` is |
+| `run_folder`, `cache_folder` | the run's folder; a node-local cache that is safe to delete (anchors, drift base answers, tokenized datasets) |
+| `environment_id`, `environment_lock_hash` | for the hardware fingerprint and run record |
+| `hardware_profile` | the node's `HardwareProfile` as JSON (driver, GPU architecture) |
+| `granted_leases[]` | `{gpu_index, vram_bytes, lease_class}` for the memory fraction |
+| `resolved_models{}` | `model_ref → {model_folder, model_hash, adapter_file, spec_file}`; HF-cache folders are read in place |
+| `plugins[]` | `{plugin_id, version, module, contributes}` for every plugin whose contributions this job may load |
+| `resume_from` | a checkpoint folder, or empty |
+
+`RASTAI_JOB_TOKEN` and `RASTAI_RUN_ID` arrive as environment variables (contracts.md); the token never goes in a file.
+
+### 7.4 Command → job kind → entry
+
+| Job kind | Started for | Entry | Main engine calls |
+|---|---|---|---|
+| `serve_inspectable` | `model.load` (inspectable runtime) | `jobs/serve_inspectable.py` | `rastai_models` sessions; `rastai_lens` readouts and interventions |
+| `train` | `train.start`, `train.resume`, `teach.start` (training stage), `rlhf.start` (reward-model and PPO stages), `sweep.start` (one per trial), `run.rerun`, `psychology.preset.distill` | `jobs/train.py` | `rastai_train.train`; `rastai_rl.run_rl_training` for PPO, GRPO, GSPO |
+| `gym` | `gym.start` | `jobs/gym.py` | `rastai_rl.run_rl_training` with a harness |
+| `eval` | `eval.test`, `eval.judge.calibrate`, `eval.benchmark.*`, `eval.elo.fit`, `eval.perplexity.run`, `eval.drift.run` | `jobs/plugin_entry.py` → `rastai_eval.<module>:<function>` | `rastai_eval` |
+| `lens` | `psychology.*` job commands | `jobs/plugin_entry.py` → `rastai_psychology...` | `rastai.lens` |
+| `data_import` | `dataset.import`, `dataset.snapshot`, `dataset.export`, `converter.test`, `gym.task.import` | `jobs/data_import.py` | `rastai_data`; `rastai_rl.import_harbor_tasks` |
+| `data_check` | `dataset.check` | `jobs/data_check.py` | `rastai_data.checks` |
+| `compile` | `design.import`, `design.compile`, `design.eject` | `jobs/compile_design.py` | `rastai_models` importers, compiler, smoke, eject |
+| `export` | `checkpoint.export`, `checkpoint.push` (prepares the folder; the node uploads), `design.export_onnx` | `jobs/export.py` | `rastai_train.export_checkpoint`; `rastai_models.export_onnx` |
+| `doctor_selftest` | `system.doctor` | `jobs/doctor_selftest.py` | tiny forward pass GPU vs CPU; `rastai_train.recipe_availability` |
+| `plugin_module` | `plugin.enable` for a plugin with a `python` entry | `plugin_module.py` | the plugin's `handle_command` |
+
+`JobSpec.entry` is `<module>:<function>` (new convention), for example `rastai_eval.suite_job:run_suite_job`.
+
+### 7.5 Start, reattach and exit
+
+```mermaid
+sequenceDiagram
+  participant N as Node
+  participant W as Worker
+  participant F as RunFolder
+  participant D as Daemon
+  N->>F: write job.json, open stdout.log and stderr.log
+  N->>W: spawn python -m rastai_worker run in a new process group
+  W->>F: read job.json, flock events.log, truncate a torn tail, write events.log.reserve
+  W->>W: serve WorkerService on the job socket
+  W->>N: WorkerHostService.Register with the job token
+  N->>W: WorkerService.Hello
+  W-->>N: WorkerInfo with protocol version 1
+  W->>F: append durable events and fsync per policy
+  N->>F: tail events.log
+  N-->>D: WatchRunEvents after the acked sequence
+  Note over N,D: the node or daemon restarts here
+  W->>F: keeps appending, ephemeral events are dropped
+  N->>F: read job.json and check the pid is alive
+  N->>W: WorkerService.Hello on the job socket
+  W-->>N: WorkerInfo
+  N->>F: resume tailing from the daemon's acked sequence
+  W->>F: final run.state_changed, fsync
+  W-->>N: process exits with 0, 1, 2, 3, 4 or 75
+```
+
+- **Serve, then register.** The worker serves `WorkerService` before it calls `Register`, because the node calls `Hello` as soon as `Register` arrives (platform flow 5.1). Registering first would let the first `Hello` find no socket.
+
+- **Orphan-proof by design.** The node starts the worker with `setsid` and points stdout and stderr at files, not pipes, so a dead node sends no SIGHUP or SIGPIPE. The worker also ignores SIGHUP.
+- **The event log is the source of truth.** Durable events reach the daemon only through the file; a restart loses nothing. Ephemeral events (`job.progress`, live packets, peek steps) go through `LiveStream` and may be dropped.
+- **Single writer.** `EventLogWriter` takes an exclusive `fcntl.flock` on `events.log`. A second writer (a relaunch racing a live job) fails with RRS-J3xxx instead of interleaving frames. Frames are `body_length u32 LE | CRC-32 u32 LE | EventRecord`, after the 8-byte `RRSEVLG1` header; the checksum is `zlib.crc32`, the same as the Rust reader's (contracts.md §7.1).
+- **fsync policy.** State changes, checkpoints, diagnostics and artifacts fsync at once; `run.metrics` is batched and fsynced at least once a second.
+- **Disk-full reserve** (platform flow 6.1). At start `EventLogWriter` writes `runs/<run_id>/events.log.reserve`: `EVENT_LOG_RESERVE_BYTES` (1 MiB) of zeros, fsynced. An append that fails with ENOSPC calls `pause_for_full_disk`: the run pauses with `RRS-S3002` and the training state stays in memory until the user frees space and sends `RESUME`. The job stays `running` and keeps its lease. Only if those two pause records can't be written either does the worker exit with `EXIT_EVENT_LOG_UNWRITABLE` (4), and the node marks the job `failed` with `RRS-S3002`. The reserve is deleted on exit.
+- **Failure reporting.** On any exception the edge writes `diagnostic.reported` (a coded `Diagnostic`, never a bare traceback) and a final `run.state_changed`, fsyncs, prints the traceback to stderr.log, and exits 1. The node builds `job.state_changed` from the exit code and the last diagnostic. OOM maps to RRS-H3xxx with the requested and leased bytes; unexpected exceptions map to RRS-J1xxx.
+- **Host outages.** `WorkerHost` calls retry with backoff for up to `HOST_RECONNECT_TIMEOUT_SECONDS`. Training keeps running meanwhile; only calls that need the host (gateway, sandboxes, blobs) wait.
+
+### 7.6 Threads, signals and multi-GPU
+
+- **Threads.** The main thread is the model thread. gRPC handler threads (grpcio's pool) do three things only: answer `Hello` from cached data, flip `JobControl` flags, and move requests or stream items through queues. `Generate` handlers put a request on the serve queue and stream results back from a per-request queue.
+- **Signals and Control values.** Handlers only set flags; each `JobSignal` has its own (contracts §4.4):
+  - SIGTERM → `preempt_requested`: checkpoint if it fits the preemption budget, `train.preempted`, exit 75 for every kind, even one with nothing to save (plan §10 row 24).
+  - Control `STOP` → `stop_requested`: final checkpoint, run `completed` with reason `stopped`, exit 0.
+  - Control `CANCEL`, or SIGINT when the RPC fails → `cancel_requested`: no checkpoint, exit 3.
+  - SIGHUP is ignored.
+- **Multi-GPU.** Rank 0 is the worker process. It starts ranks 1..N−1 as `python -m rastai_worker rank --job-file <path> --rank <n>` subprocesses in the same process group (plain argv, no multiprocessing pickling). The process group initializes from a `FileStore` at `runs/<run_id>/distributed.store`. Only rank 0 writes the event log, serves `WorkerService` and writes checkpoints.
+- **Plugin modules** run as `python -m rastai_worker plugin --plugin <plugin_id> --job-file <path>` (contracts.md names the first flag; `--job-file` is new). The node starts them with network off (contracts.md §14 question 6); the worker doesn't enforce it, it just never opens sockets other than its two.
+- **Environment check.** `python -I -m rastai_worker check` takes no job file and opens no socket. The node runs it after `uv sync` and writes `.rastai-ready` only if it exits 0 (platform flow 1.3, node layout §7.6); a failure gives `RRS-H2003` with the printed JSON attached.
+
+### 7.7 Dependencies
+
+- **Internal:** every engine package (`rastai_models`, `rastai_lens`, `rastai_data`, `rastai_train`, `rastai_rl`), `rastai_formats`, `rastai_plugin`, `rastai_proto`.
+- **External:** `grpcio` (server); Python `protobuf` † (payload conversion); `torch` (memory fraction, fingerprint); `torch.distributed` (rank setup); stdlib `fcntl`, `signal`, `zlib`.
+
+### 7.8 Boundary rules
+
+- Never imports `rastai` (the SDK) or a plugin package statically.
+- Never opens `rastai.db`, `vault.db` or the blob store folder directly. Blobs move through `PutBlob` and `GetBlob`.
+- Never writes another run's event log, and never writes the log from more than one process.
+- Never sets `HSA_OVERRIDE_GFX_VERSION` or any backend override (§22); the doctor self-test fails if one is present.
+- Never runs GPU work on a gRPC thread.
+
+### 7.9 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_event_log.py` | header, frames and checksums match `fixtures/event-logs/` (shared with the Rust reader); torn tail truncated; corrupt middle → RRS-S2002; flock blocks a second writer; fsync policy calls; the reserve file exists while open and is gone after close |
+| `tests/test_full_disk.py` | with a fake file that raises ENOSPC: the reserve is freed, `diagnostic.reported` (RRS-S3002) and `run.state_changed paused` are written, the loop waits for `RESUME` and the reserve comes back; when the pause records fail too, the exit code is 4 |
+| `tests/test_check.py` | `run_check` prints exactly one JSON line with the torch version, backend and devices on CPU |
+| `tests/test_event_payloads.py` | every event type in contracts.md §7.3 that Python emits converts from its dict; unknown fields fail |
+| `tests/test_live_stream.py` | the oldest event is dropped at capacity; readers resume by index |
+| `tests/test_control.py` | SIGTERM sets only `preempt_requested`, SIGINT only `cancel_requested`; Control `STOP` sets `stop_requested`, never `preempt_requested`; the other Control values map to their flags |
+| `tests/test_job_file.py`, `test_dispatch.py` | every job kind has an entry; bad files exit 2 with RRS-J2xxx |
+| `tests/test_worker_server.py` | in-process grpcio over a temporary Unix socket: Hello, Control, WatchLive, HandleCommand |
+| `tests/test_diagnostics.py` | OOM → RRS-H3xxx; package errors keep their code; unknown exceptions → RRS-J1xxx with the traceback in stderr |
+| `tests/test_hardware_fingerprint.py` | all `HardwareFingerprint` fields filled on CPU |
+| `tests/crash/test_worker_kill9.py` | kill -9 mid-append and mid-checkpoint: the next job recovers the log and ignores `.partial` |
+| `tests/crash/test_worker_survives_node_restart.py` | kill the node mid-run; the worker keeps writing; the node reattaches with `Hello`; the daemon sees no gap (the weeks 3–4 exit criterion) |
+
+### 7.10 Ported from the spike
+
+| Spike file | New home | Changes on the way |
+|---|---|---|
+| `reporting.py` `environment_fingerprint`, `device_label` | `hardware_fingerprint.py` | Fills the `HardwareFingerprint` message. GPU names come from `torch.cuda.get_device_properties`; the `nvidia-smi` call is dropped (the node detects hardware). Adds environment hash, dtype, quantization, attention kernel, seed, deterministic flag. |
+| `reporting.py` `write_results` | not ported | Experiments become tests and benchmarks (section 12). |
+
+### 7.11 Build order
+
+| Part | §31 step |
+|---|---|
+| `__main__`, `arguments`, `launch`, `job_file`, `worker_server` (Hello, Control, WatchLive), `host_connection`, `event_log`, `event_payloads`, `live_stream`, `job_events`, `control`, `diagnostics`, `exit_codes`, `dispatch`, `jobs/train.py` (TextCNN), `jobs/doctor_selftest.py`, `plugin_module.py` skeleton | 1 (worker protocol v0; exit: kill -9 the daemon, reattach, no lost events) |
+| `vram.py`, `hardware_fingerprint.py`, `check.py` (the node's environment check, plan M2-16) | 2 |
+| `jobs/serve_inspectable.py`, `proto_convert.py` (Generate, Fork, Close, SetInterventions, FetchTensor) | 3, live packets in 4 |
+| `jobs/plugin_entry.py` | 4 (Psychology jobs) |
+| `jobs/data_import.py`, `jobs/data_check.py`, `jobs/export.py`, `distributed.py` | 5 |
+| `jobs/compile_design.py` | 6 (week 13 for import and compile) |
+| `jobs/gym.py` | 7 |
+| preemption relaunch across network drops | 9 |
+
+---
+
+## 8. `rastai`: the public SDK
+
+**Purpose.** What a notebook or a plugin imports: `load()`, `observe()`, wandb-compatible `log()`, the daemon client, and the stable facades plugins use instead of engine packages (`rastai.runtime`, `rastai.lens`, `rastai.data`, `rastai.train`). Published to PyPI as `rastai` in Phase 2 (`pip install rastai` → `rastai.load("x.rrsmodel").to_torch()`, §11).
+
+### 8.1 Tree
+
+```
+python/rastai/
+  pyproject.toml                PyPI distribution "rastai"
+  CLAUDE.md                     facade rules: re-exports only, no wrapper functions (ADR-0023); semver on every public name
+  public_api.txt                snapshot of every public name; a test fails when it changes without a version note
+  rastai/
+    __init__.py                 load, observe, init, log, finish, config, connect, __version__
+    errors.py                   RastaiError with a catalog code
+    loading.py                  load(): .rrsmodel file or model ref → Design; Design.to_torch()
+    observe.py                  observe(): ObservedModel (run, generate, steer, ablate, save_replay)
+    tracking.py                 wandb-compatible init, log, finish, config, summary; background flush; spool file
+    client.py                   DaemonClient: execute, list_commands, subscribe, wait_for_job
+    connect_transport.py        Connect over HTTP/1.1 with stdlib http.client: unary JSON, server-stream envelopes
+    paths.py                    where the daemon is: reads RASTAI_DAEMON_SOCKET and RASTAI_URL only; builds no paths (ADR-0014)
+    runtime.py                  plugin facade, re-exports: load_model_by_ref, generate_greedy, next_token_log_probs, set_active_adapter
+    lens.py                     plugin facade, re-exports: readouts, interventions, replays, diff, SAE fit, probes, projection, attribution, routing
+    data.py                     plugin facade, re-exports: read datasets, tokenizer, chat tokenization, loaders, PII
+    train.py                    plugin facade for recipe authors, re-exports: losses, adapter switching, optimizer_step
+  tests/
+```
+
+### 8.2 Public API
+
+Notebook surface:
+
+```python
+def load(source: str | Path) -> Design: ...      # a .rrsmodel path or a model ref ("hf:google/gemma-3-1b-it@main")
+
+class Design:
+    spec: ModelSpec
+    def to_torch(self, device: str = "cpu", dtype: str = "float32", with_weights: bool = True) -> torch.nn.Module: ...
+    def parameter_count(self) -> int: ...
+
+def observe(model: torch.nn.Module, saes: list[str] | None = None, tokenizer_folder: Path | None = None) -> ObservedModel: ...
+
+class ObservedModel:
+    def run(self, prompt: str | list[int]) -> Trace: ...
+    def generate(self, prompt: str | list[int], max_new_tokens: int = 64) -> Trace: ...
+    def steer(self, point_name: str, vector: torch.Tensor, strength: float) -> None: ...
+    def ablate_head(self, layer_index: int, head_index: int) -> None: ...
+    def clear_interventions(self) -> None: ...
+    def point_names(self) -> list[str]: ...
+
+class Trace:
+    token_ids: list[int]
+    def table(self) -> list[dict]: ...                    # entropy, top guesses, lens and features per token
+    def save_replay(self, path: str | Path) -> Path: ...  # .rrsreplay with the summary layer; opens in the web viewer
+    def open_in_app(self) -> None: ...                    # psychology.replay.import through the daemon, if running
+
+def init(project: str | None = None, name: str | None = None, config: dict | None = None, tags: list[str] | None = None) -> Run: ...
+def log(values: dict[str, float], step: int | None = None) -> None: ...
+def finish() -> None: ...
+
+def connect(url: str | None = None, token: str | None = None) -> DaemonClient: ...
+
+class DaemonClient:
+    def execute(self, command_id: str, arguments: dict) -> dict: ...
+    def list_commands(self, section: str | None = None) -> list[dict]: ...
+    def subscribe(self, event_types: list[str], subject_ids: list[str] | None = None, after_bus_sequence: int = 0) -> Iterator[dict]: ...
+    def wait_for_job(self, job_id: str) -> dict: ...
+```
+
+- **`observe()` rules.** A compiled Rastai model gets full views. A model whose config a family can map (for example an HF `transformers` model passed in from a notebook) is rebuilt as a compiled model from its config and in-memory `state_dict`, with no file round trip, and gets full views. Anything else gets edge views: PyTorch's own `register_forward_hook` on each submodule, points named `<module path>.output`. Text prompts are tokenized as plain text; chat formatting needs token IDs or the daemon.
+- **`log()` rules.** API-compatible with wandb for numbers: `init`, `log(dict, step)`, `finish`, `config`, `summary`. Non-numbers are skipped with one warning; media, artifacts and sweeps are out of scope. With a daemon, `init` runs `run.external.start` and a background thread flushes batches through `run.external.log` every second; `finish` runs `run.external.finish`. The daemon is the single writer of that run's event log. Without a daemon, records spool to `./rastai-runs/<run_id>.jsonl`, importable later with `run.import_logs` (source `rastai_spool`). Logging never blocks or crashes the caller's training loop.
+- **Daemon client.** Connects over the socket named by `RASTAI_DAEMON_SOCKET` (`daemon.sock`; peer credentials, no token) or over loopback HTTP at `RASTAI_URL` with a scoped token from `RASTAI_TOKEN`. The user sets them, or whatever starts the script does (`rastai open --print-url` reports `runtime_dir`; the socket is `<runtime_dir>/daemon.sock`). With neither set, the SDK doesn't guess: `connect()` raises `RastaiError` (an `RRS-C` code, numbered in M1-13) whose fix names both variables, `init()` and `log()` spool to `./rastai-runs/` with one warning, and `load()` and `observe()` don't need a daemon. Connect JSON for unary calls; the 5-byte envelope framing for `EventService.Subscribe`. Error responses become `RastaiError` with the diagnostic's code. Macros recorded in the UI are scripts against this client (§13).
+
+Plugin facades (the stable Python plugin API). Each facade module is a list of explicit re-exports and nothing else: no wrapper functions, so there is no forwarding layer (ADR-0023). The names and signatures are the engines' own (sections 2.2, 3.2, 4.2, 5.2); `public_api.txt` is the guard.
+
+```python
+# rastai/runtime.py: used by rastai_eval and rastai_psychology
+from rastai_models import load_model_by_ref, generate_greedy, next_token_log_probs, set_active_adapter
+
+# rastai/lens.py: used by rastai_psychology
+from rastai_lens import (
+    LivePanelReadout, TensorRecorder, InterventionHook, SparseAutoencoder,
+    compute_summary_layer, write_replay, load_gemma_scope, load_llama_scope,
+    collect_readouts, compare_models, check_sae_fit, train_probe, fit_projection, place_points,
+    routing_stats, build_attribution_graph, load_feature_labels, search_feature_labels,
+)
+
+# rastai/data.py: used by rastai_eval, rastai_psychology and converter plugins
+from rastai_data import (
+    read_dataset, load_tokenizer, count_tokens, tokenize_chat_rows, make_loader, scan_pii, redact_pii,
+)
+
+# rastai/train.py: used by third-party Recipe plugins
+from rastai_train import answer_only_loss, sequence_log_probs, kl_divergence, optimizer_step
+from rastai_models import set_active_adapter
+```
+
+- `load_model_by_ref` in a job resolves the ref through `host.resolve_model` (paths from `job.json`); in a notebook (`host=None`) it reads the HF cache through `rastai_models/hf_cache.py`.
+- An engine rename changes a public name. `tests/test_public_api.py` then fails until `public_api.txt` and the version note are updated, so engine authors keep these names stable or keep the old name as a second re-export with a deprecation note.
+
+### 8.3 Dependencies
+
+- **Internal:** every engine package and `rastai_formats`, `rastai_plugin` (contracts.md §2.2: everything except `rastai_worker`).
+- **External:** `torch`; stdlib `http.client`, `socket`, `json`, `threading`. No HTTP library, no protobuf in the SDK's own code (Connect JSON is plain dicts).
+
+### 8.4 Boundary rules
+
+- Talks only to the daemon. Never to a node, a worker socket or a database file.
+- `load()` and `observe()` work with no daemon and no app.
+- Facades are re-export lists: no wrapper functions and no logic. Behavior lives in the engines, so first-party and third-party code run the same path.
+- `paths.py` builds no paths and reads no `HOME`, `XDG_*` or `RASTAI_HOME` (ADR-0014's "Checked by": in Python only the HF-cache module may). It reads `RASTAI_DAEMON_SOCKET` and `RASTAI_URL`, nothing else, so `rastai-core/src/paths.rs` stays the one place that knows the folder layout.
+
+### 8.5 Tests
+
+| Test | What it proves |
+|---|---|
+| `tests/test_loading.py` | the TextCNN template and a tiny Gemma spec become `nn.Module`s and run |
+| `tests/test_observe.py` | full points on a compiled model; edge points on a plain `nn.Sequential`; steering at strength 0 is the identity |
+| `tests/test_tracking.py` | against a fake daemon on a temporary socket: batching, ordering, spool when unreachable, `finish` flushes |
+| `tests/test_connect_transport.py` | unary JSON, stream envelopes, an error envelope becomes `RastaiError` with its code |
+| `tests/test_public_api.py` | the public names equal `public_api.txt` |
+| `tests/test_paths.py` | only `RASTAI_DAEMON_SOCKET` and `RASTAI_URL` are read: with `RASTAI_HOME` and `XDG_RUNTIME_DIR` set and neither SDK variable set, `connect()` raises `RastaiError` with the fix text and `log()` spools; ADR-0014's source check passes on `python/rastai/` |
+
+### 8.6 Ported from the spike
+
+Nothing directly. `observe()` reuses `rastai_lens` readouts ported from `lenses.py`; `load()` reuses the compiler.
+
+### 8.7 Build order
+
+| Part | §31 step |
+|---|---|
+| `runtime.py`, `lens.py` facades, `observe.py` | 4 (the Psychology plugin needs them; `observe` is §26) |
+| `client.py`, `connect_transport.py`, `paths.py`, `tracking.py`, `data.py`, `train.py` | 5 (runs table, Evaluation plugin, recipe plugins) |
+| `loading.py` (`rastai.load()`) | 6 (§31 lists it under the Designer) |
+
+---
+
+## 9. `rastai_eval`: the Evaluation plugin's Python side
+
+**Purpose.** Tests models the way a test suite tests code (§10): suites and the `eval.test` run, metrics (exact match, keyword, regex, LLM-as-a-judge, Pass@k, perplexity with bits per byte, drift, reward-model score), judge calibration, Bradley-Terry/Elo, blind A/B votes, benchmark import and runs, and per-checkpoint results with regression diffs. It is a first-party plugin built only on the public API, and the reference implementation of the eval-metric extension point (§13).
+
+Location, per contracts.md §1 and §14 question 12: `plugins/evaluation/python/rastai_eval/`. The manifest, UI (`@rastai/eval-ui`) and catalog sit beside it and are covered by the plugins layout doc.
+
+### 9.1 Tree
+
+```
+plugins/evaluation/
+  rastai-plugin.json            manifest (plugins layout doc): commands, metrics[], python{module, lockfile}
+  python/
+    pyproject.toml              depends on rastai and rastai_plugin only
+    uv.lock                     the per-plugin lockfile (§13); no packages beyond the base environment
+    CLAUDE.md                   public-API-only rule, judge trust rules
+    rastai_eval/
+      __init__.py               handle_command and the job entries named in the manifest
+      errors.py                 EvalError with RRS-V codes
+      commands.py               handle_command: sync eval.* commands; job commands call host.start_job
+      suites.py                 load .rrseval through rastai_formats; pinned conversations → tests; suite warnings
+      suite_job.py              eval.test: resolving → generating → judging → scoring (EvalRunState)
+      answers.py                answers for each test through host.gateway_generate (token IDs logged by the gateway)
+      results.py                the result file per checkpoint; artifact registration; diff of two results
+      votes.py                  eval.vote: a document edit appending one row to the project's evals/votes.rrsdata
+      elo.py                    Bradley-Terry fit, Elo scale, bootstrap intervals
+      metric_jobs.py            eval.drift.run, eval.perplexity.run, eval.elo.fit entries
+      metrics/
+        __init__.py             FIRST_PARTY_METRICS table, registered under contributes.metrics
+        exact_match.py
+        keyword.py              spike port
+        regex_match.py
+        judge.py                LLM-as-a-judge: rubric, reference answer, pairwise in both orders
+        pass_at_k.py            n samples per task in sandboxes; unbiased estimator
+        perplexity.py           perplexity and bits per byte
+        drift.py                KL(base ‖ trained) on the fixed prompt set (spike port)
+        reward_model_score.py   score with a trained reward-model adapter; best-of-n reranking
+      judges/
+        rubric_prompt.py        rubric + reference + answer(s) → judge messages
+        verdict.py              parse a verdict; both-order rule: disagreement is a tie
+        calibration.py          eval.judge.calibrate: agreement with hand labels
+      benchmarks/
+        lm_eval_import.py       lm-eval-harness task definitions → benchmark data
+        yaml_subset.py          in-house reader for the YAML subset task files use
+        prompt_fill.py          {{field}} substitution only
+        benchmark_job.py        eval.benchmark.import and eval.benchmark.run entries
+  tests/
+    python/
+      test_<module>.py
+```
+
+### 9.2 Public API
+
+```python
+JUDGE_BOTH_ORDERS = True             # §10: pairwise judges see both orders; disagreement counts as a tie
+BOOTSTRAP_ROUNDS = 1000
+ELO_SCALE = 400.0
+ELO_ANCHOR_RATING = 1000.0
+DRIFT_ANSWER_TOKEN_LIMIT = 48        # spike evaluation.py
+
+def handle_command(call: CommandCall, host: PluginHost) -> CommandReply: ...
+
+def run_suite_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None: ...
+def run_drift_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None: ...
+def run_perplexity_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None: ...
+def run_calibration_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None: ...
+def run_elo_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None: ...
+def run_benchmark_job(job: JobSpec, host: WorkerHost, events: JobEvents, control: JobControl) -> None: ...
+
+class JudgeMetric(Metric): ...
+class PassAtKMetric(Metric): ...
+class PerplexityMetric(Metric): ...
+class DriftMetric(Metric): ...
+class KeywordMetric(Metric): ...
+
+def pass_at_k(sample_count: int, passed_count: int, k: int) -> float: ...   # 1 − C(n−c, k) / C(n, k), as a stable product
+def pairwise_verdict(verdict_a_first: str, verdict_b_first: str) -> str: ... # "a", "b" or "tie"
+def fit_bradley_terry(comparisons: list[Comparison], iteration_count: int = 200) -> dict[str, float]: ...
+def elo_with_intervals(comparisons: list[Comparison], seed: int) -> list[EloRating]: ...
+def drift_kl(base_log_probs: torch.Tensor, trained_log_probs: torch.Tensor) -> float: ...
+def bits_per_byte(total_negative_log_likelihood_nats: float, byte_count: int) -> float: ...
+def diff_results(earlier: dict, later: dict) -> ResultDiff: ...
+```
+
+- **Bradley-Terry** uses the minorization-maximization update (each strength = wins / Σ comparisons ÷ (own + opponent strength)), with ties as half a win each. It doesn't depend on comparison order. Elo = `ELO_SCALE` × log10(strength) shifted so the mean is `ELO_ANCHOR_RATING`; intervals are the 2.5th and 97.5th percentiles over bootstrap resamples.
+- **Bits per byte** = total negative log-likelihood in nats ÷ ln 2 ÷ UTF-8 byte count. Perplexity alone isn't comparable across tokenizers (§10).
+- **Drift** = mean KL(base ‖ trained) over the positions that predict the base model's own greedy answers on the fixed prompt set (`eval.drift_prompt_set`). For a LoRA checkpoint, base and trained are one loaded model with the adapter off and on. Base answers are cached by model hash in `cache_folder`.
+- **Pass@k** samples go through the gateway; each sample's tests run in its own sandbox via `host.create_sandbox` / `exec_in_sandbox`.
+- **Blind A/B votes are a project document,** like every other record a user makes. `eval.vote` returns one `CommandReply.document_edits` entry: a JSON Patch appending a row to the inline source of `evals/votes.rrsdata` (task `dpo`, created on the first vote). The row is the preference row of training-evaluation flow §7.1 with `source = blind_vote`: `prompt` (messages and token IDs), `chosen` and `rejected` (text, token IDs, `model_ref` each), `chosen_side` (`a` or `b`, the screen position, kept so position bias can be checked) and `created_at`. The daemon validates and writes it with the usual atomic write, undo step and `document.changed`, so votes are per project, travel in `.rrsproj` exports and carry lineage.
+- **Elo sources.** `eval.elo.fit` reads `evals/votes.rrsdata` like any preference dataset, together with branch-pick rows whose two `model_ref`s differ and pairwise judge verdicts in stored results.
+
+### 9.3 The suite run
+
+```mermaid
+sequenceDiagram
+  participant P as EvalPluginModule
+  participant H as Node
+  participant E as EvalJob
+  participant G as Gateway
+  participant L as EventLog
+  P->>H: StartJob kind eval with entry rastai_eval.suite_job
+  H->>E: spawn a worker with the suite, the model ref and the base ref
+  E->>L: run.state_changed resolving
+  E->>E: load the suite, expand pinned conversations, find metrics in the registry
+  E->>L: run.state_changed generating
+  loop each test
+    E->>G: GatewayGenerate for the model under test
+    G-->>E: token IDs and text
+  end
+  E->>L: run.state_changed judging
+  loop each judged test, both orders when pairwise
+    E->>G: GatewayGenerate for the judge with the rubric
+    G-->>E: verdict text
+  end
+  E->>L: run.state_changed scoring
+  E->>E: cheap metrics, then drift and perplexity in-process
+  E->>H: PutBlob for the result file and judge transcripts
+  E->>L: eval.test_result per test, artifact.created, eval.suite_finished
+  E->>L: run.state_changed passed or failed
+```
+
+- **Generation goes through the gateway** for the model under test and for judges, so templates are the gateway's and every token is logged. If the model under test isn't loaded, the node loads it as for `model.load` (an assumption on the node doc).
+- **Persisted.** The result file (per test: input ref, answer, metric scores, pass flag, judge prompt and verdict blob hashes, judge agreement rate) is a blob registered as an `eval_result` artifact with lineage to the checkpoint. `eval.result.list` and `eval.result.diff` read these artifacts through `host.execute_command("artifact.list", ...)`; the plugin keeps no database and no files of its own. Votes are rows in the project's `evals/votes.rrsdata`, written by the daemon from the plugin module's document edit (9.2).
+- **Exit status.** `passed` and `failed` follow the suite's `pass_rule`; `errored` means the suite couldn't run (unreachable judge, missing model) and is never reported as a pass. `rastai eval test` exits non-zero on `failed` or `errored`.
+- **Failure branches.** A judge that returns an unparseable verdict twice scores the test as `errored` for that test, with the transcript kept. A sandbox failure in Pass@k counts the sample as failed and records why.
+
+### 9.4 Judge trust rules
+
+- A judge with no calibration on record is marked "uncalibrated" in every result; the agreement rate is shown once `eval.judge.calibrate` has run against hand labels.
+- Pairwise judging runs both orders; any disagreement is a tie.
+- The judge's prompt and verdict are stored with every result.
+- Keyword, regex and exact-match checks are never the only check on generated text: a suite that does that gets a warning at load (RRS-V0xxx), and `eval.test` runs drift alongside whenever a base model is known. This is the spike's lesson: keyword checks missed both a style change and an invented fact.
+
+### 9.5 Benchmarks
+
+- lm-eval-harness task files are read as data by `yaml_subset.py`: mappings, lists, scalars, quoted and block strings. Anchors, tags and anything else are rejected with RRS-V3xxx.
+- `!function` entries (Python code references) are rejected, never run.
+- Prompt templates support `{{field}}` substitution only. Jinja blocks (`{% %}`) and filters are rejected with a diagnostic naming the task, so unsupported tasks fail visibly instead of running wrong.
+- Task data comes from HF dataset files the node fetched, read through `rastai.data`.
+
+### 9.6 Dependencies
+
+- **Internal:** `rastai` (facades `rastai.runtime`, `rastai.data`) and `rastai_plugin` only (contracts.md §2.2; `check-imports` enforces it).
+- **External:** `torch` (KL, log-probs, Bradley-Terry math).
+
+### 9.7 Boundary rules
+
+- Never imports an engine package, `rastai_worker` or `rastai_proto`.
+- Never loads a judge model itself; judges are gateway calls.
+- Never executes code from benchmark files or task definitions.
+- Never writes results anywhere but blobs, and never writes a file itself: votes and suite edits leave as `CommandReply.document_edits` for the daemon to apply.
+
+### 9.8 Tests
+
+Tests run on the `rastai_plugin` test host (mock worker, scripted gateway, fake sandboxes).
+
+| Test | What it proves |
+|---|---|
+| `tests/python/test_judge.py` | both-order rule; disagreement is a tie; transcripts stored |
+| `tests/python/test_calibration.py` | agreement rate against hand labels |
+| `tests/python/test_pass_at_k.py` | the estimator equals brute-force enumeration for small n |
+| `tests/python/test_elo.py` | shuffled comparisons give the same ratings; seeded bootstrap repeats |
+| `tests/python/test_votes.py` | `eval.vote` returns exactly one document edit appending a `blind_vote` row to `evals/votes.rrsdata` and writes no file; the Elo job counts that row as one comparison |
+| `tests/python/test_perplexity.py`, `test_drift.py` | bits per byte on a known text; identical models give zero drift |
+| `tests/python/test_keyword.py` | spike behavior kept |
+| `tests/python/test_yaml_subset.py`, `test_lm_eval_import.py` | sample tasks in `fixtures/benchmarks/` import; `!function` and Jinja blocks are rejected |
+| `tests/python/test_suite_job.py` | state order resolving → generating → judging → scoring; `errored` vs `failed` |
+| `tests/python/test_invented_fact.py` | the spike's failure case (`fixtures/teach_it/`): keyword checks pass, the scripted judge fails the invented-fact answer, the suite fails (the weeks 11–12 exit criterion) |
+| `tests/loop/` | the CPU loop runs a suite with a scripted judge |
+
+### 9.9 Ported from the spike
+
+| Spike file | New home | Changes on the way |
+|---|---|---|
+| `evaluation.py` `is_correct`, `accuracy` | `metrics/keyword.py` | A `Metric` subclass. |
+| `evaluation.py` `answer_drift` | `metrics/drift.py` | Prompts are templated by the gateway (`tokenize_chat`) instead of the hard-coded Gemma turn; base answers cached; one model with the adapter off and on for LoRA checkpoints. |
+| `evaluation.py` `answer`, `ask_all` | `answers.py` | Answers come through the gateway, not a local greedy loop. |
+| `spike/data/general_prompts.json` | `templates/evals/` (drift prompt set and default anchor set) | Owned by the templates folder (contracts.md §1). |
+| `spike/data/teach_it_rastai.json` | `fixtures/teach_it/` | Test data. |
+
+### 9.10 Build order
+
+| Part | §31 step |
+|---|---|
+| `commands.py`, `suites.py`, `suite_job.py`, `answers.py`, `results.py`, `metrics/keyword.py`, `metrics/exact_match.py`, `metrics/judge.py`, `judges/`, `metrics/drift.py` | 5, weeks 11–12 (v0: `rastai eval test`, a judge, drift) |
+| `metrics/perplexity.py`, `metrics/regex_match.py`, `metrics/reward_model_score.py`, `elo.py`, `votes.py`, `metric_jobs.py`, `benchmarks/`, `metrics/pass_at_k.py` | 5 |
+| Pass@k and judges scoring agent tasks for the gym | 7 |
+
+---
+
+## 10. Interaction summary
+
+Who calls what across the packages, for the main flows:
+
+| Flow | Path |
+|---|---|
+| Chat with the live panel | gateway → node → `WorkerService.Generate` (`serve_inspectable`) → `SessionPool.generate` with `LivePanelReadout` → `DecodedToken` → `proto_convert` → `TokenEvent` + `LivePacket` |
+| Steering slider | `psychology.intervention.set` → node `SetInterventions` → serve job → `InterventionHook` buffers (recapture only on a new point) |
+| Replay | `psychology.replay.open` → serve job session with `max_new_tokens = 0` and the lens on → `prefill_packets`; zoom → `FetchTensor` → `TensorRecorder` |
+| Teach it | daemon chain: `train` job (`rastai_data.tokenize_chat_rows` → `build_anchor_examples` → `SftRecipe` with LoRA) → `eval` job (`rastai_eval` suite + drift) → Psychology `lens` job (model diff) |
+| RLHF | daemon chain: `train` job with `reward_model` → `train` job with `ppo` (`rastai_rl.run_rl_training`, single-turn rollouts, reward adapter on the same base) |
+| Agent gym | `gym` job → `rastai_rl` → gateway loop-back to the policy → sandboxes through the node → `grpo` update |
+| Notebook | `rastai.load()` / `rastai.observe()` (no daemon) → `rastai.log()` → `run.external.*` commands or the spool file |
+
+---
+
+## 11. `python/envs/<backend>/`: locked environments
+
+**Purpose.** One uv project and one hash-pinned `uv.lock` per backend (ADR 9). The node syncs them into `<data>/envs/<environment_id>-<lock_hash12>/` with `uv sync --frozen`; nothing is resolved on the user's machine.
+
+### 11.1 Tree
+
+```
+python/envs/
+  README.md                   which backend gets which environment, how to update a lock, CI checks
+  cpu/
+    pyproject.toml
+    uv.lock
+  cuda13/                     default for NVIDIA (driver 580 or newer)
+    pyproject.toml
+    uv.lock
+  cuda126/                    legacy build for Maxwell, Pascal and Volta
+    pyproject.toml
+    uv.lock
+  rocm/                       one environment while there is one card (contracts.md §14 question 10)
+    pyproject.toml
+    uv.lock
+  (mps/ later)
+```
+
+### 11.2 What each `pyproject.toml` holds
+
+```toml
+[project]
+name = "rastai-env-cuda13"
+requires-python = "==3.12.*"
+dependencies = [
+    "torch",            # from the pinned PyTorch index below (foundation, §27)
+    "tokenizers",       # compatibility surface, same core as the gateway's crate
+    "grpcio",           # the worker protocol (protobuf row of §27)
+    "protobuf",         # runtime for generated code (†)
+    "pyarrow",          # Parquet (†)
+    "onnx",             # imported by the torch.onnx exporter; export jobs only (plan M1-02, torch.onnx row)
+    "onnxscript",       # same
+    "rastai", "rastai_worker", "rastai_models", "rastai_lens", "rastai_train",
+    "rastai_rl", "rastai_data", "rastai_plugin", "rastai_proto", "rastai_formats",
+]
+
+[project.optional-dependencies]
+compat = ["transformers"]     # compat runtime only; synced on demand from the same lock
+qlora = ["bitsandbytes"]      # cuda13 and cuda126 only, where the kernel exists
+
+[dependency-groups]
+dev = ["pytest"]              # never installed on users' machines
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+# workspace packages resolve by path in development and to built wheels in releases
+```
+
+| Environment id | PyTorch build | Extras offered | Measured cold install (spike) |
+|---|---|---|---|
+| `cpu` | CPU | `compat` | 3 s, 0.75 GB |
+| `cuda13` | CUDA 13.x | `compat`, `qlora` | 33 s, 5.2 GB |
+| `cuda126` | CUDA 12.6 | `compat`, `qlora` | not measured |
+| `rocm` | ROCm for the card's architecture | `compat` (`qlora` once a 4-bit kernel exists for it) | 91 s, 16.5 GB |
+
+Warm reinstall from the uv cache took under 1 s for every backend (spike).
+
+### 11.3 Rules
+
+- Every package in a lock must be in `deps/allowlist-python.json` (`tools/checks/check-deps`).
+- CI resolves every lockfile on every change (§28 risk 11) and fails on a hash change it didn't expect.
+- The installer shows the download size per backend before starting; the node sums the wheel sizes recorded in `uv.lock`, so no extra file is needed.
+- Extras are synced from the same lock by `system.env.install` with an extras list; this is a locked sync, not a runtime install. Installed extras go in the hardware fingerprint.
+- Plugin environments layer on top through a `.pth` file (contracts.md §8.1), each from its own lockfile.
+- The node sets `TORCHINDUCTOR_CACHE_DIR` to `<cache>/torch/` and never sets `HSA_OVERRIDE_GFX_VERSION` (§22; the spike's integrated GPU returned silently wrong matmuls with it).
+
+### 11.4 Build order
+
+`cpu` in step 1 (worker protocol v0 and CI). `cuda13`, `cuda126` and `rocm` in step 2 (§31: "the uv environments"). `rocm` is tested once a discrete RDNA3+ card is in (§0.16).
+
+---
+
+## 12. Cross-package tests
+
+| Folder | Holds | Runs |
+|---|---|---|
+| `python/<package>/tests/`, `plugins/evaluation/tests/python/` | unit tests, CPU only | every CI run |
+| `tests/parity/` | `hf_reference.py` (the only test-time `transformers` wrapper), `parity_prompts.py` (the spike's short, chat, code and long prompts; the long one crosses the 512-token window three times), `template_forced.py` (finds positions the chat template forces), and `test_<family>_parity.py` per family | CI with tiny random-weight configs from `fixtures/models/<family>/` (weights generated at test time with a seed and written with our writer); real weights nightly on GPU |
+| `tests/gpu/` | `@pytest.mark.gpu` tests listed in each package section: two-device capture, live-panel budget, Teach it budget, QLoRA on sm_120, DDP, real-weight parity (Gemma 3 1B, OLMoE-1B-7B on one GPU, DeepSeek-V2-Lite on both), GGUF vs `llama-server` | nightly on the owner's box, or by hand |
+| `tests/crash/` | kill -9 and SIGTERM tests for workers (sections 5.4 and 7.5) | every CI run (CPU) |
+| `tests/loop/` | the full CPU loop under 10 minutes: TextCNN design → compile → train → eval → ONNX export → re-import with matching outputs; and a tiny decoder: branch pair → DPO or SFT with anchors → suite with a scripted judge → drift | every CI run |
+
+**Parity criteria** (§17 and spike 01): fp32 max |Δlogit| ≤ 5×10⁻³ with top-1 agreement on every scored position (eager attention is expected to be bit-identical for Gemma 3); bf16 drift from fp32 no worse than the reference's own; token-by-token decode equals one full pass within 5×10⁻³; positions whose next token the chat template forces are skipped; MLA parity in both plain and absorbed forms.
+
+---
+
+## 13. The spike: lessons and port map
+
+### 13.1 Measured lessons and where they live
+
+| Lesson (spike) | Where it is implemented | Guarded by |
+|---|---|---|
+| Decode must be a captured static-shape step; a Python loop is launch-bound (~70 vs 150–155 tok/s) | `rastai_models/decoding.py`, `sessions.py` | `tests/gpu/test_live_panel_budget.py` (records tok/s with the panel off) |
+| One capture stream per device; the default one lands on whichever GPU was first | `rastai_models/decoding.py` `capture_step_graph` | `tests/gpu/test_cuda_graph_two_devices.py` |
+| Fused logit lens: the lens's last row is the output; the unembedding is read once | `rastai_lens/live_packet.py` `LivePanelReadout` via `DecodeReadout` | `rastai_lens/tests/test_logit_lens.py` |
+| Batched unembedding, top-k on the GPU, one packed copy per token, last-token attention without copying shared key heads | `rastai_lens/collector.py`, `logit_lens.py`, `attention.py`, `live_packet.py` | `test_live_packet.py`; panel budget test |
+| 512-slot ring buffer for sliding-window layers (110 vs 155 tok/s on long contexts) | `rastai_models/caches/ring_cache.py` | `rastai_models/tests/test_ring_cache.py` |
+| Exact replay pins the attention kernel (math or eager); fast kernels flip bf16 near-ties | `rastai_models/attention_kernel.py`; `pin_attention_kernel` in the serve job; `attention_kernel` in the fingerprint | parity suite; replay tests |
+| Parity skips template-forced positions | `tests/parity/template_forced.py` | every family's parity test |
+| Answer-only loss (262k-vocabulary logits everywhere cost gigabytes) | `rastai_train/losses.py`; `rastai_data/examples.py` `target_mask` | `rastai_train/tests/test_losses.py` |
+| LoRA masters in float32, compute in bf16 | `rastai_models/lora.py` `LORA_MASTER_DTYPE` | `rastai_models/tests/test_lora.py` |
+| Gradient checkpointing on by default | `CompiledModel.set_gradient_checkpointing`; `training.gradient_checkpointing` default | `tests/gpu/test_teach_it_budget.py` (peak memory) |
+| Anchors cut drift 83–87% with no loss of new facts | `rastai_train/anchors.py`, `recipes/sft.py` (on by default) | `test_anchors.py`; Teach it budget test |
+| Keyword checks miss regressions; drift KL is the default model-diff metric | `rastai_eval/metrics/drift.py`, `judge.py`, suite warning (9.4) | `test_invented_fact.py` |
+| Strict safetensors contract (no duplicate keys, real integers, overflow-checked sizes, exact tiling, string metadata) | `rastai_models/io/safetensors_reader.py` (twin of the Rust reader) | `test_safetensors_reader.py` on the 33-file corpus |
+| Self-test must check numbers against a CPU reference; never force ROCm with an override | `rastai_worker/jobs/doctor_selftest.py`; environment rules (11.3) | doctor self-test unit test with a fake wrong-matmul backend |
+| Gemma Scope 2 SAEs are a check that the residual stream is right | `rastai_lens/sae_loaders/gemma_scope.py` | `tests/gpu/test_gemma_scope_sanity.py` |
+
+### 13.2 Every spike file
+
+| Spike file | Fate |
+|---|---|
+| `src/rastai_spike/gemma3.py` | `rastai_models`: `blocks/`, `caches/kv_cache.py`, `families/gemma3.py`, `loading.py` (2.8) |
+| `decoding.py` | `rastai_models/decoding.py`, `sampling.py`, `sessions.py` (2.8) |
+| `generation.py`, `hf_cache.py` | `rastai_models/generation.py`, `hf_cache.py` (2.8) |
+| `lora.py` | `rastai_models/lora.py`, `compiler/train_modes.py` (2.8) |
+| `safetensors_reader.py`, `safetensors_writer.py` | `rastai_models/io/` (2.8) |
+| `lenses.py`, `sae.py` | `rastai_lens/` (3.6) |
+| `training.py` | `rastai_train/loop.py`, `losses.py`, `recipes/sft.py`; batching to `rastai_data/loaders.py` (5.8) |
+| `evaluation.py` | `rastai_eval/metrics/keyword.py`, `drift.py`, `answers.py` (9.9) |
+| `reporting.py` | `rastai_worker/hardware_fingerprint.py`; `write_results` retired (7.10) |
+| `prompts.py` | `tests/parity/parity_prompts.py`; its `encode` helper is retired (the gateway owns templates) |
+| `tokenizer_corpus.py`, `bakeoff_fixtures.py` | their outputs move to `fixtures/tokenizer/` and `fixtures/safetensors/` (contracts.md §1); the generators are not ported, and the corpora are maintained as files with expected results |
+| `llama_server.py` | Rust: `crates/rastai-node/src/fast_runtime.rs` (contracts.md §1); no Python home |
+| `experiments/01*`, `02`, `03*`, `04`, `05` | become `tests/parity/`, `tests/gpu/test_live_panel_budget.py`, `tests/gpu/bench_lens_modes.py`, `tests/gpu/test_teach_it_budget.py`, `tests/gpu/test_gguf_llama_server.py`, and the environment size table in 11.2 |
+| `data/general_prompts.json`, `data/teach_it_rastai.json` | `templates/evals/` (drift prompts, default anchors) and `fixtures/teach_it/` (9.9) |
+
+---
+
+## 14. Decisions that touch contracts.md
+
+Each item is a decision this doc makes, with the contracts.md text it relates to. Reviewers should reconcile them there.
+
+1. **Psychology analyses split.** contracts.md §1 puts the offline analyses in `rastai_psychology`. This doc keeps that: the math (probes, projection, model diff, SAE fit check, attribution graphs, routing stats) is in `rastai_lens`; the plugin owns commands, jobs and UI and calls `rastai.lens`.
+2. **GGUF has one byte encoder.** contracts.md §2.1 lists the GGUF writer in `rastai-formats`. The byte encoding stays there and is called through the `rastai_formats` wheel; `rastai_models/io/gguf_writer.py` does the tensor side (names, dtypes, merged weights, metadata, tokenizer vocabulary read from `tokenizer.json`).
+3. **`run_job` takes `control`.** The contracts.md §12.3 example has three arguments; this doc adds `control: JobControl`, and types `events` as `JobEvents` (a `rastai_plugin` base class) because plugin jobs can't import `rastai_worker`'s `EventLogWriter`.
+4. **Engines don't touch protobuf.** Event payloads are dicts converted in `rastai_worker/event_payloads.py`; generation results are converted in `proto_convert.py`.
+5. **Chat templating for training goes through the gateway.** New `WorkerHostService.TokenizeChat`: `model_ref`, conversations as JSON, `add_generation_prompt` → per conversation `token_ids[]` and `target_mask` (bytes, 1 = target). Batched; results cached in `cache_folder`.
+6. **The Python safetensors reader is a deliberate twin** of the Rust reader (contracts.md §1 port map). Both must give the same verdict and the same `RRS-E60xx` code on every file in `fixtures/safetensors/`.
+7. **`decoding.py` stays one file** as contracts.md's port map says; sessions, sampling and generation are split into sibling files.
+8. **Capability matrix computed on the node by the doctor job**, stored with the node's hardware profile, read by `recipe.list`.
+9. **Teach it and RLHF chains are sequenced by the daemon**, one Python job per stage.
+10. **Job-kind mapping** in section 7.4, including `dataset.snapshot`, `dataset.export`, `converter.test` and `gym.task.import` under `data_import`, and `checkpoint.push` preparation under `export`.
+11. **ONNX export dependencies.** `onnx` and `onnxscript` are allowlisted under the `torch.onnx` foundation row and used only by `export` jobs, through `rastai_models/onnx_export.py` (plan M1-02; designer-gym-remote flow open question 1). The in-house fallback, an ONNX writer from ModelSpec over the vendored `onnx.proto`, stays the replacement path if the packages churn.
+12. **Open: `torch.export` files.** `.pt2` archives may contain pickled parts. Default: the prototype imports `torch.export` graphs only from a live session (`rastai_models.importers.torch_export`, reachable from a notebook); `.pt2` files are refused (RRS-E7xxx) until a loader that never unpickles is verified.
+13. **No Python paths twin.** `rastai/paths.py` reads only `RASTAI_DAEMON_SOCKET` and `RASTAI_URL`, set by the user or by whatever starts the script, and never `RASTAI_HOME`, `XDG_*` or `HOME`. That keeps ADR-0014's check ("in Python, only the standalone SDK's HF-cache module may") passing with no named exception. With neither variable set the SDK has no daemon: `connect()` raises `RastaiError`, and `log()` spools. `test_paths.py` checks both halves.
+14. **`ConverterDocument`.** `rastai.converter/1` has no generated type yet. This doc uses `ConverterDocument`, proposed for `crates/rastai-formats/src/documents/converter.rs` beside `data.rs`'s `DatasetSpec`; the control-plane layout should add it, and M1-01 fixes the name.
+15. **Image decoding in-house.** `rastai_data/image_decode.py` decodes PNG and JPEG itself (section 4.4), about 5 days as its own epic before M6-E07. The fallback, if the owner prefers it or the epic slips, is `torchvision.io.decode_image` added to plan M1-02's list under the PyTorch foundation row; it brings `pillow` and `numpy` into every lock as transitive packages. Either way `decode_image` is the only entry point, so the choice changes one file.
+16. **Blind A/B votes are a project document** (`evals/votes.rrsdata`, 9.2), not a plugin data file. training-evaluation flow §7.1 and §10.3 still say `votes.jsonl` and need the same change.
+
+---
+
+## 15. New names
+
+Names this doc introduces that aren't in contracts.md. Python class and module names inside one package are owned by this doc and not listed.
+
+**Commands**
+
+| Command | Purpose | Scope | Kind |
+|---|---|---|---|
+| `run.external.start` | create a run for a notebook's `rastai.init()`; the daemon writes its event log | training | sync |
+| `run.external.log` | append a batch of metric records to that run | training | sync |
+| `run.external.finish` | close the run with a final state | training | sync |
+
+`run.import_logs` gains the source `rastai_spool` (the SDK's offline spool file).
+
+**Wire**
+
+| Name | Where | Shape |
+|---|---|---|
+| `WorkerHostService.TokenizeChat` | `proto/rastai/worker/v1` | `TokenizeChatRequest{model_ref, conversations_json[], add_generation_prompt}` → `TokenizeChatResponse{results[]{token_ids[], target_mask (bytes)}, Diagnostic[]}` |
+
+**Model refs, observation points and conventions**
+
+| Name | Meaning |
+|---|---|
+| model ref `job:<job_id>` | a policy served live by an RL job, reachable through the gateway |
+| observation point `blocks.<i>.head_outputs` | per-head attention outputs before the output projection (head ablation) |
+| observation point `blocks.<i>.expert_gate_weights` | MoE gate weights of the chosen experts (beside `expert_choice`) |
+| observation point `blocks.<i>.depth_attention` | AttnRes weights over earlier layers |
+| observation point `<module path>.output` | edge views from `rastai.observe()` on models ModelSpec can't import |
+| `JobSpec.entry` format | `<module>:<function>` |
+
+**Job launch and exit**
+
+| Name | Meaning |
+|---|---|
+| `job.json` fields | `job_spec`, `job_socket_path`, `worker_host_socket_path`, `run_folder`, `cache_folder`, `environment_id`, `environment_lock_hash`, `hardware_profile`, `granted_leases[]`, `resolved_models{}`, `plugins[]`, `resume_from` (section 7.3) |
+| `python -m rastai_worker plugin --plugin <plugin_id> --job-file <path>` | adds `--job-file` to contracts.md's plugin process command |
+| `python -m rastai_worker rank --job-file <path> --rank <n>` | extra ranks for multi-GPU training |
+| `python -I -m rastai_worker check` | the node's environment check: one JSON line with the torch version, backend, CUDA or HIP version and visible devices |
+| `runs/<run_id>/distributed.store` | the `torch.distributed` FileStore for one run |
+| `runs/<run_id>/events.log.reserve` | `EVENT_LOG_RESERVE_BYTES` (1 MiB) freed on a full disk so the pause records fit (platform flow 6.1) |
+| exit codes | `0` OK, `1` failed (diagnostic in the log), `2` bad launch, `3` cancelled, `4` event log unwritable (`EXIT_EVENT_LOG_UNWRITABLE`, `RRS-S3002`), `75` preempted (SIGTERM, every kind) |
+| `JobControl.preempt_requested` | set by SIGTERM only; separate from `stop_requested` (Control `STOP`) |
+| `WORKER_PROTOCOL_VERSION = 1` | the integer the worker reports in `Hello` |
+
+**SDK**
+
+| Name | Meaning |
+|---|---|
+| `rastai.lens`, `rastai.train` | plugin facades beside contracts.md's `rastai.runtime` and `rastai.data` |
+| `rastai.connect()`, `DaemonClient` | the Python daemon client |
+| `rastai.init`, `rastai.log`, `rastai.finish`, `rastai.config` | the wandb-compatible tracking surface |
+| `RASTAI_DAEMON_SOCKET`, `RASTAI_URL`, `RASTAI_TOKEN` | how the SDK finds and authenticates to a daemon; the only daemon-location inputs it reads (no `RASTAI_HOME`, no `XDG_*`) |
+| `load_model_by_ref`, `next_token_log_probs` (`rastai_models`), `kl_divergence` (`rastai_train`), `load_feature_labels`, `search_feature_labels` (`rastai_lens`), `read_dataset`, `load_tokenizer`, `count_tokens` (`rastai_data`) | engine functions the facades re-export, so they are public API |
+| `./rastai-runs/<run_id>.jsonl` | the offline metric spool |
+| `python/rastai/public_api.txt` | the public-name snapshot |
+
+**Assumed in `rastai_plugin`** (to add there if missing)
+
+`JobEvents`, `JobControl`, `WorkerHost.tokenize_chat`, `WorkerHost.resolve_model`, `Recipe.restore_state`, `Metric.prepare` with `EvalContext`, and the base-class names `BenchmarkLoader` (benchmark loaders, §13) and `SamplerPlugin` (sampler/logits processor, §13) if the plugin SDK doc names them differently.
+
+**Documents, artifacts and files**
+
+| Name | Meaning |
+|---|---|
+| `rastai.converter/1` | the declarative converter document (owned by `rastai-formats`; type `ConverterDocument`, proposed in `documents/converter.rs`, section 14 item 14) |
+| `evals/votes.rrsdata` | the project's blind A/B votes: inline `dpo` rows with `source = blind_vote` and `chosen_side` (9.2) |
+| `croissant.json` | the Croissant metadata `dataset.export` writes beside exported files; also detected on import (4.2) |
+| artifact kinds | `adapter`, `checkpoint_export`, `gguf`, `onnx`, `eject`, `design_import`, `dataset_snapshot`, `dataset_report`, `eval_result`, `judge_transcript`, `rollout_trace`, `sae`, `replay` |
+| provenance keys | `rastai.run_id`, `rastai.recipe`, `rastai.derived_from`, `rastai.created_with`, `rastai.licenses` (safetensors `__metadata__`, GGUF key-values, ONNX `metadata_props`) |
+| cache files in `cache_folder` | `anchors/<base_model_hash12>-<anchor_set_hash12>-<template_hash12>.safetensors`, `drift/<model_hash12>-<prompt_set_hash12>.safetensors`, `tokenized/<dataset_hash12>-<template_hash12>.safetensors`, `images/<dataset_hash12>-<side>.safetensors` |
+| fixture folders | `fixtures/datasets/` (with `fixtures/datasets/croissant/` and `fixtures/datasets/images_tiny/`), `fixtures/images/` (decoder corpus with expected pixels), `fixtures/harbor/`, `fixtures/sae/`, `fixtures/benchmarks/`, `fixtures/teach_it/` |
+| `.rrsdata` task `classification` with an `image` column | image classification (ViT, CNN templates); see 4.3 |
+| `python/conftest.py`, `tests/conftest.py` | shared pytest fixtures |
+
+**Error classes** (one per package, rule 1.4.5): `ModelError` (RRS-M), `LensError` (RRS-L), `DataError` (RRS-D), `TrainError` (RRS-T), `RlError` (RRS-R), `WorkerError` (RRS-J), `EvalError` (RRS-V), `RastaiError` (any code, SDK edge).

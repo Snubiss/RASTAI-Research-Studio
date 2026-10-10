@@ -1,0 +1,1843 @@
+# Rastai Research Studio: Implementation Plan
+
+**Status:** v1.2, 2026-10-10. Pre-build. The steps from today (spike done) to the prototype exit (spec §5, §31, §32). v1.1 applied the cross-doc review: section 10 rows 23–37, ADR-0034, the projects epic (M3-E11), the Training view (M4-E12), storage and lineage in M5-E04, and the `node-over-ssh` CI job. v1.2 applies the second review: rows 2, 5, 29, 30, 32, 35 and 37 now match the flow docs (`chat.settings.set`, recapture once per new hooked point, `layer_placement.rs`, the current data-policy codes); ADR-0034 also restates ADR-0001 decision 5 and ADR-0006 decision 4; the threat model (M1-56) and three more fuzz targets; plugin event handlers (M5-E15); Python and TS tests on macOS and Windows runners; and feature rows for Basic/Advanced, accessibility, the egress badge, the second training window, crash reports, tutorials and vLLM.
+
+**Built on:** spec v5.3 (`docs/spec/rastai_spec_v5.md`), the spike results (`spike/README.md`), the shared names (`docs/architecture/contracts.md`), the four layout docs (`docs/architecture/layout/`), the four flow docs (`docs/architecture/flows/`) and ADRs 0001–0032. ADR-0033 (M1-02) and ADR-0034 (M1-01) are written by this plan's first two PRs. Names come from contracts.md. Names this plan adds are in section 11; they land in contracts.md through M1-01, before any code uses them.
+
+**Companion file:** [`backlog.json`](backlog.json) holds one GitHub issue per M1 and M2 task and one per later epic. It is generated from the same data as the tables below, so the two can't disagree. M1-07 turns it into GitHub issues.
+
+## Contents
+
+1. [Starting point and target](#1-starting-point-and-target)
+2. [Milestones](#2-milestones)
+3. [Ways of working](#3-ways-of-working)
+4. [M1 Foundation and skeleton](#4-m1-foundation-and-skeleton)
+5. [M2 Unified runtime](#5-m2-unified-runtime)
+6. [M3–M10: epics](#6-m3m10-epics)
+7. [Tracking L0–L3](#7-tracking-l0l3)
+8. [GitHub setup](#8-github-setup)
+9. [Schedule risks](#9-schedule-risks)
+10. [Conflicts between docs, and the defaults M1-01 adopts](#10-conflicts-between-docs-and-the-defaults-m1-01-adopts)
+11. [New names this plan adds](#11-new-names-this-plan-adds)
+12. [Open questions](#12-open-questions)
+
+---
+
+## 1. Starting point and target
+
+### 1.1 Today
+
+- **The spike is done** (§0.13). The unified-runtime bet holds: in-house Gemma 3 1B is bit-identical to HF in fp32 with eager attention; the live panel costs +16–31% at CUDA-graph speed; the gateway tokenizer and llama.cpp agree on 49,035 tokens; Teach it takes about 10 s; the WebGL2 canvas holds the refresh cap at 50,000 nodes; the backend stays Rust.
+- **The design is written:** contracts v1, four layout docs, four flow docs, 32 ADRs. contracts.md, the platform flow and the node layout already follow several of section 10's defaults; M1-01 settles the rest.
+- **The repo has one scaffold commit:** README, LICENSE, DCO, CONTRIBUTING, CLAUDE.md, the PR template and two issue templates. No product code, no CI, no GitHub settings yet.
+
+Spike items this plan carries:
+
+| Item | State | Where it lands |
+|---|---|---|
+| TextCNN ported off torchtext and `.pt` (§32 weeks 1–2 exit) | Not done; `spike/README.md` doesn't cover it | M1-18 (template), M1-35, M1-36, M1-38, M1-46 |
+| AMD numbers | Wait on a discrete RDNA3+ card (§0.16) | M2-11, M10-E01 |
+| 5080 timings taken while Steam's shader cache was running | Treat as pessimistic; re-measure on an idle box | the nightly GPU jobs from M2-10 on |
+| The bake-off safetensors reader used `memmap2` and `unsafe` | Dropped in the port | M2-13 |
+
+### 1.2 Target: the prototype exit (§5)
+
+| Condition | Proved by |
+|---|---|
+| Every section is at L1 | The feature level table (7.3) names a passing test for every L1 row; M10-E03 |
+| The core loop is at L2: chat → see inside → steer or branch → train → verify | The L2 list (7.4); M10-E02 |
+| It runs on Linux NVIDIA, Linux AMD and a paired SSH box | M10-E01 (AMD), M9 (SSH), M10-E03 (the same suite on all three) |
+
+### 1.3 How this plan is organized
+
+- **One milestone per §31 build step** (M1–M9), plus M10 for the exit checks that span every step.
+- **§32's 90-day plan cuts thin slices** through M4 (weeks 9–10), M5 and M9 (weeks 11–12) and M6 (week 13). Issues in those slices carry the `gate:90-day` label.
+- **M1 and M2 are cut into PR-sized tasks** (half a day to two days). Later milestones are epics of 2–5 days; each is cut into tasks when its milestone starts. M6-E06 re-plans at week 13 with measured velocity.
+- **Weeks are estimates; exit criteria close a milestone** (§0.8, §32). Section 3.4 states the estimate honestly.
+
+---
+
+## 2. Milestones
+
+### 2.1 At a glance
+
+| Milestone | §31 step | §32 weeks | Goal | Work | Exit gate (the test that closes it) |
+|---|---|---|---|---|---|
+| M1 Foundation and skeleton | 1 | 3–4 | Monorepo, CI, contracts in code, the command layer over HTTP, CLI and MCP, durable storage, daemon with embedded node, worker protocol v0 running TextCNN, plugin host, web shell, threat model v1 | 56 tasks, 73 size-days | kill -9 the daemon mid-run; it restarts and reattaches with no lost events (M1-48) |
+| M2 Unified runtime | 2 | 5–6 | ModelSpec compiler, Gemma 3 and Llama with parity, uv environments per backend, `rastai doctor`, model downloads including gated ones | 22 tasks, 29 size-days | both families pass parity in fp32 and bf16 on NVIDIA (M2-10) and AMD (M2-11, hardware-gated) |
+| M3 Inference | 3 | 7–8 | Gateway and tokenization, both runtimes, VRAM leases, the conversation tree, `/v1` endpoints, the Inference section; then projects | 41 of 45 epic-days in the 90-day plan | Navi chats through `/v1` with token-ID logging and the runtime toggle working (M3-E07) |
+| M4 Psychology | 4 | 9–10 (thin slice) | Live lenses, SAEs, steering, replay; then branching, diff and the advanced views | 33 of 49 epic-days in the 90-day plan | slice: First Run minutes 3–7 on an 8 GB budget; full: every `psychology.*` command at L1 |
+| M5 Training and Evaluation | 5 | 11–12 (the loop) | Teach it, the Evaluation plugin, chains; then every recipe, RLHF, data import, export, plugin event handlers | 27 of 67 epic-days in the 90-day plan | slice: the loop in under 10 minutes from cold; the invented fact caught; full: every recipe and metric at L1 |
+| M6 Designer | 6 | 13 (thin slice and packaging) | Canvas, stats, import, compile, ONNX; then all families and blocks, templates, Eject | 22 of 50 epic-days in the 90-day plan | slice: design → train → ONNX export from the UI, AppImage and `.deb`, the months-4+ plan; full: every family passes the import golden test |
+| M7 Agent Gym | 7 | after the 90 days | RL engine on harnesses with sandboxes, peek and step mode, Harbor import | 24 epic-days | GRPO on a harness end to end on Linux; step mode keeps advantages correct |
+| M8 Plugins | 8 | after the 90 days | SDK basics, `rastai plugin new, dev, test, pack`, local install, the iframe bridge | 20 epic-days | every template goes through new, codegen, lint, test and pack in CI |
+| M9 Remote | 9 | 11–12 (SSH slice) | SSH pairing, headless serve, resumable transfers, jobs that survive drops | 11 of 27 epic-days in the 90-day plan | slice: a remote job survives a network drop; full: first remote run under 15 minutes from pairing |
+| M10 Prototype exit | (spans all) | after the 90 days | AMD tier 1, the core loop at L2, the level audit on three platforms | 13 epic-days | §5: every section L1, the loop L2, on NVIDIA, AMD and an SSH box |
+
+A **size-day** is one size-M PR: about a day of agent work plus the owner's review. Size S is half, L is two. Epics are counted in the same unit.
+
+### 2.2 Milestone dependencies
+
+**Figure 2.1**
+
+```mermaid
+flowchart TD
+  M1["M1 Foundation and skeleton<br/>weeks 3–4"]
+  M2["M2 Unified runtime<br/>weeks 5–6"]
+  M3["M3 Inference<br/>weeks 7–8"]
+  M4S["M4 slice: thin Psychology<br/>weeks 9–10"]
+  M5S["M5 slice: the loop<br/>weeks 11–12"]
+  M9S["M9 slice: SSH node<br/>weeks 11–12"]
+  M6S["M6 slice: thin Designer and packaging<br/>week 13"]
+  M4["M4 Psychology complete"]
+  M5["M5 Training and Evaluation complete"]
+  M6["M6 Designer complete"]
+  M7["M7 Agent Gym"]
+  M8["M8 Plugins"]
+  M9["M9 Remote complete"]
+  AMD["Discrete AMD card installed"]
+  M10["M10 Prototype exit"]
+  M1 --> M2
+  M2 --> M3
+  M3 --> M4S
+  M4S --> M5S
+  M2 --> M9S
+  M5S --> M6S
+  M4S --> M4
+  M5S --> M5
+  M6S --> M6
+  M3 --> M9
+  M9S --> M9
+  M5 --> M7
+  M4 --> M8
+  M5 --> M8
+  M4 --> M10
+  M5 --> M10
+  M6 --> M10
+  M7 --> M10
+  M8 --> M10
+  M9 --> M10
+  AMD --> M10
+```
+
+- **The critical path is M1 → M2 → M3 → the M4 slice → the M5 slice.** Every later section runs on the unified runtime (M2) and the gateway (M3), which is why §31 puts the runtime second.
+- **The M9 slice runs beside the M5 slice** as the second lane in weeks 11–12. It needs only the skeleton's jobs and M2's environments, not inference.
+- **Completion work overlaps.** After week 13, M4–M6 are finished and M7–M9 are built, two lanes at a time, in the order M5 (it feeds M7 and M8), M4, M6, M9, M7, M8.
+- **What is persisted:** each milestone is a GitHub milestone (8.2); its state is its issues. Levels live in section 7 of this file.
+- **Failure branches:** a slice gate that fails blocks the next slice, never the lane: the lane switches to completion epics of the same milestone while the gate is fixed. If the AMD card hasn't arrived, only M10 waits; M2-11 and M10-E01 stay open.
+
+### 2.3 The 90-day plan by lane
+
+| §32 weeks | Lane A | Lane B | Gate |
+|---|---|---|---|
+| 3–4 | M1: contracts, proto, diag, formats, core, server, CLI, Python worker, web shell | M1: tooling, CI, store, transport, node, Python TextCNN stack, crash suite | M1 exit |
+| 5–6 | M2: node environments, downloads, secrets, doctor, First Run checklist | M2: ModelSpec ops, runtime, Gemma 3 and Llama, parity | M2 exit |
+| 7–8 | M3: gateway core, endpoints and chat, API adapters, Inference UI | M3: vault, leases, Inspectable serving, llama-server, twins | M3 exit |
+| 9–10 | M4 slice: contracts, Basic lenses UI, replay and viewer | M4 slice: plugin modules, live readouts, steering | M4 slice gate |
+| 11–12 | M5 slice: contracts, node gateway, Teach it training, chains, Eval v0, loop UI; M4-E07 and E08 | M9 slice: contracts, SSH pairing, network drops; then Teach it and Eval v0 with lane A | M5 and M9 slice gates |
+| 13 | M6 slice: contracts, stats, canvas, import, compile, ONNX | M6 slice: packaging; the months-4+ plan | M6 slice gate |
+
+---
+
+## 3. Ways of working
+
+### 3.1 Two lanes, two worktrees
+
+§28 risk 1: one human reviewer. So at most two lanes merge at once, each in its own git worktree (§29).
+
+```
+git fetch origin
+git worktree add ../rastai-lane-a -b lane-a/M1-01-contracts-v1-1 origin/main
+git worktree add ../rastai-lane-b -b lane-b/M1-02-spec-27-register origin/main
+```
+
+- **A lane is a merge queue, not a technology.** Lane A is mostly contracts, the control plane and the UI; lane B is mostly Python compute, the node and integration. Tasks move between lanes when that shortens the path (sections 4.7 and 5.7 show the result).
+- **One PR open for review per lane.** A lane may stack its next branch on the open one while it waits, but merges in order and rebases the next branch on `main` after each merge.
+- **Branch names:** `lane-a/<task id>-<slug>`, `lane-b/<task id>-<slug>`. PR titles start with the task id: `M1-14: rastai-formats JSON core`.
+- **More agents, same two lanes.** Extra agents may draft in a third worktree (for example, research for the next milestone), but nothing merges outside the two lanes.
+- **Cross-lane dependencies** are in every task's "depends on" list. A lane that is blocked takes its next unblocked task; the week tables in 4.7 and 5.7 come from simulating exactly that.
+
+### 3.2 Contracts first
+
+- **Every milestone opens with a contract PR** (§29): proto, document schemas, command rows and their argument types, catalog codes. Contract tasks carry `type:contract`.
+- **New commands land as honest L0 stubs:** they exist in the registry, the CLI, MCP and the palette, and return their area's "not available yet" catalog code until the handler lands (ADR-0017). The L0 floor test (M1-27) keeps this true.
+- **A lane that needs an unplanned contract change** opens a small contract PR first; the other lane rebases after it merges.
+
+### 3.3 Definition of done per PR
+
+A PR is done when all of these hold. Reviewers check the PR template's boxes (8.5).
+
+1. `just check` passes locally and every required CI job is green (§29).
+2. It adds a test that fails without the change. The one exception is a docs-only PR (spec, contracts prose, ADRs, this plan), which has no code to test.
+3. Contract changes were merged first, in their own PR.
+4. Every new user-facing error has a catalog code (`catalog_checks` and the source scan enforce it from M1-12).
+5. New external dependencies are in §27 and the allowlists (`check-deps`).
+6. No pickle, no runtime installs (`check-no-pickle`), no `unsafe` outside the ADR list (`check-unsafe`).
+7. House style: simple functions and plain data, constants at the top, readable names, small functions, a thin main (ADR-0023; clippy's `too_many_lines` at 60).
+8. Every commit is signed off (the `dco` job).
+9. It links its backlog issue (`Closes #n`) and, if it claims a level, names the feature and the tests that prove it (section 7).
+10. One topic, within two days of work. Bigger work is split before review.
+
+### 3.4 Sizes and the honest estimate
+
+- M1 is 73 size-days (39 on lane A, 34 on lane B). M2 is 29 (14 and 15).
+- Simulating the two lanes with every dependency, at one size-day per lane per working day: M1's exit gate (M1-48, M1-49) lands at lane-day 35, all of M1 at 39 (M1-56 runs on lane A beside M1-55), M2's NVIDIA parity gate at 50 and all of M2 at 52.
+- §32 gives M1 and M2 four weeks (20 working days). Meeting that needs about 2.6 size-days merged per lane per working day: agents write and self-test the PRs, and the owner reviews about five PRs a day.
+- The whole 90-day plan (M1, M2 and the `gate:90-day` epics of M3, M4, M5, M6 and M9) is 236 size-days. §32 gives it weeks 3–13: 55 working days on two lanes, 110 lane-days. That is about 2.1 size-days per lane per working day. All epics together, M3 to M10, are 295 epic-days.
+- If review can't keep that pace, the dates move, not the scope or the bar (§0.8). M6-E06 replaces these estimates with measured velocity at week 13.
+
+---
+
+## 4. M1 Foundation and skeleton
+
+### 4.1 Goal
+
+Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monorepo and CI; the contracts in code (proto, `rastai-formats`, the catalog); the command layer reachable over HTTP, the CLI and the in-house MCP; storage and durability; the daemon with its embedded node; worker protocol v0 running TextCNN training; the plugin host; and the web shell that first-party sections load through.
+
+### 4.2 Entry criteria
+
+- The one-time GitHub setup of 8.1 is done by hand (repository, settings, branch protection), so the first PR is already protected.
+- The owner has read section 10 and accepts or changes the defaults; M1-01 writes the answers into contracts.md.
+- The owner approves the §27 additions (M1-02) before M1-04, M1-25 and M1-41 merge.
+
+### 4.3 Exit criteria
+
+| # | Criterion | Test |
+|---|---|---|
+| 1 | §32 exit: kill -9 the daemon mid-run; it restarts and reattaches with no lost events | `tests/crash` row 1 (M1-48) |
+| 2 | The kill -9 rows for the skeleton pass: 1, 2, 3, 9, 11, 13 | `just test-crash` in CI (M1-48) |
+| 3 | `system.status`, `train.start` and `job.get` behave the same over HTTP, the CLI and MCP | `tests/e2e/three_surfaces` (M1-49) |
+| 4 | Worker protocol v0 trains TextCNN on CPU through `train.start`, with checkpoints and no pickle; a resumed run equals an uninterrupted one | M1-38 `test_resume`, M1-46, M1-47 |
+| 5 | Every registered command fails cleanly with a catalog code when it can't run | `l0_floor` (M1-27) |
+| 6 | Golden proto messages are byte-identical in Rust, Python and TS | golden tests (M1-08 to M1-10) |
+| 7 | The Python safetensors reader gives the expected code on all 33 corpus files | M1-34 |
+| 8 | Plugins load through the host; a bad manifest disables only that plugin | `tests/plugin_host.rs` (M1-32) |
+| 9 | The web shell's palette lists and runs the registered commands; copy-as matches the CLI | `palette.spec.ts` (M1-54) |
+| 10 | Rust, the portable Python packages and the TS packages build and pass their tests on CPU runners: Rust and Python on Linux, macOS and Windows, TS on Linux and macOS | `test-rust-*`, `test-python-*`, `test-ts-*` jobs (M1-06) |
+
+### 4.4 Levels at exit
+
+| Section or feature | Level | Proved by |
+|---|---|---|
+| Command layer (Execute, registry, CLI, MCP, palette) | L1 | M1-27, M1-49, M1-54 |
+| Storage and durability (event logs, index, blobs, rebuild) | L1 | M1-48, M1-33 |
+| Daemon, embedded node, job supervision and reattach | L1 | M1-45, M1-48 |
+| Training: `train.start` with the classification recipe (TextCNN) | L1 | M1-47, M1-48 |
+| Settings: settings and tokens | L1 | M1-27, M1-54 |
+| Plugins: host loading and `plugin.list` | L0 | M1-32 |
+| Remote: the local node's status | L0 | M1-47 |
+| Basic/Advanced switch and per-panel override | L1 | M1-54 (`basic-advanced.spec.ts`) |
+| Threat model (v1 written; reviewed again at M9) | L0 | M1-56 |
+| Every other section | none registered yet | |
+
+### 4.5 Tasks
+
+| ID | Task | Lane | Size | Depends on | Start–end (lane days) |
+|---|---|---|---|---|---|
+| M1-01 | Reconcile contracts.md with the layout and flow docs (contracts v1.1) | A | L | none | 0–2 |
+| M1-02 | Spec §27: register the dependencies the layouts need, and ADR-0033 | B | M | none | 0–1 |
+| M1-03 | Rust workspace root and `just check` | A | M | none | 2–3 |
+| M1-04 | Python and TypeScript workspaces and the cpu environment | B | M | M1-02, M1-03 | 3–4 |
+| M1-05 | Repo checks: deps, unsafe, pickle, imports, generated code, DCO | B | M | M1-03, M1-04 | 4–5 |
+| M1-06 | CI workflows for pull requests and nightly runs | B | M | M1-05 | 5–6 |
+| M1-07 | GitHub sync tool: labels, milestones and issues from backlog.json | B | S | M1-04 | 6–6.5 |
+| M1-08 | Proto toolchain and `rastai.common.v1` (contract) | A | L | M1-01, M1-03, M1-04 | 4–6 |
+| M1-09 | Proto `rastai.commands.v1` and `rastai.events.v1` (contract) | A | M | M1-08 | 6–7 |
+| M1-10 | Proto `node.v1` and `worker.v1` skeleton RPCs (contract) | B | M | M1-09 | 7.5–8.5 |
+| M1-11 | rastai-diag: Diagnostic, renderers and the JSON-lines logger | A | M | M1-03 | 3–4 |
+| M1-12 | rastai-codegen and the catalog code generator | A | M | M1-11, M1-04 | 8–9 |
+| M1-13 | Catalog v1: one number per meaning (contract) | A | M | M1-01, M1-12 | 9–10 |
+| M1-14 | rastai-formats JSON core: strict reader, canonical JSON, hashing, semver | A | L | M1-11 | 10–12 |
+| M1-15 | rastai-formats descriptions and validation layers 1 and 2 | A | L | M1-14 | 12–14 |
+| M1-16 | rastai-formats-codegen: JSON Schema, TS types, Python dataclasses | A | M | M1-15, M1-12 | 15–16 |
+| M1-17 | Step-1 document types (contract) | A | M | M1-16, M1-13 | 16–17 |
+| M1-18 | ModelSpec v1 for TextCNN, and the TextCNN template (contract) | B | M | M1-17 | 20.5–21.5 |
+| M1-19 | PyO3 wheel: rastai-formats-python and `rastai_formats` | B | M | M1-17 | 21.5–22.5 |
+| M1-20 | rastai-core: versions, paths, ids, principals, scopes, states | A | M | M1-09, M1-11 | 7–8 |
+| M1-21 | rastai-core: command registry, naming and settings resolution | A | M | M1-20, M1-15 | 14–15 |
+| M1-22 | Skeleton commands: registry rows and argument types (contract) | A | M | M1-21, M1-16, M1-13 | 17–18 |
+| M1-23 | rastai-store: databases and writer threads | B | L | M1-20 | 11.5–13.5 |
+| M1-24 | rastai-store: event-log frames, reader and writer | B | M | M1-09, M1-20 | 9.5–10.5 |
+| M1-25 | rastai-store: indexer, blob store and free space | B | M | M1-23, M1-24, M1-02 | 13.5–14.5 |
+| M1-26 | rastai-server: startup, listeners, request gate and sign-in | A | L | M1-23, M1-21, M1-13 | 18–20 |
+| M1-27 | rastai-server: the Execute path and the L0 floor | A | L | M1-26 | 20–22 |
+| M1-28 | rastai-server: event bus, Subscribe and run-log indexing | A | L | M1-27, M1-25, M1-10 | 22–24 |
+| M1-29 | rastai-mcp: JSON-RPC, the MCP server and the stdio bridge | B | M | M1-21, M1-41 | 15.5–16.5 |
+| M1-30 | rastai-server: the `/mcp` endpoint | B | S | M1-27, M1-29 | 27.5–28 |
+| M1-31 | rastai-cli: modes, generated verbs, follow and exit codes | A | L | M1-28, M1-29, M1-41 | 24–26 |
+| M1-32 | rastai-server: plugin host (discover, negotiate, register) | A | M | M1-27, M1-17 | 29–30 |
+| M1-33 | rastai-store: offline index rebuild | B | M | M1-25, M1-31 | 28–29 |
+| M1-34 | rastai_models: strict safetensors reader and writer (spike port) | B | M | M1-04, M1-13 | 10.5–11.5 |
+| M1-35 | rastai_models: the compiler and the TextCNN blocks | B | L | M1-18, M1-19, M1-34 | 22.5–24.5 |
+| M1-36 | rastai_data: readers, word vocabulary, splits and a resumable loader | B | M | M1-04 | 6.5–7.5 |
+| M1-37 | rastai_plugin: registry, base classes, module loader and host client | B | M | M1-10, M1-12, M1-19 | 24.5–25.5 |
+| M1-38 | rastai_train: loop, optimizer, checkpoints, resume and the classification recipe | B | L | M1-35, M1-36, M1-37 | 25.5–27.5 |
+| M1-39 | rastai_worker: the event-log writer and payload conversion | A | M | M1-09, M1-24 | 26–27 |
+| M1-40 | rastai_worker: process, WorkerService, host connection and control | A | L | M1-39, M1-37, M1-10 | 27–29 |
+| M1-41 | rastai-transport: local sockets, peer credentials, gRPC channels, local HTTP | B | M | M1-20, M1-08, M1-02 | 8.5–9.5 |
+| M1-42 | rastai-node: entry, identity, local handshake, hardware and telemetry | B | M | M1-41, M1-10 | 14.5–15.5 |
+| M1-43 | rastai-node: job supervisor, spawn, signals and exit causes | B | L | M1-42 | 16.5–18.5 |
+| M1-44 | rastai-node: event-log tailing and live streams | B | M | M1-43, M1-24 | 18.5–19.5 |
+| M1-45 | rastai-node: reattach after a restart, and immediate heartbeats | B | M | M1-44 | 19.5–20.5 |
+| M1-46 | rastai_worker: the TextCNN train job | B | M | M1-38, M1-40 | 29–30 |
+| M1-47 | Daemon and embedded node: links, NodeHub, scheduler, train.start and `job.*` | B | L | M1-28, M1-45, M1-46, M1-22 | 30–32 |
+| M1-48 | Kill -9 crash suite for the skeleton (M1 exit gate) | B | L | M1-47 | 32–34 |
+| M1-49 | Three surfaces end to end: HTTP, CLI and MCP | B | M | M1-31, M1-30, M1-47 | 34–35 |
+| M1-50 | `@rastai/client` and the generated TS packages | A | M | M1-28, M1-16 | 30–31 |
+| M1-51 | `@rastai/ui` basics and the Basic/Advanced primitives | A | L | M1-50 | 31–33 |
+| M1-52 | `@rastai/plugin`: host interface, registry and state tools | A | M | M1-51 | 33–34 |
+| M1-53 | apps/web shell, embedded in the daemon | A | L | M1-52, M1-32 | 34–36 |
+| M1-54 | apps/web: the generated palette, copy-as, Settings, Plugins and Remote; Playwright | A | L | M1-53, M1-31 | 36–38 |
+| M1-55 | apps/desktop: the Tauri window and `rastai open` | B | M | M1-54, M1-31 | 38–39 |
+| M1-56 | Threat model v1 | A | M | M1-26, M1-29 | 38–39 |
+
+"Start–end" is the simulated position in lane-days (3.4), not a date.
+
+### 4.6 Dependencies
+
+The M1 graph has 56 tasks, so it is drawn in four figures. A task from another figure appears as a node marked "(other figure)".
+
+**Figure 4.1: repo, contracts and formats**
+
+```mermaid
+flowchart TD
+  M1_01["M1-01 Contracts v1.1"]
+  M1_02["M1-02 Spec §27 register"]
+  M1_03["M1-03 Rust workspace"]
+  M1_04["M1-04 Python and TS workspaces"]
+  M1_05["M1-05 CI checks"]
+  M1_06["M1-06 CI workflows"]
+  M1_07["M1-07 GitHub sync tool"]
+  M1_08["M1-08 Proto toolchain, common"]
+  M1_09["M1-09 Proto commands, events"]
+  M1_10["M1-10 Proto node, worker"]
+  M1_11["M1-11 rastai-diag"]
+  M1_12["M1-12 Catalog codegen"]
+  M1_13["M1-13 Catalog v1"]
+  M1_14["M1-14 Formats JSON core"]
+  M1_15["M1-15 Formats layers 1-2"]
+  M1_16["M1-16 Formats codegen"]
+  M1_17["M1-17 Step-1 documents"]
+  M1_18["M1-18 ModelSpec TextCNN"]
+  M1_19["M1-19 PyO3 wheel"]
+  M1_02 --> M1_04
+  M1_03 --> M1_04
+  M1_03 --> M1_05
+  M1_04 --> M1_05
+  M1_05 --> M1_06
+  M1_04 --> M1_07
+  M1_01 --> M1_08
+  M1_03 --> M1_08
+  M1_04 --> M1_08
+  M1_08 --> M1_09
+  M1_09 --> M1_10
+  M1_03 --> M1_11
+  M1_11 --> M1_12
+  M1_04 --> M1_12
+  M1_01 --> M1_13
+  M1_12 --> M1_13
+  M1_11 --> M1_14
+  M1_14 --> M1_15
+  M1_15 --> M1_16
+  M1_12 --> M1_16
+  M1_16 --> M1_17
+  M1_13 --> M1_17
+  M1_17 --> M1_18
+  M1_17 --> M1_19
+```
+
+- M1-01 (contracts v1.1) and M1-02 (the §27 register) are docs-only and come first, one per lane, because every other task uses their names and dependencies.
+- The proto chain (M1-08 → M1-09 → M1-10) and the formats chain (M1-14 → M1-15 → M1-16 → M1-17) are the two contract spines. Generated code is checked in, and `check-generated` fails any PR that edits it by hand.
+- M1-13 (catalog v1) waits for both M1-01 and the catalog generator, because it renumbers the codes the docs proposed.
+- **What is persisted:** generated files in the repo (`schemas/`, `packages/*/src/generated/`, `python/*/generated/`, `crates/rastai-proto/src/generated/`).
+- **Failure branches:** if the owner declines a §27 row, the task that wraps it changes (for example, no `libc`: `disk_space.rs` runs `df`, per ADR-0033's fallback), and M1-02 records the decision.
+
+**Figure 4.2: core, store, server, MCP and CLI**
+
+```mermaid
+flowchart TD
+  M1_20["M1-20 Core basics"]
+  M1_21["M1-21 Core registry"]
+  M1_22["M1-22 Skeleton commands"]
+  M1_23["M1-23 Store databases"]
+  M1_24["M1-24 Event-log frames"]
+  M1_25["M1-25 Indexer, blobs, disk"]
+  M1_26["M1-26 Server startup, gate"]
+  M1_27["M1-27 Execute and L0 floor"]
+  M1_28["M1-28 Bus and run indexing"]
+  M1_29["M1-29 rastai-mcp"]
+  M1_30["M1-30 MCP endpoint"]
+  M1_31["M1-31 rastai-cli"]
+  M1_32["M1-32 Plugin host"]
+  M1_33["M1-33 Index rebuild"]
+  M1_56["M1-56 Threat model v1"]
+  M1_09["M1-09 (other figure)"]
+  M1_11["M1-11 (other figure)"]
+  M1_15["M1-15 (other figure)"]
+  M1_16["M1-16 (other figure)"]
+  M1_13["M1-13 (other figure)"]
+  M1_02["M1-02 (other figure)"]
+  M1_10["M1-10 (other figure)"]
+  M1_41["M1-41 (other figure)"]
+  M1_17["M1-17 (other figure)"]
+  M1_09 --> M1_20
+  M1_11 --> M1_20
+  M1_20 --> M1_21
+  M1_15 --> M1_21
+  M1_21 --> M1_22
+  M1_16 --> M1_22
+  M1_13 --> M1_22
+  M1_20 --> M1_23
+  M1_09 --> M1_24
+  M1_20 --> M1_24
+  M1_23 --> M1_25
+  M1_24 --> M1_25
+  M1_02 --> M1_25
+  M1_23 --> M1_26
+  M1_21 --> M1_26
+  M1_13 --> M1_26
+  M1_26 --> M1_27
+  M1_27 --> M1_28
+  M1_25 --> M1_28
+  M1_10 --> M1_28
+  M1_21 --> M1_29
+  M1_41 --> M1_29
+  M1_27 --> M1_30
+  M1_29 --> M1_30
+  M1_28 --> M1_31
+  M1_29 --> M1_31
+  M1_41 --> M1_31
+  M1_27 --> M1_32
+  M1_17 --> M1_32
+  M1_25 --> M1_33
+  M1_31 --> M1_33
+  M1_26 --> M1_56
+  M1_29 --> M1_56
+```
+
+- The server tasks (M1-26 → M1-27 → M1-28) are lane A's longest chain and sit on the path to the exit gate.
+- M1-56 (threat model v1, docs-only) waits for the request gate (M1-26) and the MCP parser (M1-29), so each boundary row can name a real test and fuzz target. It runs at the end of lane A, beside M1-55, so it doesn't move the exit gate.
+- M1-29 (MCP) and M1-31 (CLI) need `rastai-transport`'s local HTTP client (M1-41), which is why the plain-HTTP half of `http_client.rs` moved from step 2 to M1 (section 10, row 14).
+- **What is persisted:** `rastai.db` migration 0001 and the event-log format are durable from here; M1-23 and M1-24 own them.
+- **Failure branches:** a writer-thread design that convoys at 256 clients (spike 07) fails M1-23's test before anything builds on it.
+
+**Figure 4.3: Python stack, node, integration and the exit gate**
+
+```mermaid
+flowchart TD
+  M1_34["M1-34 Safetensors in Python"]
+  M1_35["M1-35 Compiler for TextCNN"]
+  M1_36["M1-36 Data for TextCNN"]
+  M1_37["M1-37 rastai_plugin skeleton"]
+  M1_38["M1-38 Trainer for TextCNN"]
+  M1_39["M1-39 Python event log"]
+  M1_40["M1-40 Worker process"]
+  M1_41["M1-41 Transport, local"]
+  M1_42["M1-42 Node entry, hardware"]
+  M1_43["M1-43 Node jobs"]
+  M1_44["M1-44 Node tailing, live"]
+  M1_45["M1-45 Node reattach"]
+  M1_46["M1-46 TextCNN train job"]
+  M1_47["M1-47 Daemon to node, train.start"]
+  M1_48["M1-48 Kill -9 suite, exit gate"]
+  M1_49["M1-49 Three surfaces e2e"]
+  M1_04["M1-04 (other figure)"]
+  M1_13["M1-13 (other figure)"]
+  M1_18["M1-18 (other figure)"]
+  M1_19["M1-19 (other figure)"]
+  M1_10["M1-10 (other figure)"]
+  M1_12["M1-12 (other figure)"]
+  M1_09["M1-09 (other figure)"]
+  M1_24["M1-24 (other figure)"]
+  M1_20["M1-20 (other figure)"]
+  M1_08["M1-08 (other figure)"]
+  M1_02["M1-02 (other figure)"]
+  M1_28["M1-28 (other figure)"]
+  M1_22["M1-22 (other figure)"]
+  M1_31["M1-31 (other figure)"]
+  M1_30["M1-30 (other figure)"]
+  M1_04 --> M1_34
+  M1_13 --> M1_34
+  M1_18 --> M1_35
+  M1_19 --> M1_35
+  M1_34 --> M1_35
+  M1_04 --> M1_36
+  M1_10 --> M1_37
+  M1_12 --> M1_37
+  M1_19 --> M1_37
+  M1_35 --> M1_38
+  M1_36 --> M1_38
+  M1_37 --> M1_38
+  M1_09 --> M1_39
+  M1_24 --> M1_39
+  M1_39 --> M1_40
+  M1_37 --> M1_40
+  M1_10 --> M1_40
+  M1_20 --> M1_41
+  M1_08 --> M1_41
+  M1_02 --> M1_41
+  M1_41 --> M1_42
+  M1_10 --> M1_42
+  M1_42 --> M1_43
+  M1_43 --> M1_44
+  M1_24 --> M1_44
+  M1_44 --> M1_45
+  M1_38 --> M1_46
+  M1_40 --> M1_46
+  M1_28 --> M1_47
+  M1_45 --> M1_47
+  M1_46 --> M1_47
+  M1_22 --> M1_47
+  M1_47 --> M1_48
+  M1_31 --> M1_49
+  M1_30 --> M1_49
+  M1_47 --> M1_49
+```
+
+- The node (M1-42 → M1-45) and the Python TextCNN stack (M1-34 → M1-38 → M1-46) proceed in parallel and meet in M1-47, where the daemon starts training through the embedded node.
+- M1-48 is the §32 exit test. It needs the `RASTAI_TEST_PAUSE_AT` hook in three processes so each kill lands at a named point every time.
+- **What is persisted:** `runs/<run_id>/` folders (`job.json`, `events.log`, checkpoints) written by workers; the index rows are rebuildable from them.
+- **Failure branches:** if row 1 fails, M1 doesn't close, whatever else is green; the lane fixes it before taking M2 work.
+
+**Figure 4.4: the UI**
+
+```mermaid
+flowchart TD
+  M1_50["M1-50 TS client"]
+  M1_51["M1-51 @rastai/ui basics"]
+  M1_52["M1-52 @rastai/plugin core"]
+  M1_53["M1-53 Web shell"]
+  M1_54["M1-54 Palette and sections"]
+  M1_55["M1-55 Desktop window"]
+  M1_28["M1-28 (other figure)"]
+  M1_16["M1-16 (other figure)"]
+  M1_32["M1-32 (other figure)"]
+  M1_31["M1-31 (other figure)"]
+  M1_28 --> M1_50
+  M1_16 --> M1_50
+  M1_50 --> M1_51
+  M1_51 --> M1_52
+  M1_52 --> M1_53
+  M1_32 --> M1_53
+  M1_53 --> M1_54
+  M1_31 --> M1_54
+  M1_54 --> M1_55
+  M1_31 --> M1_55
+```
+
+- The UI is not on the exit gate's path, but §31 step 1 loads first-party sections through the plugin host from day one, and M2's First Run checklist needs the shell.
+- **What is persisted:** nothing new; the UI reads state through commands and the event stream only (ADR-0006).
+- **Failure branches:** if WebKitGTK misbehaves in M1-55, the browser is a full client (§16), so M2 continues in Chrome.
+
+### 4.7 Lanes week by week: what runs in parallel in the two worktrees
+
+| Lane week | Lane A | Lane B |
+|---|---|---|
+| 1 (days 0–5) | M1-01, M1-03, M1-11, M1-08 | M1-02, M1-04, M1-05 |
+| 2 (days 5–10) | M1-09, M1-20, M1-12, M1-13 | M1-06, M1-07, M1-36, M1-10, M1-41, M1-24 |
+| 3 (days 10–15) | M1-14, M1-15, M1-21 | M1-34, M1-23, M1-25, M1-42 |
+| 4 (days 15–20) | M1-16, M1-17, M1-22, M1-26 | M1-29, M1-43, M1-44, M1-45 |
+| 5 (days 20–25) | M1-27, M1-28, M1-31 | M1-18, M1-19, M1-35, M1-37 |
+| 6 (days 25–30) | M1-39, M1-40, M1-32 | M1-38, M1-30, M1-33, M1-46 |
+| 7 (days 30–35) | M1-50, M1-51, M1-52, M1-53 | M1-47, M1-48, M1-49 |
+| 8 (days 35–40) | M1-54, M1-56 | M1-55 |
+
+A cell lists the tasks that lane starts in that lane-week (five lane-days). "Waiting" means the lane's next tasks are blocked on the other lane; "other milestone's tasks" means the lane is still finishing, or already starting, the neighbouring milestone.
+
+### 4.8 Task details
+
+#### M1-01 Reconcile contracts.md with the layout and flow docs (contracts v1.1)
+Lane A · size L · type contract · depends on none
+
+- **Goal:** Fold every 'New names' table of the four layout docs and the four flow docs into contracts.md before any code uses those names, and give each conflict in plan section 10 (rows 1–37) one answer: its default, unless the owner changes it in review. contracts.md already carries rows 1, 2 and 24, and the platform flow and the node layout already follow rows 2, 4–7, 12, 20 and 26 (section 10's preface), so for those the PR only fixes the docs that still disagree. The rest include the plugin acting principal (`ExecuteRequest.acting_plugin_id`, no header), worker exit code 4 (`EXIT_EVENT_LOG_UNWRITABLE`) in contracts §9.1 and Python §7.2, reattach order (`Register` before `Hello`), `run_job` with `control`, `LogSink` returning `LogCommit`, `TokenizeChat` (not `Tokenize`), graph node `layout{x, y, collapsed}`, lease reclaim by pinned requests only, a recapture only when the set of hooked points changes and two graph variants per slot, interventions applied through `chat.settings.set` with `lens` and `interventions` arguments, plugin jobs through `follow_up_jobs`, layer placement planned by the server, `gateway.request_logged`, gym tools through `WorkerHostService.CallTool`, `rastai eval test` exit codes (ADR-0020), one data-policy code `RRS-C1009`, timing constants, crate dependency edits, new events and tables, and this plan's own new names (plan section 11). It also writes ADR-0034: sign-in through `rastai open --print-url` and `token.login_code.create`, so the desktop shell never reads owner.token; the shell starts the daemon only through `rastai open --print-url` and passes file paths to the web app as a `#/open?path=` URL fragment, and the web app runs `file.open`; any loopback Host on any port, with Origin equal to `http://` plus Host; a too-open owner.token refuses the start; on restart the node waits for the worker's `WorkerHostService.Register`, checks BLAKE3(token) against `job.json` `job_token_hash` (with pid, `boot_id` and `process_start_ticks`), and only then calls `Hello`. ADR-0034 supersedes in part ADR-0007 decisions 3 and 4, ADR-0006 decision 4 and ADR-0001 decision 5; the PR sets their status lines and closes the pending rows of the ADR index's 'Notes since acceptance' table, which also records the illustration and path fixes to ADR-0004, 0005, 0020, 0029 (the Rust reader is `crates/rastai-formats/src/safetensors/reader.rs`) and 0032 (the daemon-free validator is the local `rastai validate <file>`; `rastai file validate` is the generated, daemon-backed verb for `file.validate`). Superseded names in the layout and flow docs get a one-line pointer in the same PR.
+- **Files:** `docs/architecture/contracts.md` (a 'v1.1 changes' list at the top); `docs/architecture/layout/*.md` (a pointer on each superseded name); `docs/architecture/flows/*.md` (a pointer on each superseded name); `docs/adr/0034-login-codes-loopback-host-owner-token.md`; `docs/adr/0007-local-api-security.md` (status line: decisions 3 and 4 superseded in part by ADR-0034); `docs/adr/0006-ui-transport-http-only.md` (status line: decision 4 superseded in part by ADR-0034); `docs/adr/0001-process-layout.md` (status line: decision 5 superseded in part by ADR-0034); `docs/adr/README.md` (the ADR-0034 row; the 'Notes since acceptance' table)
+- **Test:** Docs-only PR, exempt from the test rule (plan 3.3). Review checklist in the PR: every row of every 'New names' table in the eight docs is either in contracts.md or listed as rejected with its replacement; every row of plan section 10 has one answer; ADR-0034 is in the ADR index, and ADR-0001, ADR-0006 and ADR-0007 point to it.
+- **Docs:** [Contracts](../architecture/contracts.md), [Layout: Rust control plane §15–16](../architecture/layout/rust-control-plane.md), [Layout: node, gateway, proto §11–12](../architecture/layout/rust-node-gateway-proto.md), [Layout: Python §14–15](../architecture/layout/python.md), [Layout: frontend and plugins §20](../architecture/layout/frontend-and-plugins.md), [Flows: platform, New names](../architecture/flows/platform.md), [Flows: inference and Psychology §10](../architecture/flows/inference-psychology.md), [Flows: training and evaluation §16](../architecture/flows/training-evaluation.md), [Flows: Designer, Gym, Remote, New names](../architecture/flows/designer-gym-remote.md), [ADR-0007 local API security](../adr/0007-local-api-security.md), [ADR index, Notes since acceptance](../adr/README.md)
+
+#### M1-02 Spec §27: register the dependencies the layouts need, and ADR-0033
+Lane B · size M · type docs · depends on none
+
+- **Goal:** Owner-approved edit of the §27 dependency register (spec v5.4) adding what the docs already rely on: hyper, hyper-util, tokio-rustls, webpki-roots and tower (foundation: HTTP); pyo3 and wasm-bindgen (foundation: bindings); protobuf-es and the Python protobuf runtime (compatibility: protobuf row); keyring (security: OS keychain); pyarrow (compatibility: Parquet); libc (foundation, one file); the OS tools setsid, kill, unshare, df, nvidia-smi and rocm-smi; dev tooling pytest, vitest, @vitest/browser, typescript, vite, pnpm, wasm-bindgen-cli, axe-core and the Tauri CLI; the Tauri updater plugin as its own row; onnx and onnxscript under the torch.onnx row. ADR-0033 allows `unsafe` in exactly one file, `crates/rastai-store/src/disk_space.rs` (statvfs), which both the store and the node call; if the owner declines, the ADR records the `df` fallback instead.
+- **Files:** `docs/spec/rastai_spec_v5.md` (§27 and the status line); `docs/adr/0033-unsafe-statvfs.md`; `docs/adr/README.md`
+- **Test:** Docs-only PR. From M1-05 on, `check-deps` fails any build that uses a crate or package missing from these rows.
+- **Docs:** [Spec §27](../spec/rastai_spec_v5.md), [Contracts §14 Q1, Q2, Q15](../architecture/contracts.md), [Layout: Rust control plane §15 row 14, §17 Q2](../architecture/layout/rust-control-plane.md), [Layout: node, gateway, proto §12 Q2, Q11](../architecture/layout/rust-node-gateway-proto.md), [ADR-0012 build-in-house policy](../adr/0012-build-in-house-policy.md)
+
+#### M1-03 Rust workspace root and `just check`
+Lane A · size M · type ci · depends on none
+
+- **Goal:** Create the Cargo workspace exactly as the control-plane layout describes, so every later crate drops in: exact-pinned `[workspace.dependencies]`, `[workspace.lints]` (unsafe_code deny, unwrap_used deny, print_stdout deny, too_many_lines warn at 60), `[workspace.metadata.rastai.allowlist]`, the toolchain pin, rustfmt and clippy config, deny.toml (licenses, advisories, crates.io only, bans on anyhow, thiserror, reqwest, memmap2, openssl, async-trait, schemars), and the justfile with `check`, `build`, `test-rust`, `fmt-check`, `lint`, `deny`. An empty `crates/rastai-diag` with one unit test makes the workspace build.
+- **Files:** `Cargo.toml, Cargo.lock, rust-toolchain.toml, rustfmt.toml, clippy.toml, deny.toml`; justfile; `crates/rastai-diag/{Cargo.toml, CLAUDE.md, src/lib.rs}`; `.gitignore`
+- **Test:** `just check` passes on a clean clone and runs the rastai-diag unit test; the PR description shows a scratch commit with `.unwrap()` in library code failing `just lint`.
+- **Docs:** [Layout: Rust control plane §2](../architecture/layout/rust-control-plane.md), [ADR-0023 code style](../adr/0023-owner-code-style.md)
+
+#### M1-04 Python and TypeScript workspaces and the cpu environment
+Lane B · size M · type ci · depends on M1-02, M1-03
+
+- **Goal:** The uv workspace root and the pnpm workspace root, so Python and TS packages drop in the same way crates do. Includes the `cpu` environment lock (torch CPU, grpcio, protobuf, tokenizers; pytest in the dev group) and the `just env-cpu` recipe, which runs the same `uv sync --frozen` command the node runs from M2-16, into `.dev/envs/cpu`. Until then, the embedded node uses that folder.
+- **Files:** `python/pyproject.toml, python/CLAUDE.md, python/conftest.py`; `python/envs/cpu/{pyproject.toml, uv.lock}, python/envs/README.md`; `deps/allowlist-python.json, deps/allowlist-npm.json`; `package.json, pnpm-workspace.yaml, pnpm-lock.yaml, tsconfig.base.json` (strict); `justfile`: test-python, test-ts, env-cpu, wired into check
+- **Test:** A smoke pytest and a smoke vitest run inside `just check`; `just env-cpu` succeeds offline from the uv cache after one online run.
+- **Docs:** [Layout: Python §1.2, §11](../architecture/layout/python.md), [Layout: frontend §1 (TS conventions)](../architecture/layout/frontend-and-plugins.md), [ADR-0009 uv environments](../adr/0009-python-environments-uv.md)
+
+#### M1-05 Repo checks: deps, unsafe, pickle, imports, generated code, DCO
+Lane B · size M · type ci · depends on M1-03, M1-04
+
+- **Goal:** The repo-wide checks of the control-plane layout §2.1 as small stdlib-Python scripts, each with its own fixture test: `check-deps` (Cargo allowlist metadata against `cargo metadata`; the Python and npm allowlists against their lockfiles), `check-unsafe` (ADR exception list), `check-no-pickle` (pickle, torch.load, torch.save, `.bin` weights, torch.distributed.checkpoint), `check-imports` (Python and TS layering and public-API rules, starting with the packages that exist), `check-generated` (regenerate into a temp tree and diff; a no-op until codegen exists) and `check-dco` (every commit in a range carries a Signed-off-by matching its author).
+- **Files:** `tools/checks/{check-deps, check-unsafe, check-no-pickle, check-imports, check-generated, check-dco}`; `tools/checks/tests/`; justfile
+- **Test:** tools/checks/tests runs each check on a passing and a failing fixture tree.
+- **Docs:** [Layout: Rust control plane §2.1, §2.3–2.4](../architecture/layout/rust-control-plane.md), [Layout: Python §1.3–1.4](../architecture/layout/python.md), [Contracts §2.4](../architecture/contracts.md), [CONTRIBUTING.md](../../CONTRIBUTING.md)
+
+#### M1-06 CI workflows for pull requests and nightly runs
+Lane B · size M · type ci · depends on M1-05
+
+- **Goal:** `.github/workflows/ci.yml` on pull requests and pushes to main, with jobs `checks`, `dco`, `test-rust-linux`, `test-rust-macos`, `test-rust-windows` (CPU; keeps tier 2 compiling, §28 risk 13), `test-python`, `test-python-macos`, `test-python-windows`, `test-ts` and `test-ts-macos`, each one `just` recipe. The macOS and Windows Python jobs run `just test-python-portable`: the CPU tests of the pure-compute packages `rastai_formats`, `rastai_models`, `rastai_data` and `rastai_train` with `-m 'not posix_only'` (only the packages that exist so far; the smoke test until M1-19). The rule for later tasks: a Python test that needs Unix sockets, flock or `setsid` (the worker protocol tests from M1-37, M1-39 and M1-40 on) carries the `posix_only` marker. Spec §29 and §28 risk 13 ask for CPU tests on macOS and Windows from day one, and path handling and the strict safetensors reader are where portability rots first. `.github/workflows/nightly.yml` on schedule, main only, runs the fuzz targets for 10 minutes each (an empty matrix until targets exist). Caches for cargo, uv and pnpm. The new required jobs join the branch-protection contexts (plan 8.4) in the same PR.
+- **Files:** `.github/workflows/ci.yml`; `.github/workflows/nightly.yml`; `justfile`: test-python-portable; `python/pyproject.toml` (registers the `posix_only` pytest marker)
+- **Test:** The workflow runs green on this PR on all three OS runners; a throwaway PR with an unsigned commit fails `dco` (linked in the PR description); a smoke test marked `posix_only` is skipped on the Windows job and runs on Linux.
+- **Docs:** [Spec §29 CI](../spec/rastai_spec_v5.md), [Layout: Rust control plane §2.5](../architecture/layout/rust-control-plane.md), [Layout: Python §1.2](../architecture/layout/python.md), [ADR-0014 platform tiers](../adr/0014-platform-tiers.md)
+
+#### M1-07 GitHub sync tool: labels, milestones and issues from backlog.json
+Lane B · size S · type ci · depends on M1-04
+
+- **Goal:** `tools/github/sync_backlog.py` (stdlib plus the `gh` CLI) creates or updates the labels of plan 8.3, the milestones M1–M10 with their exit gates as descriptions, and one issue per backlog item. It is idempotent by the id prefix in the issue title, rewrites repo-relative links (`](docs/...`) to blob URLs on main, and never deletes. The same PR adds the two PR-template lines of plan 8.5.
+- **Files:** `tools/github/sync_backlog.py`; `tools/github/tests/test_sync_backlog.py`; `.github/pull_request_template.md`
+- **Test:** `--dry-run` on docs/plan/backlog.json prints the expected create and update plan (snapshot test); a second run against a fake `gh` that reports every item as existing plans no changes.
+- **Docs:** [Backlog](../plan/backlog.json)
+
+#### M1-08 Proto toolchain and `rastai.common.v1` (contract)
+Lane A · size L · type contract · depends on M1-01, M1-03, M1-04
+
+- **Goal:** buf configuration and all three generated outputs: Rust in `crates/rastai-proto` (a hand-written lib.rs that include!s generated files, no build.rs), Python in `python/rastai_proto` (with the import rewrite so generated code never shadows the `rastai` SDK) and TS in `packages/proto` (protobuf-es v2). First package: `rastai.common.v1` (Diagnostic, BlobRef, HardwareProfile, GpuInfo, HardwareFingerprint, NodeTelemetry, GpuTelemetry, ProcessVram, ResourceRequest and the state enums). Adds `just codegen` (proto step) and `just proto-check` (buf lint, buf breaking against main).
+- **Files:** `buf.yaml, buf.gen.yaml`; `proto/rastai/common/v1/{diagnostic, blob, hardware, resources, states}.proto`; `crates/rastai-proto/`; `python/rastai_proto/`; `packages/proto/`; `tools/codegen/rewrite_python_imports`; `fixtures/proto-golden/common/`
+- **Test:** Every golden message round-trips byte-identical in Rust, Python and TS (`crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py`, `packages/proto/src/golden.test.ts`); the import-rewrite test passes; `buf lint` is clean.
+- **Docs:** [Layout: node, gateway, proto §3](../architecture/layout/rust-node-gateway-proto.md), [Contracts §4.1](../architecture/contracts.md), [ADR-0004 schema ownership](../adr/0004-schema-ownership.md)
+
+#### M1-09 Proto `rastai.commands.v1` and `rastai.events.v1` (contract)
+Lane A · size M · type contract · depends on M1-08
+
+- **Goal:** The command and event wire: CommandService (Execute, ListCommands) with the v1.1 fields (`CommandDescriptor.arguments_schema_json`, `result_schema_json`; `ExecuteRequest.acting_plugin_id`), EventService.Subscribe, EventRecord (one events.log frame body) and the payloads for the M1 event types (job, run, checkpoint, artifact, node, plugin, document, command, diagnostic, `run.tags_changed`, `pin.changed`). Later payloads are added by each milestone's contract PR.
+- **Files:** `proto/rastai/commands/v1/command_service.proto`; `proto/rastai/events/v1/{event_service, event_record, payloads}.proto`; generated code in the three outputs; `fixtures/proto-golden/{commands, events}/`
+- **Test:** Goldens round-trip in three languages; the `buf breaking` check runs from this PR on.
+- **Docs:** [Contracts §4.2–4.3, §7](../architecture/contracts.md), [Layout: node, gateway, proto §3.1](../architecture/layout/rust-node-gateway-proto.md), [Layout: Rust control plane §11](../architecture/layout/rust-control-plane.md)
+
+#### M1-10 Proto `node.v1` and `worker.v1` skeleton RPCs (contract)
+Lane B · size M · type contract · depends on M1-09
+
+- **Goal:** Only the RPCs the skeleton needs, per the layout's build-order table: NodeService Handshake, GetHardware, StartJob, SignalJob, ListJobs, WatchRunEvents, WatchLive; NodeHubService Heartbeat and ExecuteCommand; WorkerService Hello, Control, WatchLive; WorkerHostService Register. Messages JobSpec, JobInfo, JobKind (including `daemon_task`), JobSignal, LiveEvent. Every other RPC arrives with the milestone that uses it.
+- **Files:** `proto/rastai/node/v1/{node_service, jobs, live, node_hub_service}.proto`; `proto/rastai/worker/v1/{worker_service, worker_host_service}.proto`; `fixtures/proto-golden/{node, worker}/`
+- **Test:** Goldens round-trip in three languages; a tonic server stub and a grpcio server stub both build from the generated code (import tests).
+- **Docs:** [Layout: node, gateway, proto §3.6](../architecture/layout/rust-node-gateway-proto.md), [Contracts §4.4–4.5](../architecture/contracts.md)
+
+#### M1-11 rastai-diag: Diagnostic, renderers and the JSON-lines logger
+Lane A · size M · type task · depends on M1-03
+
+- **Goal:** The bottom crate: the `Diagnostic` type every crate returns, the path grammar, catalog lookup, the compiler-style text renderer, the Basic renderer, JSON output and the JSON-lines logger with rotation. Built first against a small test catalog; the real tables arrive with M1-12 and M1-13. Builds for wasm32.
+- **Files:** `crates/rastai-diag/src/{diagnostic, path, catalog, terms, render_text, render_basic, render_json, logger}.rs`; `crates/rastai-diag/tests/render_snapshots.rs`; `fixtures/diagnostics/`
+- **Test:** Render snapshots (plain, color-stripped, Basic) for each severity and path shape; path round trip; a missing placeholder value stays visible as `{name}`; `cargo build --target wasm32-unknown-unknown -p rastai-diag` runs in `just check`.
+- **Docs:** [Layout: Rust control plane §3](../architecture/layout/rust-control-plane.md), [ADR-0030 diagnostics catalog](../adr/0030-diagnostics-catalog.md)
+
+#### M1-12 rastai-codegen and the catalog code generator
+Lane A · size M · type task · depends on M1-11, M1-04
+
+- **Goal:** The dev-only `rastai-codegen` crate with its first binary, `rastai-catalog-codegen`: it reads catalog/ and writes the Rust tables in rastai-diag, `@rastai/catalog`, `rastai_plugin.catalog` (a minimal package skeleton that M1-37 fills) and docs/reference/errors.md. `check-generated` becomes real.
+- **Files:** `tools/codegen/{Cargo.toml, src/bin/rastai_catalog_codegen.rs, catalog_rust.rs, catalog_typescript.rs, catalog_python.rs, reference_docs.rs, write_if_changed.rs}`; `tools/codegen/tests/catalog_checks.rs`; `packages/catalog/`; `python/rastai_plugin/rastai_plugin/catalog/generated.py`
+- **Test:** catalog_checks (codes well formed, unique, inside the owner's range, never deleted relative to the merge base); `check-generated` fails when a generated file is edited by hand.
+- **Docs:** [Layout: Rust control plane §2.6, §4.9](../architecture/layout/rust-control-plane.md), [Contracts §10](../architecture/contracts.md)
+
+#### M1-13 Catalog v1: one number per meaning (contract)
+Lane A · size M · type contract · depends on M1-01, M1-12
+
+- **Goal:** Write catalog/errors/RRS-*.json and catalog/terms/terms.json with every code the layout and flow docs propose, for all build steps, one number per meaning. Resolve the collisions between docs; the owning crate's layout doc keeps its number, others are renumbered (plan section 10, row 8): RRS-J1001–1003, J2001, J3002–3003, H2001–2003, H3001–3005, H4002, P2001–2003, U0001–0002, N0002–N0004, the two download ranges N3001–3006 and N3101–3105, R1001–R1008, C1002 (scope missing is C1005), S3001 and S3002 (a full disk during a write is S3002), the keyword-only warning keeps frontend's RRS-V0101 (V0002 withdrawn), and the gateway codes between the layout and the inference flows. Before numbering, replace the three data-policy codes (RRS-G0008 from inference 1.3, RRS-D3004 from training 2.1, RRS-N3009 from designer C5) with one shared `RRS-C1009` (plan section 10, row 37). RRS-C1008 becomes an error: owner.token too open, start refused (ADR-0034). catalog/README.md gets the doc-to-catalog mapping table. Adds one 'not available yet' code per area for honest L0 stubs (ADR-0017).
+- **Files:** `catalog/errors/RRS-{E,P,C,S,N,H,J,G,M,T,D,R,U}.json`; `catalog/terms/terms.json`; `catalog/README.md`; regenerated tables, and `docs/reference/errors.md`
+- **Test:** catalog_checks pass; the snapshot of docs/reference/errors.md is committed; the source scan finds no `RRS-` literal missing from the catalog.
+- **Docs:** [Contracts §10](../architecture/contracts.md), [Layout: node, gateway, proto §11.3](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform, catalog codes](../architecture/flows/platform.md), [Layout: frontend §20](../architecture/layout/frontend-and-plugins.md), [ADR-0017 definition of done](../adr/0017-definition-of-done-l0-l3.md)
+
+#### M1-14 rastai-formats JSON core: strict reader, canonical JSON, hashing, semver
+Lane A · size L · type task · depends on M1-11
+
+- **Goal:** The byte-level base of every document: the strict JSON reader (duplicate keys, NaN and trailing garbage rejected, depth limit, positions kept), JSON pointers, canonical JSON for content hashes, the stable pretty writer, the JSON Patch subset for undo, the one blake3 wrapper, in-house semver, ImportLimits and the ByteSource trait.
+- **Files:** `crates/rastai-formats/{Cargo.toml, CLAUDE.md}`; `src/{lib, error, limits, byte_source, hashing, semver}.rs`; `src/json/{reader, positions, pointer, canonical, pretty, patch}.rs`; `fuzz/fuzz_targets/json_reader.rs`
+- **Test:** Unit tests: positions, duplicate key → RRS-E0003, NaN → RRS-E0004, canonical key order and number output, semver ranges, patch apply and diff; the fuzz target builds (nightly runs it).
+- **Docs:** [Layout: Rust control plane §4.1–4.3](../architecture/layout/rust-control-plane.md), [ADR-0032 document files](../adr/0032-document-files-and-validation.md)
+
+#### M1-15 rastai-formats descriptions and validation layers 1 and 2
+Lane A · size L · type task · depends on M1-14
+
+- **Goal:** Type descriptions as plain data (`describe_<type>()` tables), the structure check that walks raw JSON against a description and reports every mismatch with its path in one pass, JSON Schema from a description, the shared header, `read_document` for layers 1 and 2, the empty migration chain, and the corpus test harness.
+- **Files:** `src/describe/{types, registry, structure_check, json_schema}.rs`; `src/header.rs, src/documents/mod.rs`; `src/validate/{mod, syntax, structure, environment}.rs`; `src/migrate/{mod, chain_table}.rs`; `tests/{documents_corpus, describe_matches_struct, round_trip}.rs`; `fixtures/documents/README.md`
+- **Test:** The corpus harness reports all diagnostics of a file in one pass with codes and paths; an unknown field → RRS-E1003; describe_matches_struct passes for the header.
+- **Docs:** [Layout: Rust control plane §4.2–4.4](../architecture/layout/rust-control-plane.md), [Spec §23](../spec/rastai_spec_v5.md)
+
+#### M1-16 rastai-formats-codegen: JSON Schema, TS types, Python dataclasses
+Lane A · size M · type task · depends on M1-15, M1-12
+
+- **Goal:** The second codegen binary: it walks the type descriptions and writes schemas/, `@rastai/formats` types and `rastai_formats` dataclasses (frozen, with from_json and to_json). From here on, a document or command type is written once in Rust.
+- **Files:** `tools/codegen/src/bin/rastai_formats_codegen.rs`; `tools/codegen/src/{json_schema_files, typescript_types, typescript_commands, python_dataclasses}.rs`; `schemas/index.json`; `packages/formats/` (package and src/generated/); `python/rastai_formats/` (package and generated/)
+- **Test:** Generated TS passes `tsc --noEmit` and generated Python imports (outputs_compile); `check-generated` is green; the shared header round-trips through the generated Python and TS types.
+- **Docs:** [Layout: Rust control plane §4.9](../architecture/layout/rust-control-plane.md), [Contracts §5.4](../architecture/contracts.md)
+
+#### M1-17 Step-1 document types (contract)
+Lane A · size M · type contract · depends on M1-16, M1-13
+
+- **Goal:** The documents the skeleton reads and writes: run record, resume state, settings, project, lock file and plugin manifest, each a plain struct plus its description, with meaning checks for the manifest (plugin id format, command ids inside the namespace, no reserved areas) and the project.
+- **Files:** `crates/rastai-formats/src/documents/{run_record, resume, settings, project, lock, plugin_manifest}.rs`; `src/validate/meaning/{mod, plugin_manifest, project}.rs`; `fixtures/documents/<type>/{valid, invalid}/`; regenerated `schemas/`, TS and Python
+- **Test:** documents_corpus over the new fixtures (codes and paths); round_trip gives stable content hashes; describe_matches_struct for every new type.
+- **Docs:** [Layout: Rust control plane §4.13](../architecture/layout/rust-control-plane.md), [Contracts §5.2](../architecture/contracts.md)
+
+#### M1-18 ModelSpec v1 for TextCNN, and the TextCNN template (contract)
+Lane B · size M · type contract · depends on M1-17
+
+- **Goal:** The first slice of `rastai.model/1`: the graph, edges, input map, heads and objective, with the ops TextCNN needs (embedding, conv1d, pool, linear, dropout, activation, concat, classifier_head) and shape inference for them. Also closes the spike's open exit item: TextCNN ported off torchtext and `.pt` (§32 weeks 1–2; not in spike/README.md). The template rebuilds the owner's 5-layer TextCNN (AITestLab-1 `create_model.py`, outside this repo) as a ModelSpec.
+- **Files:** `crates/rastai-formats/src/documents/{model, model_ops}.rs`; `src/validate/meaning/{model_graph, model_shapes}.rs`; `templates/designs/textcnn.rrsmodel`; `fixtures/documents/rastai.model/`; regenerated types
+- **Test:** The template validates with no diagnostics; a broken edge → RRS-E2002 at that edge's path; a cycle with no recurrent node → RRS-E2003.
+- **Docs:** [Contracts §5.2–5.3](../architecture/contracts.md), [Layout: Rust control plane §4.13](../architecture/layout/rust-control-plane.md), [Spec §29, §32](../spec/rastai_spec_v5.md)
+
+#### M1-19 PyO3 wheel: rastai-formats-python and `rastai_formats`
+Lane B · size M · type task · depends on M1-17
+
+- **Goal:** The Python build of rastai-formats, the one place workers validate documents: `read_document`, `load_model_spec`, `write_document`, `content_hash`, `hash_bytes`, with one exception type carrying diagnostics JSON. `just wheel` builds it with maturin; the cpu lock picks it up by path in development.
+- **Files:** `crates/rastai-formats/bindings/python/{Cargo.toml, src/lib.rs}`; `python/rastai_formats/` (wrapper around _native); `python/rastai_formats/tests/test_parity.py`; `justfile`: wheel
+- **Test:** test_parity: the document corpus through the wheel gives the same codes, paths and content hashes as Rust; a bad file raises FormatsValidationError with the diagnostics.
+- **Docs:** [Layout: Rust control plane §4.7](../architecture/layout/rust-control-plane.md), [Layout: Python §1.4 rule 4](../architecture/layout/python.md)
+
+#### M1-20 rastai-core: versions, paths, ids, principals, scopes, states
+Lane A · size M · type task · depends on M1-09, M1-11
+
+- **Goal:** The shared vocabulary that isn't a document: version constants, the only place data paths are built (`RASTAI_HOME`, XDG, the HF cache order), time-sortable ids, principals and scopes, state names and transition tables for the proto enums, and the Diagnostic and CommandDescriptor wire conversions.
+- **Files:** `crates/rastai-core/src/{versions, paths, ids, crockford, random, time, principal, scopes, states, wire, error}.rs`; `crates/rastai-core/tests/wire_round_trip.rs`
+- **Test:** Ids sort by creation time and round-trip through base32; `RASTAI_HOME` puts all five roots under one folder; HF cache lookup order; every transition of contracts §9 is allowed and a sample of illegal ones refused; wire field lists equal the proto messages.
+- **Docs:** [Layout: Rust control plane §5](../architecture/layout/rust-control-plane.md), [Contracts §8.1, §8.6, §9](../architecture/contracts.md)
+
+#### M1-21 rastai-core: command registry, naming and settings resolution
+Lane A · size M · type task · depends on M1-20, M1-15
+
+- **Goal:** The registry as a plain table plus functions (no macros): descriptors, registered commands, plugin add and remove, scope checks, the naming rules for CLI words (`_` → `-`), flags and MCP tool names, and settings resolution across the five layers.
+- **Files:** `crates/rastai-core/src/commands/{descriptor, table, registry, naming, output}.rs`; `src/{settings, settings_defaults}.rs`; `tests/{command_table, naming_round_trip, settings_precedence}.rs`; `fixtures/command-golden/copy-as.json` (seed)
+- **Test:** Naming round trip for every id; settings precedence per key (`RASTAI_GATEWAY__PORT=8899` sets gateway.port); a bad `--set` gives a diagnostic.
+- **Docs:** [Layout: Rust control plane §5, §10](../architecture/layout/rust-control-plane.md), [Contracts §6.1–6.3, §11](../architecture/contracts.md), [ADR-0005 command layer](../adr/0005-command-layer.md)
+
+#### M1-22 Skeleton commands: registry rows and argument types (contract)
+Lane A · size M · type contract · depends on M1-21, M1-16, M1-13 · claims L0
+
+- **Goal:** The first rows of COMMANDS and their Args and Result types: system.status, system.shutdown, command.list, job.list, job.get, job.cancel, train.start (classification on a design and a dataset path), settings.get, settings.set, token.login_code.create, token.create, token.list, token.revoke, plugin.list, node.list and node.status. Commands whose handler isn't built yet return their area's 'not available yet' code.
+- **Files:** `crates/rastai-core/src/commands/table.rs` (rows); `crates/rastai-formats/src/commands/{mod, system, command, job, train, settings, token, plugin, node}.rs`; `schemas/commands/`; regenerated TS and Python
+- **Test:** command_table.rs (rows valid, unique, in a core area, global CLI flags not reused) and commands_described.rs (every row has Args, Result and a schema file).
+- **Docs:** [Layout: Rust control plane §5.7, §10.1](../architecture/layout/rust-control-plane.md), [Contracts §6.4](../architecture/contracts.md)
+
+#### M1-23 rastai-store: databases and writer threads
+Lane B · size L · type task · depends on M1-20
+
+- **Goal:** `rastai.db` behind one writer thread (the spike-07 lesson), read-only reader pools, the data-directory lock, and migration 0001 with every table of contracts §8.2 plus the v1.1 columns (journal idempotency, `log_cursors`). Callers pass row structs and filters, never SQL.
+- **Files:** `crates/rastai-store/src/{store, sqlite, writer_thread, reader_pool, data_dir_lock, error}.rs`; `src/index/migrations/0001_initial.sql`; `src/index/{writes, reads, runs, journal, documents, config_tables, log_cursors}.rs`; `tests/{writer_thread, index_migrations}.rs`
+- **Test:** 256 concurrent writers commit without convoying (p99 bound); one bad write in a batch fails alone; a newer schema_migrations version → RRS-S0002 and the file is unchanged; a second daemon lock → RRS-S0001.
+- **Docs:** [Layout: Rust control plane §6](../architecture/layout/rust-control-plane.md), [Contracts §8.2](../architecture/contracts.md), [ADR-0003 storage](../adr/0003-storage-sqlite-vault-blobs.md), [Spike 07](../../spike/README.md)
+
+#### M1-24 rastai-store: event-log frames, reader and writer
+Lane B · size M · type task · depends on M1-09, M1-20
+
+- **Goal:** The `RRSEVLG1` frame format in Rust: the in-house CRC-32/IEEE table, frame encode and decode, the writer (append, truncate a torn tail on open, fsync policy) and the reader that reports a record, end of file, an incomplete tail or corruption. The shared fixtures land here and the Python writer (M1-39) reads the same files.
+- **Files:** `crates/rastai-store/src/event_log/{crc32, frame, writer, reader}.rs`; `fixtures/event-logs/{good, torn_tail, corrupt_middle, sequence_gap}.log`; `tests/event_log_fixtures.rs`; `crates/rastai-store/fuzz/fuzz_targets/read_next_frame.rs`
+- **Test:** CRC of "123456789" is 0xCBF43926; the fixtures read as EndOfFile, Incomplete, Corrupt (RRS-S2002) and a sequence gap (RRS-S2003); appending after a torn tail truncates it first.
+- **Docs:** [Contracts §7.1](../architecture/contracts.md), [Layout: Rust control plane §6.2](../architecture/layout/rust-control-plane.md), [ADR-0002 durability](../adr/0002-durability-worker-event-logs.md)
+
+#### M1-25 rastai-store: indexer, blob store and free space
+Lane B · size M · type task · depends on M1-23, M1-24, M1-02
+
+- **Goal:** `apply_event_record`, the one function both live indexing and the rebuild use (idempotent upserts, the ack in the same transaction), the BLAKE3-named blob store with `.incoming/` writes, rename and quarantine, and `free_bytes` / `check_free_space` (the ADR-0033 file, which the node also calls).
+- **Files:** `crates/rastai-store/src/indexer.rs`; `src/blobs/{blob_store, incoming, quarantine}.rs`; `src/disk_space.rs`; `tests/{indexer_idempotent, blob_store}.rs`
+- **Test:** The same batch applied twice gives the same rows and the ack only moves forward; a flipped blob byte is quarantined (RRS-S1001); `check_free_space` below the margin → RRS-S3001.
+- **Docs:** [Layout: Rust control plane §6.4, §13.1](../architecture/layout/rust-control-plane.md), [Flows: platform §6.1, §8.2](../architecture/flows/platform.md)
+
+#### M1-26 rastai-server: startup, listeners, request gate and sign-in
+Lane A · size L · type task · depends on M1-23, M1-21, M1-13
+
+- **Goal:** `run_daemon` as the thin sequence of platform flow 2.1 (the embedded node call is a stub until M1-47), the Server struct, clean shutdown, owner.token and identity keys, the loopback TCP listener on 47820–47829 and daemon.sock with TCP_NODELAY, the request gate (Host, Origin, credentials; any loopback Host on any port, ADR-0034), one-time login codes and session cookies, the Connect envelopes and the hand-written Connect JSON for the CommandService messages, and `/api/health` with `apis`, `plugin_api` and `node_protocol`.
+- **Files:** `crates/rastai-server/src/{daemon, server_state, shutdown, auth_files, error}.rs`; `src/http/{router, listeners, gate, sessions, connect, connect_json, health}.rs`; `tests/{gate, connect_protocol}.rs`; `crates/rastai-server/fuzz/fuzz_targets/request_gate.rs`
+- **Test:** The gate table of platform flow 4.2 with ADR-0034's Host rule (Host attacker.test → RRS-C1003, Origin null → RRS-C1004, no credential → RRS-C1002, Host 127.0.0.1:47900 with Origin http://127.0.0.1:47900 → allowed); Connect JSON equals the protobuf-es goldens; ports fall back and write daemon.port; owner.token at 0644 → start refused with RRS-C1008 and no listener bound, and after the file is deleted the next start writes a new 0600 token; start to healthy in under 1 s; the `request_gate` fuzz target (Host, Origin, cookie and bearer-token parsing on arbitrary bytes never panics) builds, and nightly runs it (plan 8.7).
+- **Docs:** [Layout: Rust control plane §8, §11](../architecture/layout/rust-control-plane.md), [Flows: platform §2.1, §4.1–4.2](../architecture/flows/platform.md), [ADR-0007 local API security](../adr/0007-local-api-security.md)
+
+#### M1-27 rastai-server: the Execute path and the L0 floor
+Lane A · size L · type task · depends on M1-26 · claims L0
+
+- **Goal:** Every caller ends in `execute_command`: registry lookup, scope check, argument check (layer 2 with paths), idempotency, the journal with secret redaction, dispatch as one `match` arm per command, plus the first handlers (system.status, system.shutdown, command.list, settings.get, settings.set, `token.*`). Adds the L0 floor test of ADR-0017.
+- **Files:** `crates/rastai-server/src/commands/{execute, dispatch, context, arguments, journal}.rs`; `src/http/command_endpoints.rs`; `src/commands/handlers/{system, command, settings, token}.rs`; `tests/{execute_paths, dispatch_complete, l0_floor}.rs`
+- **Test:** Each branch of platform flow 3.2 with its code (RRS-C0001, RRS-C0002 with paths, RRS-C1005, idempotent replay, RRS-C0004 on key reuse); secret fields redacted in the journal; dispatch_complete; l0_floor: every registered command run with dry_run returns ok or a catalog-coded diagnostic.
+- **Docs:** [Layout: Rust control plane §8.3, §10](../architecture/layout/rust-control-plane.md), [Flows: platform §3.1–3.2](../architecture/flows/platform.md), [ADR-0017](../adr/0017-definition-of-done-l0-l3.md)
+
+#### M1-28 rastai-server: event bus, Subscribe and run-log indexing
+Lane A · size L · type task · depends on M1-27, M1-25, M1-10
+
+- **Goal:** The daemon-wide bus (last 10,000 events, resume by bus_sequence, first sequence = start ms × 1,000), EventService.Subscribe, the daemon's own durable log `<data>/daemon/events.log` with replay at startup, and one tail task per open run: WatchRunEvents after the ack, mirror for remote runs, index, publish.
+- **Files:** `crates/rastai-server/src/events/{bus, daemon_events}.rs`; `src/http/event_endpoint.rs`; `src/indexing/{run_tail, daemon_log_replay}.rs`; `tests/{bus_resume, run_tail}.rs`
+- **Test:** A gap inside the buffer is replayed and one outside it gets RRS-C0401; a fake node streams records and the ack commits with the rows; a restart re-indexes nothing twice; daemon-log records after the cursor are indexed before the listener opens.
+- **Docs:** [Layout: Rust control plane §8.3, §13.1](../architecture/layout/rust-control-plane.md), [Flows: platform §6.1–6.3](../architecture/flows/platform.md), [Contracts §7.2](../architecture/contracts.md)
+
+#### M1-29 rastai-mcp: JSON-RPC, the MCP server and the stdio bridge
+Lane B · size M · type task · depends on M1-21, M1-41
+
+- **Goal:** The in-house MCP server side as plain data: parse a message, return a step (`Reply`, `ExecuteTool`, `NoReply`) so the crate never executes anything, tools built from registry rows, and `run_stdio_bridge` for `rastai mcp`, which forwards to `/mcp` on daemon.sock with a scoped token and never falls back to the owner.
+- **Files:** `crates/rastai-mcp/src/{jsonrpc, protocol_versions, error, bridge}.rs`; `src/server/{session, handle, tools}.rs`; `tests/{server_transcripts, bridge}.rs`; `fixtures/mcp/server/`; `crates/rastai-mcp/fuzz/fuzz_targets/jsonrpc_decode.rs` (a cargo-fuzz crate with its own workspace, added to the root `exclude` list)
+- **Test:** Server transcripts: initialize, tools/list for mcp-default scopes, a call, a call outside the scopes, a malformed line → RRS-C3001; the bridge against a fake /mcp, including a lost session after a daemon restart; no token → RRS-C3002; the `jsonrpc_decode` fuzz target (any bytes in, a JSON-RPC message or a coded error out, never a panic) builds, and nightly runs it (plan 8.7).
+- **Docs:** [Layout: Rust control plane §7](../architecture/layout/rust-control-plane.md), [Flows: platform §4.3](../architecture/flows/platform.md)
+
+#### M1-30 rastai-server: the `/mcp` endpoint
+Lane B · size S · type task · depends on M1-27, M1-29
+
+- **Goal:** The axum glue that turns an MCP POST into `execute_command` with the token's principal, with session handling and scope-filtered tool lists.
+- **Files:** `crates/rastai-server/src/http/mcp_endpoint.rs`; `crates/rastai-server/tests/mcp_endpoint.rs`
+- **Test:** Tools are filtered by the token's scopes; a call lands in the journal with the token principal.
+- **Docs:** [Layout: Rust control plane §7.3](../architecture/layout/rust-control-plane.md)
+
+#### M1-31 rastai-cli: modes, generated verbs, follow and exit codes
+Lane A · size L · type task · depends on M1-28, M1-29, M1-41
+
+- **Goal:** The one binary: process modes (serve, mcp, open, local commands, help, verbs), the in-house argument parser, verbs generated from ListCommands with flags from the argument schema, auto-start of the daemon, following jobs and streams through Subscribe, `--json` output, and the exit code table.
+- **Files:** `crates/rastai-cli/src/{main, error, exit_codes, arguments, modes, serve, mcp_bridge, open_ui, daemon_client, verbs, verb_arguments, follow, command_cache, help, local_commands, output}.rs`; `tests/{arguments, verbs, exit_codes, local_commands}.rs`
+- **Test:** Every CLI line in copy-as.json parses to its command id and arguments; each outcome maps to its exit code against a fake daemon; `rastai validate` prints the corpus codes; a verb with no daemon running starts one.
+- **Docs:** [Layout: Rust control plane §9](../architecture/layout/rust-control-plane.md), [Flows: platform §2.1](../architecture/flows/platform.md)
+
+#### M1-32 rastai-server: plugin host (discover, negotiate, register)
+Lane A · size M · type task · depends on M1-27, M1-17 · claims L0
+
+- **Goal:** Plugins load through the host from day one (§31): discovery of preinstalled, installed and dev folders, capability negotiation as a pure function, registration of commands and catalogs, state transitions and `plugin.state_changed`, and `plugin.list`. Installing archives comes in M8.
+- **Files:** `crates/rastai-server/src/plugin_host/{discovery, capabilities, load, contributions, lifecycle}.rs`; `src/commands/handlers/plugin.rs`; `fixtures/plugins/` (valid, bad manifest, missing capability, reserved id, command outside its namespace); `tests/plugin_host.rs`
+- **Test:** The negotiation table (RRS-P1001, P1002, P1003, P0006); a bad manifest → failed with RRS-P0001 and the daemon keeps running; a dev plugin's commands appear in ListCommands and disappear when it is disabled.
+- **Docs:** [Layout: Rust control plane §12](../architecture/layout/rust-control-plane.md), [Flows: platform §7.2–7.3](../architecture/flows/platform.md), [ADR-0015 plugins](../adr/0015-plugins-and-licensing.md)
+
+#### M1-33 rastai-store: offline index rebuild
+Lane B · size M · type task · depends on M1-25, M1-31
+
+- **Goal:** `rastai storage rebuild-index`, the fix for RRS-S0003: move the old file aside, copy the kept tables, replay run folders and the daemon log through `apply_event_record`, drop rows whose blobs are gone, and finish with quick_check.
+- **Files:** `crates/rastai-store/src/rebuild.rs`; `fixtures/data-dirs/`; `crates/rastai-store/tests/rebuild_index.rs`; `crates/rastai-cli/src/local_commands.rs` (storage rebuild-index)
+- **Test:** Index a data directory live, rebuild it, and every rebuildable table matches row by row; the command refuses while a daemon holds the lock.
+- **Docs:** [Layout: Rust control plane §13.2](../architecture/layout/rust-control-plane.md), [Flows: platform §6.4](../architecture/flows/platform.md)
+
+#### M1-34 rastai_models: strict safetensors reader and writer (spike port)
+Lane B · size M · type task · depends on M1-04, M1-13
+
+- **Goal:** Port the spike's reader and writer with the strict contract of ADR-0029, returning the same RRS-E60xx codes as the Rust reader will. The 33-file corpus moves from spike/bakeoff into fixtures/ with expected codes instead of strings.
+- **Files:** `python/rastai_models/{pyproject.toml, CLAUDE.md}`; `rastai_models/{__init__, errors}.py`; `rastai_models/io/{safetensors_reader, safetensors_writer}.py`; `fixtures/safetensors/` (33 files + expected.json); `tests/test_safetensors_{reader, writer}.py`
+- **Test:** All 33 files give the expected verdict and code (shape_overflows_64_bits → RRS-E6012, offset_beyond_64_bits → RRS-E6011); the writer round-trips every dtype and fsyncs.
+- **Docs:** [Layout: Python §2.7–2.8](../architecture/layout/python.md), [ADR-0029 strict safetensors](../adr/0029-strict-safetensors-contract.md), [Spike 07](../../spike/README.md)
+
+#### M1-35 rastai_models: the compiler and the TextCNN blocks
+Lane B · size L · type task · depends on M1-18, M1-19, M1-34
+
+- **Goal:** ModelSpec → PyTorch modules: graph order, the op table, CompiledModel running ordered steps, strict weight fill and seeded init, train modes, and the blocks TextCNN needs (embedding, conv1d, pool, linear, activation, dropout, concat, classifier head).
+- **Files:** `rastai_models/compiler/{compile, graph_order, op_table, compiled_model, weights, train_modes}.py`; `rastai_models/blocks/{op_module, embedding, convolution, linear, basic_ops, heads}.py`; `tests/test_compile.py`
+- **Test:** The TextCNN template compiles; its parameter count equals the count stored beside the template fixture; seeded init repeats exactly; a missing or extra tensor in a strict fill → RRS-M2xxx.
+- **Docs:** [Layout: Python §2](../architecture/layout/python.md), [ADR-0013 unified runtime](../adr/0013-unified-model-runtime.md)
+
+#### M1-36 rastai_data: readers, word vocabulary, splits and a resumable loader
+Lane B · size M · type task · depends on M1-04
+
+- **Goal:** What TextCNN needs without torchtext: JSONL and CSV readers, a word-level vocabulary (basic tokenizing, unknown → 0, max size), deterministic splits from a stable hash, and a batch loader whose position can be saved and restored. The fixture dataset is synthetic and written by us (4 labels, about 2,000 short texts), so no third-party data license is involved.
+- **Files:** `python/rastai_data/{pyproject.toml, CLAUDE.md}`; `rastai_data/{__init__, errors, examples, word_vocabulary, loaders, splits}.py`; `rastai_data/readers/{jsonl, csv_reader}.py`; `fixtures/datasets/textcnn_tiny.jsonl`; `tests/`
+- **Test:** Vocabulary edge cases; splits are stable across runs (zlib.crc32, never `hash()`); a restored loader yields exactly the next batch it would have yielded.
+- **Docs:** [Layout: Python §4](../architecture/layout/python.md)
+
+#### M1-37 rastai_plugin: registry, base classes, module loader and host client
+Lane B · size M · type task · depends on M1-10, M1-12, M1-19
+
+- **Goal:** The low layer engines define extension points on: the registry (register, find, names per kind), small base classes (Recipe and Metric to start), plain types, the module loader that checks ids against the manifest, the generated catalog constants, the JobEvents and JobControl base classes, and the WorkerHost client with `register()` (other calls arrive with their RPCs).
+- **Files:** `python/rastai_plugin/rastai_plugin/{__init__, extension_points, registry, types, module_loader, commands, manifest, catalog, host}.py`; `tests/{test_registry, test_module_loader, test_host}.py`
+- **Test:** register, find and names per kind; an id mismatch → RRS-P0103; the host client registers against a fake WorkerHostService on a temp socket.
+- **Docs:** [Layout: frontend and plugins §11](../architecture/layout/frontend-and-plugins.md), [Layout: Python §1.6](../architecture/layout/python.md)
+
+#### M1-38 rastai_train: loop, optimizer, checkpoints, resume and the classification recipe
+Lane B · size L · type task · depends on M1-35, M1-36, M1-37
+
+- **Goal:** The in-house training loop with the resume contract from day one: AdamW state as named tensors, checkpoints written as `step-N.partial` then renamed, `resume.json` through the wheel, RNG state as safetensors, and the classification recipe. No pickle anywhere.
+- **Files:** `python/rastai_train/{pyproject.toml, CLAUDE.md}`; `rastai_train/{__init__, errors, context, loop, optimizer, checkpoints, resume}.py`; `rastai_train/recipes/{__init__, classification}.py`; `tests/{test_loop, test_resume, test_checkpoints, test_optimizer}.py`
+- **Test:** TextCNN loss falls on the fixture; an interrupted-then-resumed run equals an uninterrupted one bit for bit on CPU in deterministic mode; a `.partial` folder is never returned; `check-no-pickle` stays green.
+- **Docs:** [Layout: Python §5](../architecture/layout/python.md), [ADR-0024 no pickle](../adr/0024-no-pickle-checkpoints.md), [Flows: training and evaluation §5](../architecture/flows/training-evaluation.md)
+
+#### M1-39 rastai_worker: the event-log writer and payload conversion
+Lane A · size M · type task · depends on M1-09, M1-24
+
+- **Goal:** The one writer of a run's events.log, in Python: header, frames, zlib.crc32 checksums, an exclusive flock, torn-tail truncation on open and the fsync policy; plus the conversion from (event_type, dict) to typed payloads, the only place engines' events touch protobuf.
+- **Files:** `python/rastai_worker/{pyproject.toml, CLAUDE.md}`; `rastai_worker/{event_log, event_payloads}.py`; `tests/{test_event_log, test_event_payloads}.py`; `fixtures/event-logs/from_python.log`; `crates/rastai-store/tests/python_log_compat.rs`
+- **Test:** Frames and checksums equal the Rust fixtures; a torn tail is truncated on open; flock blocks a second writer; the Python-written log reads frame for frame in Rust.
+- **Docs:** [Layout: Python §7.5](../architecture/layout/python.md), [Contracts §7.1](../architecture/contracts.md)
+
+#### M1-40 rastai_worker: process, WorkerService, host connection and control
+Lane A · size L · type task · depends on M1-39, M1-37, M1-10
+
+- **Goal:** The process every Python job runs in: read job.json, serve WorkerService (Hello, Control, WatchLive) on the job socket, register with WorkerHostService with retry, turn signals into flags, keep the ephemeral live stream, dispatch the job kind, and map failures to a diagnostic, stderr.log and an exit code (0, 1, 2, 3, 4, 75; plan section 10, row 4). A thin main.
+- **Files:** `rastai_worker/{__main__, arguments, launch, job_file, worker_server, host_connection, live_stream, job_events, control, diagnostics, exit_codes, dispatch, plugin_module}.py`; `tests/{test_worker_server, test_control, test_job_file, test_dispatch, test_diagnostics, test_live_stream}.py`
+- **Test:** Hello, Control and WatchLive over a temp Unix socket; SIGTERM and SIGINT only set flags; an unreadable job.json exits 2; an unexpected exception becomes RRS-J1xxx with the traceback in stderr.log only; an event-log write that fails exits 4.
+- **Docs:** [Layout: Python §7](../architecture/layout/python.md), [Flows: platform §5](../architecture/flows/platform.md)
+
+#### M1-41 rastai-transport: local sockets, peer credentials, gRPC channels, local HTTP
+Lane B · size M · type task · depends on M1-20, M1-08, M1-02
+
+- **Goal:** Local IPC for everything in the skeleton: Unix sockets in a 0700 directory, same-user peer checks, tonic channels and servers over sockets, the local NodeConnection, and the plain-HTTP half of `http_client.rs` (HTTP/1.1 over daemon.sock and loopback), which the CLI and the MCP bridge need now. HTTPS arrives in M2-14.
+- **Files:** `crates/rastai-transport/src/{lib, error, local_socket, peer, grpc_channel, node_connection, http_client}.rs`; `tests/{local_socket, grpc_local}.rs`
+- **Test:** Bind and connect; the peer check refuses another uid; the socket directory is 0700; a stale socket file is replaced; a tiny tonic service works unary and streaming over a Unix socket; an HTTP request over a Unix socket round-trips.
+- **Docs:** [Layout: node, gateway, proto §4](../architecture/layout/rust-node-gateway-proto.md)
+
+#### M1-42 rastai-node: entry, identity, local handshake, hardware and telemetry
+Lane B · size M · type task · depends on M1-41, M1-10
+
+- **Goal:** `run_node` as the start-up sequence of the node layout §7.3, the Ed25519 identity, the handshake (protocol version, capability flags, signed challenges, pinned daemon key), GetHardware, and hardware and telemetry readers over nvidia-smi, rocm-smi and sysfs, with recorded tool outputs as fixtures.
+- **Files:** `crates/rastai-node/src/{lib, error, node, identity, handshake, node_service, hardware, telemetry}.rs`; `fixtures/hardware/` (5080, 3090, the gfx1036 iGPU, no GPU); `tests/handshake.rs`
+- **Test:** A version mismatch → RRS-N0001 and an unknown daemon key → RRS-N0002; each hardware fixture parses to the expected profile; a hung tool times out with RRS-H0002 without blocking start.
+- **Docs:** [Layout: node, gateway, proto §7.1–7.3, §7.9](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §1.2](../architecture/flows/platform.md)
+
+#### M1-43 rastai-node: job supervisor, spawn, signals and exit causes
+Lane B · size L · type task · depends on M1-42
+
+- **Goal:** Python jobs in their own process groups: admission, the job token (hash only on disk), atomic job.json, spawn through `setsid` with a cleared environment (HSA_OVERRIDE_GFX_VERSION stripped; HF_HUB_OFFLINE, UV_OFFLINE and PIP_NO_INDEX set), Register within 60 s, signals to the group, and exit-cause classification. StartJob, SignalJob and ListJobs.
+- **Files:** `crates/rastai-node/src/jobs/{supervisor, spawn, job_file, signals, exit_cause, log_lines}.rs`; `src/{worker_host_service, permissions}.rs`; `tests/support/fake_worker.py`; `tests/jobs.rs`
+- **Test:** A job starts in a new process group with the expected environment; no Register in 60 s → RRS-J0002 and the group is killed; CANCEL waits the grace period then SIGKILLs the group; STOP goes through Control, TERMINATE sends SIGTERM and KILL sends SIGKILL to the group (plan section 10, row 24); each exit code maps to its state and code (4 → RRS-S3002, 75 → cancelled with reason preempted).
+- **Docs:** [Layout: node, gateway, proto §7.4](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §5](../architecture/flows/platform.md), [ADR-0001 process layout](../adr/0001-process-layout.md)
+
+#### M1-44 rastai-node: event-log tailing and live streams
+Lane B · size M · type task · depends on M1-43, M1-24
+
+- **Goal:** WatchRunEvents: tail a run's events.log after a sequence with in-memory positions and a 50 ms poll (no file-watch dependency), stop at a torn tail of a dead writer, report corruption; WatchLive: bounded per-subject queues that drop the oldest item.
+- **Files:** `crates/rastai-node/src/{run_events, live}.rs`; `tests/run_events.rs`
+- **Test:** The good, torn-tail and corrupt-middle fixtures stream as expected; a watch resumes from any after_sequence; a full live queue drops the oldest item.
+- **Docs:** [Layout: node, gateway, proto §7.5](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §6.1](../architecture/flows/platform.md)
+
+#### M1-45 rastai-node: reattach after a restart, and immediate heartbeats
+Lane B · size M · type task · depends on M1-44
+
+- **Goal:** Jobs outlive the node: on start, read every non-terminal job.json, check pid and start ticks, wait for the worker to re-Register (its token hash must match), then Hello; a job whose process is gone takes its final state from the log. Heartbeats go every 5 s and at once on any job, lease or model change.
+- **Files:** `crates/rastai-node/src/jobs/reattach.rs`; `src/{hub_client, heartbeat}.rs`; `tests/reattach.rs`
+- **Test:** Node restart mid-run: the worker re-registers, Hello succeeds and no event is lost; a job.json pointing at an unrelated live pid is never signaled and ends failed; a state change sends a heartbeat at once.
+- **Docs:** [Layout: node, gateway, proto §7.4–7.5, §7.9](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §2.3](../architecture/flows/platform.md)
+
+#### M1-46 rastai_worker: the TextCNN train job
+Lane B · size M · type task · depends on M1-38, M1-40
+
+- **Goal:** Worker protocol v0 running TextCNN training: the `train` job kind builds the context from job.json, runs the classification recipe, and writes the run record, metrics, checkpoints and the final state.
+- **Files:** `python/rastai_worker/rastai_worker/jobs/{__init__, train}.py`; `fixtures/jobs/textcnn_train/job.json`
+- **Test:** `python -m rastai_worker run --job-file` with a fake WorkerHost trains TextCNN on the fixture dataset; events.log holds run.state_changed, run.metrics, checkpoint.saved and the final state in sequence; the run folder holds no `.pt` file.
+- **Docs:** [Layout: Python §7.4](../architecture/layout/python.md), [Spec §32 weeks 3–4](../spec/rastai_spec_v5.md)
+
+#### M1-47 Daemon and embedded node: links, NodeHub, scheduler, train.start and `job.*`
+Lane B · size L · type task · depends on M1-28, M1-45, M1-46, M1-22 · claims L1
+
+- **Goal:** Wire the skeleton together: the daemon starts the embedded node and reaches it over node.sock like a remote one, serves NodeHubService (Heartbeat, ExecuteCommand), reconciles with ListJobs after a connect, and schedules jobs (queue, trivial placement on the local node, launch writes run.json and calls StartJob). Handlers for train.start (classification), job.list, job.get, job.cancel, node.list and node.status.
+- **Files:** `crates/rastai-server/src/nodes/{node_links, node_hub, reconcile}.rs`; `src/scheduler/{queue, placement, launch}.rs`; `src/commands/handlers/{job, train, node}.rs`; `src/daemon.rs` (start_embedded_node, connect_to_node)
+- **Test:** train.start returns a job_id at once; the job reaches succeeded with every metric indexed; job.cancel → cancelled; a daemon restart while the job runs reconciles through ListJobs and the run tail resumes from acked_sequence.
+- **Docs:** [Layout: Rust control plane §8.8](../architecture/layout/rust-control-plane.md), [Flows: platform §2.1–2.3, §5.1](../architecture/flows/platform.md)
+
+#### M1-48 Kill -9 crash suite for the skeleton (M1 exit gate)
+Lane B · size L · type test · depends on M1-47 · claims L1
+
+- **Goal:** The §32 exit test and its neighbours, from the platform flow's kill -9 matrix: rows 1, 2, 3, 9, 11 and 13, with the test-only `RASTAI_TEST_PAUSE_AT` hook in rastai-server, rastai-node and rastai_worker so each kill lands at a named point every time. Adds the `test-crash` CI job.
+- **Files:** `tests/crash/` (crate rastai-crash-tests); the `RASTAI_TEST_PAUSE_AT` hook in rastai-server, rastai-node and rastai_worker (test builds only); `tests/crash/test_worker_kill9.py`; `tests/crash/test_worker_survives_node_restart.py`; `justfile`: test-crash; `.github/workflows/ci.yml`: the test-crash job
+- **Test:** Row 1: kill -9 the daemon during TextCNN training, restart, the job is running and reattached, and run_metrics equals the log with no gap or duplicate. After every row: every durable record is indexed exactly once, nothing half-written is visible, no orphan process group remains, every user-visible failure has a code.
+- **Docs:** [Flows: platform §6.5](../architecture/flows/platform.md), [Layout: node, gateway, proto §7.12](../architecture/layout/rust-node-gateway-proto.md), [Spec §32 weeks 3–4](../spec/rastai_spec_v5.md)
+
+#### M1-49 Three surfaces end to end: HTTP, CLI and MCP
+Lane B · size M · type test · depends on M1-31, M1-30, M1-47 · claims L1
+
+- **Goal:** The §32 skeleton promise that commands are reachable over HTTP, the CLI and the in-house MCP: one test drives `rastai serve --headless` in a temporary RASTAI_HOME and runs the same commands three ways. Adds the `e2e-surfaces` CI job.
+- **Files:** `tests/e2e/three_surfaces/`; `fixtures/mcp/e2e/` (golden transcript); `justfile`: e2e-surfaces; ci.yml: e2e-surfaces
+- **Test:** system.status, train.start and job.get give the same results over Connect JSON, `rastai` verbs and `rastai mcp` (golden transcript); a chat-only token is refused train.start with RRS-C1005 on all three.
+- **Docs:** [Spec §32 weeks 3–4](../spec/rastai_spec_v5.md), [Layout: Rust control plane §7, §9, §14](../architecture/layout/rust-control-plane.md)
+
+#### M1-50 `@rastai/client` and the generated TS packages
+Lane A · size M · type task · depends on M1-28, M1-16
+
+- **Goal:** The thin daemon client: connect, health and version check, login-code exchange, `execute` that never throws on an expected failure, `listCommands`, and one event stream per window with backoff, resume and the resync signal. Wires the generated `@rastai/proto`, `@rastai/formats` and `@rastai/catalog` packages into the TS workspace.
+- **Files:** `packages/client/src/{index, constants, connection, login, execute, event-stream, blobs, diagnostics}.ts`; `packages/client/src/*.test.ts` (incl. proto-golden.test.ts); `packages/{proto, formats, catalog}/package.json`
+- **Test:** Transport failures come back as RRS-U outcomes; the stream resumes with the right after_bus_sequence and calls onResync on RRS-C0401; the proto goldens decode and re-encode byte-identical in TS.
+- **Docs:** [Layout: frontend and plugins §3](../architecture/layout/frontend-and-plugins.md), [ADR-0006 UI over HTTP](../adr/0006-ui-transport-http-only.md)
+
+#### M1-51 `@rastai/ui` basics and the Basic/Advanced primitives
+Lane A · size L · type task · depends on M1-50
+
+- **Goal:** The design system's first slice: tokens and base styles, Button, fields, Table, Dialog, Toast, DiagnosticView (Basic and Advanced text from the catalog), ModeProvider, useMode and AdvancedOnly, CommandPaletteView, PanelChrome and FieldForm.
+- **Files:** `packages/ui/src/` (tokens, components, mode primitives, DiagnosticView, CommandPaletteView, PanelChrome, FieldForm); `packages/ui/src/*.browser.test.tsx`
+- **Test:** Component tests in Chromium and WebKit (vitest browser mode); DiagnosticView renders both texts from the generated catalog; AdvancedOnly never hides a Basic control.
+- **Docs:** [Layout: frontend and plugins §2.4, §4](../architecture/layout/frontend-and-plugins.md)
+
+#### M1-52 `@rastai/plugin`: host interface, registry and state tools
+Lane A · size M · type task · depends on M1-51
+
+- **Goal:** The one host interface every section and plugin UI codes against, with the in-process and mock implementations, `registerPluginUi`, createStore and useStore, useQuery invalidated by bus events, useCommand, createLiveBuffer, CommandForm, JobProgress and the generated core command wrappers.
+- **Files:** `packages/plugin/src/` (PluginHost, registry, stores, useQuery, useCommand, LiveBuffer, CommandForm, JobProgress, createMockHost, generated commands); `packages/plugin/src/*.test.ts`
+- **Test:** useQuery refetches on the matching bus event only; a section renders unchanged on the mock host.
+- **Docs:** [Layout: frontend and plugins §2.3, §7](../architecture/layout/frontend-and-plugins.md)
+
+#### M1-53 apps/web shell, embedded in the daemon
+Lane A · size L · type task · depends on M1-52, M1-32
+
+- **Goal:** The frame every section lives in: thin main and boot (sign in, settings, commands, plugins), the window's one DaemonClient, hash routing, the event hub, app stores, the workspace layout tree, and the in-process plugin host that loads core sections through their section.json. The daemon embeds the built app and serves it at `/` with CSP and a no-store index.html.
+- **Files:** `apps/web/{package.json, vite.config.ts, index.html, CLAUDE.md}`; `apps/web/src/{main.tsx, constants.ts, app/, state/, events/, routing/, workspace/, plugin-host/, frame/}`; `crates/rastai-server/{build.rs, src/http/web_assets.rs}`; `justfile`: web-embed
+- **Test:** Unit tests for routes, the layout tree and the event hub (union filter, resume, hidden-tab pause); the daemon serves `/` with the CSP header and index.html as no-store.
+- **Docs:** [Layout: frontend and plugins §8.1, §8.3, §10.2](../architecture/layout/frontend-and-plugins.md), [Layout: Rust control plane §8.1](../architecture/layout/rust-control-plane.md)
+
+#### M1-54 apps/web: the generated palette, copy-as, Settings, Plugins and Remote; Playwright
+Lane A · size L · type task · depends on M1-53, M1-31 · claims L1
+
+- **Goal:** The command palette generated from ListCommands (Ctrl/Cmd-K, Basic filtering, forms, keybindings, copy as CLI, Python, TS and MCP), the Settings section (settings and tokens), Plugins (list only) and Remote (the local node's status). Brings up the Playwright harness and the `e2e-web` CI job.
+- **Files:** `apps/web/src/commands/{command-index, palette-entries, palette-match, view-actions, keybindings, run-command, copy-as, context-arguments}.ts, CommandPalette.tsx`; `apps/web/src/sections/{settings, plugins, remote}/`; `tests/e2e/` (Playwright config, palette.spec.ts, basic-advanced.spec.ts); `ci.yml`: e2e-web
+- **Test:** palette.spec.ts: the palette lists the skeleton commands, Basic mode filters them, system.status runs from it, and 'copy as CLI' equals copy-as.json, which the CLI test parses back. basic-advanced.spec.ts (spec §7, frontend 2.4) for Settings, Plugins and Remote: the interactive elements in Basic (role and accessible name) are a subsequence of those in Advanced, a value typed in Basic survives a switch to Advanced and back, and a per-panel override wins over the global setting. Every later section's UI epic adds its section to this spec.
+- **Docs:** [Layout: frontend and plugins §2.4–2.5, §8.7, §8.9](../architecture/layout/frontend-and-plugins.md)
+
+#### M1-55 apps/desktop: the Tauri window and `rastai open`
+Lane B · size M · type task · depends on M1-54, M1-31
+
+- **Goal:** The shell as a dev build on the owner's box: start or find the daemon with `rastai open --print-url`, open the printed URL, keep one instance (a second launch forwards its file paths), and refuse navigation outside the daemon origin. No HTTP or crypto in the shell, and it never reads owner.token (ADR-0034). Packaging is M6-E05.
+- **Files:** `apps/desktop/{package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/src/}`; `apps/desktop/src-tauri/tests/`
+- **Test:** Launch-line parsing of the DesktopLaunchInfo JSON; a second launch forwards its paths over desktop.sock; navigation to another origin is refused. Manual check in WebKitGTK on the owner's box, noted in the PR.
+- **Docs:** [Layout: frontend and plugins §9](../architecture/layout/frontend-and-plugins.md)
+
+#### M1-56 Threat model v1
+Lane A · size M · type docs · depends on M1-26, M1-29
+
+- **Goal:** Spec §24 and §28 risk 10 give the in-house protocols (gateway auth, MCP, the node protocol) a threat model, fuzzing and review. Write `docs/security/threat-model.md`: the assets (owner.token, scoped tokens and session cookies, conversations and gateway logs in vault.db, secrets, weights and run folders, the GPU box itself); the trust boundaries UI↔daemon (loopback HTTP and daemon.sock), plugin iframe↔host bridge, MCP client↔daemon, daemon↔node over SSH, worker↔node (job socket and worker-host.sock), and sandbox↔node; and for each boundary the attacker, the mitigations, and the test that proves each mitigation, or the epic that will add it. The fuzz targets so far (M1-14, M1-24, M1-26, M1-29) are listed against the parsers they cover. M9-E02 reviews it again once the SSH boundary exists.
+- **Files:** `docs/security/threat-model.md`; `docs/plan/implementation-plan.md` (the 7.3 row 'Threat model reviewed')
+- **Test:** Docs-only PR, exempt from the test rule (plan 3.3). Review checklist in the PR: every boundary row names its attacker, its mitigations and a test or the epic that adds one; every test the document calls existing is green on main; every in-house parser that reads bytes from across a boundary has a fuzz target or a row saying which epic adds it.
+- **Docs:** [Spec §24](../spec/rastai_spec_v5.md), [Spec §28 risk 10](../spec/rastai_spec_v5.md), [Flows: platform §4](../architecture/flows/platform.md), [Layout: node, gateway, proto §4](../architecture/layout/rust-node-gateway-proto.md), [ADR-0007 local API security](../adr/0007-local-api-security.md)
+
+
+---
+
+## 5. M2 Unified runtime
+
+### 5.1 Goal
+
+The ModelSpec compiler becomes the Inspectable runtime for real models (§17, §31 step 2, §32 weeks 5–6): Gemma 3 and Llama with parity tests in CI, the uv environment per backend, `rastai doctor` with its numerical self-test, and model downloads including gated ones, with the First Run checklist that drives them.
+
+### 5.2 Entry criteria
+
+- M1's exit gate passed (M1-48, M1-49). The M1 UI tail may still be landing on lane A; M2 tasks start as lanes free up.
+- The owner's HF token has accepted the Gemma and Llama licenses (for the nightly real-weight parity).
+- The self-hosted runner on the owner's box is registered (8.8), or GPU runs are done by hand and recorded in the PR.
+
+### 5.3 Exit criteria
+
+| # | Criterion | Test |
+|---|---|---|
+| 1 | §32 exit, NVIDIA half: Gemma 3 and Llama pass parity in fp32 and bf16 on the 5080 and the 3090 | `tests/gpu/test_real_weight_parity.py` (M2-10) |
+| 2 | §32 exit, AMD half: the same on a discrete RDNA3+ card | M2-11 (hardware-gated; moves to M10 if the card isn't in) |
+| 3 | Parity on tiny random-weight configs runs on every PR | `parity-cpu` job (M2-08, M2-09) |
+| 4 | Environments install per backend, resumably, and are never forced onto an unsupported GPU | `tests/environments.rs`, kill -9 row 5 (M2-16) |
+| 5 | `rastai doctor` catches wrong numbers, not just failing kernels | the wrong-matmul fake backend test (M2-20) |
+| 6 | Downloads resume, verify and handle gated repos and offline mode | `tests/downloads.rs`, kill -9 row 4 (M2-17) |
+| 7 | First Run minutes 0–3 work from the UI on the cpu environment | `first-run.spec.ts` (M2-21) |
+| 8 | The Rust and Python safetensors readers agree on the 33-file corpus | M2-13 |
+
+### 5.4 Levels at exit
+
+| Section or feature | Level | Proved by |
+|---|---|---|
+| Home: First Run minutes 0–3 (hardware, environment, downloads, HF sign-in, doctor) | L1 | M2-21 |
+| Settings: secrets and the HF sign-in | L1 | M2-18 |
+| Inference: `model.list`, `model.inspect`, `model.download` | L1 | M2-19 |
+| Unified runtime: Gemma 3 and Llama | parity-proven; user-facing at M3 | M2-09, M2-10 |
+| Platform: AMD | open until M2-11 | |
+
+### 5.5 Tasks
+
+| ID | Task | Lane | Size | Depends on | Start–end (lane days) |
+|---|---|---|---|---|---|
+| M2-01 | ModelSpec ops for decoder families (contract) | B | M | M1-18 | 37–38 |
+| M2-02 | rastai_models: observation points, forward context, kernels and traits | B | M | M2-01, M1-35 | 39–40 |
+| M2-03 | rastai_models: decoder blocks (spike port) | B | L | M2-02 | 40–42 |
+| M2-04 | rastai_models: KV caches, including the sliding ring buffer | B | M | M2-03 | 42–43 |
+| M2-05 | rastai_models: decoder graphs, strict loading and sharded weights | B | L | M2-03 | 43–45 |
+| M2-06 | Family base class and the Gemma 3 family | B | M | M2-05, M2-04 | 45–46 |
+| M2-07 | The Llama family | B | M | M2-06 | 46–47 |
+| M2-08 | The parity harness | B | M | M2-06 | 47–48 |
+| M2-09 | Gemma 3 and Llama parity in CI (fp32 and bf16) | B | M | M2-08, M2-07 | 48–49 |
+| M2-10 | Nightly GPU runner and real-weight parity on the 5080 and 3090 | B | M | M2-09, M2-15 | 49–50 |
+| M2-11 | AMD parity on a discrete RDNA3+ card (hardware-gated) | B | M | M2-10, M2-16, M2-20 | hardware-gated |
+| M2-12 | Step-2 contracts: environments, hardware, secrets and model commands (contract) | A | M | M1-22, M1-10 | 38–39 |
+| M2-13 | rastai-formats: the Rust safetensors reader and planner, and the model hash | B | M | M1-14, M1-34 | 35–36 |
+| M2-14 | rastai-transport: the HTTPS client | A | M | M1-41, M1-02 | 39–40 |
+| M2-15 | Locked environments for every backend | A | M | M1-04 | 40–41 |
+| M2-16 | rastai-node: uv environments | A | L | M2-12, M2-15 | 42–44 |
+| M2-17 | rastai-node: Hugging Face downloads | A | L | M2-14, M2-12 | 44–46 |
+| M2-18 | rastai-server: secrets, HF sign-in and the license check | A | M | M2-12 | 41–42 |
+| M2-19 | rastai-server: system and model handlers | A | L | M2-16, M2-17, M2-13, M2-18 | 46–48 |
+| M2-20 | `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint | A | L | M2-16, M2-05, M2-12, M2-22 | 48–50 |
+| M2-21 | Home: the First Run checklist | A | L | M2-19, M2-20, M2-18, M1-54 | 50–52 |
+| M2-22 | rastai-formats: the zip reader and DEFLATE | B | M | M1-14 | 36–37 |
+
+### 5.6 Dependencies
+
+**Figure 5.1: M2 tasks** (M1 tasks they need are marked "(M1)")
+
+```mermaid
+flowchart TD
+  M2_01["M2-01 ModelSpec decoder ops"]
+  M2_02["M2-02 Observation, context"]
+  M2_03["M2-03 Decoder blocks"]
+  M2_04["M2-04 KV caches"]
+  M2_05["M2-05 Loading"]
+  M2_06["M2-06 Gemma 3 family"]
+  M2_07["M2-07 Llama family"]
+  M2_08["M2-08 Parity harness"]
+  M2_09["M2-09 Parity in CI"]
+  M2_10["M2-10 Nightly GPU parity"]
+  M2_11["M2-11 AMD parity"]
+  M2_12["M2-12 Step-2 contracts"]
+  M2_13["M2-13 Rust safetensors"]
+  M2_14["M2-14 HTTPS client"]
+  M2_15["M2-15 Backend locks"]
+  M2_16["M2-16 Node environments"]
+  M2_17["M2-17 HF downloads"]
+  M2_18["M2-18 Secrets and HF login"]
+  M2_19["M2-19 System and model handlers"]
+  M2_20["M2-20 Doctor self-test"]
+  M2_21["M2-21 First Run checklist"]
+  M2_22["M2-22 Zip reader"]
+  M1_18["M1-18 (M1)"]
+  M1_35["M1-35 (M1)"]
+  M1_22["M1-22 (M1)"]
+  M1_10["M1-10 (M1)"]
+  M1_14["M1-14 (M1)"]
+  M1_34["M1-34 (M1)"]
+  M1_41["M1-41 (M1)"]
+  M1_02["M1-02 (M1)"]
+  M1_04["M1-04 (M1)"]
+  M1_54["M1-54 (M1)"]
+  M1_18 --> M2_01
+  M2_01 --> M2_02
+  M1_35 --> M2_02
+  M2_02 --> M2_03
+  M2_03 --> M2_04
+  M2_03 --> M2_05
+  M2_05 --> M2_06
+  M2_04 --> M2_06
+  M2_06 --> M2_07
+  M2_06 --> M2_08
+  M2_08 --> M2_09
+  M2_07 --> M2_09
+  M2_09 --> M2_10
+  M2_15 --> M2_10
+  M2_10 --> M2_11
+  M2_16 --> M2_11
+  M2_20 --> M2_11
+  M1_22 --> M2_12
+  M1_10 --> M2_12
+  M1_14 --> M2_13
+  M1_34 --> M2_13
+  M1_41 --> M2_14
+  M1_02 --> M2_14
+  M1_04 --> M2_15
+  M2_12 --> M2_16
+  M2_15 --> M2_16
+  M2_14 --> M2_17
+  M2_12 --> M2_17
+  M2_12 --> M2_18
+  M2_16 --> M2_19
+  M2_17 --> M2_19
+  M2_13 --> M2_19
+  M2_18 --> M2_19
+  M2_16 --> M2_20
+  M2_05 --> M2_20
+  M2_12 --> M2_20
+  M2_22 --> M2_20
+  M2_19 --> M2_21
+  M2_20 --> M2_21
+  M2_18 --> M2_21
+  M1_54 --> M2_21
+  M1_14 --> M2_22
+```
+
+- **Lane B's runtime chain** (M2-01 → M2-02 → M2-03 → M2-05 → M2-06 → M2-07 → M2-08 → M2-09 → M2-10) is the M2 critical path. It ports the spike's Gemma 3 code into the op library while keeping the precision details that made fp32 bit-identical.
+- **Lane A's chain** (M2-12 → M2-16 and M2-17 → M2-19 → M2-20 → M2-21) is the First Run. M2-20 crosses lanes: the doctor's tiny forward pass uses the compiler from M2-05.
+- **What is persisted:** environments under `<data>/envs/` with a ready marker written last; HF downloads in the user's HF cache, never copied (§19); `<data>/node/hardware_profile.json`; secrets in the keychain only.
+- **Failure branches:** a family that fails parity doesn't ship (§17); its route is the opaque node and compat runtime, which arrive in M6. A gated repo without access stops with the license fix button, never a half-downloaded snapshot.
+
+### 5.7 Lanes week by week: what runs in parallel in the two worktrees
+
+Lane-days continue from M1's count, so M2 starts where each lane finishes its M1 work.
+
+| Lane week | Lane A | Lane B |
+|---|---|---|
+| 8 (days 35–40) | M2-12, M2-14 | M2-13, M2-22, M2-01, M2-02 |
+| 9 (days 40–45) | M2-15, M2-18, M2-16, M2-17 | M2-03, M2-04, M2-05 |
+| 10 (days 45–50) | M2-19, M2-20 | M2-06, M2-07, M2-08, M2-09, M2-10 |
+| 11 (days 50–55) | M2-21 | free for the next milestone |
+
+### 5.8 Task details
+
+#### M2-01 ModelSpec ops for decoder families (contract)
+Lane B · size M · type contract · depends on M1-18
+
+- **Goal:** Extend `rastai.model/1` with what Gemma 3 and Llama need: embedding scale, rms_norm (scale_offset), layer_norm, attention (mha, gqa, sliding with its attributes), rope (linear, llama3 and yarn scaling), feed_forward (dense, gated), residual_add, unembed (tied or untied, final softcap), block instances and repeat, `weights{source, family, name_mapping}`, and the standard observation point names. Settles contracts v1.1's `weights` shape (designer flow Q2: a list) before anything reads it.
+- **Files:** `crates/rastai-formats/src/documents/{model, model_ops}.rs`; `src/validate/meaning/{model_graph, model_shapes}.rs`; `fixtures/documents/rastai.model/` (tiny Gemma 3 and Llama specs); regenerated types
+- **Test:** Tiny Gemma 3 and Llama specs validate; a wrong head count → RRS-E2002 at the edge; round trip keeps the content hash.
+- **Docs:** [Contracts §5.3](../architecture/contracts.md), [Layout: Rust control plane §4.13](../architecture/layout/rust-control-plane.md), [Flows: Designer, Gym, Remote, open question 2](../architecture/flows/designer-gym-remote.md)
+
+#### M2-02 rastai_models: observation points, forward context, kernels and traits
+Lane B · size M · type task · depends on M2-01, M1-35
+
+- **Goal:** The contract between the runtime and every readout: PointHook and DecodeReadout, capture modes, ForwardContext, attention-kernel selection (SDPA by default; math or eager pinned for exact replay; eager where maps are captured) and ModelTraits. CompiledModel calls the hook at every point.
+- **Files:** `python/rastai_models/rastai_models/{observation, forward_context, attention_kernel, model_traits}.py`; `tests/test_observation.py`
+- **Test:** A PointHook sees every standard point name in order; a hook that returns its tensor unchanged leaves outputs bit-identical; pinning selects the math or eager kernel.
+- **Docs:** [Layout: Python §2.2](../architecture/layout/python.md), [ADR-0027 replay from token ids](../adr/0027-replay-from-token-ids.md)
+
+#### M2-03 rastai_models: decoder blocks (spike port)
+Lane B · size L · type task · depends on M2-02
+
+- **Goal:** Port the spike's Gemma 3 blocks into the op library with the precision details that made fp32 bit-identical: RMSNorm in float32 with multiply-before-cast, inverse frequencies on the CPU with float32 angles, float32 softmax; attention as MHA, GQA and sliding with full-pattern and last-token capture (no copy of shared key heads) and the head_outputs point; dense and gated feed-forward; residual add; unembed with softcap.
+- **Files:** `rastai_models/blocks/{embedding, norms, rope, attention, feed_forward, residual, unembed}.py`; `tests/test_blocks.py`
+- **Test:** Each block equals a plain reference computation in fp32; last-token capture equals the last row of the full pattern; GQA allocates no copied key heads.
+- **Docs:** [Layout: Python §2.1, §2.8](../architecture/layout/python.md), [Spike 01](../../spike/README.md)
+
+#### M2-04 rastai_models: KV caches, including the sliding ring buffer
+Lane B · size M · type task · depends on M2-03
+
+- **Goal:** Preallocated key-value caches with dynamic and static writes, the ring-buffer cache for sliding-window layers (spike 02: 110 vs 155 tok/s on long contexts without it), and the cache set chosen from the model's traits.
+- **Files:** `rastai_models/caches/{kv_cache, ring_cache, cache_set}.py`; `tests/{test_kv_cache, test_ring_cache}.py`
+- **Test:** Token-by-token decode equals one full pass; ring decode equals full-cache sliding decode on a prompt that crosses the 512-token window three times.
+- **Docs:** [Layout: Python §2.3](../architecture/layout/python.md), [Spike 02](../../spike/README.md)
+
+#### M2-05 rastai_models: decoder graphs, strict loading and sharded weights
+Lane B · size L · type task · depends on M2-03
+
+- **Goal:** Compile decoder graphs (block instances, repeat), build on the meta device and fill weights strictly with `assign=True`, read one file or a sharded index, run per-family tensor conversion, and find snapshots in the HF cache for the standalone SDK (jobs get folders from job.json).
+- **Files:** `rastai_models/compiler/{graph_order, weights}.py`; `rastai_models/{loading, hf_cache}.py`; `rastai_models/io/weight_files.py`; `tests/test_loading.py`
+- **Test:** A tiny decoder loads from a sharded folder written by our writer; a missing or extra tensor → RRS-M2xxx; peak memory during load stays near the weights' size (meta device).
+- **Docs:** [Layout: Python §2.1–2.2](../architecture/layout/python.md)
+
+#### M2-06 Family base class and the Gemma 3 family
+Lane B · size M · type task · depends on M2-05, M2-04
+
+- **Goal:** The Family base class and registry, and Gemma 3 text as the first family: config fields, (1 + weight) norms, the embedding scale cast to the weight dtype, the final softcap, sliding/full alternation and the name mapping, building a ModelSpec instead of a hand-written module tree.
+- **Files:** `rastai_models/families/{family, registry, gemma3}.py`; `fixtures/models/gemma3/` (tiny config, expected counts); `tests/test_families.py`
+- **Test:** For the tiny config every HF tensor name maps and every parameter fills; find_family picks Gemma 3; parameter counts equal the spec's.
+- **Docs:** [Layout: Python §2.8](../architecture/layout/python.md), [Spec §17](../spec/rastai_spec_v5.md)
+
+#### M2-07 The Llama family
+Lane B · size M · type task · depends on M2-06
+
+- **Goal:** Llama 2 and 3.x as the second family, including llama3 RoPE scaling.
+- **Files:** `rastai_models/families/llama.py`; `fixtures/models/llama/` (Llama 2 and 3.2 tiny configs)
+- **Test:** As M2-06 for both tiny configs.
+- **Docs:** [Spec §17](../spec/rastai_spec_v5.md), [Layout: Python §2.1](../architecture/layout/python.md)
+
+#### M2-08 The parity harness
+Lane B · size M · type task · depends on M2-06
+
+- **Goal:** The per-family parity suite of §17: the only test-time transformers wrapper, the spike's prompt set (short, chat, code, and a long one that crosses the sliding window three times), detection of template-forced positions, the criteria constants, and the `parity-cpu` CI job on tiny random-weight configs written by our writer. transformers sits in the dev group only.
+- **Files:** `tests/parity/{hf_reference, parity_prompts, template_forced}.py`; `tests/conftest.py`; `justfile`: parity; ci.yml: parity-cpu
+- **Test:** Identical models give zero difference; a perturbed weight fails with the position and |Δlogit|; template-forced positions are found on a Gemma chat template.
+- **Docs:** [Layout: Python §12](../architecture/layout/python.md), [Spike 01, 01b](../../spike/README.md)
+
+#### M2-09 Gemma 3 and Llama parity in CI (fp32 and bf16)
+Lane B · size M · type test · depends on M2-08, M2-07
+
+- **Goal:** Both prototype families pass the parity criteria on tiny random-weight configs on every PR.
+- **Files:** `tests/parity/{test_gemma3_parity, test_llama_parity}.py`
+- **Test:** fp32: max |Δlogit| ≤ 5×10⁻³ with top-1 agreement on every scored position (eager Gemma 3 bit-identical); bf16: drift from fp32 no worse than the reference's own; decode equals one full pass; template-forced positions skipped.
+- **Docs:** [Layout: Python §12](../architecture/layout/python.md), [Spec §17](../spec/rastai_spec_v5.md)
+
+#### M2-10 Nightly GPU runner and real-weight parity on the 5080 and 3090
+Lane B · size M · type ci · depends on M2-09, M2-15 · needs:gpu
+
+- **Goal:** The self-hosted runner on the owner's box (plan 8.8) and the first GPU tests: real-weight parity for Gemma 3 1B-it and Llama 3.2 1B on both GPUs. The workflow runs on a schedule and by hand, on main only, never for pull requests.
+- **Files:** `.github/workflows/nightly-gpu.yml`; `tests/gpu/{conftest, test_real_weight_parity}.py`; `justfile`: test-gpu
+- **Test:** Both models pass parity on the 5080 and the 3090 (Gemma 3 fp32 eager bit-identical as in spike 01; bf16 with the kernel pinned).
+- **Docs:** [Spec §29 GPU tests](../spec/rastai_spec_v5.md), [Spike 01](../../spike/README.md)
+
+#### M2-11 AMD parity on a discrete RDNA3+ card (hardware-gated)
+Lane B · size M · type test · depends on M2-10, M2-16, M2-20 · needs:gpu, needs:amd
+
+- **Goal:** The AMD half of the M2 exit: once a discrete RDNA3+ card is in the owner's box, add its gfx target to the rocm environment, register the runner label `gpu-amd`, and run the parity suite and the doctor self-test on ROCm. If the card isn't in by the end of M2, this issue moves to M10 (spec §0.16).
+- **Files:** `python/envs/environments.json` (the card's gfx target); `tests/gpu/` (ROCm parametrization); `.github/workflows/nightly-gpu.yml` (gpu-amd job)
+- **Test:** Parity and the doctor self-test pass on ROCm; the Ryzen iGPU (gfx1036) is still refused and falls back to CPU with the reason shown.
+- **Docs:** [Spec §0.16, §4](../spec/rastai_spec_v5.md), [Spike 05](../../spike/README.md), [ADR-0014 platform tiers](../adr/0014-platform-tiers.md)
+
+#### M2-12 Step-2 contracts: environments, hardware, secrets and model commands (contract)
+Lane A · size M · type contract · depends on M1-22, M1-10 · claims L0
+
+- **Goal:** Everything M2 code names, registered as honest L0 stubs: `environments.proto` (EnsureEnvironment with plugin fields, EnvironmentProgress, EnvironmentInfo), self-test fields on HardwareProfile, NodeHubService.GetSecret; commands system.hardware, system.env.list, system.env.install, system.doctor, system.bundle, secret.set, secret.delete, secret.list, hf.login, hf.license.check, model.list, model.inspect and model.download with ModelDownloadPlan (with `files` and `headers_only`) and EnvironmentInstallPlan; download event payloads.
+- **Files:** `proto/rastai/node/v1/environments.proto, node_service.proto, node_hub_service.proto`; `proto/rastai/common/v1/hardware.proto`; `crates/rastai-formats/src/commands/{system, secret, hf, model}.rs, src/documents/plans.rs`; `crates/rastai-core/src/commands/table.rs` (rows); goldens and regenerated types
+- **Test:** Goldens round-trip; command_table and commands_described pass; the L0 floor covers every new row.
+- **Docs:** [Layout: node, gateway, proto §3.6](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §1](../architecture/flows/platform.md), [Contracts §6.4](../architecture/contracts.md)
+
+#### M2-13 rastai-formats: the Rust safetensors reader and planner, and the model hash
+Lane B · size M · type task · depends on M1-14, M1-34
+
+- **Goal:** Port the bake-off reader without memmap2 and its unsafe block (header read with two plain reads, tensors read on demand), keep the strict contract and its codes, add the layout planner for writing and `model_hash`. The daemon needs headers for model.inspect and the node for lease estimates.
+- **Files:** `crates/rastai-formats/src/safetensors/{dtypes, reader, writer}.rs`; `src/hashing.rs` (model_hash); `tests/safetensors_corpus.rs`; `fuzz/fuzz_targets/safetensors_header.rs`; `wheel`: check_safetensors_header
+- **Test:** The 33-file corpus gives the same verdict and code in Rust and Python; a [2³², 2³²] shape → RRS-E6012 without wrapping.
+- **Docs:** [Layout: Rust control plane §4.5, §4.12](../architecture/layout/rust-control-plane.md), [ADR-0029](../adr/0029-strict-safetensors-contract.md)
+
+#### M2-14 rastai-transport: the HTTPS client
+Lane A · size M · type task · depends on M1-41, M1-02
+
+- **Goal:** The HTTPS half of `http_client.rs` (hyper, rustls, webpki-roots, streaming bodies, per-request timeouts), the only file that imports them. Needed for HF downloads now and API adapters in M3.
+- **Files:** `crates/rastai-transport/src/http_client.rs`; `tests/http_client.rs` (local server with a test CA)
+- **Test:** Chunked streaming works; a per-request timeout fires; a bad certificate is refused.
+- **Docs:** [Layout: node, gateway, proto §4.2, §4.5](../architecture/layout/rust-node-gateway-proto.md)
+
+#### M2-15 Locked environments for every backend
+Lane A · size M · type ci · depends on M1-04
+
+- **Goal:** One uv project and hash-pinned lock per backend (cuda13, cuda126, rocm) beside cpu, the selection table with supported AMD gfx targets and the measured download sizes from spike 05, and the `env-locks` CI job that resolves every lock (§28 risk 11).
+- **Files:** `python/envs/{cuda13, cuda126, rocm}/{pyproject.toml, uv.lock}`; `python/envs/environments.json`; `python/envs/README.md`; `ci.yml`: env-locks
+- **Test:** CI resolves every lockfile and fails on an unexpected hash change; every package in every lock is in deps/allowlist-python.json.
+- **Docs:** [Layout: Python §11](../architecture/layout/python.md), [Spike 05](../../spike/README.md)
+
+#### M2-16 rastai-node: uv environments
+Lane A · size L · type task · depends on M2-12, M2-15
+
+- **Goal:** The node is the only process that runs uv: pick the environment from the hardware (never forcing ROCm on an unsupported chip), `uv sync --frozen` into `<data>/envs/<id>-<lock_hash12>` with the variables of the node layout §7.6, write the ready marker last, verify with `python -m rastai_worker check`, and stream progress through EnsureEnvironment. Replaces the `just env-cpu` stopgap.
+- **Files:** `crates/rastai-node/src/environments.rs`; `node_service.rs` (EnsureEnvironment); `python/rastai_worker/rastai_worker/check.py` (the `check` subcommand); `deps/engines/uv.json`; `tests/environments.rs` (fake uv on PATH)
+- **Test:** The pick table (sm_120 → cuda13, sm_61 → cuda126, gfx1036 → cpu with the reason, never HSA_OVERRIDE_GFX_VERSION); a killed sync leaves no ready marker and the next ensure rebuilds (kill -9 row 5); disk below the plan → RRS-S3001 before anything downloads.
+- **Docs:** [Layout: node, gateway, proto §7.6](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §1.3](../architecture/flows/platform.md), [Flows: Designer, Gym, Remote C4](../architecture/flows/designer-gym-remote.md)
+
+#### M2-17 rastai-node: Hugging Face downloads
+Lane A · size L · type task · depends on M2-14, M2-12
+
+- **Goal:** The in-house HF Hub client as the node-native `download` job: revision to file list, Range resume, `.incomplete` then rename, snapshot symlinks in the standard cache layout, SHA-256 checks through the rustls crypto provider, gated-model errors, offline mode, and download.progress on WatchLive.
+- **Files:** `crates/rastai-node/src/{hf_cache, downloads}.rs`; `fixtures/hf-server/` (a local fake of the HF endpoints the client uses); `tests/downloads.rs`
+- **Test:** Resume after an interruption at 50% with a matching hash (kill -9 row 4); gated 401 or 403 → the gated-model code with the hf.license.check fix; HF_HUB_OFFLINE → the offline code with no network call; HF tools can read the resulting snapshot.
+- **Docs:** [Layout: node, gateway, proto §7.9](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §1.4–1.5](../architecture/flows/platform.md)
+
+#### M2-18 rastai-server: secrets, HF sign-in and the license check
+Lane A · size M · type task · depends on M2-12
+
+- **Goal:** Secrets in the OS keychain through the one keyring wrapper, with the kernel keyring and then an encrypted file as headless fallbacks; `secret.*`, hf.login (verified), hf.license.check, and NodeHubService.GetSecret handing a short-lived HF token to a download job only.
+- **Files:** `crates/rastai-server/src/secrets.rs`; `src/commands/handlers/system.rs` (`secret.*`, `hf.*`); `src/nodes/node_hub.rs` (GetSecret); `tests/secrets.rs` (fake keychain)
+- **Test:** set, list (names only) and delete against a fake keychain; the journal redacts the token field; GetSecret refuses unknown purposes; the fallback warns once with RRS-S4001.
+- **Docs:** [Layout: Rust control plane §8.3](../architecture/layout/rust-control-plane.md), [Contracts §8.5](../architecture/contracts.md), [Flows: platform §1.4](../architecture/flows/platform.md)
+
+#### M2-19 rastai-server: system and model handlers
+Lane A · size L · type task · depends on M2-16, M2-17, M2-13, M2-18 · claims L1
+
+- **Goal:** The First Run's commands for real: system.hardware, system.env.list and system.env.install (plan, then job), model.list, model.inspect (config, model_type, size, license, gated flag, fits per GPU from safetensors headers, model hash) and model.download (plan with sizes and licenses, free-space check, then job); download.finished indexed into `models`.
+- **Files:** `crates/rastai-server/src/commands/handlers/{system, model}.rs`; `crates/rastai-store/src/index/` (models rows); `tests/model_commands.rs`
+- **Test:** Dry-run plans carry sizes and licenses and change nothing; a model.download job resumes after a daemon kill; model.inspect on the tiny fixture folders.
+- **Docs:** [Flows: platform §1.1–1.5](../architecture/flows/platform.md), [Spec §6, §25](../spec/rastai_spec_v5.md)
+
+#### M2-20 `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint
+Lane A · size L · type task · depends on M2-16, M2-05, M2-12, M2-22 · claims L1
+
+- **Goal:** The 20 s self-test that checks numbers, not just that kernels run (spike 05): matmuls and a tiny forward pass on each GPU against a CPU reference. Plus vram.py (applies granted leases from job.json when present), the hardware fingerprint (spike reporting.py port), system.doctor and the cached hardware profile. Plus `system.bundle` (`rastai doctor --bundle`, platform flow 1.6): logs, the hardware profile, versions, settings and the last failed jobs' stderr tails in one stored zip, through the small `zip/writer.rs` (`write_zip_stored`); `<config>/auth/` is never read.
+- **Files:** `python/rastai_worker/rastai_worker/jobs/doctor_selftest.py`; `rastai_worker/{vram, hardware_fingerprint}.py`; `crates/rastai-server/src/commands/handlers/system.rs` (system.doctor, system.bundle); `crates/rastai-formats/src/zip/writer.rs`; `<data>/node/hardware_profile.json`, written by rastai-node; `tests/test_doctor_selftest.py`
+- **Test:** A fake backend with a wrong matmul fails with RRS-H1001 for that GPU and falls back to CPU; exceeding the budget → RRS-H1003; every HardwareFingerprint field is filled on CPU; system.bundle writes a zip whose entries the zip reader lists as expected, with nothing from `<config>/auth/`; nightly: passes on the 5080 and the 3090.
+- **Docs:** [Flows: platform §1.6](../architecture/flows/platform.md), [Spec §22, §25](../spec/rastai_spec_v5.md), [Spike 05](../../spike/README.md)
+
+#### M2-21 Home: the First Run checklist
+Lane A · size L · type task · depends on M2-19, M2-20, M2-18, M1-54 · claims L1
+
+- **Goal:** Minutes 0–3 of the First Run (§6) in the Home section: hardware summary (saying plainly when no GPU is usable and offering the 270M model), download sizes per backend before starting, HF sign-in with the license text, environment install and downloads in parallel, then doctor. Derived from state, so a crash part-way resumes where it stopped.
+- **Files:** `apps/web/src/sections/home/{HomeSection, OutcomeCard, FirstRunChecklist, HardwareSummary, DownloadSizes, HfSignIn}.tsx`; `tests/e2e/first-run.spec.ts`
+- **Test:** first-run.spec.ts against the fixture HF server, the cpu environment and a tiny model: hardware → plans with sizes and license → sign-in for a gated fixture repo → install and download in parallel → doctor → Chat ready; reloading mid-way resumes.
+- **Docs:** [Layout: frontend and plugins §8.2, §8.9](../architecture/layout/frontend-and-plugins.md), [Flows: platform §1.1](../architecture/flows/platform.md), [Spec §6](../spec/rastai_spec_v5.md)
+
+#### M2-22 rastai-formats: the zip reader and DEFLATE
+Lane B · size M · type task · depends on M1-14
+
+- **Goal:** Zip reading with every cap checked from the central directory before anything is inflated, and the in-house DEFLATE decoder. Moved from step 1 to here because nothing in M1 opens an archive; M3's pinned llama-server builds and M4's preinstalled plugins do.
+- **Files:** `crates/rastai-formats/src/zip/{reader, inflate}.rs`; `fuzz/fuzz_targets/{zip_reader, inflate}.rs`; `tests/zip.rs`
+- **Test:** Stored and deflate archives read; zip slip → RRS-E5001; a bomb ratio → RRS-E5002 before inflating; a truncated central directory is refused; inflate stops at the declared size.
+- **Docs:** [Layout: Rust control plane §4.5](../architecture/layout/rust-control-plane.md)
+
+
+---
+
+## 6. M3–M10: epics
+
+Each epic is cut into PR-sized tasks (half a day to two days) when its milestone starts, in the same shape as M1 and M2: contract PR first, a test per PR. "Claims" is the level the epic brings its feature to. Epics marked 90-day are in §32's slices.
+
+### 6.1 M3 Inference (§32 weeks 7–8)
+
+- **Goal:** chat through the in-house gateway on either runtime, with every call logged by token IDs, and the OpenAI and Anthropic endpoints for Navi.
+- **Entry:** M2's NVIDIA exit (M2-10); the pinned llama.cpp build chosen and hashed for each backend.
+- **Exit:** Navi chats through `/v1` with token-ID logging and the runtime toggle working (M3-E07's `navi_chat.rs`); `chat.spec.ts` and `reconnect.spec.ts` pass; the nightly twin-parity and decode-speed checks are green.
+- **Levels at exit:** Inference L1; Home L1 through "chat"; Platform gains projects (M3-E11).
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M3-E01 | Inference contracts (90-day, contract) | 3 | M2-12 | L0 | Goldens round-trip; commands_described passes; the L0 floor covers every new row. |
+| M3-E02 | Vault, conversation tree and imports (90-day) | 4 | M3-E01 | L1 | tests/vault.rs (tree with branches, retention by age); tests/secure_delete.rs (deleted text is absent from the file bytes); ChatGPT imports keep their branches; text-only imports are flagged approximate. |
+| M3-E03 | Node: VRAM leases, model table and generation routing (90-day) | 4 | M3-E01 | L1 | tests/leases.rs: grant, deny with RRS-H3001, reclaim least recently used, pinned never reclaimed, an evictable request never reclaims (plan section 10, row 25), foreign VRAM counted; every model state transition. |
+| M3-E04 | Inspectable serving: static decode, sessions and CUDA graphs (90-day, needs gpu) | 5 | M3-E03, M2-09 | L1 | test_decoding (static step equals dynamic on CPU; seeded sampling repeats) and test_sessions; nightly GPU: two models captured on GPU 0 and GPU 1 in one process; Gemma 3 1B bf16 decodes at ≥ 145 tok/s on the 5080 (spike 150–155). |
+| M3-E05 | Fast runtime: the managed llama-server (90-day) | 4 | M3-E03, M3-E06, M2-22 | L1 | tests/fast_runtime.rs (launch, stream, crash mid-stream RRS-G3003, queue full RRS-G3006, probe mismatch RRS-G1004); tests/crash/serve_reattach against the mock: after a daemon kill -9 the Fast model is ready with the same pid and no reload; nightly: the pinned CUDA build streams the same tokens as the spike's f16 run. |
+| M3-E06 | Gateway core: tokenizer, chat templates, prompts and logging (90-day) | 5 | M3-E01 | L1 | tests/tokenizer_parity.rs (0 mismatches; the whole-spec case is not truncated); tests/chat_templates.rs (rendered prompts equal HF apply_chat_template per family); tests/logging.rs (exactly one record per request, none when incognito). |
+| M3-E07 | Endpoints and chat: /v1, `chat.*` and model.load (90-day) | 5 | M3-E02, M3-E04, M3-E05, M3-E06 | L1 | tests/e2e/navi_chat.rs: an OpenAI client library chats through /v1 with the runtime toggled between turns, and every turn has a gateway_log row with prompt and generated IDs; streaming_latency (no 40 ms stalls); kill -9 the daemon mid-stream: after restart the user row exists and no half-written assistant row does, the serve worker was reattached without a reload, and Regenerate works (`tests/crash/chat_daemon_kill`; plan section 10, row 23). |
+| M3-E08 | Third-party API adapters (90-day) | 3 | M3-E06, M2-18 | L1 | Against a mock API server over local TLS: streaming, OpenAI logprobs, 429 → RRS-G2003, provider error → RRS-G2002, missing key → RRS-G2001; text and logprobs are logged, never token IDs; with `privacy.data_policy` local-only an API chat is refused with RRS-C1009 before any request leaves (plan section 10, row 37). |
+| M3-E09 | Inference section UI (90-day) | 5 | M3-E07 | L1 | Playwright chat.spec.ts (send, stream, stop, branch, star, pin, incognito never stored; the egress badge is on while a model downloads from the fake HF server and off for a local chat) and reconnect.spec.ts (after a daemon kill -9 the UI resyncs, shows the user message and offers Regenerate; plan section 10, row 23). |
+| M3-E10 | Replay twins, tool calls and nightly checks (90-day, needs gpu) | 3 | M3-E07 | L1 | Nightly twin parity green (f16 GGUF vs fp32 Inspectable greedy tokens identical, spike 04); load floor met; jitter recorded. |
+| M3-E11 | Projects: create, open, lock resolution, export and import | 4 | M3-E01 | L1 | A project exported with embedded weights opens on a clean data dir with the network off; a project whose `rastai.lock` names a missing plugin opens with the banner; kill -9 during `project.import` leaves no half project. |
+
+M3-E11 (projects, spec §15) isn't in §32's weeks 7–8. It runs after the 90 days; until then documents live in the default project folder (`<data>/projects/`).
+
+### 6.2 M4 Psychology (slice §32 weeks 9–10)
+
+- **Goal:** see inside the model live and on replay, steer it, and branch; then the advanced views.
+- **Entry:** M3 exit; Gemma Scope 2 SAEs for layers 7, 13 and 22 in the HF cache.
+- **Slice exit (weeks 9–10):** First Run minutes 3–7 on an 8 GB budget: confidence shading, click a word for what it almost said and the active concepts, drag a concept slider and watch the answer change, open a replay. Proved by `psychology-live.spec.ts`, the steering tests, the replay tests and the nightly panel budget (≤ +35% at CUDA-graph speed, §34's proposed budget), plus a timed run on the 5080 capped at 8 GiB, recorded in the PR.
+- **Full exit:** every `psychology.*` command at L1; a replay opens in the web viewer with no daemon.
+- **Levels at exit:** Psychology L1; Plugins gain the first plugin module.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M4-E01 | Psychology contracts (90-day, contract) | 3 | M3-E01 | L0 | Goldens; the manifest validates; the L0 floor covers `psychology.*`. |
+| M4-E02 | Plugin modules and first-party packaging (90-day) | 4 | M4-E01, M2-22 | L1 | A fixture module answers a command through Execute; with network off it can't open a TCP socket; four crashes in five minutes disable it (RRS-P4003); a preinstalled archive unpacks once. |
+| M4-E03 | Live readouts in the decode step (90-day, needs gpu) | 5 | M3-E04, M4-E01 | L1 | test_live_packet (fused packet equals the unfused reference); nightly test_live_panel_budget: overhead ≤ +35% at CUDA-graph speed on the 5080 capped at 8 GiB, packet about 8.3 KB; test_gemma_scope_sanity (57–63 features per token). |
+| M4-E04 | Psychology UI: the Basic lenses (90-day) | 5 | M4-E03, M3-E09 | L1 | psychology-live.spec.ts with a recorded packet stream (dropped packets marked); clicking a token shows what it almost said and the active concepts; accessibility.spec.ts: axe-core finds no violation on every section so far in both modes, every chart has its table, and the token timeline works by keyboard alone. |
+| M4-E05 | The steering slider (90-day) | 3 | M4-E03 | L1 | Strength 0 is bit-identical to no hook; a strength change alters the next tokens without a recapture (counter test); slider.spec.ts: 40 moves in 2 s make at most 40 `chat.settings.set` calls, and the recapture counter rises by exactly one, for the first set at a point; later strength changes cause none; GPU: the change lands within one token. |
+| M4-E06 | Replay and the web viewer (90-day) | 5 | M4-E03, M4-E01 | L1 | A replay of a stored chat equals its live packets (exact fidelity with the kernel pinned); summary under 5 MB per 2k tokens; the viewer opens a fixture .rrsreplay offline; WASM under 1.5 MB gzipped. |
+| M4-E07 | Branching and Prefer this branch (90-day) | 4 | M4-E05, M5-E01 | L1 | A fork at index i continues exactly like a fresh prefill; prefer creates a dataset row with lineage; undo_property (random edits, then undo all, gives the original bytes). |
+| M4-E08 | Model diff and the SAE fit check (90-day) | 4 | M4-E03, M4-E02 | L1 | A model diffed against itself is zero; a planted feature shift is flagged; labels go stale below the threshold. |
+| M4-E09 | Steering presets: save, serve, distill | 3 | M4-E05, M3-E07, M5-E03 | L1 | steering_presets.rs (routes to Inspectable, sets interventions, always closes its session); a served preset over /v1 matches the in-app steered output. |
+| M4-E10 | Advanced views I: projections, probes and 3D flow | 5 | M4-E04, M4-E06 | L1 | New points never move old ones; the viz bench holds the refresh cap on the spike 06 scene nightly; with reduced motion on, the 3D flow view doesn't animate (accessibility.spec.ts). |
+| M4-E11 | Advanced views II: attribution graphs and observe() | 5 | M4-E10, M6-E03 | L1 | Attribution on a tiny model matches brute-force ablation within tolerance; observe() gives full points on a compiled model and edge points on nn.Sequential. |
+| M4-E12 | Training view | 3 | M4-E10, M5-E04 | L1 | training-view.spec.ts on a fixture run with three checkpoints: three frames; frame one equals a standalone `psychology.projection.run` on that checkpoint; a checkpoint removed by GC shows as a gap, not an error. |
+
+M4-E07 and M4-E08 belong to the weeks 11–12 loop and wait for M5-E01's dataset contract. M4-E11 reuses the canvas built in M6-E03. M4-E12 (the Training view, spec §9) needs runs with several checkpoints, so it waits for M5-E04.
+
+### 6.3 M5 Training and Evaluation (slice §32 weeks 11–12)
+
+- **Goal:** Teach it as the one-button loop with Verify, then every recipe, data import and export.
+- **Entry:** the M4 slice gate; M4-E07 and M4-E08 run inside this slice.
+- **Slice exit (weeks 11–12):** the full loop (branch → DPO pair → LoRA → behavior test → before/after) runs in under 10 minutes from a cold start; the eval suite catches the invented fact that keyword checks miss (`test_invented_fact`); `rastai eval test` gates by exit code.
+- **Full exit:** every recipe of §10 at L1, including the RLHF chain; Evaluation's metrics at L1; GGUF exports run in llama-server; preemption resumes with nothing lost.
+- **Levels at exit:** Training, Data and Evaluation L1.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M5-E01 | Training and Evaluation contracts (90-day, contract) | 3 | M4-E01 | L0 | Goldens; the L0 floor covers every new row. |
+| M5-E02 | Node gateway and training-data tokenization (90-day) | 4 | M5-E01, M3-E07 | L1 | target_mask fixtures (a prefix-unstable template is refused with RRS-G1006); a job's request is logged exactly once on each path. |
+| M5-E03 | Teach it training: LoRA, answer-only loss and anchors (90-day, needs gpu) | 5 | M5-E02, M2-09 | L1 | test_lora, test_losses, test_anchors; DPO loss = log 2 at init; nightly test_teach_it_budget: 40 examples under 180 s, peak within 10% of 4.7 GiB with chat resident (leases_chat_and_teach). |
+| M5-E04 | Chains, run management, storage and lineage (90-day) | 5 | M5-E03 | L1 | A chain with fake jobs stops at a failed stage with that stage's code; GC keeps pinned, live and young items (kill -9 row 10); tags and pins survive a rebuild; a write past the quota → RRS-S3003 with GC as the fix; the storage view's totals equal `storage.usage`; the lineage panel shows replay → pair → dataset → run → checkpoint for a Teach it run. |
+| M5-E05 | Evaluation plugin v0 (90-day) | 5 | M5-E01, M5-E02, M4-E02 | L1 | test_invented_fact: the spike's invented-fact answer passes keyword checks and fails the judge plus drift suite; `rastai eval test` exits 0 (passed), 1 (failed) or 2 (errored, cancelled or refused), per ADR-0020. |
+| M5-E06 | The loop end to end: Teach it and Verify (90-day) | 5 | M5-E04, M5-E05, M4-E07, M4-E08 | L1 | teach-it-loop.spec.ts; tests/loop green in CI; the timed run from a cold start on the 5080 under 10 minutes, recorded in the PR. |
+| M5-E07 | Data import, checks and converters | 5 | M5-E01 | L1 | The task detection table; dedupe and leakage on fixtures; PII redacted on export; a generated converter runs on its preview; a Croissant file round-trips through import and export. |
+| M5-E08 | The RLHF chain: reward model, PPO, GRPO and GSPO | 5 | M5-E03, M5-E04 | L1 | The reward model separates synthetic pairs; PPO KL = 0 at init; GRPO vs GSPO ratio math; the chain runs on a tiny model on CPU; best-of-n with a fixture reward model returns the highest-scoring of n samples; GPU: PPO fits where LoRA fits. |
+| M5-E09 | Recipes III: pretraining, SAE training, QLoRA, multi-GPU, sweeps (needs gpu) | 5 | M5-E03 | L1 | SAE reconstruction improves; nightly test_qlora on sm_120 and sm_86 and test_ddp_two_gpus; a sweep runs N trials. |
+| M5-E10 | The sandbox manager | 5 | M5-E01 | L1 | Create, exec and remove against Podman in CI; the cap → RRS-R1001; a node killed with sandboxes adopts and sweeps them. |
+| M5-E11 | Evaluation complete | 5 | M5-E05, M5-E10, M5-E08 | L1 | Pass@k against known values; Elo is order-independent; pairwise judging sees both orders and counts disagreement as a tie; the regression diff lists changed tests. |
+| M5-E12 | Training UI and experiment tracking | 5 | M5-E04 | L1 | Two runs overlay; imported logs equal their source values; rastai.log() spools while the daemon is down and imports later; the script `run.notebook` writes for a TextCNN run reproduces its metrics on CPU in deterministic mode; the live dashboard opens in a second window (spec §10) and keeps updating from its own event stream while the first window chats. |
+| M5-E13 | Export and provenance (needs gpu) | 4 | M5-E03 | L1 | Merged weights give the adapter-on logits; the GGUF header matches its golden; nightly: an f16 export generates the same tokens in llama-server as fp32. |
+| M5-E14 | Preemption-safe resume | 3 | M5-E04 | L1 | A resumed run equals an uninterrupted one on CPU in deterministic mode; a kill -9 mid-checkpoint leaves nothing partial visible. |
+| M5-E15 | Plugin event handlers | 3 | M4-E02, M5-E01 | L1 | A pin made while the eval module is disabled appears in `evals/pinned.rrseval` after enable; a pin repeated is added once; a daemon kill -9 between index and dispatch still runs exactly one auto-eval; five checkpoints saved while the GPU is busy end with one eval per suite, on the newest. |
+
+M5-E15 builds the dispatcher behind the manifest field `contributes.event_handlers[]` (training-evaluation 7.1, 10.1, §16): auto-run on `checkpoint.saved` and pinned conversations becoming tests. It runs after the 90 days. Until it lands, `eval.run_on_new_checkpoint` (default true, contracts §11.2) has no effect and pins don't become tests; the loop doesn't need it, because Teach it's Verify runs its suite as a chain stage (M5-E04, M5-E06).
+
+### 6.4 M6 Designer (slice §32 week 13)
+
+- **Goal:** the professional designer whose model is the runtime, and every architecture family of §11 and §17.
+- **Entry:** the M5 slice gate. The play button needs only `train.start` and job progress, which exist since M1.
+- **Slice exit (week 13):** design → train → ONNX export works from the UI (`designer.spec.ts`); AppImage and `.deb` build and launch (nightly smoke); the months-4+ plan is written (M6-E06).
+- **Full exit:** the HF import golden test passes for every supported family; MoE, MLA and ALiBi families pass parity; DeepSeek-V2-Lite runs across both GPUs; the CPU loop (design → train → eval → ONNX → re-import) runs in CI under 10 minutes (§29).
+- **Levels at exit:** Designer L1.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M6-E01 | Designer contracts (90-day, contract) | 3 | M5-E01 | L0 | Corpus for overlapping input ranges (RRS-E2004), block references and repeat; the L0 floor covers `design.*`. |
+| M6-E02 | ModelSpec analysis: live stats (90-day) | 3 | M6-E01 | L1 | Parameter counts equal the PyTorch module counts for TextCNN, tiny Gemma 3 and Llama (modelspec_stats.rs). |
+| M6-E03 | Thin Designer: canvas editing and the TextCNN template (90-day) | 5 | M6-E02 | L1 | designer.spec.ts first half (TextCNN template, edit, stats update, undo); nightly canvas bench: 1,000 nodes at the refresh cap in Chrome and WebKitGTK. |
+| M6-E04 | Import, compile, train and ONNX export from the UI (90-day) | 5 | M6-E03, M2-09 | L1 | designer.spec.ts: design → train → ONNX export from the UI; an unknown model_type imports as an opaque node with diagnostics, never an exception. |
+| M6-E05 | Linux packaging and updates (90-day) | 4 | M1-55, M6-E04 | L1 | Nightly on the owner's box: the AppImage launches, a daemon comes up, double-clicking a fixture .rrsreplay journals file.open; a tampered package is refused (RRS-U0105); crash reports (spec §24, platform flow §11): a daemon kill -9 leaves one redacted local report on the next start, the review prompt shows only with `privacy.crash_reports` on, and nothing leaves the machine through Rastai (sending is a GitHub issue the user files by hand). |
+| M6-E06 | The months-4+ plan and level audit (90-day) | 2 | M6-E04 | none | The plan PR is merged. |
+| M6-E07 | Dense families II: Qwen, Mistral, GPT-2, BERT, ViT | 5 | M2-09 | L1 | Tiny-config parity in CI for each family; the HF import golden test (import → compile → logits match) per family; nightly real weights for one size each. |
+| M6-E08 | Mixture of experts (needs gpu) | 5 | M6-E01, M6-E07 | L1 | Loop equals gather; tiny-config parity per family; nightly OLMoE-1B-7B real-weight parity on one GPU. |
+| M6-E09 | MLA and layer placement across GPUs (needs gpu) | 5 | M6-E08 | L1 | Plain equals absorbed; nightly DeepSeek-V2-Lite across the 5080 and the 3090 within tolerance. |
+| M6-E10 | ALiBi and attention residuals | 3 | M6-E01 | L1 | ALiBi bias values; BLOOM and MPT tiny parity; an AttnRes design compiles and trains, and its lens is labeled approximate. |
+| M6-E11 | Templates, composition and hierarchy | 5 | M6-E04 | L1 | Every template compiles and trains one step on CPU; overlapping ranges are caught; an 80-block model stays under the node limit with collapse. |
+| M6-E12 | Round trips: Eject, ONNX import, torch.export, rastai.load, compat runtime | 5 | M6-E04 | L1 | test_eject (runs with only torch installed); tests/loop under 10 minutes in CI (§29); the compat runtime chats with an unsupported architecture. |
+
+### 6.5 M7 Agent Gym
+
+- **Goal:** the in-house RL engine on harnesses, with sandboxes, peek and step mode (Linux only, §0.6).
+- **Entry:** M5's RLHF chain (M5-E08) and the sandbox manager (M5-E10).
+- **Exit:** GRPO on a harness end to end with sandboxes; step mode keeps group advantages correct; Harbor tasks import; orphans are swept after a kill -9.
+- **Levels at exit:** Agent Gym L1.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M7-E01 | Agent Gym contracts (contract) | 2 | M5-E10 | L0 | Goldens; the L0 floor covers the gym rows. |
+| M7-E02 | Harness editor, MCP import/export and network allowlists | 5 | M7-E01 | L1 | fixtures/harness-import both ways; client tests including a server crash mid-call; a sandbox with `network_hosts` reaches a listed host through the proxy and nothing else. |
+| M7-E03 | The multi-turn RL engine | 5 | M7-E02, M5-E08 | L1 | GRPO on a toy harness raises reward on CPU with sandboxes; traces are logged with token IDs. |
+| M7-E04 | Live peek and step mode | 4 | M7-E03 | L1 | Step mode keeps advantages correct (recomputed or marked partial); peek overhead is measured. |
+| M7-E05 | Harbor import and agent scoring | 3 | M7-E03, M5-E11 | L1 | fixtures/harbor tasks import and run; reward and eval share one definition. |
+| M7-E06 | Gym UI, traces in Psychology, crash safety | 5 | M7-E04 | L1 | A gym e2e spec; kill -9 the node with sandboxes: orphans are swept and the run resumes. |
+
+### 6.6 M8 Plugins
+
+- **Goal:** the plugin SDK extracted from two working first-party plugins (§2: extract APIs, don't invent them).
+- **Entry:** Psychology and Evaluation complete on the public API (M4, M5).
+- **Exit:** `just test-templates` passes for every template; local `.rrsplugin` install with the trust prompt; "install missing" for files that need plugins; an iframe plugin can't reach the network or cookies.
+- **Levels at exit:** Plugins L1.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M8-E01 | Plugin SDK contracts (contract) | 2 | M5-E01 | L0 | Goldens and commands_described; the L0 floor covers `plugin.*`. |
+| M8-E02 | Install pipeline and trust | 5 | M8-E01 | L1 | An archive changed after the prompt is refused (RRS-P2003); an interrupted install leaves nothing (kill -9 row 8); a file needing a missing plugin opens with placeholders. |
+| M8-E03 | The iframe bridge | 4 | M8-E01 | L1 | plugin-iframe.spec.ts: allowed and refused calls, no network from the iframe, no cookies. |
+| M8-E04 | SDK tooling and templates | 5 | M8-E02, M8-E03 | L1 | `just test-templates`: every template goes through new, codegen, lint, test and pack in CI. |
+| M8-E05 | Plugins section, macros and the Rust provider SDK | 4 | M8-E04 | L1 | A recorded macro replays as a script; provider_roundtrip.rs passes. |
+
+### 6.7 M9 Remote (slice §32 weeks 11–12)
+
+- **Goal:** bring your own box over SSH (§22), headless.
+- **Entry (slice):** M1's jobs and M2's environments. **Entry (full):** M3 and M5 for remote inference and training.
+- **Slice exit (weeks 11–12):** `rastai node` over SSH, and a remote job survives a network drop with no lost events (`remote_network_drop.rs`).
+- **Full exit:** pairing to training on a remote box in under 15 minutes (§6); resumable verified transfers; the UI over an SSH tunnel; node self-update.
+- **Levels at exit:** Remote L1.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M9-E01 | Remote contracts (90-day, contract) | 2 | M2-12 | L0 | Goldens; the L0 floor covers the rows. |
+| M9-E02 | SSH pairing and the standalone node (90-day) | 5 | M9-E01, M2-16 | L1 | ssh_loopback.rs against an sshd container in CI; a changed host key is refused; a version mismatch goes to incompatible; `node-over-ssh` reruns `e2e-surfaces`, `test-crash` rows 1–3 (row 14 once M9-E03 lands) and `loop-cpu` (once M5-E06 lands) with `RASTAI_TEST_NODE=ssh`, green; the `handshake` fuzz target runs nightly; every daemon↔node row of the threat model (M1-56) names a passing test. |
+| M9-E03 | Remote jobs survive network drops (90-day) | 4 | M9-E02 | L1 | tests/e2e/remote_network_drop.rs: kill the SSH child mid-run; the daemon reconnects and every sequence arrives once. |
+| M9-E04 | Resumable transfers and remote artifacts | 4 | M9-E02 | L1 | transfer_resume.rs; an offset mismatch → RRS-N3002; a hash mismatch deletes the partial. |
+| M9-E05 | Headless serve and the remote UI | 4 | M9-E03 | L1 | The UI works over a tunnel on a different local port; first remote run in under 15 minutes from pairing (§6), timed. |
+| M9-E06 | Updates for the daemon and nodes | 4 | M9-E02, M6-E05 | L1 | A bad signature → RRS-N4001 and nothing changes; jobs survive a node update and reattach. |
+| M9-E07 | Remote inference, Psychology and preemption | 4 | M9-E04, M4-E06, M5-E14 | L1 | Chat with the live panel on a paired box; a preempted remote run resumes after a drop. |
+
+### 6.8 M10 Prototype exit
+
+- **Goal:** prove §5.
+- **Entry:** every section at L1 in the level table; a discrete RDNA3+ card in the owner's box; a paired SSH box.
+- **Exit:** the §5 conditions in 1.2.
+
+| ID | Epic | Days | Depends on | Claims | Exit test |
+|---|---|---|---|---|---|
+| M10-E01 | AMD tier 1 (needs gpu, needs amd) | 5 | M2-11, M5-E03, M4-E03 | L1 | The nightly AMD job runs the GPU suite green. |
+| M10-E02 | The core loop at L2 | 5 | M5-E06, M5-E14, M4-E06, M3-E08, M3-E10 | L2 | Every variant in the L2 list (plan §7) has a passing test named in the level table. |
+| M10-E03 | Level audit and the three-platform run | 3 | M10-E01, M10-E02, M9-E07, M7-E06, M8-E05, M6-E12 | L1 | The same e2e suite passes on Linux NVIDIA, Linux AMD and a paired SSH box; the level table has no gaps, and every feature of spec §6–§15 and §24 has a row. |
+
+---
+
+## 7. Tracking L0–L3
+
+### 7.1 Rules
+
+From §5 and ADR-0017:
+
+| Level | Meaning | Evidence |
+|---|---|---|
+| L0 | The command exists and fails cleanly with a catalog code | a registry row with typed Args and Result; the L0 floor test (M1-27) |
+| L1 | The main path works end to end; failures are recoverable; nothing is lost | an e2e test of the main path (CLI or MCP, plus Playwright where there's UI) and a kill -9 or interruption test for anything that writes state |
+| L2 | Common variants work and have tests | the variants listed in this file, each with a test |
+| L3 | Polished: Basic-mode UX, docs, performance budgets | Phase 2 |
+
+How levels are tracked:
+- **The feature table (7.3) is the record.** A PR that claims a level edits its row in the same PR: the level, the milestone, and the tests that prove it.
+- **Issues carry `level:Lx`** for the level their work brings a feature to. The PR template asks which level a PR claims.
+- **A level is lost** when one of its tests is removed or fails on `main`. The milestone exit review re-checks every row claimed in that milestone.
+- **The L0 floor runs in CI from M1-27:** every registered command, run with `dry_run`, returns ok or a catalog-coded diagnostic. New commands start as L0 stubs (3.2), so the whole surface exists early.
+- **L3 is Phase 2** (Basic-mode polish, the novice First Run, tutorials, accessibility); performance budgets measured in the prototype are recorded but don't raise a level.
+
+### 7.2 Section levels by milestone
+
+The level each section reaches at each milestone's exit. A blank cell means no change from the cell to its left (or nothing registered yet).
+
+| Section | M1 | M2 | M3 | M4 | M5 | M6 | M7 | M8 | M9 | M10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Platform (commands, storage, daemon, node, jobs) | L1 | | L1 (projects) | | L1 (quotas, GC, lineage) | | | | L1 with remote nodes | L1 |
+| Settings | L1 (settings, tokens) | L1 (secrets, HF) | L1 (adapters, gateway) | | L1 (storage view) | | | | | L1 |
+| Home and First Run | L0 | L1 (minutes 0–3) | L1 (chat) | L1 (minutes 3–7) | L1 (minutes 7–10) | | | | | L1 |
+| Inference | | L0 (`model.*` L1) | L1 | | | | | | L1 on remote | L2 (loop) |
+| Psychology | | | | L1 | L1 (branch, diff) | | | | L1 on remote | L2 (loop) |
+| Training | L1 (classification) | | | | L1 | | | | L1 on remote | L2 (Teach it) |
+| Data | | | | | L1 | | | | | L1 |
+| Evaluation | | | | | L1 | | | | | L2 (verify) |
+| Designer | | | | | | L1 | | | | L1 |
+| Agent Gym | | | | | | | L1 | | | L1 |
+| Plugins | L0 (host) | | | L0 (first plugin module) | | | | L1 | | L1 |
+| Remote | L0 (local node) | | | | | | | | L1 | L1 |
+
+### 7.3 Feature level table
+
+The live record. Every row starts at "none" today; PRs update the "Now" column. A row whose L1 column says Phase 2 or "after the prototype" is a deferral the spec allows; M10-E03 checks that every other row names a passing L1 test, and that every feature in spec §6–§15 and §24 has a row.
+
+| Feature | Section | Now | L0 by | L1 by | L2 by | L1 proof |
+|---|---|---|---|---|---|---|
+| Command layer: Execute, registry, CLI verbs, MCP tools, palette | Platform | none | M1 | M1 | M10 | `execute_paths.rs`, `three_surfaces`, `palette.spec.ts` |
+| Event logs, index, blobs, rebuild | Platform | none | M1 | M1 | | kill -9 rows 1–3, 9, 11 (rows 6 and 10 when uploads and GC land); `rebuild_index.rs` |
+| Daemon, embedded node, jobs, reattach | Platform | none | M1 | M1 | | kill -9 rows 1 and 13 (row 14 with M9); `reattach.rs` |
+| Projects: create, open, lock file, export, import | Platform | none | M3 | M3 (after the 90 days) | | the offline round trip and the missing-plugin banner (M3-E11) |
+| Storage: quotas, GC, pins, storage view, lineage panel | Platform, Settings | none | M5 | M5 | | GC kill -9 row 10, quota test, lineage panel test (M5-E04) |
+| Plugin host and manifests | Plugins | none | M1 | M4 | | `plugin_host.rs`; the Psychology module through Execute |
+| Local API security, scoped tokens | Settings | none | M1 | M1 | | `gate.rs`, `mcp_endpoint.rs` |
+| Threat model reviewed | Platform | none | M1 | M9 (the iframe row with M8-E03) | | `docs/security/threat-model.md` names a passing test per boundary (M1-56, reviewed in M9-E02); nightly fuzz targets for the gate, MCP and the handshake |
+| Basic/Advanced switch and per-panel override | Platform | none | M1 | M1 | | `basic-advanced.spec.ts` (M1-54; each section's UI epic adds its section) |
+| Accessibility: a table behind every chart, keyboard token timeline, reduced motion | Platform | none | M4 | M4 | | `accessibility.spec.ts` (M4-E04; reduced motion in the 3D views with M4-E10); the full WCAG 2.2 AA pass is L3, Phase 2 |
+| Egress badge and project data policy | Settings | none | M3 | M3 | | `RRS-C1009` refusal (M3-E08); badge on and off in `chat.spec.ts` (M3-E09) |
+| Crash reports, opt-in | Settings | none | M6 | M6 | | one redacted local report per crash, the prompt only when opted in, nothing uploaded (M6-E05; platform flow §11 tests) |
+| Tutorials and assistant skills | Platform | none | Phase 2 | Phase 2 | | spec §7 and §31 Phase 2 (guided tutorials are L3 work); no layout doc designs them yet |
+| Environments and `rastai doctor` | Home | none | M2 | M2 | | `environments.rs`, wrong-matmul test, row 5 |
+| Model download, gated sign-in | Inference, Home | none | M2 | M2 | | `downloads.rs`, row 4, `first-run.spec.ts` |
+| Inspectable runtime: Gemma 3, Llama | Inference | none | M2 | M3 | M10 | parity suite, `navi_chat.rs` |
+| Fast runtime and replay twins | Inference | none | M3 | M3 | M10 | `fast_runtime.rs`, twin parity nightly |
+| Chat and the conversation tree | Inference | none | M3 | M3 | M10 | `chat.spec.ts`, `reconnect.spec.ts` |
+| `/v1` endpoints and API adapters | Inference | none | M3 | M3 | | `navi_chat.rs`, adapter tests |
+| vLLM as a managed engine | Inference | none | after the prototype | after the prototype | | optional (spec §8, §27) and not in §31 step 3; an external vLLM server works now as an OpenAI-compatible API (M3-E08); open question 13 |
+| Live panel and Basic lenses | Psychology | none | M4 | M4 | M10 | `psychology-live.spec.ts`, panel budget |
+| Steering and interventions | Psychology | none | M4 | M4 | M10 | steering tests |
+| Replay and the web viewer | Psychology | none | M4 | M4 | M10 | replay equality, viewer offline |
+| Branch and Prefer this branch | Psychology | none | M4 | M5 | M10 | fork test, `undo_property.rs` |
+| Model diff and SAE fit check | Psychology | none | M4 | M5 | M10 | diff tests |
+| Advanced views and attribution graphs | Psychology | none | M4 | M4 (attribution after M6-E03) | | projection, attribution tests |
+| Training view | Psychology | none | M4 | M5 (after M5-E04) | | `training-view.spec.ts` |
+| Teach it chain | Training | none | M5 | M5 | M10 | `teach-it-loop.spec.ts`, Teach it budget |
+| Recipes: classification | Training | none | M1 | M1 | | `test_loop.py`, `test_resume.py` |
+| Recipes: SFT, DPO, LoRA | Training | none | M5 | M5 | M10 | recipe tests |
+| Recipes: RM, PPO, GRPO, GSPO, best-of-n, QLoRA, SAE, pretraining, JEPA | Training | none | M5 | M5, JEPA in M6 | | recipe tests, GPU nightly |
+| Experiment tracking: runs table, log import, `rastai.log()`, `run.notebook` | Training | none | M5 | M5 | | overlay test, spool test, notebook rerun (M5-E12) |
+| Second window for live training and the dashboard | Training | none | M5 | M5 | | two-window test (M5-E12) |
+| Data import and checks, Croissant | Data | none | M5 | M5 | | task detection, dedupe, leakage, PII, Croissant round trip |
+| Evaluation: tests, judge, drift | Evaluation | none | M5 | M5 | M10 | `test_invented_fact`, `eval test` exit codes 0, 1, 2 (ADR-0020) |
+| Evaluation: Pass@k, Elo, perplexity, benchmarks | Evaluation | none | M5 | M5 | | metric tests |
+| Plugin event handlers: auto-run on new checkpoints, pinned conversations as tests | Evaluation, Plugins | none | M5 | M5 | | pin-while-disabled, kill -9 between index and dispatch, coalescing (M5-E15) |
+| Export and provenance | Training | none | M5 | M5 | | GGUF in llama-server nightly |
+| Designer canvas and live stats | Designer | none | M6 | M6 | | `designer.spec.ts`, canvas bench |
+| Import, compile, ONNX, Eject, `rastai.load()` | Designer | none | M6 | M6 | | import golden tests, `tests/loop` |
+| MoE, MLA, ALiBi, AttnRes, placement | Designer | none | M6 | M6 | | parity, two-GPU placement nightly |
+| Agent Gym | Agent Gym | none | M7 | M7 | | gym e2e, step-mode test |
+| Plugin SDK, install, iframe bridge | Plugins | none | M8 | M8 | | `test-templates`, `plugin-iframe.spec.ts` |
+| SSH remote, transfers, headless | Remote | none | M9 | M9 | | `remote_network_drop.rs`, `ssh_loopback.rs` |
+| AMD tier 1 | Platform | none | M2 | M10 | | nightly AMD suite |
+
+### 7.4 The core loop's L2 list
+
+§5 asks for the loop at L2. These are the variants M10-E02 tests; each gets a row in 7.3 when it passes.
+
+| Stage | Variants |
+|---|---|
+| Chat | Inspectable and Fast runtimes; toggling mid-conversation; an API model with proxy replay; incognito |
+| See inside | the live panel; replay of a stored chat; replay of an imported, retokenized chat (approximate) |
+| Steer or branch | concept slider; head ablation; feature edit; rewind and branch compare |
+| Train | Teach it with SFT targets; with DPO pairs; interrupted and resumed; anchors on and off |
+| Verify | keyword plus judge; drift; model diff; regression diff between two checkpoints; CI gating by exit code |
+
+---
+
+## 8. GitHub setup
+
+### 8.1 One-time setup (before M1-01)
+
+Done by hand once; M1-07 codifies the parts that change.
+
+1. Create the organization and repository (§34 suggests `rastai-research`) and push the scaffold commit.
+2. Repository settings: squash merge only, with "pull request title and commit details" as the squash message (so `Signed-off-by` lines carry into `main`); delete branches after merge; Issues on; Actions on with "require approval for all outside collaborators" for workflows from forks.
+3. Create the labels (8.3) and milestones (8.2). Until M1-07 lands, the `gh label create` and `gh api repos/{owner}/{repo}/milestones` commands do this by hand.
+4. Protect `main` (8.4).
+5. Keep the existing templates: `.github/pull_request_template.md`, and the Task and Bug issue templates (the Task template's sections match `backlog.json` bodies).
+6. Create a machine account for the agents (for example `rastai-bot`) with write access. GitHub never counts a PR author's own approval, so agents open PRs from that account and the owner's review is the required approval. Commits keep the owner's name and email with a matching `Signed-off-by` (8.6).
+
+### 8.2 Milestones
+
+One GitHub milestone per row of 2.1, titled exactly as in `backlog.json`: `M1 Foundation and skeleton`, `M2 Unified runtime`, `M3 Inference`, `M4 Psychology`, `M5 Training and Evaluation`, `M6 Designer`, `M7 Agent Gym`, `M8 Plugins`, `M9 Remote`, `M10 Prototype exit`. The description of each is its exit gate. No due dates: there is no target date (§0.8).
+
+### 8.3 Labels
+
+| Family | Labels | Color | Use |
+|---|---|---|---|
+| `area:*` | `docs`, `ci`, `proto`, `diag`, `formats`, `core`, `store`, `transport`, `sandbox`, `gateway`, `mcp`, `node`, `server`, `cli`, `envs`, `models`, `lens`, `data`, `train`, `rl`, `worker`, `sdk`, `plugin-sdk`, `web`, `canvas`, `viz`, `desktop`, `viewer`, `psychology`, `eval`, `tests`, `release` | `#1d76db` | the component a PR touches; matches the `CLAUDE.md` it must follow |
+| `type:*` | `contract`, `task`, `epic`, `docs`, `ci`, `test`, `bug` | `#5319e7` | contract PRs merge first (3.2); `task` and `bug` match the issue templates |
+| `size:*` | `S` (half a day), `M` (1 day), `L` (2 days), `XL` (epics of 3–5 days) | `#c5def5` | PRs are S to L; anything bigger is split |
+| `level:*` | `L0`, `L1`, `L2`, `L3` | `#0e8a16` | the level the work brings its feature to (section 7) |
+| `gate:*` | `90-day` | `#fbca04` | in §32's 90-day plan |
+| `needs:*` | `gpu`, `amd` | `#d93f0b` | acceptance needs the self-hosted GPU runner, or a discrete AMD card |
+
+### 8.4 Branch protection on `main`
+
+- Pull request required; one approving review (the owner); stale approvals dismissed on new commits; all conversations resolved.
+- Required status checks, strict (branch up to date): the PR jobs of 8.7 marked "required", added as each job lands. A task that adds a required job adds it to the protection rule in the same milestone.
+- Linear history; no force pushes; no deletions; rules apply to admins too.
+
+```
+gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.json
+```
+
+```json
+{
+  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-ts", "test-ts-macos"] },
+  "enforce_admins": true,
+  "required_pull_request_reviews": { "required_approving_review_count": 1, "dismiss_stale_reviews": true },
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_conversation_resolution": true,
+  "restrictions": null
+}
+```
+
+The first contexts become available with M1-06; until then, protection without required checks still forces PRs and review.
+
+### 8.5 The PR template
+
+The existing checklist covers rules 1–8 of 3.3. M1-07 adds two lines:
+
+```
+- [ ] Links its backlog issue (Closes #n) and stays within one task
+- [ ] Level claimed: none / L0 / L1 / L2 for <feature>, proven by <tests> (and the row in docs/plan section 7.3 is updated)
+```
+
+### 8.6 DCO
+
+- Every commit carries `Signed-off-by` (`git commit -s`), as CONTRIBUTING.md says. Agents commit with `-s` under the owner's git identity, because the owner is the person certifying the change; the machine account only pushes branches and opens PRs (8.1).
+- The `dco` job runs `tools/checks/check-dco` on the PR's commit range: each commit's sign-off must match its author. It is in-house (a small script), so no GitHub App is needed.
+- Squash merges keep the sign-off lines because the squash message includes commit details (8.1).
+
+### 8.7 CI jobs by milestone
+
+Each job is one `just` recipe; the workflow files stay thin (contracts §1).
+
+| Job | Workflow | Runs on | Trigger | Added by | Required on `main` |
+|---|---|---|---|---|---|
+| `checks` (fmt, clippy, cargo-deny, `check-*`, `proto-check`, `codegen-check`) | `ci.yml` | Linux | PR, push | M1-06; grows in M1-08, M1-12 | yes |
+| `dco` | `ci.yml` | Linux | PR | M1-06 | yes |
+| `test-rust-linux`, `test-rust-macos`, `test-rust-windows` | `ci.yml` | three OS runners, CPU | PR, push | M1-06 | yes |
+| `test-python`, `test-ts` | `ci.yml` | Linux | PR, push | M1-06 | yes |
+| `test-python-macos`, `test-python-windows` (CPU; `just test-python-portable`: `rastai_formats`, `rastai_models`, `rastai_data`, `rastai_train` with `-m 'not posix_only'`) | `ci.yml` | macOS and Windows runners | PR, push | M1-06 | yes |
+| `test-ts-macos` | `ci.yml` | macOS | PR, push | M1-06 | yes |
+| `test-crash` | `ci.yml` | Linux | PR, push | M1-48; rows join as their epics land (`serve_reattach` in M3-E05, `chat_daemon_kill` in M3-E07) | yes |
+| `e2e-surfaces` | `ci.yml` | Linux | PR, push | M1-49 | yes |
+| `e2e-web` (Playwright, Chromium and WebKit) | `ci.yml` | Linux | PR, push | M1-54 | yes |
+| `fuzz` (10 minutes per target) | `nightly.yml` | Linux | schedule | M1-06; targets from M1-14 (JSON reader), M1-24 (event frames), M1-26 (request gate), M1-29 (MCP JSON-RPC), M2-13 (safetensors), M2-22 (zip, inflate), M9-E02 (node handshake) | no |
+| `parity-cpu` | `ci.yml` | Linux | PR, push | M2-08 | yes |
+| `env-locks` | `ci.yml` | Linux | PR touching `python/envs` or `deps/` | M2-15 | yes |
+| `nightly-gpu` (real-weight parity, doctor, later budgets) | `nightly-gpu.yml` | self-hosted `gpu-nvidia` | schedule, manual, `main` only | M2-10 | no |
+| `nightly-amd` | `nightly-gpu.yml` | self-hosted `gpu-amd` | schedule, manual | M2-11, M10-E01 | no |
+| `llama-server-cpu` (pinned CPU build, tiny GGUF) | `ci.yml` | Linux | PR, push | M5-E13 (mock-based tests from M3-E05) | yes |
+| `gateway-bench`, live-stream jitter | `nightly.yml` | Linux | schedule | M3-E10 | no |
+| `wasm` (size budget) and viewer build | `ci.yml` | Linux | PR, push | M4-E06 | yes |
+| `loop-cpu` (`tests/loop` under 10 minutes) | `ci.yml` | Linux | PR, push | M5-E06, M6-E12 | yes |
+| `sandbox-podman` | `ci.yml` | Linux with Podman | PR, push | M5-E10 | yes |
+| `canvas-bench`, AppImage smoke | `nightly-gpu.yml` | self-hosted, desktop session | schedule | M6-E03, M6-E05 | no |
+| `release-linux` (AppImage, `.deb`, signatures) | `release.yml` | Linux | tag | M6-E05 | n/a |
+| `test-templates` | `ci.yml` | Linux | PR, push | M8-E04 | yes |
+| `ssh-loopback`, `remote-network-drop` | `ci.yml` | Linux with an sshd container | PR, push | M9-E02, M9-E03 | yes |
+| `node-over-ssh` (§16: the local suites rerun with `RASTAI_TEST_NODE=ssh`, so local and remote never drift) | `ci.yml` | Linux with an sshd container | PR, push | M9-E02; grows with M9-E03 and M5-E06 | yes |
+
+### 8.8 The self-hosted GPU runner
+
+The owner's box (5080, 3090, later the AMD card) runs the GPU jobs (§29). The repository is public, so:
+- GPU workflows trigger only on `schedule` and `workflow_dispatch`, and only for `main`. They never run on pull requests, so a fork can't run code on the box.
+- The runner runs as its own Linux user with no access to the owner's home folder, its own HF cache, and one read-only HF token as its only secret.
+- Runner labels: `gpu-nvidia` now, `gpu-amd` when the card is in.
+- A GPU result that gates a PR (for example, a budget) is run by hand with `workflow_dispatch` on the PR's branch after review (branches live in the main repository, pushed by the machine account of 8.1), and linked in the PR.
+
+### 8.9 Issues from the backlog
+
+- `backlog.json` is a JSON array; each item has `id`, `title`, `milestone`, `labels`, `depends_on` and a Markdown `body` (goal, files, acceptance test, dependencies, references).
+- M1-07's `tools/github/sync_backlog.py` creates or updates labels, milestones and issues from it, matching issues by the id at the start of the title. It rewrites repo-relative links to blob URLs and never deletes.
+- When a milestone starts, its epics are cut into task items in `backlog.json` (same shape as M1 and M2) in a docs PR, and synced.
+
+---
+
+## 9. Schedule risks
+
+| Risk | Effect on the plan | Mitigation |
+|---|---|---|
+| Review throughput (§28 risk 1) | at one size-day per lane-day, the 90-day content needs about 2.1× §32's calendar (3.4) | two lanes only; small PRs; agents self-test; dates move, scope and bar don't; re-plan at week 13 |
+| The AMD card doesn't arrive | M2-11 and M10-E01 stay open; the prototype can't exit (§5) | design stays AMD-ready (same `torch.cuda` API, ROCm llama.cpp builds); the iGPU is never forced (spike 05) |
+| Family parity bugs (§28 risk 2) | M2 slips; later families slip | the spike's precision rules ported as is; tiny configs in CI catch most bugs before GPU runs |
+| Docs disagree on names | agents build two versions of one thing | M1-01 settles every conflict before code (section 10); contract PRs first after that |
+| L0 stubs bloat the registry | review time on unbuilt commands | stubs are one row and one types entry each; they land per milestone, not all at once |
+| Self-hosted runner on a public repo | a fork could run code on the owner's box | schedule and manual triggers on `main` only; a separate runner user (8.8) |
+| WebKitGTK quirks | UI work stalls in the desktop shell | the browser is a full client (§16); desktop checks are nightly and manual |
+
+---
+
+## 10. Conflicts between docs, and the defaults M1-01 adopts
+
+The layout and flow docs were written in parallel and disagree in places. M1-01 settles each with one answer; until it merges, these defaults apply. The owner can change any of them in M1-01's review.
+
+- **Row numbers are stable.** Other docs cite them ("plan §10 row 5"), so rows are only added at the end, never renumbered.
+- **Already taken up:** contracts.md carries rows 1, 2 and 24. The platform flow and the node layout follow rows 2, 4–7, 12, 20 and 26. For those, M1-01 only fixes the docs that still disagree (named in the "Where" column).
+- **Rows 23–37** came from the cross-doc review after v1 of this plan.
+
+| # | Conflict | Where | Default |
+|---|---|---|---|
+| 1 | Login-code command: `token.login_code.create` vs `system.login_code.create` | platform flow 4.1, control-plane 9.1 vs frontend §20 | `token.login_code.create` |
+| 2 | UI launcher: `rastai open [--print]` vs `rastai ui [--print-url]` vs `rastai login-code`; ADR-0007 decision 3 has Tauri read `owner.token`; ADR-0006 decision 4 has the shell start `rastai serve` and send `file.open` over HTTP | platform flow, control-plane vs frontend §20 vs designer-gym-remote C8; ADR-0007 vs contracts §3.2; ADR-0006 vs frontend §9.3–9.5, platform flow 4.1 | `rastai open`; `--print-url` prints the frontend's DesktopLaunchInfo JSON line; the shell never reads `owner.token` and makes no HTTP request: it starts the daemon only through `rastai open --print-url`, and passes file paths to the web app as a `#/open?path=` fragment, which runs `file.open` (ADR-0034 restates ADR-0006 decision 4); `rastai tunnel` stays for C8 and mints the box's code with the generated verb `rastai token login-code create` over SSH |
+| 3 | Plugin principal from the UI: `X-Rastai-Plugin` header vs `ExecuteRequest.acting_plugin_id` | platform flow 4.2 vs frontend §20 | the proto field only |
+| 4 | Worker exit codes: 0, 1, 2, 3, 75 vs "0–4" | Python §7.2, node §7.4, contracts §9.1 vs platform flow 5.4 | 0, 1, 2, 3, 4, 75: 4 is `EXIT_EVENT_LOG_UNWRITABLE` (platform flow 5.4) → job `failed`, `RRS-S3002`; Python §7.2 and contracts §9.1 add it |
+| 5 | Reattach order: `Register` then `Hello` vs `Hello` first | node §7.4, §12 Q6 vs Python §7.5, ADR-0001 decision 5 | `Register` first; only the token's hash is on disk. ADR-0034 restates ADR-0001 decision 5: on restart the node waits for the worker's `WorkerHostService.Register`, checks BLAKE3(token) against `job.json` `job_token_hash` (with pid, `boot_id` and `process_start_ticks`), and only then calls `Hello` |
+| 6 | Job token in `job.json` vs only its hash | platform flow New names vs node §7.4, Python §7.3 | hash only; the token travels in `RASTAI_JOB_TOKEN` |
+| 7 | Grace constants: `EVICTION_GRACE_SECONDS` 10 vs `LEASE_RECLAIM_WAIT_SECONDS` 30; `STOP_GRACE_SECONDS` 120 vs `CANCEL_GRACE_SECONDS` 30 | node §7.4, §7.7 vs platform flow §10 | the owning crate's layout values (10 and 120) and names |
+| 8 | Catalog numbers collide (J, H, P, U, N, G ranges) | node §11.3, platform flow, frontend §20, inference flow §10.4 | M1-13 renumbers; the owning crate's layout doc keeps its numbers; a mapping table in `catalog/README.md` |
+| 9 | Training tokenization: `WorkerHostService.TokenizeChat` vs `Tokenize` | Python §14, node §6.6 vs training-evaluation flow Q3 | `TokenizeChat`, with a render-only mode for benchmark templates |
+| 10 | Graph node position: `position{x, y}` vs `layout{x, y, collapsed}` | frontend §20 vs designer-gym-remote | `layout{x, y, collapsed}` |
+| 11 | ModelSpec `weights`: one object vs a list | contracts §5.2 vs designer-gym-remote Q2 | a list of `{source, family, name_mapping, prefix}`, settled in M2-01 before anything reads it |
+| 12 | Environment ready marker: `.rastai-ready` vs `rastai-env-ok.json`; SSH known hosts `ssh_known_hosts` vs `known_hosts` | platform flow vs designer-gym-remote C4, C1; node §11.2 | `.rastai-ready`; `<data>/node/ssh_known_hosts` |
+| 13 | `design.import` job kind: `compile` vs a new `design_import` | Python §7.4 vs designer-gym-remote | `compile` (no new kind) |
+| 14 | `http_client.rs` at step 2, but the CLI and MCP bridge need HTTP over `daemon.sock` in step 1 | node §4.9 vs control-plane §7, §9 | plain HTTP over local sockets in M1-41; HTTPS in M2-14 |
+| 15 | Free disk space: `statvfs` with `unsafe` in the store vs `df` in the node | control-plane §6.4 vs node §7.9 | one function, `rastai_store::free_bytes`, used by both (ADR-0033); `df` if the ADR is declined |
+| 16 | `zip/reader.rs` and `jobs/doctor_selftest.py` listed at step 1 | control-plane §4.13, Python §7.11 | M2-22 and M2-20: nothing in M1 opens an archive, and §32 puts doctor in weeks 5–6 |
+| 17 | Metric and lens ids: `pass_at_k` vs `eval.pass_at_k` | contracts §2.4 example vs frontend Q8 | namespaced: `eval.pass_at_k` |
+| 18 | Chain runs have no job, but §7.1 says the job is the only log writer | training-evaluation flow Q2 | "one writer: the job, or the chain driver for chain runs" |
+| 19 | `run_job` takes three arguments vs four with `control` | contracts §12.3 vs Python §14.3 | four, with `control: JobControl` |
+| 20 | `LogSink::log_request` returns nothing vs `LogCommit` | contracts §12.2 vs node §12 Q4 | returns `LogCommit` |
+| 21 | Crate dependency edits (store, CLI, server, sandbox, transport) and new crates | control-plane §15, node §12 | adopt all; new rows `rastai-formats-wasm`, `rastai-formats-python`, `rastai-codegen`, `rastai-crash-tests` |
+| 22 | ADR-0007's Host rule breaks a tunnel on another local port | designer-gym-remote Q4 | ADR-0034 (M1-01) replaces ADR-0007 decision 4: any loopback Host on any port, Origin must equal `http://` plus Host; the gate has it from M1-26 |
+| 23 | A daemon kill -9 mid-stream: "the stored message is complete" vs only the user row | frontend §8.7, §16 (`reconnect.spec.ts`) vs inference flow 1.1 (`tests/crash/chat_daemon_kill`) | the inference flow: the assistant row and its `gateway_log` row are written in one transaction after generation, so after a daemon kill the user row survives and the half-streamed reply doesn't; the serve worker is reattached without a reload and Regenerate works. `reconnect.spec.ts` checks the resync and the Regenerate button (open question 12) |
+| 24 | Stop signals `STOP`, `TERMINATE` and `KILL`: one meaning each, and what SIGTERM exits with when a job has nothing to save | contracts §4.4 (exit 75 for every kind) vs platform flow 5.2 (`TERMINATE`: "kinds with nothing to save exit 0") | contracts §4.4's `JobSignal` table: `STOP` = `Control` (final checkpoint, exit 0, run `completed`, reason `stopped`); `TERMINATE` = SIGTERM (checkpoint if it fits, exit 75, job `cancelled`, reason `preempted`); `KILL` = SIGKILL after a grace period. Every kind exits 75 on SIGTERM, even with nothing to save (platform flow 5.2 says 0) |
+| 25 | Who may reclaim evictable leases | inference flow 4.2 ("maybe after reclaiming idle evictable leases", `RECLAIM_GRACE_SECONDS`), training flow 10.1 (`may_reclaim_evictable`) vs contracts §9.4, platform flow 5.3 | only pinned requests reclaim; an evictable request that doesn't fit is denied with `RRS-H3001`, and the daemon may unload an idle model first (the runtime toggle's swap). `RECLAIM_GRACE_SECONDS` is `EVICTION_GRACE_SECONDS` (row 7). `ResourceRequest.may_reclaim_evictable` stays as an opt-out for pinned requests (auto-run evals set it false) |
+| 26 | llama-server's API key: "random per launch", in memory only, vs saved for re-adoption | contracts §3.1–3.2, ADR-0007 decision 8 vs node §7.8, platform flow 2.3, inference flow 4.4 | saved in the `serve_fast` job's `job.json` (mode 0600); a restarted node re-adopts a live llama-server (pid, start ticks, `/health` with the key) and never reloads it |
+| 27 | Sandbox host allowlists: in the prototype, or Phase 2 | node §5.4 and designer-gym-remote B6, Q5 vs node §12 Q3 and its Phase 2 row | the in-house HTTP CONNECT egress proxy (`rastai-sandbox/src/egress_proxy.rs`) on a per-run internal network, at §31 step 7 (M7-E02); node §12 Q3 and the Phase 2 row are superseded |
+| 28 | The gateway's chat entry points: `run_turn` vs `prepare_chat` and `run_chat` | inference flow 1.1 vs node §6.2–6.3 | node §6.2–6.3: `prepare_chat` (route, render, encode, BOS rule, context check, seed; no I/O), then `chat.send` commits the user row, then `run_chat` (generate, stream, log); `generate_chat` is both, for `/v1` |
+| 29 | Interventions and CUDA graphs: recapture on a new hooked point vs buffers only | Python §2.2–2.3, §3.2 and §10 vs inference flow v1 5.2 (v1.1 follows Python) | recapture only when the set of hooked points changes (the first intervention at a new point, or a new SAE set or lens layout); value changes, such as a steering strength, are buffer writes in `InterventionHook` and never recapture; two graph variants per slot, `off` and `summary` (ADR-0026 decision 3). Inference flow 5.2 and 7.1, Python §2.3 and §3.2 all say this; M4-E05's counter test checks it |
+| 30 | Applying interventions: `psychology.intervention.set` straight to `SetInterventions` vs through a core command | contracts §6.4, Python §10, frontend §14.1 (`intervention-state.ts`) vs inference flow 7.1 | the inference flow (7.1, 10.1): `psychology.intervention.set` resolves and validates, then calls core `chat.settings.set` with the new `interventions` (and `lens`) argument, which stores the set in `conversations.settings_json` and applies it to the live session; slider drags call `chat.settings.set` directly (M4-E01, M4-E05). There is no `chat.interventions.set` (inference flow 10.6 retired it) |
+| 31 | How a plugin module starts a job: `host.start_job` and `WorkerHostService.StartJob` vs `CommandReply.follow_up_jobs` | Python §9.1 (`rastai_eval/commands.py`), frontend §11.2 (`start_job`), contracts §4.5 vs platform flow 3.3, training flow 7.3 and 8.1 | `follow_up_jobs`: the module returns job specs and the daemon starts them as the plugin principal, so scheduling and the journal stay in the daemon. `WorkerHostService.StartJob` leaves the prototype |
+| 32 | Who plans layer placement across GPUs | Python §2.1–2.2 (`placement.py` plans and applies) vs designer-gym-remote A8a | the server plans (`crates/rastai-server/src/modelspec_analysis/layer_placement.rs`, `plan_layer_placement`, from live stats and each node's HardwareProfile), `rastai_models/placement.py` applies; the scheduler's `scheduler/placement.rs` (which node and GPUs a job gets) is a different thing and keeps its name |
+| 33 | How the node gateway logs a request | contracts §4.5 ("token IDs logged to the run's event log", no event named) vs node §6.6 | node §6.6: the node gateway returns the log entry in `GenerateFinished`; the job appends `gateway.request_logged` to its `events.log`; the daemon indexes it into `gateway_log` with the new `run_id` and `finish_reason` columns |
+| 34 | How a gym rollout calls a tool | Python §6.1 (`agent_loop.py`: tool call → `ExecInSandbox`) vs designer-gym-remote B3a, node §3.1–3.2 | `WorkerHostService.ListTools` and `CallTool`: the node's `rastai-mcp` client talks to the tool server inside the sandbox (M7-E01) |
+| 35 | `rastai eval test` exit codes: errored = 5 vs 2 | control-plane §9.5 (`EXIT_ERRORED = 5`), and training flow 8.1 and §15 Q5 in their earlier drafts (5; both now follow ADR-0020) vs ADR-0020 | ADR-0020 (accepted): 0 passed, 1 failed, 2 errored, cancelled or refused. The CLI's generic table keeps its codes for other verbs; `eval.test` maps its outcomes itself |
+| 36 | A too-open `owner.token`: rotate it vs refuse to start | control-plane §8.1 (`auth_files.rs`: "0600 check and rotation") and v1 of this plan vs ADR-0007 "Checked by", platform flow 2.1 | refuse to start with `RRS-C1008` (an error) and the fix text `chmod 600 <path>`; never rotate or rewrite the file (ADR-0034 restates it) |
+| 37 | Three codes for one data-policy refusal | inference flow 1.3 (`RRS-G0008`), training flow 2.1 (`RRS-D3004`), designer-gym-remote C5 (`RRS-N3009`) | one `RRS-C1009`, "the project's data policy forbids this", raised by the daemon's policy check before anything starts; the three are withdrawn (M1-13). `RRS-N3004` stays the node layout's "repository or file not found" |
+
+---
+
+## 11. New names this plan adds
+
+M1-01 folds these into contracts.md.
+
+| Name | Kind | Meaning |
+|---|---|---|
+| `tools/github/sync_backlog.py` | dev tooling | syncs labels, milestones and issues from `backlog.json` (M1-07) |
+| `tools/checks/check-dco` | dev tooling | the sign-off check behind the `dco` job (M1-05) |
+| `.github/workflows/ci.yml`, `nightly.yml`, `nightly-gpu.yml`, `release.yml` | CI | the four workflow files (8.7) |
+| `just test-python`, `test-python-portable`, `test-ts`, `env-cpu`, `env-locks`, `parity`, `test-gpu`, `e2e-surfaces`, `e2e-web` | `just` recipes | beside the layouts' recipes; `test-python-portable` runs the pure-compute packages with `-m 'not posix_only'` (M1-06) |
+| `test-python-macos`, `test-python-windows`, `test-ts-macos` | CI jobs | CPU tests on tier-2 runners from day one (M1-06, 8.7) |
+| `posix_only` | pytest marker | a Python test that needs Unix sockets, flock or `setsid`; skipped on the Windows job (M1-06) |
+| `.dev/envs/cpu` | path (dev only, git-ignored) | the M1 stopgap environment until M2-16 |
+| `fixtures/datasets/textcnn_tiny.jsonl` | fixture | synthetic 4-label dataset written by us |
+| `fixtures/jobs/textcnn_train/job.json` | fixture | a launch file for the worker's train job test |
+| `fixtures/hf-server/` | fixture | a local fake of the HF endpoints the download client uses |
+| `fixtures/mcp/e2e/` | fixture | the three-surfaces golden MCP transcript |
+| `tests/e2e/three_surfaces/` | test | M1-49 |
+| `tests/gpu/test_real_weight_parity.py` | test | M2-10 |
+| `docs/adr/0033-unsafe-statvfs.md` | ADR | `unsafe` allowed in `crates/rastai-store/src/disk_space.rs` only |
+| `docs/adr/0034-login-codes-loopback-host-owner-token.md` | ADR | written in M1-01: sign-in through `rastai open --print-url` and `token.login_code.create` (the shell never reads `owner.token`, starts the daemon only through `rastai open --print-url`, and passes file paths as a `#/open?path=` fragment); any loopback Host on any port with Origin equal to `http://` plus Host; a too-open `owner.token` refuses the start; reattach waits for `Register` and checks the token hash before `Hello`. Supersedes in part ADR-0007 decisions 3 and 4, ADR-0006 decision 4 and ADR-0001 decision 5 |
+| `docs/security/threat-model.md` | doc | the threat model: assets, trust boundaries, attackers, mitigations and the test for each (M1-56); M1-01 adds `docs/security/` to the contracts §1 tree |
+| `crates/rastai-mcp/fuzz/`, `crates/rastai-node/fuzz/` | cargo-fuzz crates | beside the formats, store and server ones, excluded from the workspace; targets `jsonrpc_decode` (M1-29) and `handshake` (M9-E02); the server's crate gets `request_gate` (M1-26) |
+| `RRS-C1009` | catalog code | the project's data policy forbids this (section 10, row 37) |
+| `node-over-ssh` | CI job | reruns the local suites against `rastai node serve` in an sshd container (M9-E02, 8.7) |
+| `RASTAI_TEST_NODE` | environment variable (tests only) | `ssh` makes the test daemon pair with the node in the sshd container instead of the embedded node |
+| `tests/e2e/training-view.spec.ts` | test | M4-E12 |
+| `gpu-nvidia`, `gpu-amd` | runner labels | the self-hosted runner (8.8) |
+| `rastai-bot` | GitHub machine account | pushes agent branches and opens their PRs (8.1) |
+| `lane-a/<id>-<slug>`, `lane-b/<id>-<slug>` | branch names | 3.1 |
+| the label set of 8.3 and milestone titles of 8.2 | GitHub | exact strings used by `backlog.json` |
+
+---
+
+## 12. Open questions
+
+Each has the default this plan uses until the owner decides.
+
+| # | Question | Default |
+|---|---|---|
+| 1 | Approve the §27 additions in M1-02 (HTTP stack, bindings, protobuf runtimes, keyring, pyarrow, libc, OS tools, TS and Python test tooling)? | Approve; several M1 tasks can't merge without them. |
+| 2 | ADR-0033: `unsafe` for `statvfs` in one file, or `df`? | ADR-0033 with `unsafe` in one file; `df` stays the documented fallback. |
+| 3 | The honest estimate (3.4) is about 2.1× §32's calendar at one size-day per lane-day. Keep two lanes and let dates move, or allow a third lane? | Two lanes (§28 risk 1); re-plan at week 13 with measured velocity. |
+| 4 | M2's AMD half without a card: close M2 on NVIDIA and carry M2-11 to M10? | Yes. |
+| 5 | A self-hosted runner on a public repository, with the limits in 8.8? | Yes. |
+| 6 | Python and TS formatters and linters (none in §27): add `ruff` and `prettier` as dev tooling? | Not yet; `tsc --strict`, clippy, the `check-*` scripts and review. Decide before M3, when the TS surface grows. |
+| 7 | GitHub organization and repository name (§34) | `rastai-research/rastai`; M1-07 needs it for link rewriting. |
+| 8 | TextCNN's dataset: our synthetic fixture, or a slice of AG News? | Synthetic in CI; AG News stays a user dataset the owner imports. |
+| 9 | Real-weight parity for Llama uses Llama 3.2 1B (gated)? | Yes, with the owner's token on the runner (read-only). |
+| 10 | A machine account for agent PRs, so the owner's approval counts (8.1)? | Yes, `rastai-bot` with write access; commits stay under the owner's identity and sign-off. |
+| 11 | ADR-0034 supersedes, in part, decisions of three accepted ADRs (ADR-0007 decisions 3 and 4, ADR-0006 decision 4, ADR-0001 decision 5). Accept it in M1-01? | Yes: contracts §3.2 already has the shell never read `owner.token`, the frontend layout (§9.3–9.5) already keeps HTTP out of the shell, the SSH tunnel (M9-E05) needs the Host rule, and with only the token's hash on disk (rows 5 and 6) the node can't call `Hello` before the worker re-registers. |
+| 12 | Section 10 row 23: a daemon kill mid-stream keeps the user's message but drops the half-streamed reply. Flush partial replies to `vault.db` every N tokens instead? | No for the prototype: one transaction per reply keeps the vault simple, and Regenerate is one click. Revisit if the owner loses long answers in practice. |
+| 13 | vLLM as a managed engine (spec §8 says optional, for Linux serving nodes; §31 step 3 builds only llama-server): in the prototype, or after it? | After the prototype. An external vLLM server already works as an OpenAI-compatible API through `OpenAiAdapter` (M3-E08); a managed engine would add a pinned build per backend and a lifecycle like llama-server's (node §7.8). |

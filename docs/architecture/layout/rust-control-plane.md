@@ -1,0 +1,2898 @@
+# Layout: the Rust control plane (`rastai-formats`, `rastai-core`, `rastai-store`, `rastai-diag`, `rastai-mcp`, `rastai-server`, `rastai-cli`) and the workspace root
+
+**Status:** v1, 2026-10-10. Pre-build design. Built on spec v5.3 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names in `docs/architecture/contracts.md`. Names from contracts are used exactly. Names this doc adds are listed in section 16; changes it needs in contracts are in section 15.
+
+This doc covers:
+- the workspace root: Cargo workspace, `justfile`, lint and `cargo-deny` config, `catalog/`, `schemas/` (section 2);
+- `crates/rastai-diag` (section 3);
+- `crates/rastai-formats`, with its WASM and PyO3 builds and its codegen (section 4);
+- `crates/rastai-core` (section 5);
+- `crates/rastai-store` (section 6);
+- `crates/rastai-mcp` (section 7);
+- `crates/rastai-server` (section 8);
+- `crates/rastai-cli` (section 9);
+- four cross-cutting designs: the command registry and its generated surfaces (10), daemon HTTP API versioning (11), the plugin host (12), event indexing and the `rastai.db` rebuild (13).
+
+It does not cover `rastai-proto`, `rastai-transport`, `rastai-sandbox`, `rastai-gateway` or `rastai-node` (`layout/rust-node-gateway-proto.md`), the Python packages (`layout/python.md`), or the TS packages and plugin SDKs (`layout/frontend-and-plugins.md`). The runtime behavior of startup, `Execute`, undo, the request gate, event durability, the rebuild, plugin install and GC is drawn in `flows/platform.md`; this doc gives the code that implements it and cites the flow sections instead of redrawing them.
+
+Every crate section has the same parts: tree, public API, dependencies, boundary rules, tests, ported spike code, build-order step.
+
+---
+
+## 1. Overview
+
+### 1.1 Crates at a glance
+
+| Crate | Runs in | Owns | First needed (§31) |
+|---|---|---|---|
+| `rastai-diag` | every Rust process, WASM | `Diagnostic`, the compiled catalog, the text renderer, the JSON-lines logger | step 1, first crate written |
+| `rastai-formats` | daemon, node, CLI, browser (WASM), Python (PyO3) | every document type, the 4 validation layers, migrations, canonical JSON and content hashes, safetensors, GGUF, streaming zip (ZIP64), importers, type descriptions | step 1 (header, run record, resume, settings, manifest, first command args); grows every step |
+| `rastai-core` | daemon, node, CLI | command table and registry, ids, principals, scopes, shared state enums, settings resolution, data paths, protobuf JSON for wire types stored in documents | step 1 |
+| `rastai-store` | daemon, node | `rastai.db`, `vault.db`, blob store, event-log reader and writer, the indexer, the rebuild | step 1 (`rastai.db`, logs, blobs); step 3 (`vault.db`) |
+| `rastai-mcp` | daemon (`/mcp`), CLI (`rastai mcp` bridge), node (gym tools) | MCP server and client, JSON-RPC 2.0 | step 1 (server, bridge); step 7 (client) |
+| `rastai-server` | daemon | HTTP API, `Execute`, the bus, scheduling, `NodeHubService`, plugin host, import/export, ModelSpec analysis, secrets | step 1; grows every step |
+| `rastai-cli` | the `rastai` binary | process modes, generated verbs, local commands | step 1 |
+
+```mermaid
+flowchart TD
+  CLI["rastai-cli"] --> SRV["rastai-server"]
+  CLI --> NODE["rastai-node (other doc)"]
+  CLI --> MCP["rastai-mcp"]
+  SRV --> NODE
+  SRV --> GW["rastai-gateway (other doc)"]
+  SRV --> MCP
+  SRV --> STORE["rastai-store"]
+  MCP --> TR["rastai-transport (other doc)"]
+  MCP --> CORE["rastai-core"]
+  MCP --> PROTO
+  STORE --> CORE
+  STORE --> PROTO["rastai-proto (generated)"]
+  CORE --> FMT["rastai-formats"]
+  CORE --> PROTO
+  FMT --> DIAG["rastai-diag"]
+  WASM["rastai-formats-wasm"] --> FMT
+  PY["rastai-formats-python"] --> FMT
+  CG["rastai-codegen (dev only)"] --> CORE
+  CG --> FMT
+```
+
+Arrows mean "may depend on" (contracts §2.4). `rastai-server` is the composition root and also reaches the lower crates directly; those edges are left out. Every crate depends on `rastai-diag`; only the `rastai-formats` edge is drawn. The two binding crates and `rastai-codegen` are new (section 16). The `rastai-store` → `rastai-proto` edge is a contract change (section 15): the store decodes `EventRecord` to index it. So is `rastai-mcp` → `rastai-proto`: MCP tools are built from the registry's generated `CommandDescriptor`.
+
+### 1.2 Conventions for these crates
+
+These restate contracts §12 and `layout/rust-node-gateway-proto.md` §2, so the whole Rust tree reads the same way.
+
+- **`src/lib.rs` is a list of `pub mod` lines** and nothing else. Each crate's public API is the `pub fn`s and `pub struct`s of its modules.
+- **One error enum per crate** in `src/error.rs` (`FormatsError`, `CoreError`, `StoreError`, `McpError`, `ServerError`, `CliError`), each with `fn code(&self) -> &'static str` returning a catalog code. `rastai-diag` has none: its functions can't fail. No `anyhow`, no `thiserror`.
+- **Free functions over plain structs**: `append_event(&mut writer, &record)`, not `writer.append(...)` chains. Methods only for tiny accessors.
+- **Closed sets are enums with a `match`** (`Document`, `IndexWrite`, `McpConnection`, `Mode`). Traits only for small synchronous interfaces with a few implementations: this doc adds two, `ByteSource` and `ByteSink` in `rastai-formats`; `LogSink` belongs to the gateway.
+- **No `async fn` in traits behind `dyn`.** Async polymorphism is an enum.
+- **Shared state** is a plain struct with tables behind `std::sync::Mutex`; a lock is never held across `.await`.
+- **One wrapper file per external library** (contracts §2.4 rule 8); each crate section has a table naming it.
+- **Constants at the top of each file**, with the reason or measurement in a comment.
+- **Generated code** sits in a `generated/` folder, starts with a `// Generated by rastai-codegen. Do not edit.` line, and is checked in.
+- **`unsafe` is forbidden** (workspace lint, section 2.3). Section 4.12 says why the spike's `mmap` is dropped; the one proposed exception is `statvfs` (section 6.4).
+
+---
+
+## 2. Workspace root
+
+### 2.1 Tree (Rust and shared files only)
+
+```
+RASTAI/
+  Cargo.toml                 workspace: members, shared package fields, [workspace.dependencies], [workspace.lints],
+                             [workspace.metadata.rastai.allowlist] (the §27 crate table, 2.4)
+  Cargo.lock                 checked in; CI builds with --locked
+  rust-toolchain.toml        pinned stable toolchain (1.99, the spike's), components rustfmt + clippy, wasm32 target
+  rustfmt.toml               max_width = 120, edition = "2024" (matches the spike's line length)
+  clippy.toml                too-many-lines-threshold = 60, too-many-arguments-threshold = 6, cognitive-complexity-threshold = 15
+  deny.toml                  cargo-deny: licenses, advisories, sources, bans (2.4)
+  justfile                   every build, test, codegen and release task (2.5)
+  catalog/                   error and term catalog sources (2.6)
+  schemas/                   generated JSON Schemas (2.7)
+  tools/
+    codegen/                 Rust crate `rastai-codegen` (dev only): bins rastai-formats-codegen, rastai-catalog-codegen (4.9)
+    checks/
+      check-deps             reads `cargo metadata`, compares each crate's direct deps with the allowlist table
+      check-imports          (frontend doc) public-API rule for TS and Python
+      check-generated        regenerate everything into a temp tree, diff, fail on any change
+      check-unsafe           fails if any file outside the ADR exception list contains `unsafe` (the list is empty)
+      check-no-pickle        greps Python for `pickle` and `torch.load` (contracts §12.3)
+  fixtures/                  shared test inputs (contracts §12.5); this doc adds fixtures/mcp/, fixtures/data-dirs/ (section 14)
+  tests/
+    crash/                   Rust crate `rastai-crash-tests` (publish = false): the kill -9 matrix (flows/platform.md 6.5)
+```
+
+### 2.2 `Cargo.toml` (workspace)
+
+```toml
+[workspace]
+resolver = "3"
+members = [
+  "crates/rastai-diag",
+  "crates/rastai-proto",
+  "crates/rastai-formats",
+  "crates/rastai-formats/bindings/wasm",
+  "crates/rastai-formats/bindings/python",
+  "crates/rastai-core",
+  "crates/rastai-plugin",
+  "crates/rastai-store",
+  "crates/rastai-transport",
+  "crates/rastai-sandbox",
+  "crates/rastai-gateway",
+  "crates/rastai-mcp",
+  "crates/rastai-node",
+  "crates/rastai-server",
+  "crates/rastai-cli",
+  "apps/desktop/src-tauri",
+  "tools/codegen",
+  "tests/crash",
+]
+# cargo-fuzz needs its own nightly workspace; the spike is history and never built here.
+exclude = ["crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz", "spike"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+
+[workspace.dependencies]
+# Every external crate is declared here once, with an exact version. Member crates write `tokio = { workspace = true }`.
+# The reason and allowed users of each one are in [workspace.metadata.rastai.allowlist] below.
+tokio = { version = "=1.53.0", default-features = false }
+axum = { version = "=0.8.9", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+blake3 = "=1.x.y"           # exact version pinned when the crate is first added
+# ... one line per allowlisted crate
+
+[workspace.lints.rust]
+unsafe_code = "deny"           # deny, not forbid, so an ADR can allow one named file; check-unsafe keeps the list honest
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"           # tests opt out with #[allow] at the test module
+expect_used = "warn"
+dbg_macro = "deny"
+todo = "deny"
+print_stdout = "deny"          # only rastai-cli/src/output.rs and codegen bins print; they allow it per file
+too_many_lines = "warn"        # 60 lines, from clippy.toml: small functions
+cognitive_complexity = "warn"
+```
+
+- `version` exact-pins (`=`) every external crate, so `Cargo.lock` and the allowlist agree and an update is a deliberate PR.
+- `default-features = false` on big crates; each member turns on only the features it uses (for example `tokio` features `rt-multi-thread`, `net`, `sync`, `time`, `process`, `fs`, `io-util`, `macros` in `rastai-server`; only `sync` in `rastai-store`).
+- Each member's `Cargo.toml` has `[lints] workspace = true`.
+
+### 2.3 Lint and format rules
+
+| Rule | Where | Why |
+|---|---|---|
+| `cargo fmt --check` | `just fmt-check` | one style; `rustfmt.toml` sets 120 columns |
+| clippy with `-D warnings` | `just lint` | the lints above; `too_many_lines` keeps functions small |
+| `unsafe_code = "deny"` + `tools/checks/check-unsafe` | workspace lints | contracts §12.2: `unsafe` only with an ADR naming the file |
+| no `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl` | `deny.toml` `[bans]` | contracts §12.2 and §14 row 1 |
+| no `async-trait` | `deny.toml` `[bans]` | async polymorphism is an enum |
+| every direct dependency in the allowlist table, used only by the listed crates | `tools/checks/check-deps` | §27; one wrapper module per library |
+
+### 2.4 `deny.toml` and the crate allowlist
+
+`deny.toml` holds what cargo-deny checks well:
+- `[licenses] allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CC0-1.0", "MPL-2.0", "BSL-1.0", "CDLA-Permissive-2.0"]` (the ADR-0015 #7 list); anything else fails. `confidence-threshold = 0.9`.
+- `[advisories]`: the RustSec database; `yanked = "deny"`.
+- `[sources]`: crates.io only; no git dependencies.
+- `[bans]`: `multiple-versions = "warn"`; `deny = ["anyhow", "thiserror", "reqwest", "memmap2", "openssl", "openssl-sys", "async-trait", "schemars"]`. `wrappers` pins the libraries with one owner: `tokenizers` and `minijinja` only under `rastai-gateway`; `rusqlite` only under `rastai-store`; `pyo3` only under `rastai-formats-python`; `wasm-bindgen` only under `rastai-formats-wasm`; `keyring` only under `rastai-server`; `blake3` only under `rastai-formats`; `ed25519-dalek` only under `rastai-node`.
+
+The §27 table itself lives in `Cargo.toml` as data, so there is one place to read it:
+
+```toml
+[workspace.metadata.rastai.allowlist]
+# crate = { category, reason, users }. check-deps fails if a member uses a crate not listed, or a crate a member isn't listed for.
+tokio      = { category = "foundation", reason = "async runtime", users = ["rastai-server", "rastai-node", "rastai-gateway", "rastai-mcp", "rastai-transport", "rastai-sandbox", "rastai-plugin", "rastai-cli", "rastai-store"] }
+rusqlite   = { category = "foundation", reason = "SQLite", users = ["rastai-store"] }
+blake3     = { category = "security", reason = "content hashes, blob names", users = ["rastai-formats"] }   # every other crate hashes through rastai_formats::hashing
+ed25519-dalek = { category = "security", reason = "node and daemon identity, update signatures", users = ["rastai-node"] }   # the daemon signs through rastai_node::identity
+serde      = { category = "foundation", reason = "document and JSON types", users = ["*"] }
+pyo3       = { category = "foundation", reason = "the rastai-formats wheel (contracts §14 row 1)", users = ["rastai-formats-python"] }
+# ... one row per crate in §27 and contracts §14 row 1
+```
+
+Dev-only crates (`libfuzzer-sys` for the fuzz crate) are listed with `category = "dev"`; `check-deps` rejects them in non-dev dependency sections.
+
+### 2.5 `justfile` recipes
+
+Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) are listed in those docs; the ones below are the Rust and repo-wide ones.
+
+| Recipe | Runs | Used by |
+|---|---|---|
+| `just check` | `fmt-check lint test-rust codegen-check deny check-deps proto-check` plus the Python and TS checks from their docs | "done" means this passes (§29) |
+| `just build` | `cargo build --workspace --locked` | dev |
+| `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`) | CI on Linux, macOS, Windows runners (CPU) |
+| `just test-crash` | `cargo test -p rastai-crash-tests -- --test-threads=1` | CI on Linux |
+| `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (formats, store, server) | nightly CI, 10 minutes per target |
+| `just codegen` | `buf generate` (proto doc), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen` | after any catalog, document or command change |
+| `just codegen-check` | `tools/checks/check-generated` | CI |
+| `just wasm` | `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --out-dir packages/formats/src/wasm/` | `packages/formats` build, the viewer |
+| `just wheel` | `maturin build --release -m crates/rastai-formats/bindings/python/Cargo.toml` into `python/rastai_formats/dist/` | the uv environments |
+| `just deny` | `cargo deny check` | CI |
+| `just check-deps` | `tools/checks/check-deps` | CI |
+| `just serve-dev` | `RASTAI_HOME=.dev cargo run -p rastai-cli -- serve --headless` | dev: a throwaway data directory under the repo (git-ignored) |
+| `just web-embed` | `pnpm --filter @rastai/web build` (frontend doc), so `rastai-server` embeds a fresh `apps/web/dist/` | release builds |
+| `just release-linux` | `tools/release/` AppImage and `.deb` | release |
+
+### 2.6 `catalog/`
+
+```
+catalog/
+  errors/
+    RRS-E.json     formats and validation         (owner rastai-formats)
+    RRS-P.json     plugins                         (plugin host in rastai-server, SDKs)
+    RRS-C.json     commands and API                (rastai-core, rastai-server, rastai-mcp)
+    RRS-S.json     storage and durability          (rastai-store)
+    RRS-N.json     nodes, transport, remote
+    RRS-H.json     hardware and environments
+    RRS-J.json     jobs and worker protocol
+    RRS-G.json     gateway and inference
+    RRS-M.json     model runtime
+    RRS-T.json     training
+    RRS-D.json     data
+    RRS-R.json     agent gym and sandboxes
+    RRS-U.json     UI client
+  terms/
+    terms.json     plain-English definitions shown by the UI (the glossary, contracts §13)
+  README.md        how to add a code: pick the next free number in the owning range, never reuse, retire instead
+```
+
+`RRS-L` and `RRS-V` live in `plugins/psychology/catalog/` and `plugins/evaluation/catalog/` (contracts §10); the catalog codegen reads them too. One entry:
+
+```json
+{
+  "code": "RRS-S3001",
+  "severity": "error",
+  "title": "Not enough free disk space",
+  "message": "{operation} needs {needed_bytes} bytes on {volume}, but only {free_bytes} are free.",
+  "basic_text": "Your disk is almost full, so Rastai can't save this.",
+  "fix_text": "Free up space, or let Rastai delete old checkpoints and unused files.",
+  "fix_command_id": "storage.gc",
+  "docs_anchor": "storage-disk-full",
+  "retired": false
+}
+```
+
+- Placeholders are `{snake_case}` names. The codegen test checks that every placeholder used in Rust call sites exists in the entry (it scans for `diagnostic("RRS-...", &[("name", ...)])` with a plain text search; no macro).
+- `fix_command_id`, when set, must be a command id in the core table or a first-party manifest. Checked by the codegen.
+- Terms: `{"term_id": "logit_lens", "title": "Logit lens", "basic_text": "...", "advanced_text": "...", "docs_anchor": "..."}`.
+
+### 2.7 `schemas/`
+
+Generated by `rastai-formats-codegen` from the type descriptions (section 4.9). Checked in; never edited.
+
+```
+schemas/
+  rastai.model/1.json              one file per document type and schema version (contracts §5.1)
+  rastai.harness/1.json
+  rastai.data/1.json
+  rastai.eval/1.json
+  rastai.replay/1.json
+  rastai.plugin/1.json
+  rastai.project/1.json
+  rastai.lock/1.json
+  rastai.conversation/1.json
+  rastai.run_record/1.json
+  rastai.resume/1.json
+  rastai.steering_preset/1.json
+  rastai.layout/1.json
+  rastai.keybindings/1.json
+  rastai.settings/1.json
+  rastai.converter/1.json          step 5 (declarative dataset converters)
+  rastai.eval_result/1.json        step 5 (an eval run's result file)
+  rastai.model_diff/1.json         step 4 (Psychology model diff report)
+  rastai.sae_fit_check/1.json      step 4 (Psychology SAE fit check report)
+  rastai.theme/1.json              step 8 (plugin theme tokens)
+  commands/
+    rastai.command.model.load/1.json      arguments and result of each core command (two `$defs`: arguments, result)
+    ...
+  index.json                        every schema id with its file and content hash (the Phase 2 publish step reads this)
+```
+
+- Old versions stay forever (`rastai.model/1.json` is kept when `/2` appears), because migrations read old files.
+- The `$id` in each file is the stable URL `https://schemas.rastai.dev/<type>/<version>.json` (contracts §14 row 8); nothing serves it until Phase 2.
+
+---
+
+## 3. `rastai-diag`: catalog, renderer, logger
+
+**Purpose.** The bottom crate. It holds the `Diagnostic` type every other crate returns, the compiled catalog that gives each code its text and fix, the compiler-style renderer, and the JSON-lines logger. It has no rastai dependencies and builds for `wasm32-unknown-unknown`, so the browser validator renders the same messages as the CLI.
+
+### 3.1 Tree
+
+```
+crates/rastai-diag/
+  Cargo.toml
+  CLAUDE.md                   local rules: no rastai deps, WASM-safe, every user-facing text comes from the catalog
+  src/
+    lib.rs                    pub mod lines only
+    diagnostic.rs             Severity, Diagnostic, diagnostic(), diagnostic_at(), has_errors()
+    path.rs                   the Diagnostic.path grammar: build and split "<file>:<line>:<column>#<json pointer>"
+    catalog.rs                CatalogEntry, find_entry(), fill_placeholders(); RuntimeCatalog for third-party PLG- codes
+    terms.rs                  TermEntry, find_term()
+    render_text.rs            compiler-style text: code and title, location, source snippet with a caret, fix lines
+    render_basic.rs           Basic-mode text: basic_text plus the fix label
+    render_json.rs            Diagnostic as a JSON object (CLI --json, logs)
+    logger.rs                 JSON-lines logger: init_logger(), log_info(), log_warn(), log_error(), file rotation
+    generated/
+      catalog_table.rs        pub const CATALOG: &[CatalogEntry], from catalog/errors/*.json and the first-party plugin catalogs
+      terms_table.rs          pub const TERMS: &[TermEntry], from catalog/terms/terms.json
+  tests/
+    render_snapshots.rs       each fixtures/diagnostics/<case>.json renders to <case>.txt (plain) and <case>.basic.txt
+```
+
+### 3.2 Public API
+
+```rust
+// diagnostic.rs
+pub enum Severity { Error, Warning, Info }
+
+/// The in-process twin of rastai.common.v1.Diagnostic. Same fields, same meaning.
+/// rastai-core/src/wire.rs converts between the two; a test checks the field lists match (section 5.5).
+pub struct Diagnostic {
+    pub code: String,               // "RRS-E2004", or "PLG-<plugin_id>-0001" for third-party plugins
+    pub severity: Severity,
+    pub message: String,            // the catalog message with placeholders filled
+    pub path: String,               // see path.rs; empty when the problem has no location
+    pub fix_text: String,
+    pub fix_command_id: String,     // drives the fix button; empty when there is none
+    pub fix_arguments_json: String,
+}
+
+/// Builds a diagnostic from the catalog. Severity, message and fix come from the entry, so call sites never write user-facing text.
+pub fn diagnostic(code: &str, values: &[(&str, &str)]) -> Diagnostic
+pub fn diagnostic_at(code: &str, values: &[(&str, &str)], path: &str) -> Diagnostic
+pub fn has_errors(diagnostics: &[Diagnostic]) -> bool
+
+// path.rs
+pub struct DiagnosticPath { pub file: String, pub line: u32, pub column: u32, pub json_pointer: String }
+pub fn format_path(path: &DiagnosticPath) -> String       // "designs/textcnn.rrsmodel:14:9#/inputs/1/range"
+pub fn parse_path(text: &str) -> DiagnosticPath
+
+// catalog.rs
+pub struct CatalogEntry {
+    pub code: &'static str, pub severity: Severity, pub title: &'static str, pub message: &'static str,
+    pub basic_text: &'static str, pub fix_text: &'static str, pub fix_command_id: &'static str,
+    pub docs_anchor: &'static str, pub retired: bool,
+}
+pub fn find_entry(code: &str) -> Option<&'static CatalogEntry>
+pub fn fill_placeholders(template: &str, values: &[(&str, &str)]) -> String
+
+/// Third-party plugin codes, loaded at runtime by the plugin host from the plugin's catalog/errors.json.
+pub struct PluginCatalogEntry { pub code: String, pub severity: Severity, pub title: String, pub message: String,
+                                pub basic_text: String, pub fix_text: String, pub fix_command_id: String }
+pub struct RuntimeCatalog { pub plugin_entries: Vec<PluginCatalogEntry> }
+pub fn add_plugin_catalog(catalog: &mut RuntimeCatalog, plugin_id: &str, entries: Vec<PluginCatalogEntry>) -> Vec<Diagnostic>
+pub fn remove_plugin_catalog(catalog: &mut RuntimeCatalog, plugin_id: &str)
+pub fn plugin_diagnostic(catalog: &RuntimeCatalog, code: &str, values: &[(&str, &str)]) -> Diagnostic
+
+// render_text.rs, render_basic.rs, render_json.rs
+pub enum RenderStyle { Plain, Color }
+pub fn render_text(diagnostic: &Diagnostic, source_text: Option<&str>, style: RenderStyle) -> String
+pub fn render_basic(diagnostic: &Diagnostic) -> String
+pub fn render_json(diagnostic: &Diagnostic) -> serde_json::Value
+
+// logger.rs
+pub enum LogLevel { Debug, Info, Warn, Error }
+pub struct LoggerSettings { pub process_name: String, pub file_path: Option<PathBuf>, pub level: LogLevel,
+                            pub max_file_bytes: u64, pub keep_files: u32 }
+pub fn init_logger(settings: LoggerSettings)
+pub fn log_info(message: &str, fields: &[(&str, &str)])
+pub fn log_warn(message: &str, fields: &[(&str, &str)])
+pub fn log_error(message: &str, fields: &[(&str, &str)])
+pub fn log_diagnostic(diagnostic: &Diagnostic, fields: &[(&str, &str)])
+```
+
+The text renderer's output, for a meaning-layer error in a design:
+
+```
+error[RRS-E2004]: Input ranges overlap
+  --> designs/textcnn.rrsmodel:14:9  #/inputs/1/range
+   |
+14 |         "range": [0, 128],
+   |         ^^^^^^^^^^^^^^^^^ overlaps input "title" (0..64)
+   = fix: shrink one of the ranges, or merge the two inputs
+```
+
+- **Callers:** every crate builds diagnostics with `diagnostic()`. `rastai-cli/src/output.rs` renders them (`render_text` with `Color` on a TTY, `render_basic` unless `--verbose`). The WASM build calls `render_basic` for form hints. The plugin host owns the `RuntimeCatalog`. `rastai-server` and `rastai-node` call `init_logger` once in their entry functions; run ids travel into Python as `RASTAI_RUN_ID` (contracts §14 row 2).
+- **Log line:** `{"unix_ms":..., "level":"info", "process":"daemon", "message":"...", "run_id":"...", ...fields}` in `<state>/logs/daemon.jsonl` or `node.jsonl`; rotated to `.1.jsonl` ... at `logging.max_file_bytes`, keeping `logging.keep_files`. One `std::sync::Mutex<File>` guards the file; each line is one `write_all`.
+- **Unknown code:** `diagnostic()` with a code missing from the catalog returns severity `Error`, the code itself, and message `"unknown diagnostic code"`, and logs a warning. The codegen test (4.9) makes this unreachable for first-party code: it scans the source for `"RRS-` literals and checks each against the catalog.
+
+### 3.3 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | none | | |
+| External | serde, serde_json | `render_json`, log lines | `render_json.rs`, `logger.rs` |
+
+### 3.4 Boundary rules
+
+- Never depends on another rastai crate. Never depends on tokio.
+- No I/O except `logger.rs` (and only when `init_logger` was given a file).
+- Never holds user-facing text outside `generated/`. A new message is a new catalog entry, not a string literal.
+- Must build for `wasm32-unknown-unknown`; CI builds it in `just wasm`.
+
+### 3.5 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Unit | bottom of `path.rs`, `catalog.rs`, `render_text.rs` | path round trip; a missing placeholder value stays visible as `{name}`; snippet and caret at line 1, at the last line, with tabs and multi-byte characters |
+| Snapshots | `tests/render_snapshots.rs`, `fixtures/diagnostics/` (new) | plain, color-stripped and Basic output for one case per severity and path shape |
+| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); placeholders in call sites exist in the entry; every `fix_command_id` exists in the core table or a first-party manifest |
+| Append-only | `tools/checks/check-generated` | a code present at the merge base can be marked `retired` but never deleted or renumbered |
+
+### 3.6 Ported from the spike
+
+Nothing is ported. The lesson carried over: the spike's three readers (Python, Rust, Java) agreed on the 33-file corpus by comparing error *strings*, which broke on every wording change. Codes replace strings as the thing tests compare.
+
+### 3.7 Build-order step
+
+Step 1, before any other crate: the first `Execute` returns diagnostics. `RuntimeCatalog` arrives with third-party plugins at step 8.
+
+---
+
+## 4. `rastai-formats`: documents, validation, safetensors, GGUF
+
+**Purpose.** The single source of truth for every document type (§15, §23). It parses bytes into typed Rust structs in four validation layers, collects every diagnostic in one pass, migrates old files, writes files back with a content hash, and describes each type as plain data so JSON Schema, TS types and Python dataclasses are generated from it. It also owns the byte-exact formats Rastai writes in-house: safetensors, GGUF and zip. The same code runs in the daemon, the node, the CLI, the browser (WASM) and Python (PyO3).
+
+### 4.1 Tree
+
+```
+crates/rastai-formats/
+  Cargo.toml                  rlib only; the two builds are the binding crates below
+  CLAUDE.md                   local rules: bytes in, typed data out; no tokio; no path-based file access; WASM-safe
+  src/
+    lib.rs
+    error.rs                  FormatsError, typed errors for internal callers, each with code()
+    limits.rs                 ImportLimits and its defaults: file size, JSON depth, graph node count, parameter count, zip caps
+    byte_source.rs            ByteSource trait (length, read_at) with SliceSource and FileSource;
+                              ByteSink trait (write_bytes) with VecSink and FileSink
+    hashing.rs                the only blake3 import: hash_bytes, StreamHasher, content_hash_of_value, model_hash
+    semver.rs                 in-house semver: parse a version, parse a range, version_matches
+    json/
+      reader.rs               strict JSON reader: duplicate keys rejected, depth limit, NaN and Infinity rejected, positions kept
+      positions.rs            PositionMap: JSON pointer to line and column, filled by the reader
+      pointer.rs              JSON pointer escape, join, lookup
+      canonical.rs            canonical JSON (sorted keys, no whitespace, UTF-8), the input to content hashes
+      pretty.rs               stable pretty writer for files on disk: 2-space indent, fields in description order
+      patch.rs                JSON Patch subset (add, remove, replace, move): apply and diff, for undo (flows/platform.md 3.4)
+    describe/
+      types.rs                TypeDescription, FieldDescription, FieldKind, and the field() / list_of() / enum_of() helpers
+      registry.rs             describe_all_types(), find_description(name)
+      structure_check.rs      layer 2: walk a JSON value against a description, collect every mismatch with its path;
+                              a FieldKind::Proto field is only checked to be a JSON object (contracts §4)
+      json_schema.rs          a description as a JSON Schema value (runtime: MCP tool lists, ListCommands; build time: schemas/)
+      plugin_types.rs         read a plugin's types.json into TypeDescriptions (frontend doc 10.4)
+    header.rs                 SharedHeader (contracts §5.1) and its describe; header checks every document shares
+    documents/
+      mod.rs                  Document enum, DocumentType enum, type detection from extension and the "type" field
+      model.rs                ModelSpec, GraphNode, GraphEdge, BlockDefinition, InputRange, OutputHead, Objective, WeightsSource
+      model_ops.rs            the op vocabulary (contracts §5.3) and each op's attribute description
+      harness.rs              Harness, HarnessTool, HarnessEnvironment, HarnessReward, HarnessTask
+      data.rs                 DatasetSpec, DataSource, Splits, DataChecks
+      eval.rs                 EvalSuite, EvalTest, Expectation, JudgeSpec, BenchmarkSpec, DriftSpec
+      replay.rs               ReplayManifest (replay.json) and the archive layout constants
+      plugin_manifest.rs      PluginManifest and its contribution entries (frontend doc 10.1)
+      project.rs              Project (project.json) and the folder layout constants
+      lock.rs                 LockFile (rastai.lock)
+      conversation.rs         ConversationHeader, ConversationMessage, MessagePart; JSONL read and write
+      run_record.rs           RunRecord
+      resume.rs               ResumeState
+      steering_preset.rs      SteeringPreset
+      layout.rs               WorkspaceLayout
+      keybindings.rs          Keybindings
+      settings.rs             SettingsDocument (the keys of contracts §11.2)
+      converter.rs            ConverterDocument (rastai.converter/1): column mapping, templates, filters (step 5)
+      theme.rs                ThemeDocument (rastai.theme/1): name, colors, spacing_px, font_sizes_px, radius_px (step 8)
+      eval_result.rs          EvalResult (rastai.eval_result/1): answers, token ids, scores, pass flags, judge hashes (step 5)
+      model_diff.rs           ModelDiffReport (rastai.model_diff/1): feature, lens and routing shifts, eval deltas (step 4)
+      sae_fit_check.rs        SaeFitCheckReport (rastai.sae_fit_check/1): reconstruction quality per layer (step 4)
+      plans.rs                dry-run results: ModelDownloadPlan, EnvironmentInstallPlan, PluginInstallPlan, StorageGcPlan, UpdatePlan
+    commands/
+      mod.rs                  describe_arguments(id), describe_result(id), parse_arguments(), result_json()
+      system.rs               one <Name>Args and <Name>Result struct + describe fn per command in the area
+      ...                     one file per core area of contracts §6.1: settings.rs, token.rs, secret.rs, hf.rs, storage.rs,
+                              artifact.rs, project.rs, file.rs, document.rs, workspace.rs, command.rs, job.rs, model.rs,
+                              chat.rs, conversation.rs, adapter.rs, gateway.rs, train.rs (train, teach, rlhf, sweep), recipe.rs,
+                              run.rs, checkpoint.rs, design.rs, harness.rs, gym.rs, sandbox.rs, plugin.rs, node.rs,
+                              transfer.rs, dataset.rs, converter.rs
+    validate/
+      mod.rs                  read_document(): layers 1 to 3 plus migration, in one pass
+      syntax.rs               layer 1: run json::reader, turn its errors into RRS-E0xxx with line and column
+      structure.rs            layer 2: header first, then the body description; RRS-E1xxx with pointer and line
+      meaning/
+        mod.rs                check_meaning(document): one match arm per document type
+        model_graph.rs        references resolve, block refs exist, repeat counts, acyclic unless an rnn op closes the loop
+        model_shapes.rs       shape inference per op along the graph; shape errors on the edge that breaks
+        input_map.rs          input ranges don't overlap, every range has an encoder, fusion inputs exist
+        harness.rs            tool names unique, reward refers to a known kind, task ids unique
+        data.rs               split ratios sum to 1, converter ref present, source hashes well formed
+        eval.rs               test ids unique, thresholds in range, judge ids referenced exist
+        plugin_manifest.rs    plugin id format, command ids inside the plugin's namespace, no reserved areas
+        project.rs            folders exist in the listing given, data_policy known
+      environment.rs          layer 4: EnvironmentFacts in, RRS-E3xxx warnings out
+    migrate/
+      mod.rs                  the chain runner: read schema_version, apply each step, mark newer files read-only (RRS-E4001)
+      chain_table.rs          one row per (type, from_version) naming its step function; empty until a v2 exists
+    zip/
+      reader.rs               central directory (ZIP64 too), stored and deflate entries, limits, zip-slip check, before any
+                              entry is read; copy_zip_entry streams one entry into a ByteSink
+      inflate.rs              in-house DEFLATE decoder (RFC 1951), streaming
+      writer.rs               stored-only streaming writer with fixed entry order and timestamps, so archives are
+                              reproducible; ZIP64 records when a size, an offset or the entry count needs them
+    safetensors/
+      dtypes.rs               dtype names and element sizes
+      reader.rs               strict reader (spike port): header checked fully before any tensor is read
+      writer.rs               layout planner: sorted names, header padded with spaces to 8 bytes, string metadata
+    gguf/
+      reader.rs               header-only GGUF v3 reader: key-values and tensor infos, no tensor bytes (node lease sizing)
+      writer.rs               GGUF v3 encoder: header, key-values, tensor infos, 32-byte aligned data offsets
+      quantize.rs             Q8_0 block encoding; f32, f16 and bf16 are copies or casts
+    importers/
+      chatgpt_export.rs       ChatGPT conversations.json to rastai.conversation/1, keeping the mapping tree's branches
+      claude_export.rs        Claude export to rastai.conversation/1
+      openai_jsonl.rs         OpenAI messages JSONL, with tool calls and results
+      sharegpt.rs             ShareGPT
+      mcp_client_config.rs    .mcp.json, Claude Desktop and VS Code configs to harness tools
+      mcp_server_json.rs      MCP Registry server.json references to harness tools
+      mcpb_bundle.rs          .mcpb bundle manifest (read through zip/) to a harness tool
+      agent_skills.rs         Agent Skills folder listing to harness tools
+      mcp_exporters.rs        harness tools back to the MCP client config formats (harness.export)
+  bindings/
+    wasm/                     crate rastai-formats-wasm (cdylib): the only wasm-bindgen user (4.5)
+      Cargo.toml
+      src/lib.rs
+    python/                   crate rastai-formats-python (cdylib), module rastai_formats._native: the only pyo3 user (4.6)
+      Cargo.toml
+      src/lib.rs
+  fuzz/                       cargo-fuzz crate, own workspace, nightly
+    Cargo.toml
+    fuzz_targets/
+      json_reader.rs
+      read_document.rs        read_document on arbitrary bytes, once per extension
+      safetensors_header.rs
+      gguf_header.rs
+      zip_reader.rs
+      inflate.rs
+      conversation_import.rs
+  tests/
+    documents_corpus.rs       fixtures/documents/<type>/{valid,invalid}: verdicts, codes and paths
+    safetensors_corpus.rs     fixtures/safetensors/: the 33 files and their expected codes
+    round_trip.rs             read, write, read: equal values and a stable content hash; seeded random documents
+    describe_matches_struct.rs every description lists exactly the struct's serde fields, with matching kinds
+    migrations.rs             every fixture of an old version opens and upgrades to the current one
+    commands_described.rs     every id in rastai-core's COMMANDS has an Args and a Result description
+    importers.rs              fixtures/conversations/* and fixtures/harness-import/* to their expected outputs
+    gguf_writer.rs            header bytes against a golden file; Q8_0 blocks against reference values
+    gguf_reader.rs            our writer's output and a llama.cpp-made K-quant fixture read back; truncated and lying headers
+    zip.rs                    stored and deflate archives, zip slip, zip bomb, truncated central directory
+    zip64.rs                  nightly: a 5 GB sparse source round-trips through ZIP64 with peak RSS under 64 MiB
+```
+
+### 4.2 How a document type is written
+
+Each type is a plain struct with serde derives plus one hand-written `describe_<type>()` next to it (contracts §5.4). No proc macros of our own, no schema library.
+
+```rust
+// documents/eval.rs (shortened)
+const EVAL_SCHEMA_ID: &str = "rastai.eval/1";
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct EvalTest {
+    pub test_id: String,
+    pub input: TestInput,
+    pub expectation: Expectation,
+    pub metric: String,
+    pub pass_threshold: f64,
+}
+
+pub fn describe_eval_test() -> TypeDescription {
+    TypeDescription {
+        name: "EvalTest".into(),
+        schema_id: EVAL_SCHEMA_ID.into(),
+        doc: "One model test: an input, an expectation and a pass threshold.".into(),
+        fields: vec![
+            field("test_id", FieldKind::String, REQUIRED, "Stable id, unique in the suite."),
+            field("input", FieldKind::Type("TestInput".into()), REQUIRED, "Messages, or a conversation reference."),
+            field("expectation", FieldKind::Type("Expectation".into()), REQUIRED, "What a passing answer looks like."),
+            field("metric", FieldKind::String, REQUIRED, "Metric name from the registry, e.g. judge or keyword."),
+            field("pass_threshold", FieldKind::Number, REQUIRED, "Score at or above this passes."),
+        ],
+    }
+}
+```
+
+```rust
+// describe/types.rs
+pub struct TypeDescription { pub name: String, pub schema_id: String, pub doc: String, pub fields: Vec<FieldDescription> }
+
+pub struct FieldDescription {
+    pub name: String,
+    pub kind: FieldKind,
+    pub required: bool,
+    pub doc: String,
+    pub secret: bool,                 // the command journal redacts it (flows/platform.md 3.1)
+    pub cli_position: Option<u32>,    // `rastai eval test <suite>`: positional CLI argument (section 9.4)
+}
+
+/// Same kinds as a plugin's types.json (frontend doc 10.4), plus Json, Enum and Proto.
+pub enum FieldKind {
+    String, Integer, Number, Boolean,
+    Json,                             // free-form JSON checked by the meaning layer (op attributes, recipe settings)
+    Enum(Vec<String>),
+    List(Box<FieldKind>),
+    Map(Box<FieldKind>),              // string keys
+    Type(String),                     // another described type, by name
+    Proto(String),                    // a wire type stored as its protobuf JSON, e.g. "rastai.common.v1.HardwareFingerprint";
+                                      // layer 2 only checks it is a JSON object (contracts §4)
+}
+
+pub const REQUIRED: bool = true;
+pub const OPTIONAL: bool = false;
+pub fn field(name: &str, kind: FieldKind, required: bool, doc: &str) -> FieldDescription
+pub fn list_of(kind: FieldKind) -> FieldKind
+pub fn enum_of(values: &[&str]) -> FieldKind
+```
+
+- **Descriptions do two jobs:** the codegen writes schemas and types from them, and layer 2 checks raw JSON against them. Because layer 2 runs before `serde_json::from_value`, every structure problem is reported with a path, all at once, and serde never sees bad input. A `from_value` failure after a clean layer 2 is a description bug; `describe_matches_struct.rs` catches it in CI.
+- Unknown fields are a structure error (`RRS-E1003`), so a typo never silently drops data. Forward compatibility comes from `schema_version`, not from ignoring fields.
+- Enums in documents are Rust enums with `#[serde(rename_all = "snake_case")]` and an `Enum` description listing the same names.
+- **Wire types inside documents** (contracts §4, §5.4): `run.json` `job_spec` (`rastai.node.v1.JobSpec`) and `hardware_fingerprint`, replay `hardware_fingerprint` (`rastai.common.v1.HardwareFingerprint`), and conversation message `settings` (`rastai.node.v1.SamplingSettings`) are described as `FieldKind::Proto("<package>.<Message>")`. The struct field is a `serde_json::Value` holding the object, never a re-declared struct, because `rastai-formats` can't depend on `rastai-proto` (WASM). Each consumer treats it the same way:
+  - `structure_check.rs` (layer 2): the value must be a JSON object, else `RRS-E1002` at the field's path.
+  - `json_schema.rs`: `{"type": "object"}` with a `description` naming the message.
+  - `python_dataclasses.rs` and `typescript_types.rs`: a plain `dict` / `Record<string, unknown>` with a doc comment naming the message, so `rastai_formats` and `@rastai/formats` don't depend on the proto packages.
+  - Rust readers decode it with `rastai-core/src/proto_json.rs` (section 5.2) into the generated message; a decode failure is an `RRS-E1xxx` diagnostic at the field's path.
+
+### 4.3 Public API
+
+```rust
+// validate/mod.rs: the one entry point for untrusted bytes
+pub struct ReadOutcome {
+    pub document: Option<Document>,      // None when layer 1 or 2 found errors
+    pub diagnostics: Vec<Diagnostic>,    // every layer's findings, collected in one pass
+    pub read_only: bool,                 // the file is from a newer schema version (RRS-E4001)
+    pub migrated_from_version: u32,      // 0 when no migration ran
+}
+
+pub fn read_document(file_name: &str, source: &dyn ByteSource, limits: &ImportLimits) -> ReadOutcome
+pub fn check_environment(document: &Document, facts: &EnvironmentFacts) -> Vec<Diagnostic>
+pub fn write_document(document: &Document) -> Result<Vec<u8>, FormatsError>   // fills content_hash, pretty JSON
+pub fn document_content_hash(document: &Document) -> String
+
+pub enum Document {
+    Model(ModelSpec), Harness(Harness), Data(DatasetSpec), Eval(EvalSuite), Replay(ReplayManifest),
+    PluginManifest(PluginManifest), Project(Project), Lock(LockFile), RunRecord(RunRecord), Resume(ResumeState),
+    SteeringPreset(SteeringPreset), Layout(WorkspaceLayout), Keybindings(Keybindings), Settings(SettingsDocument),
+    Converter(ConverterDocument), Theme(ThemeDocument), EvalResult(EvalResult), ModelDiff(ModelDiffReport),
+    SaeFitCheck(SaeFitCheckReport),
+}
+
+/// Plain facts the caller looked up; rastai-formats never queries the machine itself.
+pub struct EnvironmentFacts {
+    pub enabled_plugins: Vec<(String, String)>,     // (plugin_id, version)
+    pub host_capabilities: Vec<String>,             // "designer.node@1"
+    pub gpu_memory_bytes: Vec<u64>,
+    pub adapters: Vec<String>,
+}
+
+// Typed readers for files Rastai wrote itself (run records, resume state, settings). Same layers, shorter call.
+pub fn read_run_record(bytes: &[u8]) -> Result<RunRecord, Vec<Diagnostic>>
+pub fn read_resume_state(bytes: &[u8]) -> Result<ResumeState, Vec<Diagnostic>>
+pub fn read_settings(bytes: &[u8]) -> Result<SettingsDocument, Vec<Diagnostic>>
+pub fn read_plugin_manifest(bytes: &[u8]) -> Result<PluginManifest, Vec<Diagnostic>>
+
+// conversation.rs: JSONL, one message per line
+pub fn read_conversation(source: &dyn ByteSource, limits: &ImportLimits) -> Result<Conversation, Vec<Diagnostic>>
+pub fn write_conversation(conversation: &Conversation) -> Vec<u8>
+
+// commands/mod.rs
+pub fn parse_arguments<T: DeserializeOwned>(command_id: &str, arguments_json: &str) -> Result<T, Vec<Diagnostic>>
+pub fn result_json<T: Serialize>(result: &T) -> String
+pub fn describe_arguments(command_id: &str) -> Option<TypeDescription>
+pub fn describe_result(command_id: &str) -> Option<TypeDescription>
+
+// describe/
+pub fn describe_all_types() -> Vec<TypeDescription>
+pub fn json_schema_for(description: &TypeDescription, all_types: &[TypeDescription]) -> serde_json::Value
+pub fn read_plugin_types(bytes: &[u8]) -> Result<Vec<TypeDescription>, Vec<Diagnostic>>
+
+// hashing.rs
+pub fn hash_bytes(bytes: &[u8]) -> String                     // "blake3:<64 hex>"
+pub struct StreamHasher { /* wraps blake3::Hasher */ }
+pub fn new_stream_hasher() -> StreamHasher
+pub fn update_stream_hasher(hasher: &mut StreamHasher, bytes: &[u8])
+pub fn finish_stream_hasher(hasher: StreamHasher) -> String
+pub fn content_hash_of_value(document: &serde_json::Value) -> String   // canonical JSON without the content_hash key
+pub fn model_hash(weight_files: &[(String, String)]) -> String         // contracts §8.6: sorted "<name> <hash>" lines
+
+// json/patch.rs (undo)
+pub struct JsonPatchOperation { pub op: PatchOp, pub path: String, pub from: String, pub value: serde_json::Value }
+pub fn apply_patch(document: &serde_json::Value, patch: &[JsonPatchOperation]) -> Result<serde_json::Value, FormatsError>
+pub fn diff_values(before: &serde_json::Value, after: &serde_json::Value) -> Vec<JsonPatchOperation>
+
+// semver.rs
+pub struct Version { pub major: u64, pub minor: u64, pub patch: u64, pub pre_release: String }
+pub fn parse_version(text: &str) -> Result<Version, FormatsError>
+pub fn version_matches(range: &str, version: &Version) -> Result<bool, FormatsError>  // ">=1.2, <2", "^1.2", "=1.2.3"
+
+// byte_source.rs: a small sync trait with two implementations
+pub trait ByteSource {
+    fn length(&self) -> u64;
+    fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<(), FormatsError>;
+}
+pub struct SliceSource<'a> { pub bytes: &'a [u8] }      // WASM, tests, small files
+pub struct FileSource { pub file: std::fs::File }       // native only; the caller opened the file
+
+// byte_source.rs: the write side, so archives stream to disk instead of building in memory
+pub trait ByteSink {
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), FormatsError>;
+}
+pub struct VecSink { pub bytes: Vec<u8> }               // WASM, tests, small archives
+pub struct FileSink { pub file: std::fs::File }         // native only; the caller created the file
+```
+
+**Callers:** `rastai-server` (every `file.*`, `document.*`, `design.*` command, the plugin host, `Execute` argument parsing); `rastai-node` (run records, resume state, conversation and harness reads on the node); `rastai-cli` (`rastai validate`); `rastai-store` (run records during a rebuild); `rastai-mcp` (JSON Schemas for tools); `@rastai/formats` through WASM; `rastai_formats` and every Python package through PyO3.
+
+### 4.4 The four layers, as code
+
+```rust
+// validate/mod.rs
+pub fn read_document(file_name: &str, source: &dyn ByteSource, limits: &ImportLimits) -> ReadOutcome {
+    let mut diagnostics = Vec::new();
+    let Some(raw) = read_raw_json(file_name, source, limits, &mut diagnostics) else {   // layer 1, zip containers opened here
+        return failed_outcome(diagnostics);
+    };
+    let migration = migrate_to_current(&raw.value, &mut diagnostics);                    // RRS-E4xxx
+    check_structure(&migration.value, &raw.positions, file_name, &mut diagnostics);      // layer 2
+    if has_errors(&diagnostics) {
+        return failed_outcome(diagnostics);
+    }
+    let document = build_document(&migration.value);                                     // serde from_value, cannot fail here
+    check_meaning(&document, file_name, &raw.positions, &mut diagnostics);              // layer 3: warnings and errors
+    finished_outcome(document, diagnostics, migration)
+}
+```
+
+| Layer | Code range | Examples | Blocks loading? |
+|---|---|---|---|
+| 1 syntax | `RRS-E0001`–`0999` | not UTF-8, bad token, duplicate key, NaN | yes |
+| 2 structure | `RRS-E1001`–`1999` | missing required field, wrong kind, unknown field, value not in enum | yes |
+| 3 meaning | `RRS-E2001`–`2999` | unresolved reference, shape mismatch, cycle, overlapping input ranges | no: the document opens with errors shown; compile and train refuse it |
+| 4 environment | `RRS-E3001`–`3999` | plugin missing, doesn't fit the GPU, adapter can't run it | no: warnings, an action that needs the thing fails then |
+| versions | `RRS-E4001`–`4999` | newer file opened read-only, migration step failed | only a failed migration |
+| untrusted limits | `RRS-E5001`–`5999` | zip slip, zip bomb, file too big, too deep, too many graph nodes | yes, checked before allocating |
+
+Layer 4 is a separate call because only the caller knows the environment. The daemon runs it after `read_document` for `file.open` and `file.validate`; the WASM build never runs it.
+
+### 4.5 Byte formats: safetensors, GGUF, zip
+
+```rust
+// safetensors/reader.rs (spike port, section 4.12)
+const HEADER_LENGTH_BYTES: u64 = 8;
+const MAX_HEADER_BYTES: u64 = 100 * 1024 * 1024;   // same cap as the reference implementation (spike)
+
+pub struct TensorEntry { pub name: String, pub dtype: SafetensorsDtype, pub shape: Vec<u64>, pub start: u64, pub end: u64 }
+pub struct SafetensorsHeader { pub entries: Vec<TensorEntry>, pub metadata: Vec<(String, String)>, pub data_start: u64 }
+
+pub fn read_safetensors_header(source: &dyn ByteSource) -> Result<SafetensorsHeader, Diagnostic>
+pub fn check_safetensors_header(header_bytes: &[u8], data_length: u64) -> Result<SafetensorsHeader, Diagnostic>
+pub fn read_tensor_bytes(source: &dyn ByteSource, header: &SafetensorsHeader, entry: &TensorEntry, buffer: &mut Vec<u8>) -> Result<(), Diagnostic>
+
+// safetensors/writer.rs: plans the layout; the caller streams the tensor bytes in entry order
+pub struct TensorPlan { pub name: String, pub dtype: SafetensorsDtype, pub shape: Vec<u64> }
+pub struct SafetensorsLayout { pub header_bytes: Vec<u8>, pub entries: Vec<TensorEntry> }   // entries sorted by name
+pub fn plan_safetensors(tensors: &[TensorPlan], metadata: &[(String, String)]) -> Result<SafetensorsLayout, FormatsError>
+
+// gguf/writer.rs
+pub const GGUF_ALIGNMENT_BYTES: u64 = 32;
+pub enum GgufValue { U32(u32), I32(i32), U64(u64), F32(f32), Bool(bool), Text(String), TextList(Vec<String>), I32List(Vec<i32>), F32List(Vec<f32>) }
+pub enum GgufTensorType { F32, F16, Bf16, Q8_0 }
+pub struct GgufTensorPlan { pub name: String, pub shape: Vec<u64>, pub source_dtype: SafetensorsDtype, pub target_type: GgufTensorType }
+pub struct GgufLayout { pub header_bytes: Vec<u8>, pub tensor_offsets: Vec<u64> }
+pub fn plan_gguf(metadata: &[(String, GgufValue)], tensors: &[GgufTensorPlan]) -> Result<GgufLayout, FormatsError>
+pub fn encode_gguf_tensor(plan: &GgufTensorPlan, source_bytes: &[u8]) -> Result<Vec<u8>, FormatsError>
+
+// gguf/reader.rs: header only, for the node's Fast-model lease sizing (node layout §12 Q9). Untrusted input.
+pub struct GgufTensorInfo { pub name: String, pub shape: Vec<u64>, pub ggml_type: u32, pub offset: u64 }
+pub struct GgufHeader { pub version: u32, pub metadata: Vec<(String, GgufValue)>, pub tensors: Vec<GgufTensorInfo>,
+                        pub data_start: u64 }
+pub fn read_gguf_header(source: &dyn ByteSource) -> Result<GgufHeader, Diagnostic>      // RRS-E65xx
+pub fn gguf_tensor_bytes(tensor: &GgufTensorInfo) -> Result<u64, Diagnostic>           // block-size table per ggml type, K-quants included
+
+// zip/reader.rs and writer.rs: streaming, so multi-GB offline bundles and replays never sit in memory
+pub struct ZipEntry { pub path: String, pub compressed_bytes: u64, pub uncompressed_bytes: u64, pub method: ZipMethod,
+                      pub data_offset: u64, pub crc32: u32 }
+pub struct ZipSource { pub path: String, pub reader: Box<dyn ByteSource>, pub size_bytes: u64 }
+pub fn list_zip_entries(source: &dyn ByteSource, limits: &ImportLimits) -> Result<Vec<ZipEntry>, Diagnostic>   // all caps checked here
+pub fn copy_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, sink: &mut dyn ByteSink, limits: &ImportLimits) -> Result<(), Diagnostic>
+pub fn read_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, limits: &ImportLimits) -> Result<Vec<u8>, Diagnostic>  // documents only
+pub fn write_zip_stored(destination: &mut dyn ByteSink, entries: &mut dyn Iterator<Item = ZipSource>) -> Result<(), FormatsError>
+pub fn write_small_zip(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, FormatsError>   // in memory, for a few small documents
+```
+
+- **Strict safetensors contract (§23, spike):** no duplicate JSON keys; integers must be real integers; byte sizes use `checked_mul`; tensors tile the data section exactly; metadata maps strings to strings. One code per corpus class (section 16.4, `RRS-E6001`–`6017`). The Python reader in `rastai_models/io/` returns the same codes on the same corpus (`layout/python.md` 2.7).
+- **GGUF** covers f32, f16, bf16 and Q8_0. K-quants are made by the pinned `llama-quantize` on the node (`layout/python.md` 5.3); the format writer never does them. The tensor side (names, metadata, vocabulary) is in `rastai_models/io/gguf_writer.py`, which calls these two functions through the wheel, so GGUF has one byte encoder.
+- **GGUF header reader** (`gguf/reader.rs`, step 3): reads the magic, version, key-values and tensor infos and stops at `data_start`; it never reads tensor bytes. The node sums `gguf_tensor_bytes` and reads the context length and KV-head keys to size a Fast model's lease. GGUF files are untrusted (downloads), so counts and string and array lengths are checked against `ImportLimits` before anything is allocated. Key-value types that `GgufValue` has no variant for (u8, i16, f64 and the like) are skipped by size, not refused. Codes are in section 16.4 (`RRS-E6501`–`6506`).
+- **Zip** is in-house because §27 lists no zip crate. Reading supports stored and deflate (other tools write deflate: `.mcpb`, `.pt2`, exported projects from other machines). Writing is stored-only: replays are mostly safetensors, which barely compress, and stored archives are reproducible byte for byte. Deflate writing comes if a measurement shows a size problem.
+- **Zip streams.** Offline `.rrsproj` bundles carry model weights (`weights/`, several GB; flows/platform.md 10.2) and `.rrsreplay` files can carry `activations/*.safetensors`, so nothing builds a whole archive in memory:
+  - `write_zip_stored` takes one `ZipSource` at a time. It reads each source twice: once for the CRC-32, then to copy it after a complete local header (no data descriptors, so every unzip tool reads the result). Only the central-directory list (path, CRC, sizes, offset per entry) is kept in memory.
+  - **ZIP64:** when any size or offset passes `u32::MAX`, or there are more than 65,535 entries, the writer adds the ZIP64 extra fields, the ZIP64 end-of-central-directory record and its locator. The reader accepts the same.
+  - `copy_zip_entry` unpacks one entry into a sink in fixed-size chunks (`project.import` writes `weights/` straight into the `.importing` folder). Inflate stops at the declared size, and the CRC is checked at the end.
+  - `read_zip_entry` and `write_small_zip` stay for documents and small archives (`system.bundle`, tests); `read_zip_entry` refuses an entry over the `ImportLimits` file-size cap with `RRS-E5003`.
+- **Zip limits** are checked from the central directory before any entry is inflated: entry count, total uncompressed size, per-entry ratio (zip bomb, `RRS-E5002`), and `..`, absolute paths or backslashes in names (zip slip, `RRS-E5001`). `inflate.rs` also stops at the declared uncompressed size, so a lying header can't exceed it.
+
+### 4.6 WASM build: `rastai-formats-wasm`
+
+`crates/rastai-formats/bindings/wasm/src/lib.rs` is the only file that imports `wasm-bindgen`. Every function takes and returns plain strings and byte arrays, so the TS side needs no generated glue beyond what `wasm-bindgen` writes.
+
+```rust
+#[wasm_bindgen(js_name = readDocument)]
+pub fn read_document_js(file_name: &str, bytes: &[u8]) -> String          // JSON: { document_json, diagnostics, read_only, migrated_from_version }
+
+#[wasm_bindgen(js_name = contentHash)]
+pub fn content_hash_js(document_json: &str) -> String
+
+#[wasm_bindgen(js_name = renderBasic)]
+pub fn render_basic_js(diagnostic_json: &str) -> String
+
+#[wasm_bindgen(js_name = listZipEntries)]
+pub fn list_zip_entries_js(zip_bytes: &[u8]) -> String                    // JSON entries or diagnostics
+
+#[wasm_bindgen(js_name = readZipEntry)]
+pub fn read_zip_entry_js(zip_bytes: &[u8], entry_path: &str) -> Vec<u8>
+
+#[wasm_bindgen(js_name = readSafetensorsHeader)]
+pub fn read_safetensors_header_js(bytes: &[u8]) -> String                 // the viewer reads the replay summary layer
+```
+
+- **Callers:** `@rastai/formats` (early form feedback in the Designer and editors; the daemon still validates) and `apps/viewer` (opens `.rrsreplay` and `.rrsmodel` with no daemon). Output goes to `packages/formats/src/wasm/` and is a build artifact, not checked in.
+- Layer 4 (environment) is never run in WASM.
+- **Size budget:** under 1.5 MB gzipped. The build uses `opt-level = "s"` for this crate only.
+
+### 4.7 PyO3 build: `rastai-formats-python`
+
+`crates/rastai-formats/bindings/python/src/lib.rs` is the only file that imports `pyo3`. It builds the native module `rastai_formats._native`; `python/rastai_formats/` wraps it with the generated dataclasses (contracts §2.2). Arguments and results are `bytes` and `str`; failures raise one exception type carrying diagnostics JSON.
+
+```rust
+#[pyfunction]
+fn read_document(file_name: &str, data: &[u8]) -> String                  // same JSON as the WASM readDocument
+
+#[pyfunction]
+fn load_model_spec(json_bytes: &[u8]) -> PyResult<String>                 // validated, migrated, canonical ModelSpec JSON (§16 parsing boundary)
+
+#[pyfunction]
+fn write_document(document_json: &str) -> PyResult<Vec<u8>>               // fills content_hash; used for run.json, resume.json, .rrsdata
+
+#[pyfunction]
+fn content_hash(document_json: &str) -> PyResult<String>
+
+#[pyfunction]
+fn hash_bytes(data: &[u8]) -> String
+
+#[pyfunction]
+fn model_hash(weight_files: Vec<(String, String)>) -> String
+
+#[pyfunction]
+fn check_safetensors_header(header_bytes: &[u8], data_length: u64) -> PyResult<String>  // optional: one implementation of the strict contract
+
+#[pyfunction]
+fn plan_gguf(metadata_json: &str, tensors_json: &str) -> PyResult<(Vec<u8>, Vec<u64>)>
+
+#[pyfunction]
+fn encode_gguf_tensor(plan_json: &str, source_bytes: &[u8]) -> PyResult<Vec<u8>>
+
+#[pyfunction]
+fn write_zip_stored(destination_path: &str, entries: Vec<(String, String)>) -> PyResult<()>
+// .rrsreplay archives from rastai_lens: (path in the archive, source file path) pairs. The binding opens each file as a
+// FileSource and the destination as a FileSink, so activations stream to disk and never cross into Python as bytes.
+
+// exception: rastai_formats._native.FormatsValidationError(diagnostics_json)
+```
+
+- **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai.load()` in notebooks.
+- **Paths in the binding only.** `write_zip_stored` is the one function here that takes paths. The binding crate opens them; `rastai-formats` itself still only sees a `FileSource` and a `FileSink` (4.10).
+- Built by `just wheel` with maturin (§27 dev tooling) for CPython 3.12, `abi3` off: one wheel per platform in each `envs/<backend>/uv.lock`, by hash. Nothing installs at runtime.
+- The GIL is released (`py.allow_threads`) around anything that can take more than a millisecond (Q8_0 encoding, large documents).
+
+### 4.8 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | `rastai-diag` | diagnostics | |
+| External | serde, serde_json | document structs, JSON values, the canonical and pretty writers | `json/` (the reader is in-house; serde_json holds the values) |
+| External | blake3 | content hashes, model hashes, stream hashing | `hashing.rs` |
+| External (binding crates only) | wasm-bindgen | WASM build | `bindings/wasm/src/lib.rs` |
+| External (binding crates only) | pyo3 | Python build | `bindings/python/src/lib.rs` |
+| Dev | libfuzzer-sys (via cargo-fuzz) | fuzz targets | `fuzz/` |
+| Dev tooling | wasm-bindgen-cli, maturin | build the two artifacts | `justfile` |
+
+`wasm-bindgen`, `pyo3` and `wasm-bindgen-cli` are not yet in §27 (contracts §14 row 1 proposes the first two). Section 15 lists them.
+
+### 4.9 Codegen: `tools/codegen` (`rastai-codegen`)
+
+A dev-only crate (`publish = false`) with two binaries. It never ships. Generated output is checked in, and `check-generated` fails CI if regenerating changes anything.
+
+```
+tools/codegen/
+  Cargo.toml                  depends on rastai-formats, rastai-core, rastai-diag, serde_json
+  src/
+    bin/
+      rastai_formats_codegen.rs   main: load descriptions, then write each output in turn
+      rastai_catalog_codegen.rs   main: read catalog JSON, then write each output in turn
+    json_schema_files.rs      schemas/<type>/<version>.json and schemas/commands/*, schemas/index.json
+    typescript_types.rs       packages/formats/src/generated/*.ts (one interface per type, string unions for enums,
+                              Proto fields as Record<string, unknown> with a doc comment naming the message)
+    typescript_commands.rs    packages/formats/src/generated/commands.ts (command id to Args and Result type names)
+    python_dataclasses.rs     python/rastai_formats/generated/*.py (frozen @dataclass per type, from_json/to_json functions;
+                              Proto fields as dict with a docstring line naming the message)
+    catalog_rust.rs           crates/rastai-diag/src/generated/catalog_table.rs and terms_table.rs
+    catalog_typescript.rs     packages/catalog/src/generated/catalog.ts
+    catalog_python.rs         python/rastai_plugin/catalog/generated.py
+    reference_docs.rs         docs/reference/commands.md, errors.md, settings.md
+    write_if_changed.rs       write a file only when its bytes differ, so timestamps stay stable
+  tests/
+    catalog_checks.rs         the catalog rules of 3.5
+    outputs_compile.rs        the generated TS passes `tsc --noEmit`, the generated Python imports (run by just, not cargo)
+```
+
+```rust
+// tools/codegen/src/bin/rastai_formats_codegen.rs: a thin main
+fn main() -> ExitCode {
+    let repo_root = find_repo_root();
+    let types = rastai_formats::describe::describe_all_types();
+    let commands = command_descriptions(&rastai_core::commands::COMMANDS);
+    write_json_schema_files(&repo_root, &types, &commands);
+    write_typescript_types(&repo_root, &types);
+    write_typescript_commands(&repo_root, &commands);
+    write_python_dataclasses(&repo_root, &types);
+    write_reference_docs(&repo_root, &commands);
+    ExitCode::SUCCESS
+}
+```
+
+Order inside `just codegen`: proto first (`buf generate`), then the catalog (rastai-diag must compile before the rest), then formats.
+
+### 4.10 Boundary rules
+
+- **Bytes in, typed data out.** Never opens a path. File access is only through a `FileSource` the caller opened. Never touches the network, SQLite or the environment.
+- Never depends on tokio, `rastai-core`, `rastai-proto` or any other rastai crate except `rastai-diag`.
+- Every document type is defined here once. TS, Python and JSON Schema are generated. Nobody else declares a document or command-argument struct (contracts §2.4 rule 3). Plugin command types come from the plugin's `types.json`, read by `read_plugin_types`.
+- **Content hashes are computed only here** (any build). TS and Python never hash documents themselves, because canonical JSON number formatting must match exactly.
+- Untrusted-import limits are checked before allocating (`ImportLimits`), never after.
+- Must build for `wasm32-unknown-unknown` (CI).
+
+### 4.11 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Unit | bottom of each file | JSON reader positions; canonical JSON key order and number output; semver ranges; JSON Patch apply and diff; inflate against known streams |
+| Document corpus | `tests/documents_corpus.rs` + `fixtures/documents/<type>/{valid,invalid}/` | each invalid file has `<name>.expected.json` with the expected codes and paths (contracts §12.5); all are reported in one pass |
+| Safetensors corpus | `tests/safetensors_corpus.rs` + `fixtures/safetensors/` | 6 valid, 27 malformed; the code for each from `expected.json` |
+| Round trip | `tests/round_trip.rs` | read, write, read: equal; content hash stable across runs; random documents from a seeded in-house generator (no property-testing crate) |
+| Descriptions | `tests/describe_matches_struct.rs` | for each type, a filled fixture serialized by serde has exactly the described fields |
+| Migrations | `tests/migrations.rs` | every `fixtures/documents/<type>/v<n>/` file opens and upgrades; newer files open read-only |
+| Commands | `tests/commands_described.rs` | every core command id has Args and Result descriptions and a schema file |
+| Importers | `tests/importers.rs` + `fixtures/conversations/`, `fixtures/harness-import/` (new) | ChatGPT branches kept; Claude, OpenAI JSONL, ShareGPT; MCP configs both ways |
+| GGUF | `tests/gguf_writer.rs`, `tests/gguf_reader.rs` | header bytes against a golden file; Q8_0 against reference blocks; the reader reads our own output and a K-quant fixture made by the pinned `llama-quantize`, and refuses truncated or oversized headers with `RRS-E65xx`; the GPU test that runs the file in `llama-server` is in `layout/python.md` |
+| ZIP64 | `tests/zip64.rs` (nightly: it writes about 5 GB to a temp dir) | a 5 GB sparse source file goes through `write_zip_stored`, and `copy_zip_entry` into a test-only hashing sink gives the source's BLAKE3; `list_zip_entries` reads the ZIP64 records; the test process's peak RSS stays under 64 MiB; a 70,000-entry archive of empty files also round-trips |
+| Fuzz | `fuzz/fuzz_targets/` | nightly, 10 minutes per target; crashes become corpus files |
+| Parity across builds | `python/rastai_formats/tests/test_parity.py`, `packages/formats/src/validator.test.ts` | the same document and safetensors corpora through the wheel and WASM give identical codes, paths and content hashes |
+
+### 4.12 Ported from the spike
+
+| Spike file | Goes to | Changes on the way |
+|---|---|---|
+| `spike/bakeoff/rust/src/safetensors.rs` | `src/safetensors/reader.rs` | `memmap2` and its `unsafe` block are dropped: the header is read with `read_at`, tensors are read on demand into the caller's buffer (contracts §14 row 1; the daemon only reads headers and streams tensors). String errors become `Diagnostic`s with `RRS-E60xx` codes and a path naming the tensor. The serde duplicate-key visitor is replaced by the in-house JSON reader, which every document uses. `crc-fast` and the `read`/`validate` benchmark commands are dropped; the corpus test replaces `validate_command`. |
+| `spike/src/rastai_spike/safetensors_writer.py` (layout rules only) | `src/safetensors/writer.rs` | Same layout: sorted names, header padded with spaces to 8 bytes, string-only metadata. The Python writer itself moves to `rastai_models/io/`. |
+| `spike/bakeoff/fixtures/safetensors/*`, `safetensors_expected.json` | `fixtures/safetensors/`, `expected.json` | Expected strings become codes. `shape_overflows_64_bits` must give `RRS-E6012` in Python too: the spike's Python reader (arbitrary-precision ints) reported a size mismatch instead of an overflow. |
+| Lesson from spike 07 | `json/reader.rs` | Header NaN and trailing garbage are syntax errors in every reader, so all three languages agree on what "valid JSON" means. |
+
+### 4.13 Build-order step
+
+| Part | First needed (§31) | Why then |
+|---|---|---|
+| `json/`, `hashing.rs`, `header.rs`, `describe/`, `validate/` layers 1–2, `run_record.rs`, `resume.rs`, `settings.rs`, `project.rs`, `lock.rs`, `plugin_manifest.rs`, `semver.rs`, `zip/reader.rs`, `commands/` for the skeleton commands, the PyO3 build, `rastai-codegen` | 1 | the daemon, plugin host and worker protocol v0 (weeks 3–4) |
+| `model.rs` with the TextCNN ops, `model_shapes.rs` for them | 1 | worker v0 trains TextCNN from a ModelSpec |
+| `safetensors/`, `model_hash`, the Gemma and Llama ops | 2 | unified runtime, `model.inspect` |
+| `conversation.rs`, conversation importers, `gguf/reader.rs` | 3 | the conversation tree, `conversation.import`; Fast-model lease sizing |
+| `replay.rs`, `steering_preset.rs`, `zip/writer.rs` (streaming, ZIP64), `model_diff.rs`, `sae_fit_check.rs`, the WASM build | 4 | replays and the web viewer; Psychology reports |
+| `data.rs`, `converter.rs`, `eval.rs`, `eval_result.rs`, `gguf/writer.rs`, `plans.rs` for downloads | 5 | data import, Evaluation, export |
+| full `meaning/` for ModelSpec (input map, blocks, repeat), MoE/MLA/ALiBi/AttnRes ops, `layout.rs`, `keybindings.rs` | 6 | Designer |
+| `harness.rs`, MCP importers and exporters | 7 | Agent Gym |
+| `plugin_types.rs`, full manifest contributions, `theme.rs` | 8 | plugin SDK, theme contributions |
+| crates.io release, schemas served at stable URLs | Phase 2 | §31 |
+
+---
+
+## 5. `rastai-core`: command registry and domain types
+
+**Purpose.** The shared vocabulary of the Rust processes that is not a document: the core command table and the registry that merges plugin commands into it, the generated-surface naming rules, ids, principals and scopes, state-machine helpers, settings resolution, data paths and version constants. It is synchronous and does no I/O beyond reading environment variables and OS randomness.
+
+### 5.1 Tree
+
+```
+crates/rastai-core/
+  Cargo.toml
+  CLAUDE.md                   local rules: sync only, no files, no sockets, no SQLite; COMMANDS holds core commands only
+  src/
+    lib.rs
+    error.rs                  CoreError
+    versions.rs               APP_VERSION, PLUGIN_API_VERSION, NODE_PROTOCOL_VERSION, WORKER_PROTOCOL_VERSION, API_PACKAGES
+    paths.rs                  DataPaths, PathEnvironment, resolve_paths(), one function per well-known path, hf_cache_dir()
+    ids.rs                    IdPrefix, new_id(), id_has_prefix(), node_id_from_public_key()
+    crockford.rs              Crockford base32 encode and decode (ids, node ids)
+    random.rs                 random_bytes() from the OS: /dev/urandom on Linux and macOS (Windows later)
+    time.rs                   now_unix_ms(), format_rfc3339(), parse_rfc3339() (in-house, UTC only)
+    principal.rs              PrincipalKind, Principal, owner_principal(), principal_label()
+    scopes.rs                 Scope, scope_name(), parse_scope(), token presets, scopes_allow()
+    states.rs                 names and transition tables for the proto state enums (contracts §9)
+    settings.rs               SettingsSource, SettingsLayer, ResolvedSettings, resolve_settings(), typed getters,
+                              NodeSettings and node_settings(), GatewaySettings and gateway_settings()
+    settings_defaults.rs      the compiled default layer (contracts §11.1), built as a serde_json value in code
+    proto_json.rs             hand-written protobuf JSON for the wire types stored in documents (contracts §4):
+                              JobSpec, HardwareFingerprint, SamplingSettings and their nested messages
+    commands/
+      descriptor.rs           CommandRow, the static table row; its kind is the generated CommandKind
+      table.rs                pub const COMMANDS: &[CommandRow], one line per core command (contracts §6.4)
+      registry.rs             CommandRegistry, load_core_commands(), add_plugin_commands(), remove_plugin_commands(),
+                              find_command(), list_commands(), check_scope()
+      naming.rs               cli_words(), command_id_from_cli_words(), flag_name(), mcp_tool_name(),
+                              command_id_from_mcp_tool_name(), check_command_id()
+      output.rs               CommandOutput (result_json, job_id, warnings)
+    wire.rs                   rastai-diag Diagnostic to and from the proto Diagnostic; CommandRow to the proto CommandDescriptor
+  tests/
+    command_table.rs          every row well formed, unique, in a core area, valid scope and kind, since_version set
+    naming_round_trip.rs      every core id survives cli_words and mcp_tool_name round trips; fixtures/command-golden/copy-as.json
+    settings_precedence.rs    defaults < user < project < environment < flags, per key
+    wire_round_trip.rs        the Diagnostic and CommandRow twins list the proto messages' fields; golden round trip
+    proto_json_golden.rs      proto_json output equals fixtures/proto-golden/ JSON from protobuf-es, and decodes back
+```
+
+### 5.2 Public API
+
+```rust
+// commands/descriptor.rs
+use rastai_proto::commands::v1::{CommandDescriptor, CommandKind};   // generated: one owner (contracts §2.4 rule 3)
+
+/// One row of the core table: the one allowed in-process twin of the proto CommandDescriptor, because a const table
+/// can't hold Strings. Same field names as the message; it leaves out only what registration fills in
+/// (plugin_id, arguments_type, result_type and the two schema strings). tests/wire_round_trip.rs pins the field list.
+pub struct CommandRow {
+    pub command_id: &'static str,
+    pub title: &'static str,
+    pub summary: &'static str,
+    pub section: &'static str,
+    pub scope: Scope,
+    pub kind: CommandKind,                 // the generated enum, not one of our own
+    pub undoable: bool,
+    pub basic: bool,                       // shown in Basic mode
+    pub default_shortcut: &'static str,    // "" when none
+    pub experimental: bool,
+    pub since_version: &'static str,
+}
+
+// commands/table.rs
+pub const COMMANDS: &[CommandRow] = &[
+    CommandRow { command_id: "system.status", title: "Show status", summary: "Daemon, nodes, versions.", section: "settings",
+                 scope: Scope::Read, kind: CommandKind::Sync, undoable: false, basic: true, default_shortcut: "",
+                 experimental: false, since_version: "0.1.0" },
+    // one row per core command
+];
+
+// commands/registry.rs
+/// What the registry holds: the generated proto CommandDescriptor, with arguments_schema_json and result_schema_json
+/// (section 15 row 7). Core rows become descriptors at startup (wire.rs); plugin descriptors are built from manifests.
+pub struct CommandRegistry { pub commands: Vec<CommandDescriptor> }
+pub struct CommandFilter { pub section: String, pub include_experimental: bool, pub basic_only: bool }
+
+pub fn load_core_commands() -> CommandRegistry                                  // schema strings empty; rastai-server fills them
+pub fn add_plugin_commands(registry: &mut CommandRegistry, plugin_id: &str, commands: Vec<CommandDescriptor>) -> Result<(), Vec<Diagnostic>>
+pub fn remove_plugin_commands(registry: &mut CommandRegistry, plugin_id: &str)
+pub fn find_command<'a>(registry: &'a CommandRegistry, command_id: &str) -> Option<&'a CommandDescriptor>
+pub fn list_commands<'a>(registry: &'a CommandRegistry, filter: &CommandFilter) -> Vec<&'a CommandDescriptor>
+pub fn check_scope(principal: &Principal, command: &CommandDescriptor) -> Result<(), Diagnostic>   // RRS-C1005
+
+// wire.rs
+pub fn descriptor_from_row(row: &CommandRow) -> CommandDescriptor
+pub fn diagnostic_to_proto(diagnostic: &Diagnostic) -> rastai_proto::common::v1::Diagnostic
+pub fn diagnostic_from_proto(message: &rastai_proto::common::v1::Diagnostic) -> Diagnostic
+
+// proto_json.rs: one encode and one decode per message stored in documents (contracts §4); prost has no proto3 JSON
+pub fn job_spec_to_json(spec: &JobSpec) -> serde_json::Value
+pub fn job_spec_from_json(value: &serde_json::Value, path: &str) -> Result<JobSpec, Diagnostic>          // RRS-E1xxx at `path`
+pub fn hardware_fingerprint_to_json(fingerprint: &HardwareFingerprint) -> serde_json::Value
+pub fn hardware_fingerprint_from_json(value: &serde_json::Value, path: &str) -> Result<HardwareFingerprint, Diagnostic>
+pub fn sampling_settings_to_json(settings: &SamplingSettings) -> serde_json::Value
+pub fn sampling_settings_from_json(value: &serde_json::Value, path: &str) -> Result<SamplingSettings, Diagnostic>
+
+// commands/naming.rs (section 10.3 has the rules)
+pub fn cli_words(command_id: &str) -> Vec<String>                          // "eval.suite.add_conversation" -> eval suite add-conversation
+pub fn command_id_from_cli_words(registry: &CommandRegistry, words: &[String]) -> Option<(String, usize)>  // longest match, words used
+pub fn flag_name(field_name: &str) -> String                              // "fail_fast" -> "--fail-fast"
+pub fn mcp_tool_name(command_id: &str) -> String                          // "eval.suite.edit" -> "eval__suite__edit"
+pub fn command_id_from_mcp_tool_name(tool_name: &str) -> String
+pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnostic>   // form, reserved areas, plugin prefix
+
+// commands/output.rs
+pub struct CommandOutput { pub result_json: String, pub job_id: String, pub warnings: Vec<Diagnostic> }
+// Handlers return Result<CommandOutput, Vec<Diagnostic>>; errors are always catalog diagnostics (flows/platform.md 3.1).
+
+// principal.rs and scopes.rs
+pub enum PrincipalKind { Owner, Token, Plugin, Node }
+pub struct Principal { pub kind: PrincipalKind, pub id: String, pub scopes: Vec<Scope> }
+pub fn owner_principal() -> Principal                                     // every scope
+pub fn principal_label(principal: &Principal) -> String                   // "owner", "token:tok_...", "plugin:eval", "node:node_..."
+
+pub enum Scope {
+    Read, Chat, ConversationsRead, GatewaySpend, InferenceManage, Psychology, Training, Eval, Designer, Gym,
+    SandboxSpawn, Data, Project, PluginsManage, Remote, Secrets, SystemAdmin,
+    Plugin(String),                        // a third-party plugin's own scope, named by its plugin id
+}
+pub fn scope_name(scope: &Scope) -> String                               // "conversations.read"
+pub fn parse_scope(text: &str) -> Result<Scope, Diagnostic>
+pub fn token_preset_scopes(preset: &str) -> Option<Vec<Scope>>          // "chat-only", "mcp-default" (contracts §6.3)
+pub fn scopes_allow(held: &[Scope], needed: &Scope) -> bool
+
+// ids.rs
+pub enum IdPrefix { Run, Job, Checkpoint, Artifact, Conversation, Message, Request, Lease, Sandbox, Transfer,
+                    Project, Document, Journal, Token, Session, Rollout, Group }
+pub fn new_id(prefix: IdPrefix) -> String                                  // "run_01JA2B3C4D5E6F7G8H9J0K1M2N"
+pub fn id_has_prefix(id: &str, prefix: IdPrefix) -> bool
+pub fn node_id_from_public_key(public_key: &[u8; 32]) -> String
+
+// states.rs: the enums are rastai-proto's (one owner); these are the plain helpers around them
+pub fn job_state_name(state: JobState) -> &'static str
+pub fn parse_job_state(text: &str) -> Option<JobState>
+pub fn job_transition_allowed(from: JobState, to: JobState) -> bool        // contracts §9.1 plus flows/platform.md additions
+pub fn is_terminal_job_state(state: JobState) -> bool
+// the same four functions for RunState, ModelState, LeaseState, NodeState, SandboxState, PluginState, EvalRunState
+
+// settings.rs
+pub enum SettingsSource { Default, User, Project(String), Environment, Flag }
+pub struct SettingsLayer { pub source: SettingsSource, pub values: serde_json::Value }
+pub struct ResolvedSettings { pub values: serde_json::Value, pub sources: Vec<(String, SettingsSource)> }  // dotted key -> layer
+pub fn default_settings() -> SettingsLayer
+pub fn settings_from_environment(variables: &[(String, String)]) -> SettingsLayer   // RASTAI_<SECTION>__<KEY>
+pub fn settings_from_flags(set_flags: &[String]) -> Result<SettingsLayer, Diagnostic> // --set section.key=value
+pub fn resolve_settings(layers: &[SettingsLayer]) -> ResolvedSettings
+pub fn setting_bool(settings: &ResolvedSettings, key: &str) -> bool
+pub fn setting_u64(settings: &ResolvedSettings, key: &str) -> u64
+pub fn setting_text(settings: &ResolvedSettings, key: &str) -> String
+
+/// What rastai-node reads (compute.*, nodes.*, sandbox.*, storage.*, hf.*). Plain fields, so the node never parses keys.
+pub struct NodeSettings {
+    pub vram_reserve_bytes: u64,               // compute.vram_reserve_bytes
+    pub chat_gpu_indices: Vec<u32>,            // compute.gpu_assignment.chat; empty = any
+    pub training_gpu_indices: Vec<u32>,        // compute.gpu_assignment.training; empty = any
+    pub sandbox_cap: u32,                      // compute.sandbox_cap
+    pub heartbeat_seconds: u64,                // nodes.heartbeat_seconds
+    pub missed_heartbeats_unreachable: u32,    // nodes.missed_heartbeats_unreachable
+    pub ssh_binary: String,                    // nodes.ssh_binary
+    pub sandbox_engine_socket: String,         // sandbox.engine_socket; "" = auto (Podman, then Docker)
+    pub sandbox_default_cpu_count: u32,        // sandbox.default_caps.cpu
+    pub sandbox_default_ram_bytes: u64,        // sandbox.default_caps.ram_bytes
+    pub sandbox_default_time_seconds: u64,     // sandbox.default_caps.time_seconds
+    pub storage_quota_bytes: u64,              // storage.quota_bytes; 0 = none
+    pub free_space_margin_bytes: u64,          // storage.free_space_margin_bytes
+    pub hf_cache_dir_override: Option<PathBuf>, // hf.cache_dir; None = hf_cache_dir(&environment) below
+    pub hf_offline: bool,                      // hf.offline (HF_HUB_OFFLINE=1 is honored by the node's download client)
+}
+
+/// What rastai-gateway reads (gateway.*, inference.sampling).
+pub struct GatewaySettings {
+    pub enabled: bool,                         // gateway.enabled
+    pub retention_days: u32,                   // gateway.retention_days
+    pub incognito_default: bool,               // gateway.incognito_default
+    pub redact_pii_on_export: bool,            // gateway.redact_pii_on_export
+    pub default_adapter: String,               // gateway.default_adapter
+    pub default_sampling: SamplingSettings,    // inference.sampling, as the generated proto message
+    pub default_max_tokens: u32,               // inference.sampling.max_tokens (not a SamplingSettings field)
+}
+
+pub fn node_settings(resolved: &ResolvedSettings) -> NodeSettings
+pub fn gateway_settings(resolved: &ResolvedSettings) -> GatewaySettings      // re-run on settings.set; the gateway swaps its copy
+
+// paths.rs: the only place paths are built (contracts §8.1)
+pub struct PathEnvironment { pub rastai_home: Option<PathBuf>, pub home: PathBuf, pub xdg_config_home: Option<PathBuf>,
+                             pub xdg_data_home: Option<PathBuf>, pub xdg_cache_home: Option<PathBuf>,
+                             pub xdg_state_home: Option<PathBuf>, pub xdg_runtime_dir: Option<PathBuf>,
+                             pub hf_hub_cache: Option<PathBuf>, pub hf_home: Option<PathBuf> }
+pub struct DataPaths { pub config: PathBuf, pub data: PathBuf, pub cache: PathBuf, pub state: PathBuf, pub runtime: PathBuf }
+pub fn read_path_environment() -> PathEnvironment
+pub fn resolve_paths(environment: &PathEnvironment) -> DataPaths
+pub fn rastai_db_path(paths: &DataPaths) -> PathBuf
+pub fn vault_db_path(paths: &DataPaths) -> PathBuf
+pub fn blobs_dir(paths: &DataPaths) -> PathBuf
+pub fn run_dir(paths: &DataPaths, run_id: &str) -> PathBuf
+pub fn run_events_log_path(paths: &DataPaths, run_id: &str) -> PathBuf
+pub fn daemon_events_log_path(paths: &DataPaths) -> PathBuf                // <data>/daemon/events.log
+pub fn daemon_socket_path(paths: &DataPaths) -> PathBuf                     // <runtime>/daemon.sock
+pub fn daemon_lock_path(paths: &DataPaths) -> PathBuf
+pub fn daemon_port_path(paths: &DataPaths) -> PathBuf
+pub fn owner_token_path(paths: &DataPaths) -> PathBuf
+pub fn daemon_key_path(paths: &DataPaths) -> PathBuf                       // <data>/identity/daemon.key
+pub fn node_key_path(paths: &DataPaths) -> PathBuf                         // <data>/identity/node.key
+pub fn node_socket_path(paths: &DataPaths) -> PathBuf                      // <runtime>/node.sock
+pub fn node_hub_socket_path(paths: &DataPaths) -> PathBuf                  // <runtime>/node-hub.sock
+pub fn worker_host_socket_path(paths: &DataPaths) -> PathBuf               // <runtime>/worker-host.sock
+pub fn job_socket_path(paths: &DataPaths, job_id: &str) -> PathBuf         // <runtime>/jobs/<job_id>.sock
+pub fn remote_node_socket_path(paths: &DataPaths, node_id: &str) -> PathBuf   // <runtime>/remote/<node_id>/node.sock, the ssh -L end
+pub fn plugin_dir(paths: &DataPaths, plugin_id: &str, version: &str) -> PathBuf
+// ... one function per remaining row of contracts §8.1
+pub fn hf_cache_dir(environment: &PathEnvironment) -> PathBuf             // HF_HUB_CACHE, else HF_HOME/hub, else ~/.cache/huggingface/hub
+
+// versions.rs
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const PLUGIN_API_VERSION: &str = "0.1.0";       // frozen as 1.0.0 in Phase 2, extracted from first-party code (§13)
+pub const NODE_PROTOCOL_VERSION: u32 = 1;          // integer + capability flags in the handshake (§20)
+pub const WORKER_PROTOCOL_VERSION: u32 = 1;
+pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];   // section 11
+```
+
+**Callers:** `rastai-server` (registry, scopes, settings, paths, every id, `proto_json` for `run.json`), `rastai-cli` (naming, paths, settings flags), `rastai-mcp` (naming, principals), `rastai-node` (paths, ids, states, versions, `node_settings`, `proto_json` for `run.json` and replays), `rastai-gateway` (`gateway_settings`, principals), `rastai-store` (paths, ids, states), `rastai-codegen` (the table, for `docs/reference/commands.md` and `schemas/commands/`).
+
+### 5.3 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | `rastai-diag` | diagnostics | |
+| Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver | |
+| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor` and `CommandKind`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `proto_json.rs` |
+| External | serde, serde_json | settings values, proto JSON values | `settings.rs`, `proto_json.rs` |
+
+### 5.4 Boundary rules
+
+- Synchronous. Never depends on tokio, axum, tonic, rusqlite or any network crate.
+- No file or socket I/O. The only OS reads are environment variables (`read_path_environment`, `settings_from_environment`) and `/dev/urandom`.
+- `COMMANDS` lists core commands only. Plugin commands come from manifests at runtime (section 12).
+- Never defines a document or command-argument type (those are `rastai-formats`) or a wire type (those are `rastai-proto`). State enums are proto's; this crate only adds names and transition tables.
+- No other crate builds a data path or reads `RASTAI_*`/`XDG_*`/`HF_*` path variables (contracts §8.1).
+
+### 5.5 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Unit | bottom of `ids.rs`, `crockford.rs`, `time.rs`, `scopes.rs`, `states.rs` | ids sort by creation time and round-trip through base32; RFC 3339 for leap years and epoch edges; every transition in contracts §9 allowed and a sample of illegal ones refused |
+| Command table | `tests/command_table.rs` | ids follow contracts §6.1 and sit in a core area; no duplicates; scope, kind and section valid; `since_version` set |
+| Naming | `tests/naming_round_trip.rs` | every id survives `cli_words` → `command_id_from_cli_words` and `mcp_tool_name` → back; the CLI and MCP columns of `fixtures/command-golden/copy-as.json` (frontend doc 2.5) match |
+| Settings | `tests/settings_precedence.rs` | a later layer overrides single keys, not whole sections; `RASTAI_GATEWAY__PORT=8899` sets `gateway.port`; bad `--set` text gives a diagnostic |
+| Wire | `tests/wire_round_trip.rs` | the rastai-diag `Diagnostic` and `CommandRow` list the proto messages' fields (`CommandRow` minus the five registration fields); `fixtures/proto-golden/common/Diagnostic.binpb` round-trips |
+| Proto JSON | `tests/proto_json_golden.rs` | `JobSpec`, `HardwareFingerprint` and `SamplingSettings` encode to the protobuf-es JSON in `fixtures/proto-golden/` (64-bit integers as strings, enums as names) and decode back; a wrong kind gives `RRS-E1002` at the given path |
+| Paths | bottom of `paths.rs` | `RASTAI_HOME` puts all five roots under one folder; XDG fallbacks; HF cache order |
+
+### 5.6 Ported from the spike
+
+| Spike file | Goes to | Changes on the way |
+|---|---|---|
+| `spike/src/rastai_spike/hf_cache.py` (`cache_directory`) | `paths.rs` `hf_cache_dir()` | Same order (`HF_HUB_CACHE`, `HF_HOME/hub`, `~/.cache/huggingface/hub`), so we find what the HF tools downloaded. Snapshot lookup (`refs/<revision>`) moves to `rastai-node`'s download code. |
+
+### 5.7 Build-order step
+
+Step 1. The table starts with the skeleton's commands (`system.status`, `command.list`, `job.list`, `job.get`, `job.cancel`, `train.start` for TextCNN, `settings.get`) and grows with each step; every new row lands in a contract PR first (§29). `proto_json.rs` lands at step 1 with `JobSpec` and `HardwareFingerprint`, because the first `run.json` carries both; `SamplingSettings` follows at step 3 with conversations. `NodeSettings` lands at step 1 (the embedded node), `GatewaySettings` at step 3.
+
+---
+
+## 6. `rastai-store`: databases, blobs, event logs, indexing
+
+**Purpose.** Everything the daemon persists, behind plain functions: `rastai.db` (the index) and `vault.db` (conversations and gateway logs), each with one writer thread; the BLAKE3-named blob store; the event-log frame reader and writer; the indexer that turns `EventRecord`s into index rows; and the offline rebuild. It is the only crate that touches SQLite.
+
+### 6.1 Tree
+
+```
+crates/rastai-store/
+  Cargo.toml
+  CLAUDE.md                   local rules: the only SQLite user; writes only through writer threads; row first, file second
+  src/
+    lib.rs
+    error.rs                  StoreError with RRS-S codes
+    store.rs                  Store (the handles), open_store(), close_store(), startup cleanup
+    sqlite.rs                 the only rusqlite import: open with pragmas, migrations, quick_check, transactions, savepoints
+    writer_thread.rs          one std thread per database file: request channel, batching, savepoint per request, oneshot replies
+    reader_pool.rs            a few read-only connections per database, each behind a Mutex
+    data_dir_lock.rs          take_daemon_lock(): File::try_lock on <runtime>/daemon.lock
+    disk_space.rs             free_bytes(), check_free_space(): the one statvfs call (section 6.4)
+    index/
+      migrations/0001_initial.sql   every rastai.db table: contracts §8.2, the flows/platform.md columns, log_cursors
+      writes.rs               IndexWrite enum and apply_index_write(): one match arm per variant
+      reads.rs                IndexReader, IndexReaderGuard and open_index_reader()
+      runs.rs                 rows and functions for runs, jobs, run_metrics, run_tags, checkpoints
+      artifacts.rs            artifacts, artifact_copies, lineage, models
+      documents.rs            documents, undo_steps
+      journal.rs              command_journal, including idempotency_key, result_json, job_id
+      config_tables.rs        settings, tokens, nodes, plugins, projects
+      transfers.rs            transfers
+      log_cursors.rs          acked sequence of the daemon's own event log
+      handler_calls.rs        HandlerCall rows of plugin_event_deliveries: queue, list pending, mark delivered, drop (12.5)
+    vault/
+      migrations/0001_initial.sql   conversations, messages, annotations, gateway_log (contracts §8.3) with the added
+                                    gateway_log columns run_id, finish_reason, stop_kind (plan §10 row 33)
+      writes.rs               VaultWrite enum and apply_vault_write()
+      reads.rs                VaultReader, VaultReaderGuard, open_vault_reader(), conversation tree and gateway-log queries
+      token_ids.rs            token ids as little-endian u32 blobs
+      retention.rs            delete gateway_log rows older than gateway.retention_days
+    blobs/
+      blob_store.rs           BlobStore, put_bytes(), put_file(), uploads, open_blob(), has_blob(), verify_blob()
+      incoming.rs             write to .incoming/, fsync, rename into ab/<hash>, fsync the folder
+      quarantine.rs           move a mismatched blob to .quarantine/ (RRS-S1001)
+      gc.rs                   blob sweep: not in the live set and untouched for BLOB_GC_GRACE_HOURS
+    event_log/
+      crc32.rs                in-house CRC-32/IEEE table, equal to Python's zlib.crc32
+      frame.rs                EVENT_LOG_HEADER, encode_frame(), decode_frame_header()
+      writer.rs               EventLogWriter: create, open for append (truncates a torn tail), append, raw append, sync
+      reader.rs               EventLogReader, open_event_log(), read_next_frame() -> FrameRead (flows/platform.md 6.1)
+    indexer.rs                apply_event_record(): one EventRecord to its rastai.db rows, inside the writer's transaction;
+                              vault_writes_for_records(): the vault.db rows a batch carries (gateway.request_logged)
+    rebuild.rs                rebuild_index(): flows/platform.md 6.4
+  tests/
+    writer_thread.rs
+    index_migrations.rs
+    event_log_fixtures.rs
+    python_log_compat.rs
+    indexer_idempotent.rs
+    handler_calls.rs
+    rebuild_index.rs
+    blob_store.rs
+    gc.rs
+    vault.rs
+    secure_delete.rs
+```
+
+### 6.2 Public API
+
+```rust
+// store.rs
+pub struct Store {
+    pub index: IndexWriter,
+    pub vault: VaultWriter,
+    pub index_readers: ReaderPool,
+    pub vault_readers: ReaderPool,
+    pub blobs: BlobStore,
+    pub daemon_log: std::sync::Mutex<EventLogWriter>,   // <data>/daemon/events.log, the daemon's durable records
+}
+/// Opens both databases (WAL, quick_check, migrations), starts the writer threads, opens the daemon log for append,
+/// and deletes stale .incoming/ files. Synchronous: called once at startup before anything is served.
+pub fn open_store(paths: &DataPaths) -> Result<Store, StoreError>
+pub async fn close_store(store: Store)                  // waits for both writer threads to drain and commit
+
+// writer_thread.rs and index/writes.rs
+pub struct IndexWriter { /* std::sync::mpsc::Sender<IndexRequest> */ }
+pub enum IndexWrite {
+    JournalStarted(JournalStartedRow),
+    MarkUnfinishedJournalRows,                          // at startup: RRS-C0005
+    // rows + handler calls + runs.acked_sequence, one transaction
+    ApplyRunEvents { run_id: String, records: Vec<EventRecord>, handler_calls: Vec<HandlerCall> },
+    // rows + handler calls + log_cursors, one transaction
+    ApplyDaemonEvents { records: Vec<EventRecord>, handler_calls: Vec<HandlerCall> },
+    MarkHandlerDelivered { call: HandlerCall, journal_id: String, code: String },   // code "" when the command succeeded
+    DropHandlerCalls { plugin_id: String },             // the user disabled or uninstalled the plugin
+    UpsertRun(RunRow),
+    UpsertJob(JobRow),
+    UpsertDocument(DocumentRow),
+    RecordUndoStep(UndoStepRow),
+    SetUndoPosition { document_id: String, position: u32 },
+    ClearUndoSteps { document_id: String },
+    UpsertNode(NodeRow),
+    UpsertPlugin(PluginRow),
+    InsertToken(TokenRow),
+    RevokeToken { token_id: String, revoked_unix_ms: i64 },
+    SetSetting { scope: String, key: String, value_json: String },
+    UpsertProject(ProjectRow),
+    UpsertTransfer(TransferRow),
+    DeleteCollected(GcDeletion),                        // GC: rows go before files
+    Batch(Vec<IndexWrite>),                             // several writes, one transaction
+}
+pub async fn write_index(writer: &IndexWriter, write: IndexWrite) -> Result<(), StoreError>
+
+pub struct VaultWriter { /* same shape */ }
+pub enum VaultWrite {
+    CreateConversation(ConversationRow),
+    AppendMessage(MessageRow),
+    ReplaceMessage(MessageRow),                         // a streamed assistant message finished
+    SetConversationFlags { conversation_id: String, flags: ConversationFlags },
+    RenameConversation { conversation_id: String, title: String },
+    DeleteConversation { conversation_id: String },
+    AddAnnotation(AnnotationRow),
+    AppendGatewayLog(GatewayLogEntry),                  // the generated proto entry; upsert by request_id, so a re-sent record is a no-op
+    DeleteGatewayLogBefore { unix_ms: i64 },
+    Batch(Vec<VaultWrite>),                             // several writes, one transaction (assistant message + its log row)
+}
+/// The vault writer's commit reply. The error is the catalog code as text, so a crate that must not import the store
+/// (rastai-gateway's LogCommit) can hold the receiver.
+pub struct VaultCommit { pub committed: tokio::sync::oneshot::Receiver<Result<(), String>> }
+pub async fn write_vault(writer: &VaultWriter, write: VaultWrite) -> Result<(), StoreError>         // queue, then wait
+pub fn queue_vault_write(writer: &VaultWriter, write: VaultWrite) -> VaultCommit                    // never blocks: for sync callers (VaultLogSink)
+pub async fn wait_for_commit(commit: VaultCommit) -> Result<(), StoreError>
+
+// index/reads.rs, vault/reads.rs: blocking; async callers wrap them in spawn_blocking.
+// A guard is one pooled read-only connection; it derefs to the reader and goes back to the pool on drop.
+pub fn open_index_reader(pool: &ReaderPool) -> Result<IndexReaderGuard<'_>, StoreError>
+pub fn open_vault_reader(pool: &ReaderPool) -> Result<VaultReaderGuard<'_>, StoreError>
+//   let reader = open_index_reader(&store.index_readers)?;
+//   let runs = list_runs(&reader, &filter)?;
+pub fn list_runs(reader: &IndexReader, filter: &RunFilter) -> Result<Vec<RunRow>, StoreError>
+pub fn get_run(reader: &IndexReader, run_id: &str) -> Result<Option<RunRow>, StoreError>
+pub fn list_run_metrics(reader: &IndexReader, run_id: &str, names: &[String], after_sequence: u64) -> Result<Vec<MetricRow>, StoreError>
+pub fn find_journal_by_idempotency_key(reader: &IndexReader, principal: &str, key: &str) -> Result<Option<JournalRow>, StoreError>
+pub fn find_token_by_hash(reader: &IndexReader, token_hash: &str) -> Result<Option<TokenRow>, StoreError>
+pub fn get_document(reader: &IndexReader, document_id: &str) -> Result<Option<DocumentRow>, StoreError>
+pub fn list_undo_steps(reader: &IndexReader, document_id: &str) -> Result<Vec<UndoStepRow>, StoreError>
+pub fn artifact_lineage(reader: &IndexReader, artifact_id: &str, depth: u32) -> Result<Vec<LineageRow>, StoreError>
+pub fn get_conversation_tree(reader: &VaultReader, conversation_id: &str) -> Result<Option<ConversationTree>, StoreError>
+pub fn list_conversations(reader: &VaultReader, filter: &ConversationFilter) -> Result<Vec<ConversationRow>, StoreError>
+pub fn list_gateway_log(reader: &VaultReader, filter: &GatewayLogFilter) -> Result<Vec<GatewayLogEntry>, StoreError>
+pub fn list_pending_handler_calls(reader: &IndexReader, plugin_id: &str) -> Result<Vec<HandlerCall>, StoreError>
+// ... one read function per query a command needs; each takes a filter struct, never raw SQL
+
+// index/handler_calls.rs: one row of plugin_event_deliveries (section 12.5)
+pub struct HandlerCall {
+    pub plugin_id: String,
+    pub handler_id: String,       // "<event_type>:<command_id>", unique per plugin
+    pub command_id: String,
+    pub event_type: String,
+    pub log_name: String,         // "run:<run_id>" or "daemon:<segment>": with sequence, the key of the record
+    pub sequence: u64,
+    pub run_id: String,           // "" for daemon records
+    pub subject_id: String,       // the BusEvent subject id of the record
+}
+
+// indexer.rs
+pub fn apply_event_record(transaction: &SqliteTransaction, record: &EventRecord) -> Result<(), StoreError>
+pub fn vault_writes_for_records(records: &[EventRecord]) -> Vec<VaultWrite>   // AppendGatewayLog per gateway.request_logged
+
+// vault/token_ids.rs
+pub fn encode_token_ids(token_ids: &[u32]) -> Vec<u8>
+pub fn decode_token_ids(bytes: &[u8]) -> Result<Vec<u32>, StoreError>
+
+// blobs/
+pub struct BlobStore { pub root: PathBuf, pub max_blob_bytes: u64 }
+pub enum PutMode { Copy, HardLink }                     // hard link when pinning a checkpoint on the same filesystem
+pub fn put_bytes(store: &BlobStore, bytes: &[u8], media_type: &str) -> Result<BlobRef, StoreError>
+pub fn put_file(store: &BlobStore, source: &Path, mode: PutMode, media_type: &str) -> Result<BlobRef, StoreError>
+pub struct BlobUpload { /* temp file, StreamHasher, bytes written */ }
+pub fn start_upload(store: &BlobStore) -> Result<BlobUpload, StoreError>
+pub fn write_upload(upload: &mut BlobUpload, bytes: &[u8]) -> Result<(), StoreError>
+pub fn finish_upload(store: &BlobStore, upload: BlobUpload, expected_hash: &str, media_type: &str) -> Result<BlobRef, StoreError>
+pub fn open_blob(store: &BlobStore, hash: &str) -> Result<std::fs::File, StoreError>     // RRS-S1002 when missing
+pub fn has_blob(store: &BlobStore, hash: &str) -> bool
+pub fn verify_blob(store: &BlobStore, hash: &str) -> Result<(), StoreError>             // re-hash; quarantine on mismatch
+pub fn collect_blob_garbage(store: &BlobStore, live_hashes: &HashSet<String>, dry_run: bool) -> Result<BlobGcReport, StoreError>
+
+// event_log/
+pub const EVENT_LOG_HEADER: &[u8; 8] = b"RRSEVLG1";
+pub enum FrameRead { Record(EventRecord), EndOfFile, Incomplete { valid_bytes: u64 }, Corrupt { offset: u64 } }
+pub fn open_event_log(path: &Path) -> Result<EventLogReader, StoreError>
+pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreError>
+pub enum SyncPolicy { Now, Batched }
+pub fn create_event_log(path: &Path) -> Result<EventLogWriter, StoreError>
+pub fn open_event_log_for_append(path: &Path) -> Result<EventLogWriter, StoreError>     // truncates a torn tail (RRS-S2001)
+pub fn append_event(writer: &mut EventLogWriter, record: &mut EventRecord, sync: SyncPolicy) -> Result<u64, StoreError>  // sets sequence
+pub fn append_raw_frame(writer: &mut EventLogWriter, frame_bytes: &[u8]) -> Result<(), StoreError>   // daemon mirror of a remote run
+pub fn sync_event_log(writer: &mut EventLogWriter) -> Result<(), StoreError>
+
+// rebuild.rs, data_dir_lock.rs, disk_space.rs
+pub struct RebuildOptions { pub verify_blobs: bool, pub hf_cache_dir: PathBuf }
+pub struct RebuildReport { pub runs: u64, pub records: u64, pub artifacts: u64, pub documents: u64, pub models: u64,
+                           pub diagnostics: Vec<Diagnostic> }
+pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError>  // caller holds daemon.lock
+pub fn take_daemon_lock(paths: &DataPaths) -> Result<DaemonLock, StoreError>           // RRS-S0001 when held
+pub fn free_bytes(path: &Path) -> Result<u64, StoreError>
+pub fn check_free_space(path: &Path, needed_bytes: u64, margin_bytes: u64) -> Result<(), StoreError>  // RRS-S3001
+```
+
+**Callers:** `rastai-server` (everything: journal, documents, runs, tokens, plugins, settings, vault through its `VaultLogSink`, the indexing loop, GC), `rastai-node` (`EventLogReader` to tail runs, `free_bytes` before downloads), `rastai-cli` (`take_daemon_lock` and `rebuild_index` for `rastai storage rebuild-index`), `tests/crash`.
+
+### 6.3 The writer thread
+
+The spike's lesson (07): a `Mutex<Connection>` locked from tokio's blocking pool convoys at high concurrency; one thread that owns the connection does not.
+
+```rust
+// writer_thread.rs
+const WRITER_BATCH_MAX: usize = 256;      // flows/platform.md INDEX_BATCH_RECORDS: one fsync per batch, not per request
+
+struct IndexRequest { write: IndexWrite, committed: tokio::sync::oneshot::Sender<Result<(), StoreError>> }
+
+fn run_index_writer(connection: SqliteConnection, requests: std::sync::mpsc::Receiver<IndexRequest>) {
+    while let Ok(first) = requests.recv() {
+        let batch = drain_more_requests(first, &requests, WRITER_BATCH_MAX);
+        let outcomes = apply_batch_in_one_transaction(&connection, &batch);   // a savepoint per request
+        reply_to_each(batch, outcomes);
+    }
+}
+```
+
+- A savepoint per request means one bad write fails only its own caller; the rest of the batch commits.
+- Callers `await` the oneshot, so a command returns only after its rows are committed.
+- The thread exits when every `IndexWriter` clone is dropped; `close_store` drops them and joins.
+
+| Pragma | `rastai.db` | `vault.db` | Why |
+|---|---|---|---|
+| `journal_mode` | WAL | WAL | readers never block the writer (§19) |
+| `synchronous` | NORMAL | FULL | `rastai.db` is an index: WAL + NORMAL never corrupts, and a power cut only loses commits the logs restore. `vault.db` is primary data |
+| `foreign_keys` | ON | ON | |
+| `busy_timeout` | 5000 ms | 5000 ms | readers during a checkpoint |
+| `secure_delete` | OFF | ON | a deleted conversation must not linger in free pages (`tests/secure_delete.rs`, flows/inference-psychology.md) |
+
+### 6.4 What the indexer writes
+
+`apply_event_record` runs inside the writer's transaction, for live records and for the rebuild alike, so both produce the same rows. Every write is an upsert keyed by ids, and `run_metrics` is keyed by (`run_id`, `sequence`, `name`), so a re-sent record never counts twice.
+
+| `event_type` | Rows |
+|---|---|
+| `job.state_changed` | `jobs` state, exit code, error code |
+| `run.state_changed` | `runs.state`, `finished_unix_ms` on a terminal state |
+| `run.metrics` | one `run_metrics` row per value |
+| `checkpoint.saved` | `checkpoints` |
+| `artifact.created` | `artifacts`, `artifact_copies` (home node), `lineage` from the payload's parents |
+| `transfer.finished` | `transfers` |
+| `download.finished` | `models` (ref, revision, `model_hash`, `size_bytes` from the payload: the node hashes each file with BLAKE3 and computes the model hash when the download ends, flows/platform.md 1.5; section 15 row 19) |
+| `node.state_changed` | `nodes.state` |
+| `plugin.state_changed` | `plugins.state` |
+| `document.changed` | `documents` hash and time |
+| `command.finished` | `command_journal` finished columns |
+| `run.tags_changed` (daemon, new) | `run_tags` for the run, replaced |
+| `pin.changed` (daemon, new) | `pinned` on `runs`, `checkpoints` or `artifacts` |
+| `gateway.request_logged` (worker, new) | `gateway_log` in **`vault.db`**, not `rastai.db`: one `VaultWrite::AppendGatewayLog` per record, keyed by `request_id` so a re-sent record is a no-op. Written by the run tail before the batch's `ApplyRunEvents` (section 13.1), because the index writer can't reach the vault. The entry carries `run_id`, `finish_reason` and `stop_kind` |
+| `conversation.changed` (daemon) | no `rastai.db` rows (the vault already holds the conversation); recorded in the daemon log so plugin event handlers see it (12.5) |
+| everything else | no rows: live state (leases, loaded models, sandboxes) comes from heartbeats, plugin events are the plugin's |
+
+Then the same transaction inserts the batch's `HandlerCall` rows into `plugin_event_deliveries` (section 12.5) and sets `runs.acked_sequence` (run logs) or `log_cursors.acked_sequence` (the daemon log).
+
+Models found only by scanning the HF cache (the rebuild, `model.list`) still get `model_hash` lazily from `model.inspect`, since the HF cache names blobs by SHA-256, not BLAKE3.
+
+**Free space** uses `statvfs`, which std doesn't expose. `disk_space.rs` is the one file that calls `libc::statvfs`, which needs `libc` in §27 (it is already in the tree under tokio) and an ADR allowing `unsafe` in that one file. Section 17 lists the alternative.
+
+### 6.5 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | `rastai-core` | paths, ids, states | |
+| Internal | `rastai-formats` | `hashing.rs` for blob and stream hashes; run records during the rebuild | |
+| Internal | `rastai-proto` | `EventRecord`, `BlobRef`, payload messages (section 15: a new edge) | `event_log/frame.rs`, `indexer.rs` |
+| Internal | `rastai-diag` | diagnostics | |
+| External | rusqlite (bundled SQLite) | both databases | `sqlite.rs` |
+| External | prost | decode and encode `EventRecord` frame bodies | `event_log/frame.rs` |
+| External | tokio (`sync` feature only) | oneshot replies from the writer threads | `writer_thread.rs` |
+| External | libc (proposed) | `statvfs` | `disk_space.rs` |
+
+Contracts lists `blake3` for this crate. It isn't needed: hashing goes through `rastai_formats::hashing`. With `rastai-node` and `rastai-transport` doing the same (section 15 row 16), BLAKE3 has one wrapper in the workspace and `blake3`'s only allowlisted user is `rastai-formats` (2.4).
+
+### 6.6 Boundary rules
+
+- The only crate that opens `rastai.db` or `vault.db`, and `sqlite.rs` is the only file that imports rusqlite. Callers pass row structs and filters, never SQL.
+- Writes only through the writer threads. Never blocks a tokio worker: writes are awaited on a oneshot; reads are blocking functions the caller runs in `spawn_blocking`.
+- Never decides who writes a run's `events.log`. The job, or for chain runs (kind `teach`, `rlhf`, `sweep`) the daemon's chain driver, is the only writer (§19; plan §10 row 18). The store provides the writer functions; it is called for the daemon's own log, the daemon's mirrors of remote runs, and chain runs (`record_chain_event`, section 8.3).
+- Index rows go before files on delete (GC); files go before rows on create (blobs, checkpoints). A crash leaves an unreferenced file, never a dangling row.
+- Never decides policy. Incognito, retention age, quotas and what is pinned are decided by `rastai-server` and handed in as data.
+- Never touches the network, spawns processes or reads settings files.
+
+### 6.7 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Unit | bottom of `crc32.rs`, `frame.rs`, `token_ids.rs`, `incoming.rs` | CRC of `"123456789"` is `0xCBF43926`; frame round trip; token-id blobs round trip |
+| Writer thread | `tests/writer_thread.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07); one bad write in a batch fails alone |
+| Migrations | `tests/index_migrations.rs` | a fresh database equals the migration chain applied to the oldest fixture; a newer `schema_migrations` → `RRS-S0002`, file unchanged |
+| Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first |
+| Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
+| Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |
+| Handler calls | `tests/handler_calls.rs` | pending calls list per plugin in log order; `MarkHandlerDelivered` removes one from the pending list; `DropHandlerCalls` clears a plugin's |
+| Rebuild | `tests/rebuild_index.rs`, `fixtures/data-dirs/` (new) | index a data directory live, rebuild it, compare every rebuildable table row by row |
+| Blobs | `tests/blob_store.rs`, `tests/gc.rs` | dedupe touches the existing blob; a flipped byte is quarantined; GC keeps pinned, live and young blobs |
+| Vault | `tests/vault.rs`, `tests/secure_delete.rs` | conversation tree with branches; retention deletes by age; deleted text is absent from the file bytes |
+| Crash | `tests/crash/` rows 2, 6, 9, 10, 11 (flows/platform.md 6.5) | the matrix rows that land in this crate |
+| Fuzz | `crates/rastai-store/fuzz/` (cargo-fuzz, own workspace) | `read_next_frame` on arbitrary bytes never panics and never reads past a frame |
+
+### 6.8 Ported from the spike
+
+| Spike code | Goes to | Changes on the way |
+|---|---|---|
+| `spike/bakeoff/rust/src/gateway.rs`: `start_log_writer`, `log_token_ids` (one thread, oneshot commit) | `writer_thread.rs` | Two writers (index, vault) with an enum of writes each; batching with a savepoint per request; errors are replied to the caller instead of `eprintln!`. |
+| `gateway.rs`: `open_log` (`CREATE TABLE IF NOT EXISTS`, WAL, NORMAL) | `sqlite.rs`, `vault/migrations/` | Numbered migrations in `schema_migrations`; `synchronous = FULL` and `secure_delete` for the vault. |
+| `gateway.rs`: token ids stored as JSON text | `vault/token_ids.rs` | Little-endian u32 blobs (contracts §8.3): 4 bytes per token instead of up to 7, and no parsing on replay. |
+| spike lesson: library choice swamps language choice (crc-fast) | `event_log/crc32.rs` | An in-house table CRC-32/IEEE. Frames are small, so the table version is fast enough; `tools/bench/` gets a micro-benchmark before anything faster is considered. |
+
+### 6.9 Build-order step
+
+| Part | First needed (§31) |
+|---|---|
+| `sqlite.rs`, `writer_thread.rs`, `reader_pool.rs`, `data_dir_lock.rs`, `index/` (journal, runs, jobs, metrics, documents, nodes, plugins, settings, tokens, projects), `event_log/`, `indexer.rs`, the daemon log, `blobs/blob_store.rs` and `incoming.rs`, `disk_space.rs` | 1 (weeks 3–4: kill -9 the daemon mid-run, no lost events) |
+| `rebuild.rs` | 1 (the fix offered for `RRS-S0003`) |
+| `vault/`, `retention.rs`, `vault_writes_for_records` | 3 (conversation tree, gateway logs, node-gateway log records) |
+| `artifacts.rs` lineage queries | 4 (branch → pair → dataset lineage) |
+| `blobs/gc.rs`, checkpoint pinning (`PutMode::HardLink`), `handler_calls.rs` | 5 (checkpoints accumulate; Evaluation auto-run) |
+| `transfers.rs` | 9 (remote) |
+| SQLCipher for `vault.db` (same schema, no migration) | Phase 2 |
+
+---
+
+## 7. `rastai-mcp`: MCP server and client
+
+**Purpose.** The in-house MCP implementation (§21, §27): JSON-RPC 2.0 messages, the server side that turns registry commands into MCP tools, the client side that harnesses use to call MCP servers, and the stdio bridge behind `rastai mcp`. The server side never executes anything itself: it hands each tool call back to `rastai-server`, so every MCP call goes through the same `execute_command` as the UI and the CLI.
+
+### 7.1 Tree
+
+```
+crates/rastai-mcp/
+  Cargo.toml
+  CLAUDE.md                   local rules: no axum, no command execution, no policy decisions
+  src/
+    lib.rs
+    error.rs                  McpError
+    protocol_versions.rs      SUPPORTED_PROTOCOL_VERSIONS (MCP revision dates, newest first), pick_protocol_version()
+    jsonrpc.rs                JsonRpcId, JsonRpcMessage, parse_message() (strict JSON, size cap), message_json()
+    server/
+      session.rs              McpSession, new_session(), initialize and initialized handling
+      handle.rs               handle_message() -> McpStep
+      tools.rs                McpTool, tool_from_command(), tools_list_result(), tool_call_reply()
+    client/
+      connection.rs           McpConnection enum, initialize(), list_tools(), call_tool(), close_connection()
+      line_channel.rs         LineChannel: newline-delimited JSON over two tokio channels; any byte stream adapts to it
+      stdio_process.rs        start a local stdio MCP server as a child process and adapt it to a LineChannel
+      http_connection.rs      Streamable HTTP client over rastai-transport's HTTP client
+    bridge.rs                 run_stdio_bridge(): `rastai mcp`, stdin and stdout to POST /mcp on daemon.sock
+  tests/
+    server_transcripts.rs     fixtures/mcp/server/*.jsonl: request lines and the exact expected replies
+    client_protocol.rs        client against an in-process fake server over a LineChannel
+    stdio_process.rs          a child process speaking the protocol through /bin/sh, including a crash mid-call
+    bridge.rs                 bridge against an in-process fake /mcp, including a lost session after a daemon restart
+```
+
+### 7.2 Public API
+
+```rust
+// jsonrpc.rs
+const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;   // checked before parsing: MCP input is untrusted
+
+pub enum JsonRpcId { Number(i64), Text(String) }
+pub enum JsonRpcMessage {
+    Request { id: JsonRpcId, method: String, params: serde_json::Value },
+    Notification { method: String, params: serde_json::Value },
+    Response { id: JsonRpcId, result: serde_json::Value },
+    Error { id: Option<JsonRpcId>, code: i64, message: String, data: serde_json::Value },
+}
+pub fn parse_message(text: &str) -> Result<JsonRpcMessage, McpError>      // RRS-C3001 on malformed input
+pub fn message_json(message: &JsonRpcMessage) -> String
+
+// server/
+pub struct McpSession { pub session_id: String, pub protocol_version: String, pub principal: Principal,
+                        pub client_name: String, pub initialized: bool, pub last_used_unix_ms: i64 }
+pub struct McpTool { pub name: String, pub title: String, pub description: String, pub command_id: String,
+                     pub input_schema: serde_json::Value, pub output_schema: serde_json::Value, pub read_only: bool }
+
+/// What the caller must do next. Plain data out, so rastai-mcp needs no callback into the daemon.
+pub enum McpStep {
+    Reply(JsonRpcMessage),
+    ExecuteTool { request_id: JsonRpcId, command_id: String, arguments_json: String },
+    NoReply,                                                  // notifications
+}
+pub struct ToolOutcome { pub ok: bool, pub result_json: String, pub job_id: String, pub diagnostics: Vec<Diagnostic> }
+
+pub fn new_session(principal: Principal) -> McpSession
+pub fn handle_message(session: &mut McpSession, message: JsonRpcMessage, tools: &[McpTool]) -> McpStep
+pub fn tool_from_command(command: &CommandDescriptor) -> McpTool             // the registry's generated descriptor
+pub fn tool_call_reply(request_id: JsonRpcId, outcome: &ToolOutcome) -> JsonRpcMessage
+
+// client/
+pub enum McpTransportConfig {
+    Stdio { command: Vec<String>, environment: Vec<(String, String)> },
+    Http { url: String, headers: Vec<(String, String)> },
+}
+pub enum McpConnection { Lines(LinesConnection), Http(HttpConnection) }
+pub struct RemoteTool { pub name: String, pub description: String, pub input_schema: serde_json::Value }
+pub struct RemoteToolResult { pub is_error: bool, pub content_json: String }
+
+pub async fn start_stdio_process(command: &[String], environment: &[(String, String)]) -> Result<McpConnection, McpError>
+pub fn connection_from_lines(channel: LineChannel) -> McpConnection        // the node wraps a sandbox exec stream this way
+pub async fn connect_http(url: &str, headers: &[(String, String)], client: &HttpClient) -> Result<McpConnection, McpError>
+pub async fn initialize(connection: &mut McpConnection, client_name: &str) -> Result<String, McpError>   // negotiated revision
+pub async fn list_tools(connection: &mut McpConnection) -> Result<Vec<RemoteTool>, McpError>
+pub async fn call_tool(connection: &mut McpConnection, tool_name: &str, arguments: serde_json::Value, timeout: Duration) -> Result<RemoteToolResult, McpError>
+pub async fn close_connection(connection: McpConnection)
+
+// bridge.rs
+pub struct DaemonEndpoint { pub socket_path: PathBuf }
+pub async fn run_stdio_bridge(daemon: &DaemonEndpoint, token: &str) -> Result<(), McpError>
+```
+
+- **Server methods:** `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Anything else gets JSON-RPC error `-32601`. `resources/*` for `ui://` panels comes with two-way MCP Apps, which is deferred (§33).
+- **Tool list:** one tool per command the session's principal may run (`scopes_allow`), named by `mcp_tool_name`. `inputSchema` is the command's `arguments_schema_json`; `outputSchema` its `result_schema_json`; `annotations.readOnlyHint` is true for `read`-scope commands. Experimental commands are listed only when `plugins.experimental_apis` is on.
+- **Tool results:** `structuredContent` is the command's result object and `content` holds the same JSON as one text item. A `job` command returns `{job_id}` at once, with a text note to poll `job.get`. A failed command returns `isError: true` with each diagnostic rendered by `render_basic` and its code, so an agent can act on the code.
+- **Transport:** Streamable HTTP on `/mcp`. Every reply is a single `application/json` body in the prototype (no command needs server-pushed progress yet). `GET /mcp` answers 405. The session id travels in `Mcp-Session-Id`; sessions idle for 24 h are dropped.
+- **Callers:** `rastai-server/src/http/mcp_endpoint.rs` (server side), `rastai-cli` (`rastai mcp` → `run_stdio_bridge`), `rastai-node` (gym and Pass@k tools: `connection_from_lines` over `ExecInSandbox`, `connect_http` for remote MCP servers the harness allows).
+
+### 7.3 How a tool call flows through the code
+
+```rust
+// rastai-server/src/http/mcp_endpoint.rs: the axum handler is the only async glue
+pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: &str, body: &str) -> McpHttpReply {
+    let message = match parse_message(body) {
+        Ok(message) => message,
+        Err(error) => return malformed_request_reply(error),            // RRS-C3001
+    };
+    let tools = tools_for_principal(server, &principal);                // registry filtered by scopes
+    let mut session = take_or_create_session(server, session_id, &principal);
+    let step = handle_message(&mut session, message, &tools);
+    let reply = match step {
+        McpStep::Reply(reply) => Some(reply),
+        McpStep::NoReply => None,
+        McpStep::ExecuteTool { request_id, command_id, arguments_json } => {
+            let outcome = execute_tool(server, &principal, &command_id, &arguments_json).await;   // execute_command inside
+            Some(tool_call_reply(request_id, &outcome))
+        }
+    };
+    put_session_back(server, session);
+    mcp_http_reply(reply)
+}
+```
+
+### 7.4 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | `rastai-core` | `Principal`, naming, scopes | |
+| Internal | `rastai-proto` | `CommandDescriptor`, the registry's row type (section 15 row 17) | `server/tools.rs` |
+| Internal | `rastai-formats` | the strict JSON reader for incoming messages | |
+| Internal | `rastai-transport` | HTTP client for remote servers and for the bridge over `daemon.sock` | |
+| Internal | `rastai-diag` | diagnostics, `render_basic` | |
+| External | tokio (`process`, `io-util`, `sync`, `time`) | child processes, line I/O, timeouts | `client/stdio_process.rs`, `client/line_channel.rs` |
+| External | serde_json | message values | `jsonrpc.rs` |
+
+### 7.5 Boundary rules
+
+- Never executes a command and never checks scopes for execution: it returns `ExecuteTool`, and `rastai-server` runs it through `execute_command` (gate, scope, arguments, journal).
+- Never reads tokens or secrets. The bridge gets its token as an argument; `rastai-cli` reads `RASTAI_TOKEN`. The bridge never falls back to the owner (flows/platform.md 4.3, `RRS-C3002`).
+- Never decides network or sandbox policy. The node checks a harness's `network_hosts` before `connect_http` (§12: remote HTTP MCP servers are network permissions).
+- No axum and no HTTP serving; `rastai-server` owns the route.
+- Messages over `MAX_MESSAGE_BYTES` are refused before parsing.
+
+### 7.6 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Unit | bottom of `jsonrpc.rs`, `protocol_versions.rs` | ids as numbers and strings; batch arrays refused (removed from MCP); revision negotiation picks the client's if supported, else ours |
+| Server transcripts | `tests/server_transcripts.rs`, `fixtures/mcp/server/` (new) | initialize, tools/list for `mcp-default` scopes, a successful call, a call outside the scopes, a malformed line |
+| Client | `tests/client_protocol.rs`, `tests/stdio_process.rs` | handshake, listing, call with timeout, server crash mid-call gives a typed error, stderr noise ignored |
+| Bridge | `tests/bridge.rs` | lines in order; a 404 session after a daemon restart replays `initialize` once and retries |
+| End to end | `tests/e2e/` (flows/platform.md 4.3) | a golden transcript through the real `rastai mcp` against a running daemon |
+
+### 7.7 Ported from the spike
+
+Nothing; the spike had no MCP code.
+
+### 7.8 Build-order step
+
+| Part | First needed (§31) |
+|---|---|
+| `jsonrpc.rs`, `server/`, `bridge.rs` | 1 (weeks 3–4: the 3 skeleton commands reachable over HTTP, the CLI and MCP) |
+| `client/` | 7 (harness tools in sandboxes; Pass@k on agent tasks) |
+| `resources/*` for `ui://` panels | after the prototype (two-way MCP Apps, §33) |
+
+---
+
+## 8. `rastai-server`: the daemon
+
+**Purpose.** The control plane (§16): the HTTP API and its request gate, `Execute` and the command handlers, the event bus, run-log indexing, job scheduling, the node links and `NodeHubService`, the plugin host, the gateway's vault sink, import/export, ModelSpec analysis and secrets. It is the composition root: it is the only crate that wires the others together. Its public API is one function, `run_daemon`; everything else is internal and shown here so implementers know the module seams.
+
+### 8.1 Tree
+
+```
+crates/rastai-server/
+  Cargo.toml
+  CLAUDE.md                   local rules: handlers take Args and return CommandOutput; no HTTP types below http/
+  build.rs                    one job: embed apps/web/dist as a table of include_bytes! (placeholder page when missing)
+  src/
+    lib.rs
+    error.rs                  ServerError
+    daemon.rs                 run_daemon(): the startup steps of flows/platform.md 2.1, one call each
+    server_state.rs           Server, the plain struct every handler reads (8.2)
+    shutdown.rs               SIGTERM and SIGINT: close streams, detach from workers, flush writers, release the lock
+    auth_files.rs             owner.token create and 0600 check (RRS-C1008 refuses the start, plan §10 row 36); daemon.key through
+                              rastai_node::identity (load_or_create_identity, sign_challenge, verify_challenge), the one Ed25519 wrapper
+    secrets.rs                the only keyring import: get, set, delete, list names; kernel keyring and encrypted-file fallbacks
+    policy.rs                 check_data_policy(): the one data-policy check (RRS-C1009, plan §10 row 37), called by chat.*,
+                              dataset.import, StartJob on a remote node, NodeHubService.GatewayGenerate and /v1 (routing.rs)
+    http/
+      router.rs               build_router(): every route of contracts §3.3, plus rastai-gateway's /v1 routes
+      listeners.rs            loopback TCP on 47820–47829 and daemon.sock; TCP_NODELAY on every connection; writes daemon.port
+      gate.rs                 check_request_gate() (flows/platform.md 4.2)
+      sessions.rs             one-time login codes, session cookies, idle expiry
+      connect.rs              Connect protocol: unary and server-streaming envelopes, content-type selection
+      connect_json.rs         hand-written proto JSON for the CommandService messages (section 11.3)
+      command_endpoints.rs    CommandService.Execute and ListCommands
+      event_endpoint.rs       EventService.Subscribe
+      blob_endpoints.rs       GET /api/blobs/<hash> with Range; PUT /api/blobs
+      health.rs               GET /api/health
+      mcp_endpoint.rs         /mcp (section 7.3)
+      plugin_assets.rs        /plugins/<plugin_id>/<version>/ui/*
+      web_assets.rs           / : the embedded web app, cache headers, CSP (frontend doc)
+    commands/
+      execute.rs              execute_command(), run_command() (flows/platform.md 3.1, 3.2)
+      dispatch.rs             dispatch(): one match arm per core command; plugin ids fall through to the plugin host
+      context.rs              CommandContext
+      arguments.rs            check_arguments(): layer 2 against the command's description or the plugin's types.json
+      journal.rs              journal rows, secret redaction, idempotency lookup
+      undo.rs                 undoable edits, document.undo and document.redo (flows/platform.md 3.4)
+      handlers/
+        system.rs             system.*, settings.*, token.*, secret.*, hf.*, storage.*
+        artifact.rs           artifact.*
+        project.rs            project.*, file.*, document.*, workspace.*
+        command.rs            command.list
+        job.rs                job.*
+        model.rs              model.*
+        chat.rs               chat.*, conversation.*
+        adapter.rs            adapter.*, gateway.*
+        train.rs              recipe.*, train.*, teach.*, rlhf.*, sweep.*
+        run.rs                run.*, checkpoint.*
+        design.rs             design.*
+        gym.rs                harness.*, gym.*, sandbox.*
+        plugin.rs             plugin.*
+        node.rs               node.*, transfer.*
+        dataset.rs            dataset.*, converter.*
+    events/
+      bus.rs                  Bus: the last BUS_BUFFER_EVENTS events, bus_sequence, publish(), events_after(), subscribe()
+      daemon_events.rs        record_daemon_event(): append to the daemon log, index, then publish
+    indexing/
+      run_tail.rs             one task per open run: WatchRunEvents after the ack, mirror for remote runs, index, publish
+      daemon_log_replay.rs    at startup: index daemon-log records after log_cursors.acked_sequence
+    scheduler/
+      queue.rs                pending jobs per node; interactive work before training
+      placement.rs            pick the node and GPUs from compute settings and the latest telemetry
+      launch.rs               write run.json, build the JobSpec, NodeService.StartJob
+      chains.rs               Teach it, RLHF and sweep chains: next_chain_action(), start the next step, record_chain_event();
+                              the only writer of a chain run's events.log
+      daemon_tasks.rs         job kind daemon_task (flows/platform.md): plugin.install, storage.gc, project.export, ...
+    nodes/
+      node_links.rs           NodeLink per node: transport, handshake, state (contracts §9.2), reconnect with backoff
+      node_hub.rs             NodeHubService server: Heartbeat, ExecuteCommand, GatewayGenerate, GetSecret
+      reconcile.rs            after a connect: ListJobs against the jobs table, then resume the run tails
+      pairing.rs              node.pair and node.unpair over SSH (rastai-transport)
+    plugin_host/
+      discovery.rs            find preinstalled, installed and dev plugins; read their manifests
+      capabilities.rs         HOST_CAPABILITIES, FIRST_PARTY_CAPABILITIES, negotiate_capabilities()
+      load.rs                 load_all_plugins(), load_plugin(): the decision chain of flows/platform.md 7.3
+      contributions.rs        commands from manifests and types.json into the registry; file types; plugin catalogs
+      install.rs              plugin.install plan and apply (flows/platform.md 7.1)
+      lifecycle.rs            plugin state transitions and plugin.state_changed
+      forward.rs              forward_command(): NodeService.HandleCommand to the plugin's Python module
+      event_handlers.rs       contributes.event_handlers[]: match_event_handlers(), deliver_handler_calls(), pending calls (12.5)
+    gateway_glue/
+      vault_log_sink.rs       VaultLogSink: rastai-gateway's LogSink; queues the vault write and returns its commit
+      routing.rs              mount the /v1 routes; build the gateway routing table from models, adapters and served presets
+    modelspec_analysis/
+      stats.rs                parameter count, weight bytes and FLOPs per token, per graph node and in total
+      memory.rs               activation and KV-cache memory for batch × sequence, per dtype; the training estimate and
+                              largest_micro_batch() (training-evaluation flow 3)
+      fits.rs                 fits check per compute target, from node GPU memory
+      time_estimate.rs        time ≈ FLOPs ÷ (GPUs × peak FLOPS × MFU) (§22)
+      layer_placement.rs      plan_layer_placement() over PlacementUnits and GpuBudgets → LayerPlacement (designer-gym-remote A8a)
+    import_export/
+      file_routing.rs         file.open: extension to handler and route, including plugin file types
+      project_archive.rs      .rrsproj export and import through rastai-formats zip
+      conversations.rs        conversation.import and export through rastai-formats importers
+    storage_tasks.rs          storage.gc live set, gateway-log retention timer, free-space checks before work
+  tests/
+    gate.rs                   one request head per branch of flows/platform.md 4.2
+    connect_protocol.rs       envelopes and JSON against fixtures/proto-golden/
+    execute_paths.rs          one row per branch of flows/platform.md 3.2
+    dispatch_complete.rs      every core command id reaches its own arm, never the plugin fall-through
+    undo_property.rs          random edits then full undo give the original bytes
+    bus_resume.rs             replay inside the buffer; RRS-C0401 outside it
+    run_tail.rs               remote mirror before index; restart re-indexes from the mirror
+    plugin_host.rs            fixture plugins through discovery, negotiation and registration
+    plugin_event_handlers.rs  module down when the event fires, then delivered once on enable; re-sent records queue nothing new
+    mcp_endpoint.rs           sessions, scope filtering, tool calls through execute_command
+    modelspec_stats.rs        TextCNN and tiny Gemma and Llama configs: parameter counts equal the PyTorch module counts
+    layer_placement.rs        fake GPUs (16 GB + 24 GB): tied embeddings, a unit too big, a dtype gap, a hand-set map over budget
+    data_policy.rs            the policy-by-target table of 8.3, one row per cell
+    chains.rs                 next_chain_action over child outcomes, gates and optional steps
+```
+
+### 8.2 The `Server` struct and the thin startup
+
+```rust
+// server_state.rs: one plain struct, shared as Arc<Server>. Tables sit behind std locks never held across .await.
+pub struct Server {
+    pub paths: DataPaths,
+    pub settings: RwLock<ResolvedSettings>,
+    pub store: Store,
+    pub registry: RwLock<CommandRegistry>,
+    pub bus: Bus,
+    pub nodes: NodeLinks,
+    pub plugins: PluginHost,
+    pub catalog: RwLock<RuntimeCatalog>,          // third-party plugin codes
+    pub gateway: GatewayState,                    // from rastai-gateway
+    pub auth: AuthState,                          // login codes, sessions, cached token hashes
+    pub mcp_sessions: Mutex<Vec<McpSession>>,
+    pub scheduler: Scheduler,
+    pub identity: NodeIdentity,                   // daemon.key, through rastai_node::identity (the one Ed25519 wrapper)
+}
+
+// daemon.rs
+pub struct DaemonOptions { pub headless: bool, pub port: Option<u16>, pub set_flags: Vec<String>, pub open_browser: bool }
+
+pub async fn run_daemon(options: DaemonOptions) -> Result<(), ServerError> {
+    let paths = resolve_paths(&read_path_environment());
+    let settings = load_settings_layers(&paths, &options)?;
+    let _daemon_lock = take_daemon_lock(&paths)?;                 // RRS-S0001
+    let store = open_store(&paths)?;                              // migrations, writer threads
+    ensure_owner_token(&paths)?;                                  // RRS-C1008 when too open
+    let identity = load_or_create_identity(&daemon_key_path(&paths))?;   // rastai_node::identity
+    let node = start_embedded_node(&paths, &settings, &identity).await?;
+    let server = build_server(paths, settings, store, identity);
+    discover_plugins(&server)?;                                   // manifests and saved states only, so replayed records match handlers (12.5)
+    replay_daemon_log(&server).await?;                            // index records after the cursor
+    connect_to_node(&server, &node).await?;                       // handshake, reconcile, resume run tails
+    load_all_plugins(&server).await;                              // failures disable plugins, never stop the daemon
+    resume_chains(&server).await;                                 // index unacked chain records, then next_chain_action
+    start_background_tasks(&server);                              // scheduler, heartbeat watch, retention, GC timer,
+                                                                  // pending plugin handler calls (12.5)
+    listen_http(&server).await?;                                  // writes daemon.port; health ok from here
+    wait_for_shutdown(&server).await
+}
+```
+
+This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cli` calls it for `rastai serve`.
+
+### 8.3 Module APIs
+
+```rust
+// commands/execute.rs: every caller (HTTP, daemon.sock, MCP, NodeHubService.ExecuteCommand, plugin forwards) ends here
+pub async fn execute_command(server: &Server, principal: &Principal, request: ExecuteRequest) -> ExecuteResponse
+
+// commands/arguments.rs: layer 2 for core and plugin commands alike, so every caller gets RRS-C0002 with paths
+pub fn check_arguments(command: &CommandDescriptor, arguments_json: &str) -> Result<(), Vec<Diagnostic>>
+
+// commands/context.rs
+pub struct CommandContext<'a> {
+    pub server: &'a Server,
+    pub principal: &'a Principal,
+    pub command: &'a CommandDescriptor,           // the registry's generated descriptor
+    pub journal_id: String,
+    pub project_id: String,
+    pub idempotency_key: String,
+    pub dry_run: bool,
+}
+
+// commands/dispatch.rs: a plain match, no reflection (contracts §6.2)
+pub async fn dispatch(context: &CommandContext<'_>, arguments_json: &str) -> Result<CommandOutput, Vec<Diagnostic>> {
+    let command_id = context.command.command_id.as_str();
+    match command_id {
+        "system.status" => handlers::system::status(context, parse_arguments(command_id, arguments_json)?).await,
+        "model.load" => handlers::model::load(context, parse_arguments(command_id, arguments_json)?).await,
+        "chat.send" => handlers::chat::send(context, parse_arguments(command_id, arguments_json)?).await,
+        // one arm per row of COMMANDS
+        _ => plugin_host::forward_command(context, arguments_json).await,
+    }
+}
+
+// commands/handlers/model.rs: every handler has this shape
+pub async fn load(context: &CommandContext<'_>, arguments: ModelLoadArgs) -> Result<CommandOutput, Vec<Diagnostic>>
+
+// commands/undo.rs
+pub async fn apply_document_edit(context: &CommandContext<'_>, document_id: &str, edit: DocumentEdit) -> Result<CommandOutput, Vec<Diagnostic>>
+pub async fn undo_document(context: &CommandContext<'_>, document_id: &str) -> Result<CommandOutput, Vec<Diagnostic>>
+pub async fn redo_document(context: &CommandContext<'_>, document_id: &str) -> Result<CommandOutput, Vec<Diagnostic>>
+
+// events/
+pub struct BusFilter { pub event_types: Vec<String>, pub subject_ids: Vec<String> }
+pub fn publish(bus: &Bus, event: BusEvent) -> u64                          // assigns bus_sequence
+pub fn events_after(bus: &Bus, after_bus_sequence: u64, filter: &BusFilter) -> Result<Vec<BusEvent>, Diagnostic>   // RRS-C0401
+pub fn subscribe(bus: &Bus) -> tokio::sync::broadcast::Receiver<BusEvent>
+pub async fn record_daemon_event(server: &Server, record: EventRecord) -> Result<(), StoreError>   // log, index, publish, deliver handler calls
+
+// indexing/run_tail.rs
+pub async fn tail_run(server: Arc<Server>, run_id: String, node_id: String)    // one task per open run
+pub fn start_run_tails(server: &Arc<Server>, node_id: &str)                      // after (re)connect, for every open run
+
+// scheduler/queue.rs: the job is the generated JobSpec (contracts §2.4 rule 3); no second job struct
+pub async fn submit_job(server: &Server, spec: JobSpec, node_id: &str) -> Result<String, Vec<Diagnostic>>   // fills spec.job_id and returns it
+pub async fn run_scheduler(server: Arc<Server>)                                  // wakes on submit, heartbeat and job end
+
+// scheduler/chains.rs (training-evaluation flow 6)
+pub struct ChainStep {
+    pub step_name: String,       // "train", "verify", "diff"
+    pub child_run_id: String,    // assigned at chain creation, so a restart never starts a step twice
+    pub command_id: String,      // "train.start", "eval.test", "psychology.diff.run"
+    pub arguments_json: String,
+    pub gate: Option<StepGate>,  // e.g. the reward model's accuracy in RLHF
+    pub optional: bool,          // skipped with an info diagnostic when its plugin is disabled
+}
+pub enum ChainAction { StartStep(usize), Wait, Finish(RunState), Fail(Diagnostic) }
+pub fn next_chain_action(steps: &[ChainStep], child_outcomes: &[Option<ChildRunOutcome>]) -> ChainAction   // pure
+pub async fn start_next_chain_step(server: &Server, finished_run_id: &str)      // reads the chain, calls next_chain_action
+/// The chain driver is the only writer of a chain run's events.log (plan §10 row 18). Appends with SyncPolicy::Now
+/// (create_event_log at chain creation, open_event_log_for_append after), then ApplyRunEvents and publish, like
+/// record_daemon_event. Chain runs have no job, so no run tail: the driver indexes what it writes.
+pub async fn record_chain_event(server: &Server, chain_run_id: &str, record: EventRecord) -> Result<(), StoreError>
+pub async fn resume_chains(server: &Server)          // startup: index records after each open chain's ack, then act
+
+// nodes/
+pub enum NodeTransport { Embedded { socket_path: PathBuf }, Ssh { host: String, user: String } }
+pub struct NodeLink { pub node_id: String, pub state: NodeState, pub transport: NodeTransport,
+                      pub protocol_version: u32, pub capabilities: Vec<String>, pub session_token: String }
+pub async fn connect_node(server: &Server, node_id: &str) -> Result<(), Diagnostic>
+pub async fn node_client(server: &Server, node_id: &str) -> Result<NodeServiceClient<Channel>, Diagnostic>
+pub async fn serve_node_hub(server: Arc<Server>) -> Result<(), ServerError>      // tonic server on node-hub.sock
+
+// gateway_glue/vault_log_sink.rs: the gateway's LogSink is sync; it queues and hands the commit back (node layout §6.2)
+pub struct VaultLogSink { pub vault: VaultWriter }
+impl LogSink for VaultLogSink {
+    /// queue_vault_write(&self.vault, vault_write_for_entry(entry)), with its VaultCommit receiver returned in LogCommit.
+    /// The gateway awaits it before it sends the final chunk.
+    fn log_request(&self, entry: GatewayLogEntry) -> LogCommit;
+}
+/// A chat.send entry (conversation_id and message_id set) becomes Batch[AppendMessage(assistant row), AppendGatewayLog],
+/// one transaction (inference flow 1.1); any other entry is AppendGatewayLog alone.
+fn vault_write_for_entry(entry: GatewayLogEntry) -> VaultWrite
+// conversation.changed: handlers/chat.rs calls record_daemon_event after run_chat returns, which is after the gateway
+// awaited the commit, so the event never announces a row that isn't there.
+
+// modelspec_analysis/
+pub struct DesignStats { pub parameter_count: u64, pub trainable_parameter_count: u64, pub active_parameter_count: u64,
+                         pub weight_bytes: u64, pub flops_per_token: u64, pub per_node: Vec<NodeStats> }
+pub fn compute_design_stats(spec: &ModelSpec, shapes: &InferredShapes) -> DesignStats
+pub fn estimate_memory_bytes(spec: &ModelSpec, stats: &DesignStats, batch_size: u64, sequence_length: u64, dtype: &str) -> MemoryEstimate
+pub fn check_fits(estimate: &MemoryEstimate, gpus: &[GpuInfo]) -> Vec<FitResult>
+pub fn estimate_time_seconds(stats: &DesignStats, tokens: u64, gpus: &[GpuInfo], utilization: f64) -> f64
+
+// modelspec_analysis/memory.rs: the training estimate (training-evaluation flow 3)
+pub struct TrainingMemoryEstimate {
+    pub weights_bytes: u64,                // frozen base in its dtype (4-bit plus scales for QLoRA)
+    pub trainable_state_bytes: u64,        // float32 master + gradient + AdamW moments per trainable parameter
+    pub activation_bytes_per_sample: u64,  // with gradient checkpointing
+    pub logits_bytes_per_sample: u64,      // answer positions only (spike)
+    pub workspace_bytes: u64,              // CUDA context and kernel workspaces
+}
+pub fn estimate_training_memory(model: &ModelSpec, method: TrainingMethod, dtype: Dtype, sequence_length: u32,
+                                answer_tokens_per_sample: u32) -> TrainingMemoryEstimate
+pub fn largest_micro_batch(estimate: &TrainingMemoryEstimate, budget_bytes: u64) -> u32   // never over the budget
+
+// modelspec_analysis/layer_placement.rs (designer-gym-remote A8a): the server plans, the worker applies
+pub struct PlacementUnit { pub graph_node_ids: Vec<String>, pub memory_bytes: u64, pub tied_to_embedding: bool }   // never splits a block
+pub struct GpuBudget { pub gpu_index: u32, pub free_bytes: u64 }   // VRAM − compute.vram_reserve_bytes − pinned leases
+pub struct LayerPlacement {
+    pub gpu_by_graph_node: Vec<(String, u32)>,   // the ModelSpec placement{node_id: gpu_index}
+    pub bytes_per_gpu: Vec<(u32, u64)>,          // what each GPU's lease must hold
+}
+pub fn plan_layer_placement(units: &[PlacementUnit], gpus: &[GpuBudget]) -> Result<LayerPlacement, Vec<Diagnostic>>
+
+// policy.rs: one data-policy check for every place data can leave the machine (plan §10 row 37)
+pub enum PolicyTarget {
+    ThisMachine,                               // the embedded node, local llama-server
+    PairedNode { node_id: String },            // allowed from trusted-remote
+    ThirdPartyApi { adapter_name: String },    // allowed only by any (inference flow 1.3)
+    ProviderMachine { node_id: String },       // allowed only by any; Phase 3
+}
+pub fn check_data_policy(policy: DataPolicy, target: &PolicyTarget) -> Result<(), Diagnostic>   // RRS-C1009, fix settings.set privacy.data_policy
+pub fn policy_target_for_route(route: &RouteTarget) -> PolicyTarget          // the gateway's resolved route, for chat.* and /v1
+
+// secrets.rs
+pub fn get_secret(account: &str) -> Result<Option<String>, ServerError>         // account names from contracts §8.5
+pub fn set_secret(account: &str, value: &str) -> Result<(), ServerError>
+pub fn delete_secret(account: &str) -> Result<(), ServerError>
+pub fn list_secret_names() -> Result<Vec<String>, ServerError>
+```
+
+- **Async handlers, sync helpers.** Handlers are `async fn` because they await the store, nodes or the gateway; everything they call that doesn't wait (stats, argument building, row building) is a plain sync function.
+- **`active_parameter_count`** differs from the total only for MoE designs (§11: total vs active parameters).
+- **Secrets** never enter logs, events, the journal (`secret` fields are redacted) or `.rrsproj`. `NodeHubService.GetSecret` hands out short-lived values for named purposes only.
+- **Data policy** (`policy.rs`). `DataPolicy` is the `rastai-formats` enum from `project.json` (`local-only`, `trusted-remote`, `any`); the project's policy applies inside a project and `privacy.data_policy` outside one. Callers, each before anything starts or moves: `chat.*` on the prepared route, before the user row is written (inference flow 1.1); `dataset.import` and `train.start` before data goes to another node; `submit_job` when `node_id` is not the embedded node; `node_hub.rs` for `GatewayGenerate` to an API adapter (judges); `gateway_glue/routing.rs` for `/v1`, which resolves the request's model with the gateway's `route_model` and checks it before the gateway sees the request (HTTP 403 with `RRS-C1009`, inference flow 1.2). The gateway never checks the policy itself.
+
+| `PolicyTarget` | `local-only` | `trusted-remote` | `any` |
+|---|---|---|---|
+| `ThisMachine` | yes | yes | yes |
+| `PairedNode` | `RRS-C1009` | yes | yes |
+| `ThirdPartyApi` | `RRS-C1009` | `RRS-C1009` | yes |
+| `ProviderMachine` (Phase 3) | `RRS-C1009` | `RRS-C1009` | yes |
+
+### 8.4 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | every crate except `rastai-plugin` (contracts §2.1) | composition root | |
+| Internal | `rastai-node` (`identity.rs`) | daemon identity and handshake signatures through the one Ed25519 wrapper | `auth_files.rs` |
+| External | axum | HTTP routing | `http/router.rs` (handlers take axum extractors only in `http/`) |
+| External | tokio | runtime, tasks, signals, broadcast | |
+| External | tonic | `NodeHubService` server, `NodeService` clients | `nodes/node_hub.rs`, `nodes/node_links.rs` |
+| External | prost | Connect message encoding | `http/connect.rs` |
+| External | keyring (proposed in contracts §14) | OS keychain | `secrets.rs` |
+
+`ed25519-dalek` is not a dependency of this crate (section 15 row 16): the daemon key is loaded, and challenges signed and verified, by `rastai_node::identity`.
+| External | serde_json | Connect JSON, handler results | `http/connect_json.rs` |
+
+### 8.5 Boundary rules
+
+- **Handlers never see HTTP.** They take `(&CommandContext, Args)` and return `Result<CommandOutput, Vec<Diagnostic>>`. Only `http/` imports axum. That's what makes the CLI, MCP and plugin forwards behave the same as the UI.
+- Never parses a `.rrs` file or a command's arguments itself: always `rastai-formats`.
+- Never opens SQLite: always `rastai-store` functions.
+- Never imports `tokenizers` or `minijinja`: tokenization and chat templates are `rastai-gateway`'s.
+- **Never starts a process for a job.** Every job, even on the local machine, goes through a node over `NodeService` (§16: local and remote never drift). The only in-process work is `daemon_task` jobs (flows/platform.md).
+- Never runs third-party plugin code in-process. Plugin Python runs under the node; plugin UI runs in the browser.
+- Never listens on a non-loopback interface unless `daemon.listen` says so, and then logs a warning at every start.
+- Every error that leaves the daemon is a catalog `Diagnostic`; HTTP status codes are used only for credential problems (401, 403) and transport errors.
+
+### 8.6 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; cargo-fuzz on header parsing (`crates/rastai-server/fuzz/`) |
+| Connect | `tests/connect_protocol.rs` | unary binary and JSON; stream envelopes and the end-of-stream trailer; JSON equals `fixtures/proto-golden/commands/*.json` |
+| Execute | `tests/execute_paths.rs` | each decision branch of flows/platform.md 3.2 with its code; idempotent `train.start`; secret redaction |
+| Dispatch | `tests/dispatch_complete.rs` | a context whose plugin forward returns a sentinel: no core command id may reach it |
+| Undo | `tests/undo_property.rs` | seeded random edit sequences, then undo all: the original bytes; outside edit gives `RRS-C2002` |
+| Bus | `tests/bus_resume.rs` | gap replayed from the buffer; too old gives `RRS-C0401`; first sequence after start is start ms × 1,000 |
+| Indexing | `tests/run_tail.rs` | a fake node streams records; mirror is written before the index; restart re-indexes from the mirror once |
+| Plugins | `tests/plugin_host.rs`, `fixtures/plugins/` | the tests listed in flows/platform.md 7.1–7.3 |
+| Event handlers | `tests/plugin_event_handlers.rs`, `tests/crash/` | a fixture plugin's module is down when `checkpoint.saved` is indexed: the call stays pending, and on `plugin.state_changed → enabled` it runs exactly once; a re-sent record queues no second call; a call whose command already finished is not run again (idempotency key); kill -9 the daemon between the index commit and the delivery: after restart the handler runs once (a new row for the flows/platform.md 6.5 matrix) |
+| Analysis and policy | `tests/layer_placement.rs`, `tests/data_policy.rs`, `tests/chains.rs` | placement tables on fake GPUs; every cell of the 8.3 policy table; `next_chain_action` over child outcomes, gates and optional steps |
+| MCP | `tests/mcp_endpoint.rs` | tools filtered by token scopes; a call lands in the journal with the token principal |
+| Analysis | `tests/modelspec_stats.rs` | parameter counts match `fixtures/models/<family>/expected_counts.json` (written by a Python test from the real modules) |
+| End to end | `tests/e2e/`, `tests/crash/` | the same command through HTTP, CLI and MCP; the kill -9 matrix |
+
+### 8.7 Ported from the spike
+
+| Spike code | Goes to | Changes on the way |
+|---|---|---|
+| `spike/bakeoff/rust/src/main.rs` `serve_on_loopback` (TCP_NODELAY on every accepted socket) | `http/listeners.rs` | Same `tap_io` hook. Without it, streaming small chunks stalled ~40 ms per reply in both bake-off gateways (spike 07). Also binds `daemon.sock` and tries ports 47820–47829. |
+| `gateway.rs` `chat_completions` (axum handler, SSE body from a channel) | `rastai-gateway` (other doc); the router mount is `gateway_glue/routing.rs` | The gateway keeps the handler; the daemon only mounts it behind the gate. |
+| `gateway.rs` logging to SQLite | `gateway_glue/vault_log_sink.rs` + `rastai-store` | The gateway no longer owns a database: it calls `LogSink`, and this sink writes the vault (contracts §2.4 rule 7). |
+
+### 8.8 Build-order step
+
+| Part | First needed (§31) |
+|---|---|
+| `daemon.rs`, `server_state.rs`, `shutdown.rs`, `auth_files.rs`, `http/` (minus blobs and mcp), `commands/` (execute, dispatch, journal) with the skeleton handlers, `events/`, `indexing/`, `scheduler/` (queue, launch), `nodes/` (embedded link, hub, reconcile), `plugin_host/` (discovery, capabilities, load, contributions, lifecycle) | 1 (weeks 3–4; plugins load through the host from day one) |
+| `http/mcp_endpoint.rs` | 1 (skeleton exit) |
+| `secrets.rs`, `handlers/system.rs` HF login and license checks | 2 (gated model downloads) |
+| `gateway_glue/`, `handlers/chat.rs`, `handlers/model.rs`, `handlers/adapter.rs`, `import_export/conversations.rs`, `http/blob_endpoints.rs`, `policy.rs` | 3 (Inference; API adapters are the first data leaving the machine) |
+| `plugin_host/forward.rs` | 4 (Psychology is the first plugin module) |
+| `commands/undo.rs` | 4 (`psychology.branch.prefer` is the first undoable command), used heavily at 6 |
+| `scheduler/chains.rs`, `handlers/train.rs`, `handlers/run.rs`, `storage_tasks.rs` GC, `modelspec_analysis/memory.rs` training estimate, `plugin_host/event_handlers.rs` | 5 (Teach it, RLHF, checkpoints, Evaluation auto-run) |
+| `modelspec_analysis/` (stats, fits, time, `layer_placement.rs`), `handlers/design.rs` | 6 (Designer; placement across the 5080 and the 3090) |
+| `handlers/gym.rs` | 7 |
+| `plugin_host/install.rs` for third-party archives, `handlers/plugin.rs` dev and test | 8 |
+| `nodes/pairing.rs`, SSH `NodeTransport`, `handlers/node.rs` | 9 |
+
+---
+
+## 9. `rastai-cli`: the `rastai` binary
+
+**Purpose.** The one binary (§16). It picks a process mode from the first words (daemon, standalone node, node init, MCP bridge, open the UI, SSH tunnel to a headless box), runs the few commands that must work without a daemon, and turns every other invocation into a registry command: words to a command id, flags to arguments JSON, `Execute` over `daemon.sock`, then the result, the job or the stream until it ends. No verb is hand-written.
+
+### 9.1 Tree
+
+```
+crates/rastai-cli/
+  Cargo.toml                  [[bin]] name = "rastai"
+  CLAUDE.md                   local rules: no business logic; only output.rs prints; verbs come from the registry
+  src/
+    main.rs                   the thin main (9.2)
+    error.rs                  CliError
+    exit_codes.rs             EXIT_* constants (9.5)
+    arguments.rs              in-house parser: words, --flag value, --flag=value, --no-flag, --, global flags
+    modes.rs                  Mode, choose_mode(), the ALIASES table
+    serve.rs                  `rastai serve` -> rastai_server::run_daemon
+    node_serve.rs             `rastai node serve` -> rastai-node's entry function (other doc)
+    node_init.rs              `rastai node init --daemon-key <key>`: create the node identity, pin the daemon key, print the
+                              node id (designer-gym-remote C1; run over SSH by node.pair)
+    mcp_bridge.rs             `rastai mcp` -> rastai_mcp::run_stdio_bridge with RASTAI_TOKEN
+    open_ui.rs                `rastai` and `rastai open`: ensure the daemon, token.login_code.create, open the browser;
+                              --print-url prints one DesktopLaunchInfo JSON line instead; --replace-older-daemon stops an
+                              older daemon with system.shutdown and starts this version (flows/platform.md 9.2)
+    tunnel.rs                 `rastai tunnel <user@host>`: run `rastai open --print-url` on the box over SSH, forward a free
+                              local port in 47830–47839 with ssh -N -L, open the browser on the rewritten URL (designer-gym-remote C8)
+    daemon_client.rs          Connect client over daemon.sock (rastai-transport); health; ensure_daemon_running()
+    verbs.rs                  run_verb(): words to command, arguments, Execute, then print, follow or stream
+    verb_arguments.rs         flags to arguments JSON from the command's schema (kinds, positionals, lists, maps)
+    follow.rs                 follow a job or a stream through EventService.Subscribe until it ends
+    command_cache.rs          <cache>/commands-<app version>.json: the last ListCommands, for help when the daemon is down
+    help.rs                   help text from descriptors and schemas
+    completion.rs             bash, zsh and fish completion scripts from the cached command list
+    local_commands.rs         no daemon needed: validate, version, storage rebuild-index
+    output.rs                 the only stdout and stderr writer: results as text or --json, diagnostics via rastai-diag
+  tests/
+    arguments.rs              the parser table
+    verbs.rs                  every CLI line in fixtures/command-golden/copy-as.json parses to its command id and arguments
+    exit_codes.rs             each outcome kind maps to its exit code, against a fake daemon on a temp socket
+    local_commands.rs         `rastai validate` gives the corpus codes; rebuild-index refuses while a daemon holds the lock
+```
+
+### 9.2 Public surface
+
+```rust
+// main.rs: a thin main
+fn main() -> ExitCode {
+    let arguments = parse_command_line(std::env::args().skip(1).collect());
+    let mode = choose_mode(&arguments);
+    let outcome = run_mode(mode, &arguments);        // starts a tokio runtime only for the modes that need one
+    report_and_exit(outcome)
+}
+
+// modes.rs
+pub enum Mode {
+    OpenUi(OpenFlags),         // `rastai`, `rastai open [--print-url] [--replace-older-daemon]`
+    Serve(ServeFlags),         // `rastai serve [--headless] [--port N]`
+    NodeServe(NodeServeFlags), // `rastai node serve`
+    NodeInit(NodeInitFlags),   // `rastai node init --daemon-key <key>`
+    Tunnel(TunnelFlags),       // `rastai tunnel <user@host>`
+    McpBridge,                 // `rastai mcp`
+    Local(LocalCommand),       // `rastai validate <file>...`, `rastai version`, `rastai storage rebuild-index [--verify-blobs]`
+    Help(Vec<String>),         // `rastai help [words]`, `--help` anywhere
+    Verb(Vec<String>),         // everything else: a registry command
+}
+pub const ALIASES: &[(&str, &str)] = &[("doctor", "system.doctor"), ("rerun", "run.rerun")];
+pub fn choose_mode(arguments: &ParsedArguments) -> Mode
+
+// verbs.rs
+pub async fn run_verb(client: &DaemonClient, words: &[String], arguments: &ParsedArguments) -> Result<VerbOutcome, CliError>
+pub enum VerbOutcome { Finished(ExecuteResponse), JobEnded { job_id: String, final_state: JobState, diagnostics: Vec<Diagnostic> },
+                       StreamEnded { diagnostics: Vec<Diagnostic> }, Detached { job_id: String } }
+
+// verb_arguments.rs
+pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Value, arguments: &ParsedArguments) -> Result<String, Vec<Diagnostic>>
+// command comes from ListCommands; schema is its arguments_schema_json, parsed once per invocation
+```
+
+### 9.3 A verb, step by step
+
+1. **Daemon.** `GET /api/health` on `daemon.sock`. No answer: spawn `rastai serve` detached and wait up to `DAEMON_LOCK_WAIT_SECONDS` (10, flows/platform.md), unless `--no-start`. A daemon from a different app version prints warning `RRS-C0006` and continues (section 11.4).
+2. **Registry.** `ListCommands`, cached in `command_cache.rs` per daemon version.
+3. **Words to id.** `command_id_from_cli_words` takes the longest match (`rastai eval suite add-conversation x` → `eval.suite.add_conversation`, one word left as a positional). No match prints the three closest ids by edit distance and exits `EXIT_USAGE`.
+4. **Flags to arguments** (9.4), validated locally against the schema for a fast message; the daemon validates again.
+5. **Execute** with a random idempotency key per invocation (`--idempotency-key` to set one, so a retried script never starts two runs).
+6. **Result.** `sync`: print it. `job`: print the job id, then follow `job.state_changed`, `job.progress` and `job.log_line` until a terminal state, unless `--detach`. `stream`: print tokens or packets as they arrive (`rastai chat send` prints the reply as it streams).
+7. **Exit code** from the outcome (9.5).
+
+### 9.4 Flags and arguments
+
+| Field kind (from the schema) | Command line | Example |
+|---|---|---|
+| string, integer, number | `--name value` or `--name=value` | `--model ckpt:ckpt_01JA...` |
+| boolean | `--name` / `--no-name` | `--fail-fast` |
+| enum | `--name value`, checked against the list | `--runtime fast` |
+| list | repeat the flag | `--gpu 0 --gpu 1` |
+| map | repeat `--name key=value` | `--set-env HF_HUB_OFFLINE=1` |
+| object, json | only through `--arguments-json '<json>'` or `--arguments-file <path>` | |
+| a field with `cli_position` (core) or `x-rastai-cli-position` (plugin `types.json`) | positional, in order, or as a flag | `rastai eval test evals/facts.rrseval --model ckpt:...` |
+
+- Field names map to flags by `flag_name` (`fail_fast` → `--fail-fast`). Flags override `--arguments-json` and `--arguments-file` key by key.
+- **Global flags** are reserved; `tests/command_table.rs` and the plugin host refuse a command field that collides with one: `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`.
+- "Copy as CLI" in the UI (frontend doc 2.5) always writes flags, never positionals, so a copied line is unambiguous. `tests/verbs.rs` parses every CLI line of `fixtures/command-golden/copy-as.json` back to the same arguments.
+
+### 9.5 Exit codes
+
+| Constant | Code | When |
+|---|---|---|
+| `EXIT_OK` | 0 | success; a job that `succeeded`; an eval suite that `passed` |
+| `EXIT_FAILED` | 1 | the command ran and failed: `ok: false`, a job `failed` or `cancelled`, an eval suite `failed` (§10: a suite can gate CI), `rastai validate` found errors |
+| `EXIT_USAGE` | 2 | unknown verb, bad flag, arguments invalid before sending |
+| `EXIT_DAEMON_UNAVAILABLE` | 3 | the daemon can't be reached or started, or it lacks an API package this CLI needs |
+| `EXIT_NOT_PERMITTED` | 4 | `RRS-C1xxx` (auth, scope) |
+| `EXIT_ERRORED` | 5 | the work couldn't run at all: an eval run `errored`, a job that failed before starting |
+
+### 9.6 Dependencies
+
+| Kind | Name | Used for |
+|---|---|---|
+| Internal | `rastai-server`, `rastai-node` | `serve`, `node serve` and `node init` modes |
+| Internal | `rastai-transport` | the SSH child process for `rastai tunnel` (also the socket client below) |
+| Internal | `rastai-mcp` | `rastai mcp` (section 15: not in contracts' list) |
+| Internal | `rastai-store` | `take_daemon_lock` and `rebuild_index` for the offline rebuild (section 15) |
+| Internal | `rastai-core`, `rastai-formats`, `rastai-transport`, `rastai-proto`, `rastai-diag` | naming, local validation, the socket client, Connect messages, rendering |
+| External | tokio | runtime for the async modes |
+| External | prost | binary Connect for `Subscribe` |
+
+The argument parser is in-house (contracts §2.1); there is no CLI-parsing crate.
+
+### 9.7 Boundary rules
+
+- No business logic. Every verb is a registry command run by the daemon; the CLI never has its own list of verbs beyond the modes and `ALIASES`.
+- Local commands are only those that must work without a daemon: `validate` (pure `rastai-formats`), `version`, `help`, completion, and `storage rebuild-index` (needs the daemon stopped; holds `daemon.lock`).
+- Talks to the daemon only over `daemon.sock` as the owner (peer credentials). Never reads `owner.token`; never opens `rastai.db` except inside `rebuild_index` with the lock held.
+- `output.rs` is the only file that prints (workspace lint `print_stdout`).
+- `--json` output is one JSON object per line: results, events while following, and a final `{"exit_code": n, "diagnostics": [...]}`.
+
+### 9.8 Tests
+
+Listed in the tree (9.1). The end-to-end checks that need a real daemon (`rastai eval test` exit codes on a failing suite, `rastai mcp` transcript, `rastai serve` startup time) live in `tests/e2e/` and `tests/crash/`.
+
+### 9.9 Ported from the spike
+
+| Spike code | Goes to | Changes on the way |
+|---|---|---|
+| `spike/bakeoff/rust/src/main.rs`: match on the first word, `argument()` helper, `ExitCode` | `modes.rs`, `arguments.rs`, `main.rs` | The match covers only process modes; verbs come from the registry. String errors become diagnostics; `eprintln!` moves into `output.rs`. |
+
+### 9.10 Build-order step
+
+| Part | First needed (§31) |
+|---|---|
+| `main.rs`, `arguments.rs`, `modes.rs`, `serve.rs`, `mcp_bridge.rs`, `daemon_client.rs`, `verbs.rs`, `verb_arguments.rs`, `follow.rs`, `output.rs`, `local_commands.rs`, `exit_codes.rs` | 1 (skeleton: 3 commands over HTTP, CLI and MCP) |
+| `open_ui.rs` | 1 (with the web shell) |
+| `help.rs`, `command_cache.rs` | 1 |
+| `node_serve.rs`, `node_init.rs`, `tunnel.rs` | 9 (standalone nodes, pairing, the headless box; the embedded node needs no mode) |
+| `completion.rs` | 8 (with the plugin SDK verbs) |
+
+---
+
+## 10. Commands: registration and generated surfaces
+
+### 10.1 Where a command is defined
+
+| Piece | Core command | Plugin command (first- or third-party) |
+|---|---|---|
+| Descriptor (id, title, scope, kind, undoable, basic, shortcut) | one row in `rastai-core/src/commands/table.rs` | one entry in the manifest's `contributes.commands[]` |
+| Argument and result types | `<Name>Args` / `<Name>Result` + `describe_*` in `rastai-formats/src/commands/<area>.rs` | the plugin's `types.json` (frontend doc 10.4) |
+| Handler | one `match` arm in `rastai-server/src/commands/dispatch.rs` calling `handlers::<area>::<verb>` | the module's `handle_command` (contracts §6.2), reached through `plugin_host::forward_command` |
+| Error codes | `catalog/errors/RRS-<letter>.json` | `RRS-L`/`RRS-V` for first-party, `PLG-<plugin_id>-nnnn` for third-party |
+| Generated files | `just codegen`: `schemas/commands/`, TS types, Python dataclasses, `docs/reference/commands.md` | `rastai plugin codegen` (frontend doc) |
+
+**Adding a core command** touches exactly those files plus a test. The table row, the types and the catalog codes land first in a contract PR (§29); the handler follows. Three tests keep the pieces in step: `rastai-core/tests/command_table.rs` (row is valid), `rastai-formats/tests/commands_described.rs` (types exist), `rastai-server/tests/dispatch_complete.rs` (an arm exists).
+
+### 10.2 From definitions to surfaces
+
+```mermaid
+flowchart LR
+  TABLE["rastai-core COMMANDS"] --> REG["CommandRegistry in rastai-server"]
+  FMT["rastai-formats describe_arguments"] --> SCHEMA["arguments_schema_json and result_schema_json"]
+  MAN["Plugin manifest commands"] --> PH["Plugin host contributions.rs"]
+  TYPES["Plugin types.json"] --> PH
+  PH --> REG
+  SCHEMA --> REG
+  REG --> LIST["ListCommands"]
+  REG --> TOOLS["MCP tools/list, filtered by scopes"]
+  REG --> BRIDGE["Iframe bridge tools/list, filtered by grant"]
+  LIST --> UI["UI palette, menus, keybindings, forms"]
+  LIST --> CLI["CLI verbs, help, completion"]
+  LIST --> COPY["Copy as CLI, Python, TS, MCP"]
+  TABLE --> CG["rastai-codegen"]
+  FMT --> CG
+  CG --> DOCS["docs/reference/commands.md, schemas/commands/, typed TS and Python wrappers"]
+```
+
+- At startup the server copies `COMMANDS` into the registry and fills each row's two schema fields from `describe_arguments` / `describe_result` through `json_schema_for`. The plugin host adds plugin rows as each plugin loads and removes them when it is disabled, then publishes `plugin.state_changed` so UIs refetch `ListCommands` (frontend doc 2.5).
+- Every surface reads the registry; none keeps its own list. Adding a command or enabling a plugin adds the palette entry, the CLI verb and the MCP tool at once (§13: "every plugin feature becomes an MCP tool and a CLI verb automatically").
+- The UI and CLI read `ListCommands`; MCP and the iframe bridge read the registry in-process. All of them call `Execute` (or `execute_command` in-process), so scope checks, argument checks and the journal are the same for all.
+- What's persisted: nothing. The registry is rebuilt at every start; `<cache>/commands-<version>.json` in the CLI is only a help cache.
+- Failure branches: a plugin command id outside the plugin's namespace or in a reserved area is refused at load (`RRS-P0004`), and only that command is skipped; a plugin command whose `arguments_type` is missing from `types.json` is skipped with `RRS-P0005`. The plugin still loads.
+
+### 10.3 Naming rules, one implementation each
+
+| Surface | Rule | Implemented in | Checked by |
+|---|---|---|---|
+| CLI verb | segments as words, `_` as `-`: `eval.suite.add_conversation` → `rastai eval suite add-conversation` | `rastai_core::commands::naming::cli_words` | `naming_round_trip.rs` |
+| CLI flag | field name with `_` as `-`, prefixed `--` | `flag_name` | same |
+| MCP tool | dots as `__`: `eval__suite__edit` (contracts §6.1) | `mcp_tool_name` | same |
+| Palette entry | `title`; Basic mode shows `basic` rows; experimental hidden unless `plugins.experimental_apis` | `apps/web` (frontend doc 2.5) | frontend tests |
+| Copy as | flags only for CLI; `rastai.client.connect().execute(...)` for Python; `execute(client, ...)` for TS; a `tools/call` body for MCP | `apps/web/src/commands/copy-as.ts` | `fixtures/command-golden/copy-as.json`, read by both the TS tests and `rastai-cli/tests/verbs.rs` |
+
+The copy-as formatter is TS because only the UI copies; the CLI proves it can parse every golden line back. The MCP column is checked against `mcp_tool_name` in `naming_round_trip.rs`.
+
+### 10.4 Kinds and what each surface does with them
+
+| Kind | `Execute` returns | UI | CLI | MCP |
+|---|---|---|---|---|
+| `sync` | `result_json` | shows the result | prints it | `structuredContent` |
+| `job` | `job_id` at once | `JobProgress` toast with a link | follows events to the end unless `--detach`; exit code from the final state | `{job_id}` and a note to poll `job.get` |
+| `stream` | a session id at once; ephemeral events follow | navigates to the view that shows the stream | prints the stream until it ends | the final result only, after the stream ends (agents don't need tokens one by one) |
+
+---
+
+## 11. Daemon HTTP API versioning
+
+The daemon serves four kinds of API on one port and one socket (contracts §3.3). Each has its own versioning rule; none uses a `/v2` URL for the prototype.
+
+### 11.1 What is versioned how
+
+| Surface | Version carrier | Compatible change | Breaking change |
+|---|---|---|---|
+| `CommandService`, `EventService` (Connect) | protobuf package in the path: `rastai.commands.v1`, `rastai.events.v1` | new fields, new RPCs, new enum values; `buf breaking` enforces this in CI | a new package (`v2`) served beside `v1` for at least one minor release; `/api/health` lists both |
+| Commands | the command id plus `since_version` on its descriptor | new optional argument fields with defaults; new result fields; new commands | a new command id; the old id is retired (11.2) |
+| Events | `event_type` names and payload messages | new event types; new payload fields. Clients ignore types they don't know | a new event type name; the old one keeps being emitted for one minor release |
+| `/api/*` (health, login, blobs) | none | additive JSON fields only | not allowed in 1.x; would need a new path |
+| `/v1/*` gateway | OpenAI and Anthropic's own versions (their paths; `anthropic-version` header accepted) | follow their additions | follow theirs |
+| `/mcp` | MCP revision, negotiated in `initialize` (section 7.2) | add a newer revision to `SUPPORTED_PROTOCOL_VERSIONS` | drop the oldest revision after one minor release |
+| Plugin API | semver `PLUGIN_API_VERSION`, matched against `engines.rastai` | minor bump | major bump; the previous major is kept 12 months (§13), from 1.0 on |
+
+### 11.2 Retired commands
+
+`rastai-core/src/commands/table.rs` keeps a second table:
+
+```rust
+/// Commands that were replaced. Calls to the old id fail with RRS-C0007, whose fix button runs the new id.
+pub const RETIRED_COMMANDS: &[RetiredCommand] = &[
+    // RetiredCommand { id: "old.id", replaced_by: "new.id", retired_in: "0.4.0" },
+];
+```
+
+Retired ids are never reused (like catalog codes). `ListCommands` doesn't list them; `Execute` on one returns `RRS-C0007` with `fix_command_id` set to the replacement.
+
+### 11.3 Content types
+
+- `CommandService` accepts `application/proto` (the UI's default, via connect-es) and `application/json` (curl, scripts, the CLI). The JSON codec is hand-written in `http/connect_json.rs` for the six messages involved (`ExecuteRequest`, `ExecuteResponse`, `Diagnostic`, `ListCommandsRequest`, `ListCommandsResponse`, `CommandDescriptor`), because prost has no proto3 JSON mapping and §27 lists no crate for it. `tests/connect_protocol.rs` compares its output with `fixtures/proto-golden/commands/*.json`, which protobuf-es produces.
+- `EventService.Subscribe` accepts only `application/connect+proto` in the prototype. Its payloads are a large `oneof`; a hand-written JSON codec for all of them isn't worth it yet. The CLI uses binary for `Subscribe`. Section 17 lists this.
+- Errors in the Connect envelope (`{"code": "unauthenticated", ...}`) are used only for gate failures; everything else is `ExecuteResponse{ok: false, diagnostics}` with HTTP 200 (flows/platform.md 3.1).
+
+### 11.4 Discovering versions and handling skew
+
+`GET /api/health` (no auth) gains three additive fields (section 15):
+
+```json
+{ "status": "ok", "version": "0.3.0", "apis": ["rastai.commands.v1", "rastai.events.v1"], "plugin_api": "0.1.0", "node_protocol": 1 }
+```
+
+| Client | Can it differ from the daemon? | Rule |
+|---|---|---|
+| Web app | no: the daemon serves it (`/`) | none needed; `index.html` is `no-store` so a reload after an update gets the new app |
+| Tauri shell | yes, briefly, during an update | it only loads the daemon URL; nothing to check |
+| CLI | yes: a daemon started before an update keeps running | compares `version`; different → warning `RRS-C0006` ("restart the daemon") and continue; a missing entry in `apis` → error, `EXIT_DAEMON_UNAVAILABLE` |
+| Scripts, SDKs, MCP clients | yes | read `apis` and each descriptor's `since_version`; send `Rastai-Client: <name>/<version>`, which the daemon logs |
+| Nodes | yes | integer protocol version + capability flags in `Handshake` (§20); mismatch → `incompatible` and `node.update` (rust-node doc) |
+
+---
+
+## 12. Plugin host: manifests and capability negotiation
+
+The plugin host is `rastai-server/src/plugin_host/`. Its runtime decisions are drawn in flows/platform.md 7.1 (install), 7.2 (states) and 7.3 (load and negotiation); this section gives the code that makes them and the data it uses.
+
+### 12.1 Where plugins come from, and load order
+
+| Source | Location | Trust |
+|---|---|---|
+| Preinstalled (first-party: `psychology`, `eval`) | `.rrsplugin` archives shipped next to the binary in `<install prefix>/share/rastai/plugins/`, unpacked into `<data>/plugins/<plugin_id>/<version>/` on first start and after an app update | trusted; no prompt; `ui.kind = in_process` allowed |
+| Installed | `plugins` rows plus `<data>/plugins/<plugin_id>/<version>/` | the permissions granted at install |
+| Dev | folders in `plugins.dev_paths[]` (unpacked); `just serve-dev` points them at `plugins/psychology` and `plugins/evaluation` | as installed; first-party ids keep `in_process` |
+
+```mermaid
+flowchart TD
+  D["discovery.rs: preinstalled, installed and dev manifests"] --> P["read_plugin_manifest through rastai-formats"]
+  P -->|"invalid"| F["failed, RRS-P0001 with the RRS-E details"]
+  P -->|"valid"| O["Order: first-party first, then by dependencies"]
+  O -->|"dependency cycle"| CY["disabled, RRS-P3001 for each plugin in the cycle"]
+  O --> N["negotiate_capabilities for the next plugin"]
+  N --> S{"state_after_negotiation"}
+  S -->|"incompatible, disabled or awaiting_trust"| K["keep the state and its diagnostic"]
+  S -->|"loadable"| R["contributions.rs registers commands, file types and the catalog"]
+  R --> M{"Python entry?"}
+  M -->|"no"| E["enabled"]
+  M -->|"yes"| J["submit_job with a JobSpec of kind plugin_module, on the embedded node"]
+  J --> E
+  K --> NEXT["next plugin"]
+  E --> NEXT
+  F --> NEXT
+  NEXT --> N
+```
+
+- First-party plugins load first because they provide capabilities (`psychology.lens@1`, `eval.metric@1`) that third-party plugins require.
+- Each plugin's outcome is stored in `plugins.state` and published as `plugin.state_changed` (lifecycle.rs). A failure never stops the loop or the daemon.
+- The module start is asynchronous: commands are registered from the manifest at once, and calls made before the module registers wait up to 30 s (flows/platform.md 2.1, `RRS-P4002`).
+
+### 12.2 The capability table
+
+A manifest's `requires_capabilities` lists `"<name>@<major>"`. Each contribution key maps to one capability, and a plugin must require the capability of every key it uses (`rastai plugin lint` checks it; the host refuses with `RRS-P0006` if not).
+
+```rust
+// plugin_host/capabilities.rs
+pub struct HostCapability { pub name: &'static str, pub majors: &'static [u32], pub contribution_key: &'static str, pub experimental: bool }
+pub struct FirstPartyCapability { pub plugin_id: &'static str, pub name: &'static str, pub majors: &'static [u32], pub contribution_key: &'static str }
+
+pub const HOST_CAPABILITIES: &[HostCapability] = &[
+    HostCapability { name: "commands", majors: &[1], contribution_key: "commands", experimental: false },
+    HostCapability { name: "ui.section", majors: &[1], contribution_key: "sections", experimental: false },
+    HostCapability { name: "events.handler", majors: &[1], contribution_key: "event_handlers", experimental: false },
+    // one row per line of the table below
+];
+
+pub const FIRST_PARTY_CAPABILITIES: &[FirstPartyCapability] = &[
+    FirstPartyCapability { plugin_id: "psychology", name: "psychology.lens", majors: &[1], contribution_key: "lenses" },
+    FirstPartyCapability { plugin_id: "psychology", name: "psychology.sae_loader", majors: &[1], contribution_key: "sae_loaders" },
+    FirstPartyCapability { plugin_id: "eval", name: "eval.metric", majors: &[1], contribution_key: "metrics" },
+];
+```
+
+| Capability | Contribution key | Provided by | Experimental in the prototype |
+|---|---|---|---|
+| `commands@1` | `commands` | host | |
+| `ui.section@1`, `ui.panel@1`, `ui.settings_page@1` | `sections`, `panels`, `settings_pages` | host | |
+| `ui.theme@1`, `ui.layout@1`, `ui.keybindings@1` | `themes`, `layouts`, `keybindings` | host | |
+| `templates@1` | `templates` | host | |
+| `file.type@1`, `file.importer@1`, `file.exporter@1` | `file_types`, `importers`, `exporters` | host | |
+| `data.converter@1` | `converters` | host | |
+| `train.recipe@1` | `recipes` | host | |
+| `rl.reward_function@1` | `reward_functions` | host | |
+| `designer.node@1` | `node_types` | host | |
+| `events.handler@1` | `event_handlers` | host | |
+| `psychology.lens@1`, `psychology.sae_loader@1` | `lenses`, `sae_loaders` | first-party `psychology`, only while it is enabled | |
+| `eval.metric@1` | `metrics` | first-party `eval`, only while it is enabled | |
+| `inference.adapter@1` | `adapters` | host | yes: gateway adapters are a closed Rust enum today; plugin adapters need an out-of-process design first |
+| `assistant.skill@1` | `assistant_skills` | host | yes |
+| `compute.target@1` | `compute_targets` | host | yes, until providers arrive (Phase 3) |
+
+That is 22 capabilities. `events.handler@1` is what the Evaluation plugin requires for auto-run (`eval.checkpoint.evaluate` on `checkpoint.saved`, training-evaluation flow 10.1) and for pinned conversations (`eval.suite.add_conversation` on `conversation.changed`, inference flow 9); without it the first-party manifest would be refused with `RRS-P0006`.
+
+A major version is added to `majors` when an extension point changes incompatibly; the host keeps serving the previous major for 12 months after plugin API 1.0 (§13).
+
+### 12.3 Negotiation as plain data
+
+```rust
+// plugin_host/capabilities.rs
+pub struct AvailableCapability { pub name: String, pub major: u32, pub experimental: bool }
+
+pub struct NegotiationResult {
+    pub engines_ok: bool,                          // engines.rastai covers PLUGIN_API_VERSION, else RRS-P1001
+    pub missing_capabilities: Vec<String>,         // RRS-P1002, each named
+    pub experimental_capabilities: Vec<String>,    // RRS-P1003 unless plugins.experimental_apis is on
+    pub undeclared_contribution_keys: Vec<String>, // RRS-P0006
+    pub missing_dependencies: Vec<String>,         // RRS-P3001
+    pub new_permissions: Vec<String>,              // back to awaiting_trust
+}
+
+pub fn available_capabilities(enabled_first_party: &[String]) -> Vec<AvailableCapability>
+pub fn negotiate_capabilities(manifest: &PluginManifest, available: &[AvailableCapability],
+                              enabled_plugins: &[(String, Version)], granted_permissions: &[String]) -> NegotiationResult
+pub fn state_after_negotiation(result: &NegotiationResult, experimental_allowed: bool) -> PluginState
+pub fn negotiation_diagnostics(result: &NegotiationResult) -> Vec<Diagnostic>
+```
+
+`negotiate_capabilities` is a pure function; `tests/plugin_host.rs` runs it over a table of manifests without touching disk.
+
+### 12.4 What registration does on the daemon side
+
+| Contribution | `contributions.rs` does | Who uses it |
+|---|---|---|
+| `commands` + `types.json` | `check_command_id` (namespace, reserved areas), schemas from `read_plugin_types` → `json_schema_for`, scope capped by the grant, `add_plugin_commands` | every surface (section 10) |
+| `file_types`, `importers`, `exporters` | rows in the file-routing table (`import_export/file_routing.rs`) | `file.open`, drag-drop, `plugin.suggest` |
+| plugin `catalog/errors.json` | `add_plugin_catalog` (codes must be `PLG-<plugin_id>-nnnn`) | every renderer |
+| `recipes`, `metrics`, `lenses`, `sae_loaders`, `reward_functions`, `converters`, `node_types` | names kept in the plugin's `LoadedPlugin` so `recipe.list`, `converter.list` and the environment facts for validation can list them | the Python registry loads the implementations by name inside jobs (`rastai_plugin`) |
+| `sections`, `panels`, `settings_pages`, `themes`, `layouts`, `keybindings`, `templates` | nothing beyond serving `ui/` assets and returning the manifest in `plugin.list` | the UI registers them (frontend doc 10) |
+| `compute_targets` | Phase 3: start the provider process | the scheduler |
+| `event_handlers` `[]{event_type, command_id}` | kept in `LoadedPlugin`; each `command_id` must be one of the plugin's own commands (`RRS-P0004` otherwise) and `event_type` a durable type. After the indexer commits a matching durable record, the server runs `execute_command(command_id)` as the plugin principal (12.5) | `plugin_host/event_handlers.rs` |
+
+```rust
+// plugin_host/load.rs
+pub struct LoadedPlugin { pub plugin_id: String, pub version: Version, pub source: PluginSource, pub folder: PathBuf,
+                          pub manifest: PluginManifest, pub state: PluginState, pub granted_permissions: Vec<String>,
+                          pub diagnostics: Vec<Diagnostic>, pub contribution_names: Vec<(String, String)>,
+                          pub event_handlers: Vec<EventHandlerContribution> }   // manifest type from rastai-formats: event_type, command_id
+pub enum PluginSource { Preinstalled, Installed, Dev }
+pub fn discover_plugins(server: &Server) -> Result<(), ServerError>   // discovery.rs: manifests and saved states into PluginHost; starts nothing
+pub async fn load_all_plugins(server: &Server)
+pub async fn load_plugin(server: &Server, plugin_id: &str) -> PluginState
+pub async fn unload_plugin(server: &Server, plugin_id: &str)       // removes commands, file types, catalog; stops the module
+pub async fn forward_command(context: &CommandContext<'_>, arguments_json: &str) -> Result<CommandOutput, Vec<Diagnostic>>
+```
+
+- **Principal for plugin calls:** `{kind: plugin, id: <plugin_id>}` with the scopes from its granted `commands:[scopes]` permission. Nested calls from the module (`WorkerHostService.ExecuteCommand` → `NodeHubService.ExecuteCommand`) carry it, so a plugin can't escalate (flows/platform.md 3.3).
+- **Document edits from modules** come back as JSON Patch in `CommandReply.document_edits` and go through `commands/undo.rs`, so plugins never write files or rows directly.
+
+### 12.5 Plugin event handlers
+
+A manifest's `contributes.event_handlers[]{event_type, command_id}` runs one of the plugin's commands when a durable event is indexed. The Evaluation plugin uses it for auto-run (`checkpoint.saved` → `eval.checkpoint.evaluate`) and for pinned conversations (`conversation.changed` → `eval.suite.add_conversation`). The effect of a user action must not be lost when the daemon crashes between indexing and the handler, or when the plugin's module is down, so every call is queued durably in the same transaction as the record it answers.
+
+```rust
+// plugin_host/event_handlers.rs
+/// Pure: one HandlerCall per (enabled plugin's handler, matching durable record). log_name is "run:<run_id>" or
+/// "daemon:<segment>"; with the record's sequence it is the call's key, so a re-sent record never queues twice.
+pub fn match_event_handlers(plugins: &PluginHost, log_name: &str, records: &[EventRecord]) -> Vec<HandlerCall>
+/// Runs each call through execute_command as the plugin principal, with idempotency key
+/// "handler:<plugin_id>:<handler_id>:<log_name>:<sequence>", then writes MarkHandlerDelivered.
+pub async fn deliver_handler_calls(server: &Server, calls: Vec<HandlerCall>)
+/// At startup and on plugin.state_changed → enabled: list_pending_handler_calls, then deliver_handler_calls.
+pub async fn deliver_pending_handler_calls(server: &Server, plugin_id: &str)
+```
+
+```mermaid
+flowchart TD
+  A["Batch of durable records ready to index"] --> B["match_event_handlers against enabled plugins"]
+  B --> C["ApplyRunEvents or ApplyDaemonEvents: rows, HandlerCall rows and the ack in one transaction"]
+  C --> D["deliver_handler_calls"]
+  D --> E{"Plugin module ready?"}
+  E -->|"no, module down or restarting"| P["Call stays pending in plugin_event_deliveries"]
+  P -->|"plugin.state_changed to enabled, or daemon start"| D
+  E -->|"yes"| X["execute_command as the plugin principal, idempotency key per call"]
+  X --> J{"Journal already has this key?"}
+  J -->|"yes, a crash re-delivered it"| M
+  J -->|"no"| R["Handler command runs, journal row committed"]
+  R --> M["MarkHandlerDelivered with the journal id and code"]
+  D -->|"daemon killed before marking"| K["Restart: the call is still pending"]
+  K --> D
+```
+
+- **Queued with the record, delivered after it.** The `HandlerCall` rows commit in the same transaction as the record's index rows and ack (13.1), so an indexed record always has its calls. A daemon crash after that commit leaves them pending; delivery resumes at the next start. `deliver_handler_calls` runs in its own task, so a slow or absent module never holds up indexing.
+- **Exactly once in effect.** A call marked delivered is never run again. A call that ran but wasn't marked (crash between the journal commit and `MarkHandlerDelivered`) is re-sent with the same idempotency key, and `execute_command` returns the journaled outcome instead of running it again (flows/platform.md 3.2). A command interrupted mid-run (`RRS-C0005` at startup) is retried with the key suffixed `:retry<n>`, so **handler commands must be idempotent**: `eval.suite.add_conversation` ignores an id already in the suite, and `eval.checkpoint.evaluate` coalesces by checkpoint id.
+- **Which plugins.** Calls are queued only for plugins that are `enabled` when the record is indexed. A module that is down or restarting keeps its calls pending (`RRS-P4002`); they go out on the next `plugin.state_changed → enabled` and at daemon start. `DropHandlerCalls` clears a plugin's pending calls only on the user's `plugin.disable` or `plugin.uninstall`: turning a plugin off means it shouldn't act on what happened meanwhile. When the host itself disables a module that keeps crashing, the calls stay pending for the next enable.
+- **At startup** `discover_plugins` reads every manifest and the saved `plugins.state` before `replay_daemon_log` and the run tails index anything, so a record indexed during startup queues the same calls as one indexed later. The calls are delivered once `load_all_plugins` has started the modules.
+- **Arguments.** Every handler command takes `HandlerEventArgs{event_type, log_name, sequence, run_id, subject_id}` (a `rastai-formats` command type, `core:HandlerEventArgs` in a plugin's `types.json`). The handler reads details through ordinary commands (`checkpoint.list`, `conversation.get`), so no event payload needs a JSON codec.
+- **Failures.** A command that fails with any code other than "module not ready" (`RRS-P4002`) or "interrupted" (`RRS-C0005`) is marked delivered with its code and logged; it is not retried, because retrying a deterministic failure would loop. The failure is in the journal like any other command.
+- **Persisted:** `plugin_event_deliveries` in `rastai.db` (section 15 row 18). It is not rebuilt (13.2): a rebuild starts it empty, so old events never fire handlers twice.
+- **Tests:** `tests/plugin_event_handlers.rs` and the kill -9 row in section 8.6.
+
+---
+
+## 13. Event indexing and rebuilding `rastai.db`
+
+`rastai.db` is an index (§19). Everything in it except five tables can be rebuilt from three sources: the run folders (`run.json` and `events.log`), the daemon's own event log, and the blob store, plus a scan of the projects and the HF cache. The runtime flows are flows/platform.md 6.1 (live indexing) and 6.4 (rebuild); this section is the code that implements them.
+
+### 13.1 Live indexing
+
+```mermaid
+flowchart TD
+  A["tail_run starts for an open run"] --> B["read runs.acked_sequence through open_index_reader"]
+  B --> C["NodeService.WatchRunEvents after the ack"]
+  C --> D["Collect up to 256 records or 100 ms"]
+  D --> R{"Run on a remote node?"}
+  R -->|"yes"| M["append_raw_frame to the daemon mirror, then sync"]
+  R -->|"no, embedded node shares the file"| G
+  M --> G{"Any gateway.request_logged in the batch?"}
+  G -->|"yes"| V["write_vault: AppendGatewayLog per record, upsert by request_id"]
+  G -->|"no"| H
+  V --> H["match_event_handlers: HandlerCall rows for the batch"]
+  V -->|"disk full"| DF
+  H --> W["write_index ApplyRunEvents: rows, handler calls and ack in one transaction"]
+  W -->|"disk full"| DF["RRS-S3002 banner, retry every 10 s, records wait in the logs"]
+  DF --> G
+  W -->|"committed"| P["publish each record as a BusEvent"]
+  P --> Q["deliver_handler_calls for the batch, see 12.5"]
+  Q --> T{"Terminal run state seen?"}
+  T -->|"no"| D
+  T -->|"yes"| X["stop the tail"]
+  C -->|"stream broken"| L["node link reconnects with backoff"]
+  L --> B
+```
+
+- **The ack is the cursor.** `runs.acked_sequence` is committed in the same transaction as the rows it covers, so a crash anywhere re-sends records that the upserts absorb (6.4 lists the keys).
+- **Vault rows before the ack.** `gateway.request_logged` records go to `vault.db` `gateway_log` (with `run_id`, `finish_reason`, `stop_kind`), which the index writer can't reach. The tail writes them with `vault_writes_for_records` and waits for that commit before `ApplyRunEvents` commits the ack. A crash between the two re-sends the batch, and the upsert by `request_id` absorbs it.
+- **Handler calls with the ack.** The batch's `HandlerCall` rows commit in the same `ApplyRunEvents` transaction, then go out after the commit (12.5), so an indexed `checkpoint.saved` always reaches the Evaluation plugin's handler, even across a crash.
+- **Chain runs have no tail.** The chain driver writes and indexes their records itself (`record_chain_event`, 8.3); `resume_chains` indexes anything after their ack at startup.
+- **The daemon's own durable records** (`command.finished`, daemon-made `artifact.created`, `document.changed`, `node.state_changed`, `plugin.state_changed`, `download.finished`, `transfer.finished`, `conversation.changed`, and the two new ones below) go through `record_daemon_event`: append to `<data>/daemon/events.log` with `SyncPolicy::Now`, then `ApplyDaemonEvents` (rows, handler calls and `log_cursors`), then publish, then deliver handler calls. At startup `daemon_log_replay.rs` indexes anything after the cursor before the HTTP listener opens. `conversation.changed` carries ids and flags only, never text, and incognito conversations emit none.
+- **Two daemon events are added** so rebuild doesn't lose user decisions: `run.tags_changed` (`run_id`, `tags[]`) from `run.tag`, and `pin.changed` (`kind`, `id`, `pinned`) from `artifact.pin` / `artifact.unpin`. Without the second, a rebuild would forget pins and the next GC could delete pinned data.
+- **Rotation:** the daemon log rolls to `events-<n>.log` at 256 MiB (flows/platform.md); each segment has its own sequence and its own `log_cursors` row.
+
+### 13.2 Rebuild
+
+`rastai storage rebuild-index` (CLI-only, offline) takes `daemon.lock` and calls `rastai_store::rebuild_index`.
+
+```rust
+// rastai-store/src/rebuild.rs: a thin sequence; each step adds counts and diagnostics to the report
+pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError> {
+    let mut report = new_rebuild_report();
+    let old_database = move_old_database_aside(paths)?;             // rastai.db.broken-<unix_ms>
+    let fresh = create_fresh_index(paths)?;                         // migrations
+    copy_kept_tables(&old_database, &fresh, &mut report);           // settings, tokens, nodes, plugins, projects
+    rebuild_from_run_folders(paths, &fresh, &mut report)?;          // run.json, then events.log or its mirror
+    rebuild_from_daemon_log(paths, &fresh, &mut report)?;           // every segment, in order
+    drop_rows_with_missing_blobs(paths, &fresh, options, &mut report)?;   // --verify-blobs re-hashes and quarantines
+    rebuild_documents_from_projects(&fresh, &mut report)?;          // header id and content_hash per document file
+    rebuild_models_from_hf_cache(&options.hf_cache_dir, &fresh, &mut report)?;
+    finish_index(&fresh)?;                                          // quick_check, then the cursors
+    Ok(report)
+}
+```
+
+| Table | Rebuilt from |
+|---|---|
+| `runs` | `run.json` (record, hash, node, parent) + `run.state_changed`; `acked_sequence` = last valid sequence |
+| `jobs` | `job.state_changed` (final states) |
+| `run_metrics` | `run.metrics` |
+| `run_tags` | `run.tags_changed` (daemon log) |
+| `checkpoints` | `checkpoint.saved`; `pinned` from `pin.changed` |
+| `artifacts`, `artifact_copies`, `lineage` | `artifact.created` in run logs and the daemon log; copies from `transfer.finished`; `pinned` from `pin.changed`; rows whose blob is missing locally and whose home is this machine are dropped with `RRS-S1002` |
+| `command_journal` | `command.finished` (commands that never finished are not rebuilt) |
+| `documents` | a scan of the projects in `projects`, reading each document's header through `rastai-formats` |
+| `models` | `download.finished` (with `model_hash` and `size_bytes`) plus a scan of the HF cache; `model_hash` filled lazily only for models the scan found |
+| `undo_steps`, `transfers` | not rebuilt (flows/platform.md 6.4): undo stacks start empty; transfers restart from their partial files |
+| `plugin_event_deliveries` | not rebuilt: starts empty, so a rebuild never re-runs plugin handlers on old events (12.5). Calls pending at the time of the loss are dropped |
+| `settings`, `tokens`, `nodes`, `plugins`, `projects` | copied from the old file when readable; otherwise empty, and plugins are re-discovered `disabled` with no grants |
+
+- **Same code as live indexing.** Steps 3 and 4 call `apply_event_record` on a transaction of the fresh connection, so live and rebuilt rows can't differ. `tests/rebuild_index.rs` compares them row by row.
+- **Reading is tolerant.** A torn tail ends that log; a corrupt frame ends it with `RRS-S2002` in the report; the rebuild continues with the next run.
+- **Persisted:** the new `rastai.db`; the old file stays beside it until the user deletes it. `vault.db` is never touched: it is primary data, not an index. So the rebuild skips the vault side of `gateway.request_logged`, and `gateway_log` rows that retention deleted stay deleted.
+
+---
+
+## 14. Test map for the control plane
+
+| Kind | Location | Runs | Covers |
+|---|---|---|---|
+| Unit | `#[cfg(test)] mod tests` at the bottom of each file | `just test-rust` on Linux, macOS and Windows CPU runners | pure functions: parsers, naming, hashing, CRC, semver, paths, stats |
+| Crate integration | `crates/<crate>/tests/<topic>.rs` | same | the per-crate tables in sections 3–9 |
+| Corpora | `fixtures/documents/`, `fixtures/safetensors/`, `fixtures/event-logs/`, `fixtures/conversations/` | same, plus the wheel and WASM parity tests | one verdict and code per file, identical in Rust, Python and WASM |
+| Golden | `fixtures/proto-golden/`, `fixtures/command-golden/copy-as.json`, `fixtures/mcp/server/`, `fixtures/diagnostics/` | same | wire bytes, Connect JSON, CLI/MCP naming, MCP transcripts, rendered diagnostics |
+| Fuzz | `crates/rastai-formats/fuzz/`, `crates/rastai-store/fuzz/`, `crates/rastai-server/fuzz/` | nightly, 10 minutes per target | JSON reader, documents, safetensors, zip, inflate, conversation import, event frames, request-gate headers |
+| Crash | `tests/crash/` (`rastai-crash-tests`) | `just test-crash` on Linux | the kill -9 matrix of flows/platform.md 6.5; rows 1–3, 6, 7, 9, 10 exercise these crates |
+| End to end | `tests/e2e/` | Playwright and CLI scripts against a real daemon (frontend doc) | one command through HTTP, CLI and MCP; `rastai eval test` exit codes; the headless tunnel |
+| Rebuild equality | `crates/rastai-store/tests/rebuild_index.rs`, `fixtures/data-dirs/` | `just test-rust` | live index equals rebuilt index, table by table |
+
+Fixtures this doc adds: `fixtures/diagnostics/`, `fixtures/mcp/server/`, `fixtures/data-dirs/`, `fixtures/harness-import/`, versioned document folders `fixtures/documents/<type>/v<n>/` for migrations, `fixtures/models/<family>/expected_counts.json`, and `fixtures/gguf/`.
+
+Windows and macOS runners build and test every crate in this doc. Unix-only pieces (`daemon.sock` peer credentials, `statvfs`) sit behind one function each with a `#[cfg(unix)]` body and a Windows body that returns a typed "not supported yet" error, so tier 2 compiles from day one (§4).
+
+---
+
+## 15. Changes this doc needs in contracts.md
+
+Each lands in contracts.md in its own PR before code uses it (§29).
+
+| # | Contracts section | Change | Why |
+|---|---|---|---|
+| 1 | §2.1 `rastai-store` | internal deps + `rastai-proto`; external + `prost`, `tokio` (`sync` only); − `blake3` | the store decodes `EventRecord` to index it; writer replies use a oneshot; hashing goes through `rastai_formats::hashing` |
+| 2 | §2.1 `rastai-cli` | internal deps + `rastai-mcp`, `rastai-store`, `rastai-proto`; external + `prost` | `rastai mcp` bridge; offline `storage rebuild-index`; binary `Subscribe` |
+| 3 | §2.1 `rastai-server` | external + `prost`, `serde_json` | Connect encoding; hand-written Connect JSON |
+| 4 | §2.1 | new rows `rastai-formats-wasm`, `rastai-formats-python`, `rastai-codegen` (dev), `rastai-crash-tests` (dev) | the two builds as their own small crates; codegen and crash tests as workspace members |
+| 5 | §1 tree | `tools/codegen/` is a Rust crate; `tests/crash/` is a Rust crate; `crates/rastai-formats/bindings/{wasm,python}/` | as above |
+| 6 | §4.1 `Diagnostic.path` | grammar `[<file>[:<line>:<column>]][#<json pointer>]` | one string carries both the location and the pointer |
+| 7 | §4.2 `CommandDescriptor` | + `arguments_schema_json`, `result_schema_json` (also proposed by the frontend doc) | forms, CLI flags and MCP tool schemas from one place; with these fields the registry holds the message itself (row 15) |
+| 8 | §3.3 `/api/health` | + `apis`, `plugin_api`, `node_protocol` | version discovery (section 11.4) |
+| 9 | §3.2 CLI and UI rows | `EventService` is binary-only in the prototype; `CommandService` accepts binary and JSON | section 11.3 |
+| 10 | §6.2 | handlers return `Result<CommandOutput, Vec<Diagnostic>>`; there is no `CommandError` type | matches flows/platform.md 3.1 |
+| 11 | §6.1 generated surfaces | CLI words and flags turn `_` into `-` | readable verbs (`add-conversation`) |
+| 12 | §7.3 | new durable daemon events `run.tags_changed`, `pin.changed` | rebuild keeps tags and pins (section 13.1) |
+| 13 | §8.2 | new table `log_cursors` (`log_name`, `acked_sequence`) | the daemon log's ack, like `runs.acked_sequence` |
+| 14 | §14 row 1 (§27) | + `wasm-bindgen-cli` (dev tooling), `libc` (foundation, `statvfs`, one file with an ADR for `unsafe`); `pyo3` and `wasm-bindgen` as already proposed | section 4.8, 6.4 |
+| 15 | §2.4 rule 3, §6.2 | The registry holds the generated `CommandDescriptor` (with row 7's fields); `find_command` and `list_commands` return it. The static row is `CommandRow`, with `command_id` and the generated `CommandKind`, so the twin test can compare field names. `RegisteredCommand` and `JobRequest` don't exist; `submit_job(server, spec: JobSpec, node_id)` takes the generated `JobSpec` | clears the three violations contracts §2.4 lists (sections 5.2, 8.3) |
+| 16 | §2.1, §14 row 1 | `blake3`: used only by `rastai-formats` (− from `rastai-store` and `rastai-node`; the node and `rastai-transport` hash through `rastai_formats::hashing`, node layout). `ed25519-dalek`: used only by `rastai-node` (− from `rastai-server`, which signs through `rastai_node::identity`) | one wrapper per library (§2.4 rule 8); sections 2.4, 6.5, 8.4 |
+| 17 | §2.1 `rastai-mcp` | internal deps + `rastai-proto` | `tool_from_command` takes the registry's `CommandDescriptor` (section 7.2) |
+| 18 | §5.2 plugin manifest, §8.2, §6.4 | `contributes.event_handlers[]{event_type, command_id}`; capability `events.handler@1`; table `plugin_event_deliveries` (`plugin_id`, `handler_id`, `command_id`, `event_type`, `log_name`, `sequence`, `run_id`, `subject_id`, `queued_unix_ms`, `delivered_unix_ms`, `journal_id`, `code`; key `plugin_id`, `handler_id`, `log_name`, `sequence`); command type `HandlerEventArgs` | Evaluation auto-run and pins with no lost events (section 12.5); the manifest field comes from training-evaluation §16 |
+| 19 | §7.3 `download.finished` | payload + `model_hash`, `size_bytes` | the node computes both when the download ends (flows/platform.md 1.5), so the `models` row is complete without `model.inspect` (section 6.4) |
+| 20 | §7.3, §8.3 | durable event `gateway.request_logged` (emitter worker); `gateway_log` + `run_id`, `finish_reason`, `stop_kind` | plan §10 row 33, node layout §6.6; indexed into `vault.db` (section 13.1) |
+| 21 | §7.1 | one writer of a run's `events.log`: the job, or the daemon's chain driver for chain runs | plan §10 row 18, training-evaluation flow 6; section 8.3 `record_chain_event` |
+| 22 | §5.2 | documents `rastai.converter/1`, `rastai.theme/1`, `rastai.eval_result/1`, `rastai.model_diff/1`, `rastai.sae_fit_check/1`, owned by `rastai-formats` | named by `layout/python.md` §15, frontend §20 and training-evaluation §16; section 4.1 |
+| 23 | §3.1 | CLI modes `rastai open [--print-url] [--replace-older-daemon]`, `rastai tunnel <user@host>`, `rastai node init --daemon-key <key>` | plan §10 row 2, designer-gym-remote C1 and C8, flows/platform.md 9.2; section 9.2 |
+| 24 | §10 | `RRS-E6501`–`6506` for the GGUF header reader | node layout §12 Q9; section 16.4 |
+
+---
+
+## 16. New names
+
+### 16.1 Crates, binaries and modules
+
+| Name | What |
+|---|---|
+| `rastai-formats-wasm` | `crates/rastai-formats/bindings/wasm/`, cdylib, the only `wasm-bindgen` user; output to `packages/formats/src/wasm/` |
+| `rastai-formats-python` | `crates/rastai-formats/bindings/python/`, cdylib, the only `pyo3` user; module `rastai_formats._native` |
+| `rastai_formats._native.FormatsValidationError` | the one exception the wheel raises, carrying diagnostics JSON |
+| `rastai-codegen` | `tools/codegen/`, dev-only crate with bins `rastai-formats-codegen` (named in contracts §5.4) and `rastai-catalog-codegen` |
+| `rastai-crash-tests` | `tests/crash/`, dev-only crate for the kill -9 matrix |
+| `crates/rastai-store/fuzz/`, `crates/rastai-server/fuzz/` | cargo-fuzz crates beside the formats one, excluded from the workspace |
+| `tools/checks/check-unsafe`, `tools/checks/check-no-pickle` | CI checks (section 2.1) |
+
+### 16.2 Types, functions and constants other docs may reference
+
+| Name | Crate | What |
+|---|---|---|
+| `DiagnosticPath`, `format_path`, `parse_path` | `rastai-diag` | the path grammar of section 15 row 6 |
+| `RuntimeCatalog`, `PluginCatalogEntry`, `add_plugin_catalog`, `plugin_diagnostic` | `rastai-diag` | third-party `PLG-` codes at runtime |
+| `render_text`, `render_basic`, `render_json`, `init_logger`, `log_info` | `rastai-diag` | renderer and logger |
+| `ByteSource`, `SliceSource`, `FileSource`, `ByteSink`, `VecSink`, `FileSink` | `rastai-formats` | byte access without paths, both directions |
+| `ImportLimits`, `ReadOutcome`, `read_document`, `Document`, `EnvironmentFacts`, `check_environment`, `write_document` | `rastai-formats` | the four-layer API |
+| `ConverterDocument`, `ThemeDocument`, `EvalResult`, `ModelDiffReport`, `SaeFitCheckReport` | `rastai-formats` | the five document types other docs introduced (section 15 row 22) |
+| `TypeDescription`, `FieldDescription`, `FieldKind` (`Json`, `Enum` and `Proto` added to the frontend doc's kinds), `cli_position` | `rastai-formats` | descriptions; `x-rastai-cli-position` is the same hint in a plugin's `types.json`; `Proto` is contracts §4's name |
+| `parse_arguments`, `describe_arguments`, `describe_result`, `json_schema_for`, `read_plugin_types`, `HandlerEventArgs` | `rastai-formats` | command argument handling; the arguments every plugin event handler takes (12.5) |
+| `plan_safetensors`, `read_safetensors_header`, `check_safetensors_header`, `plan_gguf`, `encode_gguf_tensor`, `read_gguf_header`, `GgufHeader`, `GgufTensorInfo`, `gguf_tensor_bytes`, `write_zip_stored`, `ZipSource`, `copy_zip_entry`, `write_small_zip` | `rastai-formats` | byte formats |
+| `hash_bytes`, `StreamHasher`, `content_hash_of_value`, `model_hash` | `rastai-formats` | the one BLAKE3 wrapper |
+| `apply_patch`, `diff_values`, `JsonPatchOperation` | `rastai-formats` | undo patches |
+| `CommandRow`, `CommandRegistry`, `CommandFilter`, `CommandOutput`, `descriptor_from_row` | `rastai-core` | registry; the registry holds the generated `CommandDescriptor` |
+| `proto_json` functions (`job_spec_to_json`, `job_spec_from_json`, and the same for `HardwareFingerprint` and `SamplingSettings`) | `rastai-core` | named in contracts §4 |
+| `NodeSettings`, `node_settings`, `GatewaySettings`, `gateway_settings` | `rastai-core` | resolved settings for the node and the gateway |
+| `daemon_key_path`, `node_key_path`, `node_socket_path`, `node_hub_socket_path`, `worker_host_socket_path`, `job_socket_path`, `remote_node_socket_path` | `rastai-core` | path functions the node and transport layouts call |
+| `RETIRED_COMMANDS`, `RetiredCommand` | `rastai-core` | section 11.2 |
+| `cli_words`, `command_id_from_cli_words`, `flag_name`, `mcp_tool_name`, `command_id_from_mcp_tool_name`, `check_command_id` | `rastai-core` | naming |
+| `Scope::Plugin(String)` | `rastai-core` | a third-party plugin's own scope |
+| `PathEnvironment`, `DataPaths`, `read_path_environment`, `resolve_paths`, `hf_cache_dir` | `rastai-core` | paths |
+| `APP_VERSION`, `PLUGIN_API_VERSION`, `NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`, `API_PACKAGES` | `rastai-core` | versions |
+| `Store`, `open_store`, `IndexWrite`, `VaultWrite`, `write_index`, `write_vault`, `queue_vault_write`, `VaultCommit`, `wait_for_commit`, `ReaderPool`, `open_index_reader`, `open_vault_reader`, `IndexReaderGuard`, `VaultReaderGuard` | `rastai-store` | persistence API |
+| `HandlerCall`, `list_pending_handler_calls`, `vault_writes_for_records` | `rastai-store` | plugin handler queue; vault rows from run logs |
+| `EventLogWriter`, `EventLogReader`, `SyncPolicy`, `append_raw_frame`, `rebuild_index`, `RebuildOptions`, `RebuildReport`, `take_daemon_lock`, `free_bytes`, `check_free_space` | `rastai-store` | logs, rebuild, lock, disk |
+| `WRITER_BATCH_MAX` (256) | `rastai-store` | equals flows/platform.md `INDEX_BATCH_RECORDS` |
+| `McpStep`, `McpTool`, `ToolOutcome`, `McpSession`, `McpConnection`, `LineChannel`, `run_stdio_bridge`, `MAX_MESSAGE_BYTES` (4 MiB), `SUPPORTED_PROTOCOL_VERSIONS` | `rastai-mcp` | MCP |
+| `Server`, `run_daemon`, `DaemonOptions`, `CommandContext`, `check_arguments`, `record_daemon_event`, `submit_job`, `NodeLink`, `NodeTransport` | `rastai-server` | daemon internals named across docs |
+| `record_chain_event`, `resume_chains` (with `ChainStep`, `ChainAction`, `next_chain_action` from training-evaluation flow 6) | `rastai-server` | the chain driver |
+| `check_data_policy`, `PolicyTarget`, `policy_target_for_route` | `rastai-server` | the one data-policy check (`RRS-C1009`) |
+| `HOST_CAPABILITIES`, `FIRST_PARTY_CAPABILITIES`, `negotiate_capabilities`, `NegotiationResult`, `LoadedPlugin`, `PluginSource` | `rastai-server` | plugin host |
+| `match_event_handlers`, `deliver_handler_calls`, `deliver_pending_handler_calls` | `rastai-server` | plugin event handlers (12.5) |
+| `VaultLogSink` | `rastai-server` | named by the node/gateway doc |
+| `DesignStats`, `compute_design_stats`, `estimate_memory_bytes`, `check_fits`, `estimate_time_seconds` | `rastai-server` | ModelSpec analysis behind `design.stats` |
+| `TrainingMemoryEstimate`, `estimate_training_memory`, `largest_micro_batch` (training-evaluation flow 3); `plan_layer_placement`, `PlacementUnit`, `GpuBudget`, `LayerPlacement` (designer-gym-remote A8a) | `rastai-server` | ModelSpec analysis for training plans and multi-GPU placement |
+| `Mode` (with `Tunnel` and `NodeInit`), `ALIASES`, `EXIT_OK` … `EXIT_ERRORED` | `rastai-cli` | sections 9.2, 9.5 |
+
+### 16.3 Files, protocol details and conventions
+
+| Name | What |
+|---|---|
+| `[workspace.metadata.rastai.allowlist]` in `Cargo.toml` | the §27 crate table as data, read by `check-deps` |
+| `<install prefix>/share/rastai/plugins/` | preinstalled first-party `.rrsplugin` archives |
+| `<cache>/commands-<app version>.json` | the CLI's help cache |
+| `<data>/daemon/events-<n>.log` | rotated segments of the daemon log (the log itself is named in flows/platform.md) |
+| `log_cursors` table | section 15 row 13 |
+| `plugin_event_deliveries` table | section 15 row 18 |
+| `run.tags_changed`, `pin.changed` | durable daemon events (section 13.1) |
+| `Rastai-Client: <name>/<version>` header | client identification (section 11.4) |
+| `/api/health` fields `apis`, `plugin_api`, `node_protocol` | section 11.4 |
+| Capability names | the 22 names in section 12.2 (`commands@1`, `ui.section@1`, ..., `events.handler@1`, ..., `compute.target@1`) |
+| CLI global flags | `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help` |
+| Fixtures | `fixtures/diagnostics/`, `fixtures/mcp/server/`, `fixtures/data-dirs/`, `fixtures/harness-import/`, `fixtures/documents/<type>/v<n>/`, `fixtures/models/<family>/expected_counts.json`, `fixtures/gguf/` (tiny GGUF files, one K-quant made by the pinned `llama-quantize`) |
+
+### 16.4 Catalog codes
+
+In ranges contracts §10 already assigns. Codes defined in flows/platform.md (for example `RRS-C0001`–`0005`, `RRS-S0001`–`4001`, `RRS-P0001`–`4003`, `RRS-E3001`, `RRS-E5001`, `RRS-E5002`) and in the other docs are used, not repeated.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `RRS-E0001` | error | JSON syntax error at a line and column |
+| `RRS-E0002` | error | File is not valid UTF-8 |
+| `RRS-E0003` | error | Duplicate key in a JSON object |
+| `RRS-E0004` | error | NaN or Infinity is not valid JSON |
+| `RRS-E1001` | error | Required field missing |
+| `RRS-E1002` | error | Field has the wrong kind |
+| `RRS-E1003` | error | Unknown field |
+| `RRS-E1004` | error | Value is not one of the allowed values |
+| `RRS-E1005` | error | The `type` field doesn't match the file extension |
+| `RRS-E2001` | error | Reference doesn't resolve |
+| `RRS-E2002` | error | Shapes don't match along a graph edge |
+| `RRS-E2003` | error | Graph has a cycle with no recurrent node |
+| `RRS-E2004` | error | Input ranges overlap |
+| `RRS-E2005` | error | Duplicate id (graph node, test, tool, task) |
+| `RRS-E4002` | error | Migration step failed |
+| `RRS-E5003` | error | File is larger than the import limit |
+| `RRS-E5004` | error | JSON nested deeper than the import limit |
+| `RRS-E5005` | error | Graph has more nodes or parameters than the import limit |
+| `RRS-E6001` | error | Safetensors: file is shorter than the 8-byte header length |
+| `RRS-E6002` | error | Safetensors: header length points past the end of the file |
+| `RRS-E6003` | error | Safetensors: header is over the 100 MB limit |
+| `RRS-E6004` | error | Safetensors: header is not valid UTF-8 JSON (includes NaN and trailing bytes) |
+| `RRS-E6005` | error | Safetensors: header is not a JSON object |
+| `RRS-E6006` | error | Safetensors: header has duplicate keys |
+| `RRS-E6007` | error | Safetensors: a tensor entry is not an object |
+| `RRS-E6008` | error | Safetensors: unsupported dtype |
+| `RRS-E6009` | error | Safetensors: shape is not a list of non-negative integers |
+| `RRS-E6010` | error | Safetensors: `data_offsets` is not two integers |
+| `RRS-E6011` | error | Safetensors: `data_offsets` fall outside the data section (reversed, past the end, or beyond 64 bits) |
+| `RRS-E6012` | error | Safetensors: the shape's byte size overflows 64 bits |
+| `RRS-E6013` | error | Safetensors: the shape's byte size doesn't match the offsets |
+| `RRS-E6014` | error | Safetensors: tensors overlap |
+| `RRS-E6015` | error | Safetensors: gap in the data section |
+| `RRS-E6016` | error | Safetensors: bytes at the end belong to no tensor |
+| `RRS-E6017` | error | Safetensors: `__metadata__` must map strings to strings |
+| `RRS-E6501` | error | GGUF: not a GGUF file (bad magic) |
+| `RRS-E6502` | error | GGUF: unsupported version (only 3 is read) |
+| `RRS-E6503` | error | GGUF: header ends before its declared key-values or tensor infos |
+| `RRS-E6504` | error | GGUF: a count, string or array length is over the import limit |
+| `RRS-E6505` | error | GGUF: unknown value type or tensor type |
+| `RRS-E6506` | error | GGUF: a tensor's data lies outside the file |
+| `RRS-C0006` | warning | The daemon is running a different app version; restart it |
+| `RRS-C0007` | error | Command retired; use its replacement |
+| `RRS-P0004` | error | Plugin command id outside the plugin's namespace or in a reserved area |
+| `RRS-P0005` | error | Plugin command type missing from `types.json` |
+| `RRS-P0006` | error | Plugin contributes to an extension point it doesn't require |
+
+`offset_beyond_64_bits.safetensors` must give `RRS-E6011` in both readers: Rust sees a number that doesn't fit `u64`, Python sees a big integer past the end; both are "outside the data section".
+
+---
+
+## 17. Open questions
+
+Each has the default this doc uses until the owner decides.
+
+| # | Question | Default |
+|---|---|---|
+| 1 | `rastai-diag::Diagnostic` mirrors `rastai.common.v1.Diagnostic` field for field. Is that "a type defined twice"? | Keep the twin: `rastai-diag` must stay free of `rastai-proto` (contracts §2.1, WASM size). `wire.rs` converts and a test pins the field lists. Alternative: make `rastai-diag` depend on `rastai-proto`. |
+| 2 | Free disk space needs `statvfs` (no std API). | `libc` in §27 and an ADR for `unsafe` in `rastai-store/src/disk_space.rs`. Alternative without `unsafe`: run `df --output=avail -B1` (Linux only). |
+| 3 | `EventService` JSON. | Binary only in the prototype. Hand-write the JSON codec if a non-TS, non-Rust client needs the stream. |
+| 4 | DEFLATE decoding for zip is in-house (~400 lines, fuzzed). | In-house. Alternative: allowlist `miniz_oxide` behind `zip/inflate.rs`. |
+| 5 | OS randomness without a crate. | `/dev/urandom` now; add `getrandom` to §27 when Windows (tier 2) work starts. |
+| 6 | Where preinstalled plugins ship. | `<install prefix>/share/rastai/plugins/`; to confirm with the packaging scripts in `tools/release/`. |
+| 7 | One implementation of the strict safetensors contract? | Keep the Python reader (`layout/python.md`), sharing the corpus and codes. The wheel's `check_safetensors_header` is there if the Python owner prefers to delegate. |
+| 8 | Embedding the web app. | `build.rs` writes an `include_bytes!` table of `apps/web/dist/`. Alternative: serve from `<install prefix>/share/rastai/web/` and drop `build.rs`. |
+| 9 | Protocol version constants live in `rastai-core` (`NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`). | Keep them in core: the daemon and the node both read them. Reconcile with the node doc if it defines its own. |
+| 10 | "Copy as Python" uses `rastai.client.connect()` (frontend doc). | Use it; the Python packages doc confirms the name. |
+| 11 | Zip needs CRC-32/IEEE, the same checksum as event-log frames, whose table is in `rastai-store/src/event_log/crc32.rs`; `rastai-formats` can't depend on the store. | Move the table to `rastai-formats/src/crc32.rs` when the zip reader lands, and have `event_log/frame.rs` call it, so there is one CRC table. Alternative: a second copy in `zip/`, pinned to the store's by a shared test vector. |
+| 12 | Pinned conversations become tests through an event handler (12.5). Reading `conversation.list {pinned: true}` when a suite runs needs no event at all. | Keep the handler, which makes the pin visible in the suite file at once and is durable through `plugin_event_deliveries`. The Evaluation plugin may also read pins at run time as a safety net; that is its owner's call (`rastai_eval/suites.py`). |
+| 13 | The identity type is `NodeIdentity` (node layout) although the daemon uses it for `daemon.key` too. | Keep the node layout's name. Rename both docs to `Identity` only if a third key holder appears. |
