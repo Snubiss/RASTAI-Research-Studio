@@ -1,0 +1,12 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "blank_name_and_host_name.json:6:3#/name"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "blank_name_and_host_name.json:7:3#/default_node"
+    }
+  ]
+}

@@ -1,0 +1,542 @@
+{
+  "$defs": {
+    "ThemeColors": {
+      "additionalProperties": false,
+      "description": "Color roles; a role left out comes from the base theme. Locked --rr-locked-* tokens are not roles.",
+      "properties": {
+        "accent": {
+          "description": "Primary actions and the selected item. A #rrggbb color.",
+          "type": "string"
+        },
+        "accent_active": {
+          "description": "An accent control being pressed. A #rrggbb color.",
+          "type": "string"
+        },
+        "accent_hover": {
+          "description": "An accent control under the pointer. A #rrggbb color.",
+          "type": "string"
+        },
+        "background": {
+          "description": "Window background. A #rrggbb color.",
+          "type": "string"
+        },
+        "border": {
+          "description": "Control and panel borders. A #rrggbb color.",
+          "type": "string"
+        },
+        "border_strong": {
+          "description": "Borders that must stand out. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_background": {
+          "description": "Designer canvas background. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_edge": {
+          "description": "Graph edges. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_edge_active": {
+          "description": "Edges carrying data in a live view. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_grid": {
+          "description": "Designer canvas grid lines. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_label": {
+          "description": "Labels on the canvas. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_node": {
+          "description": "Graph node fill. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_node_border": {
+          "description": "Graph node border. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_node_selected": {
+          "description": "Selected graph node. A #rrggbb color.",
+          "type": "string"
+        },
+        "canvas_port": {
+          "description": "Node input and output ports. A #rrggbb color.",
+          "type": "string"
+        },
+        "diverging_negative": {
+          "description": "Negative end of diverging color maps. A #rrggbb color.",
+          "type": "string"
+        },
+        "diverging_positive": {
+          "description": "Positive end of diverging color maps. A #rrggbb color.",
+          "type": "string"
+        },
+        "diverging_zero": {
+          "description": "Middle of diverging color maps. A #rrggbb color.",
+          "type": "string"
+        },
+        "divider": {
+          "description": "Lines between list rows and sections. A #rrggbb color.",
+          "type": "string"
+        },
+        "focus_ring": {
+          "description": "The keyboard focus ring. A #rrggbb color.",
+          "type": "string"
+        },
+        "overlay": {
+          "description": "The scrim behind dialogs. A #rrggbb color.",
+          "type": "string"
+        },
+        "selection": {
+          "description": "Selected text and rows. A #rrggbb color.",
+          "type": "string"
+        },
+        "sequential_high": {
+          "description": "High end of sequential color maps. A #rrggbb color.",
+          "type": "string"
+        },
+        "sequential_low": {
+          "description": "Low end of sequential color maps. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_1": {
+          "description": "Chart series 1. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_2": {
+          "description": "Chart series 2. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_3": {
+          "description": "Chart series 3. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_4": {
+          "description": "Chart series 4. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_5": {
+          "description": "Chart series 5. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_6": {
+          "description": "Chart series 6. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_7": {
+          "description": "Chart series 7. A #rrggbb color.",
+          "type": "string"
+        },
+        "series_8": {
+          "description": "Chart series 8. A #rrggbb color.",
+          "type": "string"
+        },
+        "success": {
+          "description": "Success states. A #rrggbb color.",
+          "type": "string"
+        },
+        "surface": {
+          "description": "Panels and cards. A #rrggbb color.",
+          "type": "string"
+        },
+        "surface_raised": {
+          "description": "Menus, popovers and raised cards. A #rrggbb color.",
+          "type": "string"
+        },
+        "surface_sunken": {
+          "description": "Wells and inputs set into a surface. A #rrggbb color.",
+          "type": "string"
+        },
+        "text": {
+          "description": "Body text. A #rrggbb color.",
+          "type": "string"
+        },
+        "text_disabled": {
+          "description": "Text of disabled controls. A #rrggbb color.",
+          "type": "string"
+        },
+        "text_muted": {
+          "description": "Secondary text. A #rrggbb color.",
+          "type": "string"
+        },
+        "text_on_accent": {
+          "description": "Text on an accent fill. A #rrggbb color.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "ThemeColors",
+      "type": "object"
+    },
+    "ThemeDensity": {
+      "additionalProperties": false,
+      "description": "Spacing scales; ui.density picks one.",
+      "properties": {
+        "comfortable": {
+          "$ref": "#/$defs/ThemeSpacing",
+          "description": "The default scale."
+        },
+        "compact": {
+          "$ref": "#/$defs/ThemeSpacing",
+          "description": "The tighter scale."
+        }
+      },
+      "required": [
+        "comfortable",
+        "compact"
+      ],
+      "title": "ThemeDensity",
+      "type": "object"
+    },
+    "ThemeElevation": {
+      "additionalProperties": false,
+      "description": "Three shadow levels.",
+      "properties": {
+        "level_1": {
+          "description": "A CSS box-shadow value.",
+          "type": "string"
+        },
+        "level_2": {
+          "description": "A CSS box-shadow value.",
+          "type": "string"
+        },
+        "level_3": {
+          "description": "A CSS box-shadow value.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "level_1",
+        "level_2",
+        "level_3"
+      ],
+      "title": "ThemeElevation",
+      "type": "object"
+    },
+    "ThemeFocusRing": {
+      "additionalProperties": false,
+      "description": "Focus ring size; its color is the focus_ring role.",
+      "properties": {
+        "offset_px": {
+          "description": "Gap between the ring and the control.",
+          "type": "integer"
+        },
+        "width_px": {
+          "description": "Ring width in CSS pixels.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "width_px",
+        "offset_px"
+      ],
+      "title": "ThemeFocusRing",
+      "type": "object"
+    },
+    "ThemeFontSizes": {
+      "additionalProperties": false,
+      "description": "Font sizes in CSS pixels, smallest first.",
+      "properties": {
+        "lg": {
+          "description": "Font size in CSS pixels.",
+          "type": "integer"
+        },
+        "md": {
+          "description": "Font size in CSS pixels.",
+          "type": "integer"
+        },
+        "sm": {
+          "description": "Font size in CSS pixels.",
+          "type": "integer"
+        },
+        "xl": {
+          "description": "Font size in CSS pixels.",
+          "type": "integer"
+        },
+        "xs": {
+          "description": "Font size in CSS pixels.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ],
+      "title": "ThemeFontSizes",
+      "type": "object"
+    },
+    "ThemeFontWeights": {
+      "additionalProperties": false,
+      "description": "Font weights, 100 to 900.",
+      "properties": {
+        "bold": {
+          "description": "CSS font weight.",
+          "type": "integer"
+        },
+        "medium": {
+          "description": "CSS font weight.",
+          "type": "integer"
+        },
+        "regular": {
+          "description": "CSS font weight.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "regular",
+        "medium",
+        "bold"
+      ],
+      "title": "ThemeFontWeights",
+      "type": "object"
+    },
+    "ThemeLineHeights": {
+      "additionalProperties": false,
+      "description": "Unitless CSS line heights.",
+      "properties": {
+        "body": {
+          "description": "Line height as a multiple of the font size.",
+          "type": "number"
+        },
+        "code": {
+          "description": "Line height as a multiple of the font size.",
+          "type": "number"
+        },
+        "heading": {
+          "description": "Line height as a multiple of the font size.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "body",
+        "heading",
+        "code"
+      ],
+      "title": "ThemeLineHeights",
+      "type": "object"
+    },
+    "ThemeMotion": {
+      "additionalProperties": false,
+      "description": "Animation timing; ui.reduced_motion sets both durations to 0.",
+      "properties": {
+        "easing": {
+          "description": "A CSS easing function.",
+          "type": "string"
+        },
+        "fast_ms": {
+          "description": "Short transitions, in milliseconds.",
+          "type": "integer"
+        },
+        "slow_ms": {
+          "description": "Long transitions, in milliseconds.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fast_ms",
+        "slow_ms",
+        "easing"
+      ],
+      "title": "ThemeMotion",
+      "type": "object"
+    },
+    "ThemeRadius": {
+      "additionalProperties": false,
+      "description": "Corner radii in CSS pixels.",
+      "properties": {
+        "large": {
+          "description": "Corner radius in CSS pixels.",
+          "type": "integer"
+        },
+        "medium": {
+          "description": "Corner radius in CSS pixels.",
+          "type": "integer"
+        },
+        "small": {
+          "description": "Corner radius in CSS pixels.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "small",
+        "medium",
+        "large"
+      ],
+      "title": "ThemeRadius",
+      "type": "object"
+    },
+    "ThemeSpacing": {
+      "additionalProperties": false,
+      "description": "One spacing scale.",
+      "properties": {
+        "spacing_px": {
+          "description": "Spacing steps in CSS pixels; --rr-space-<n> is step n.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "spacing_px"
+      ],
+      "title": "ThemeSpacing",
+      "type": "object"
+    },
+    "ThemeTypography": {
+      "additionalProperties": false,
+      "description": "Typography tokens.",
+      "properties": {
+        "font_family_mono": {
+          "description": "CSS font-family list for code.",
+          "type": "string"
+        },
+        "font_family_ui": {
+          "description": "CSS font-family list for the interface.",
+          "type": "string"
+        },
+        "font_sizes_px": {
+          "$ref": "#/$defs/ThemeFontSizes",
+          "description": "Font sizes xs to xl."
+        },
+        "font_weights": {
+          "$ref": "#/$defs/ThemeFontWeights",
+          "description": "Regular, medium and bold weights."
+        },
+        "line_heights": {
+          "$ref": "#/$defs/ThemeLineHeights",
+          "description": "Body, heading and code line heights."
+        }
+      },
+      "required": [
+        "font_family_ui",
+        "font_family_mono",
+        "font_weights",
+        "font_sizes_px",
+        "line_heights"
+      ],
+      "title": "ThemeTypography",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.theme/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A theme: color roles and the other design tokens (contracts 5.6).",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "base": {
+      "description": "Light or dark: missing roles and the locked set come from it.",
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "type": "string"
+    },
+    "colors": {
+      "$ref": "#/$defs/ThemeColors",
+      "description": "One optional #rrggbb per color role."
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "density": {
+      "$ref": "#/$defs/ThemeDensity",
+      "description": "The comfortable and compact spacing scales."
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "elevation": {
+      "$ref": "#/$defs/ThemeElevation",
+      "description": "Shadow levels."
+    },
+    "focus_ring": {
+      "$ref": "#/$defs/ThemeFocusRing",
+      "description": "Focus ring width and offset."
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "motion": {
+      "$ref": "#/$defs/ThemeMotion",
+      "description": "Animation durations and easing."
+    },
+    "name": {
+      "description": "Shown in the theme picker.",
+      "type": "string"
+    },
+    "radius_px": {
+      "$ref": "#/$defs/ThemeRadius",
+      "description": "Corner radii."
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    },
+    "typography": {
+      "$ref": "#/$defs/ThemeTypography",
+      "description": "Font families, weights, sizes and line heights."
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id",
+    "name",
+    "base",
+    "colors",
+    "typography",
+    "density",
+    "radius_px",
+    "motion",
+    "focus_ring",
+    "elevation"
+  ],
+  "title": "ThemeDocument",
+  "type": "object"
+}

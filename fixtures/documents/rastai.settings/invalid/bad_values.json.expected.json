@@ -1,0 +1,32 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1002",
+      "path": "bad_values.json:7:5#/ui/theme"
+    },
+    {
+      "code": "RRS-E1004",
+      "path": "bad_values.json:8:5#/ui/density"
+    },
+    {
+      "code": "RRS-E1003",
+      "path": "bad_values.json:9:5#/ui/colour"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "bad_values.json:12:5#/daemon/port"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "bad_values.json:16:7#/inference/sampling/seed"
+    },
+    {
+      "code": "RRS-E1004",
+      "path": "bad_values.json:20:5#/privacy/data_policy"
+    },
+    {
+      "code": "RRS-E1003",
+      "path": "bad_values.json:22:3#/archive"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.lock/1.json",
+  "type": "rastai.lock",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "environment": {
+    "environment_id": "cpu",
+    "lock_hash": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

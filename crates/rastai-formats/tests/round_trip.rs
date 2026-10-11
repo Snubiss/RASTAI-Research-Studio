@@ -1,22 +1,26 @@
-//! Read, write, read: equal values and a stable content hash (layout 4.11), over seeded random documents from an
-//! in-house generator (no property-testing crate).
+//! Read, write, read: equal values and a stable content hash (layout 4.11).
 //!
-//! No document type is registered before M1-17, so this test reads through `check_document` with one test type
-//! whose description is the shared header alone. Each document type's PR adds its own round trip through
-//! `read_document`.
+//! The first half writes seeded random headers from an in-house generator (no property-testing crate) and reads
+//! them through `check_document` with a test type whose description is the shared header alone. The second half
+//! takes every valid file of the document corpus through `read_document`: the typed document, written with the
+//! stable writer and read again, is equal, writes the same bytes and has the same content hash.
 
 #![allow(clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use rastai_formats::byte_source::SliceSource;
 use rastai_formats::describe::registry::describe_all_types;
-use rastai_formats::documents::DocumentType;
+use rastai_formats::documents::{Document, DocumentType};
+use rastai_formats::error::FormatsError;
 use rastai_formats::hashing::content_hash_of_value;
 use rastai_formats::header::{SHARED_HEADER_TYPE_NAME, SharedHeader};
 use rastai_formats::json::pretty::pretty_json;
 use rastai_formats::limits::ImportLimits;
-use rastai_formats::validate::{CheckedDocument, check_document};
+use rastai_formats::validate::{CheckedDocument, check_document, read_document};
+use serde::Serialize;
 use serde_json::Value;
 
 const HEADER_ONLY_TYPE: &str = "test.header_only";
@@ -32,6 +36,13 @@ const SEED: u64 = 0x5EED_0015;
 /// The content hash of the first header SEED generates.
 const GOLDEN_FIRST_HEADER_HASH: &str = "blake3:7a65b0277f61d6682d3ad0fe96ce82280c0fd8cb6de2ccb869fbd275bbb67314";
 const DOCUMENT_COUNT: usize = 200;
+/// The corpus's valid files, one folder per document type.
+const CORPUS_FOLDER: &str = "../../fixtures/documents";
+const VALID_FOLDER: &str = "valid";
+/// The content hash of `fixtures/documents/rastai.theme/valid/night.theme.json` as read. A change here changes the
+/// stored hash of every theme (contracts 5.1).
+const NIGHT_THEME_FILE: &str = "rastai.theme/valid/night.theme.json";
+const GOLDEN_NIGHT_THEME_HASH: &str = "blake3:de79ce5ff11222694df1eae654fc5a2b8351062faaee8733a3c987a1d107ba7e";
 // Text pieces that stress the writer and the reader: quotes, escapes, a pointer separator, non-ASCII and an
 // astral-plane character (a surrogate pair in JSON escapes).
 const TEXT_PIECES: &[&str] = &[
@@ -179,4 +190,73 @@ fn hashes_are_stable_across_runs_and_machines() {
     // Written down once from this test's first run: a change here changes every stored content hash (contracts 5.1).
     let hash = content_hash_of_value(&serde_json::to_value(&header).unwrap());
     assert_eq!(hash, GOLDEN_FIRST_HEADER_HASH);
+}
+
+/// Every valid corpus file, sorted.
+fn valid_corpus_files() -> Vec<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(CORPUS_FOLDER);
+    let mut files = Vec::new();
+    for type_folder in fs::read_dir(&root).unwrap() {
+        let valid_folder = type_folder.unwrap().path().join(VALID_FOLDER);
+        let Ok(entries) = fs::read_dir(&valid_folder) else {
+            continue;
+        };
+        files.extend(entries.map(|entry| entry.unwrap().path()));
+    }
+    files.sort();
+    files
+}
+
+fn read_typed(file_name: &str, bytes: &[u8]) -> Document {
+    let outcome = read_document(file_name, &SliceSource { bytes }, &ImportLimits::default());
+    assert_eq!(outcome.diagnostics, vec![], "{file_name}");
+    outcome.document.unwrap()
+}
+
+/// The stable pretty text of a typed document and its JSON value.
+fn written(document: &Document) -> (Vec<u8>, Value) {
+    match document {
+        Document::RunRecord(run_record) => text_and_value(run_record),
+        Document::Resume(resume) => text_and_value(resume),
+        Document::Settings(settings) => text_and_value(settings),
+        Document::Project(project) => text_and_value(project),
+        Document::Lock(lock) => text_and_value(lock),
+        Document::PluginManifest(manifest) => text_and_value(manifest),
+        Document::Theme(theme) => text_and_value(theme),
+    }
+}
+
+fn text_and_value<T: Serialize>(typed: &T) -> (Vec<u8>, Value) {
+    let text: Result<Vec<u8>, FormatsError> = pretty_json(typed);
+    (text.unwrap(), serde_json::to_value(typed).unwrap())
+}
+
+#[test]
+fn every_valid_corpus_document_survives_write_and_read() {
+    let files = valid_corpus_files();
+    assert!(files.len() >= 7, "every step-1 type has a valid file: {files:?}");
+    for path in files {
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let first = read_typed(&file_name, &fs::read(&path).unwrap());
+        let (first_text, first_value) = written(&first);
+        let second = read_typed(&file_name, &first_text);
+        assert_eq!(second, first, "{file_name}: the typed document changed");
+        let (second_text, second_value) = written(&second);
+        assert_eq!(second_text, first_text, "{file_name}: writing again changes the bytes");
+        assert_eq!(
+            content_hash_of_value(&second_value),
+            content_hash_of_value(&first_value),
+            "{file_name}"
+        );
+    }
+}
+
+#[test]
+fn a_theme_hash_is_stable_across_runs_and_machines() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(CORPUS_FOLDER)
+        .join(NIGHT_THEME_FILE);
+    let theme = read_typed("night.theme.json", &fs::read(path).unwrap());
+    let (_, value) = written(&theme);
+    assert_eq!(content_hash_of_value(&value), GOLDEN_NIGHT_THEME_HASH);
 }

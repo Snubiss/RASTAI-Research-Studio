@@ -1,0 +1,160 @@
+{
+  "$defs": {
+    "ResumeDataloader": {
+      "additionalProperties": false,
+      "description": "The data loader's position.",
+      "properties": {
+        "dataset_hash": {
+          "description": "Content hash of the dataset snapshot.",
+          "type": "string"
+        },
+        "epoch": {
+          "description": "Epoch of the shuffle order.",
+          "type": "integer"
+        },
+        "position": {
+          "description": "Samples already taken in this epoch.",
+          "type": "integer"
+        },
+        "shuffle_seed": {
+          "description": "Seed of the shuffle order.",
+          "type": "integer"
+        },
+        "split": {
+          "description": "Split being read, such as train.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataset_hash",
+        "split",
+        "shuffle_seed",
+        "epoch",
+        "position"
+      ],
+      "title": "ResumeDataloader",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.resume/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Where training stood at a checkpoint (resume.json).",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "RFC 3339 UTC time it was written.",
+      "type": "string"
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "dataloader": {
+      "$ref": "#/$defs/ResumeDataloader",
+      "description": "Where the data loader stood."
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "epoch": {
+      "description": "Current epoch, from 0.",
+      "type": "integer"
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "optimizer_file": {
+      "description": "Optimizer state file, if the recipe has one.",
+      "type": "string"
+    },
+    "recipe_state": {
+      "additionalProperties": {},
+      "description": "Other state the recipe keeps between steps.",
+      "type": "object"
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "rng_file": {
+      "description": "Random generator states, e.g. rng.safetensors.",
+      "type": "string"
+    },
+    "run_id": {
+      "description": "The run the checkpoint belongs to.",
+      "type": "string"
+    },
+    "samples_seen": {
+      "description": "Training samples seen so far.",
+      "type": "integer"
+    },
+    "scheduler": {
+      "additionalProperties": {},
+      "description": "Learning-rate scheduler state.",
+      "type": "object"
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "step": {
+      "description": "Optimizer steps taken.",
+      "type": "integer"
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    },
+    "weights_file": {
+      "description": "Weights file in the checkpoint folder.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id",
+    "run_id",
+    "step",
+    "epoch",
+    "samples_seen",
+    "dataloader",
+    "rng_file",
+    "weights_file",
+    "created_at"
+  ],
+  "title": "ResumeState",
+  "type": "object"
+}

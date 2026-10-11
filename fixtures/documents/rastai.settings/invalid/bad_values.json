@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.settings/1.json",
+  "type": "rastai.settings",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "ui": {
+    "theme": 5,
+    "density": "cozy",
+    "colour": "blue"
+  },
+  "daemon": {
+    "port": "8899"
+  },
+  "inference": {
+    "sampling": {
+      "seed": null
+    }
+  },
+  "privacy": {
+    "data_policy": "local_only"
+  },
+  "archive": {
+    "enabled": true
+  }
+}

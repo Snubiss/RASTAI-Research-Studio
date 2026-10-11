@@ -677,6 +677,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-E2006",
+        severity: Severity::Error,
+        title: "Value isn't in its required form",
+        message: "{found} isn't {expected}.",
+        basic_text: "A value in this file is written in a form Rastai can't use, such as a color that isn't six hex digits.",
+        fix_text: "Rewrite the value in the form shown.",
+        fix_command_id: "",
+        docs_anchor: "rrs-e2006",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-E3001",
         severity: Severity::Warning,
         title: "File requires a plugin that isn't installed or enabled",

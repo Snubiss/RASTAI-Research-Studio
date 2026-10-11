@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1003",
+      "path": "locked_egress.theme.json:10:5#/colors/--rr-locked-egress"
+    }
+  ]
+}

@@ -2408,7 +2408,7 @@ flowchart TD
 
 ## 10. Projects
 
-Runs on `project.create`, `project.open`, `project.close` (sync) and `project.export`, `project.import` (jobs of kind `daemon_task`), contracts §6.4. A project is a `.rrsproj` folder (spec §15, contracts §5.2): `project.json` (header, `name`, `data_policy`, `default_node`), `rastai.lock`, `settings.json`, the document folders, run records under `runs/`, and `weights/` only in offline bundles. Every box below is in `rastai-server` unless marked.
+Runs on `project.create`, `project.open`, `project.close` (sync) and `project.export`, `project.import` (jobs of kind `daemon_task`), contracts §6.4. A project is a `.rrsproj` folder (spec §15, contracts §5.2): `project.json` (header, `name`, `default_node`), `rastai.lock`, `settings.json`, the document folders, run records under `runs/`, and `weights/` only in offline bundles. Every box below is in `rastai-server` unless marked.
 
 ### 10.1 Opening a project
 
@@ -2438,7 +2438,7 @@ flowchart TD
 - **Opening never fails because something is missing** (spec §13). Missing environments, plugins and model revisions become offers in the response and banners in the UI; documents that need a missing plugin open with placeholders (7.4). Only an unreadable `project.json` stops the open.
 - **Read-only projects** (newer schema) refuse edits with `RRS-E4001` at the edit, the same as a single newer document (3.4).
 - **Documents rows:** each file's hash is compared with an existing `documents` row; a mismatch is an outside edit and clears that document's undo steps with info `RRS-C2002` (3.4).
-- **`data_policy`** from `project.json` becomes the project layer of `privacy.data_policy` (contracts §11.1), which the gateway routing (inference flows 1.3) and the scheduler read for remote and API targets. A target the policy forbids is refused with `RRS-C1009` by the daemon's policy check, before anything starts (plan §10 row 37).
+- **The data policy** is `privacy.data_policy` in the project's own `settings.json`, the project layer (contracts §11.1; `project.json` has no `data_policy` field), which the gateway routing (inference flows 1.3) and the scheduler read for remote and API targets. A target the policy forbids is refused with `RRS-C1009` by the daemon's policy check, before anything starts (plan §10 row 37).
 - **`project.create`** copies a starter from `projects/` (contracts §1) or writes an empty project: `project.json`, a `rastai.lock` with the current environment lock hash, `settings.json` and the empty folders, each through a temp file and a rename, then runs `project.open`.
 - **`project.close`** drops the project's routes and served presets from the gateway and its settings layer; its rows stay.
 

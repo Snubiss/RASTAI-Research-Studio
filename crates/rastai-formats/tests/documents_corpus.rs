@@ -1,10 +1,10 @@
 //! The document corpus (contracts 12.5, layout 4.11): every file under `fixtures/documents/<folder>/valid/` and
-//! `.../invalid/` goes through `read_document`. A valid file must give no error; an invalid file must give exactly
-//! the codes and paths its `<name>.expected.json` lists, in order, all from one read. fixtures/documents/README.md
-//! describes the folders and the expected-file format.
+//! `.../invalid/` goes through `read_document`. A valid file must give no error and its typed document; an invalid
+//! file must give exactly the codes and paths its `<name>.expected.json` lists, in order, all from one read, layer 3
+//! included. fixtures/documents/README.md describes the folders and the expected-file format.
 //!
-//! No document type is registered before M1-17, so the second half of this file runs the same layers through
-//! `check_document` with a test type of its own: that is where a whole body is checked (unknown fields included).
+//! The second half of this file runs layers 1 and 2 through `check_document` with a test type of its own, which has
+//! every kind of field, so the walk is tested apart from any real document's description.
 
 #![allow(clippy::unwrap_used)]
 
@@ -93,7 +93,11 @@ fn check_case(fixture: &Path, expect_valid: bool) -> Option<String> {
     let actual = codes_and_paths(&outcome.diagnostics);
     if expect_valid {
         let message = format!("{}: expected valid, got {actual:?}", fixture.display());
-        return has_errors(&outcome.diagnostics).then_some(message);
+        if has_errors(&outcome.diagnostics) {
+            return Some(message);
+        }
+        let missing = format!("{}: valid, but no typed document came back", fixture.display());
+        return outcome.document.is_none().then_some(missing);
     }
     match read_expected(fixture) {
         Ok(expected) if expected == actual => None,

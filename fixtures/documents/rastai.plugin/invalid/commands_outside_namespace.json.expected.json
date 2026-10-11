@@ -1,0 +1,24 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-P0004",
+      "path": "commands_outside_namespace.json:19:9#/contributes/commands/0/command_id"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "commands_outside_namespace.json:26:9#/contributes/commands/1/command_id"
+    },
+    {
+      "code": "RRS-E2005",
+      "path": "commands_outside_namespace.json:40:9#/contributes/commands/3/command_id"
+    },
+    {
+      "code": "RRS-P0004",
+      "path": "commands_outside_namespace.json:47:9#/contributes/commands/4/command_id"
+    },
+    {
+      "code": "RRS-P0004",
+      "path": "commands_outside_namespace.json:57:9#/contributes/event_handlers/1/command_id"
+    }
+  ]
+}

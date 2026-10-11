@@ -146,6 +146,15 @@ Source: `catalog/errors/RRS-E.json`.
 - **In plain words:** Two items in this file have the same name, so Rastai can't tell them apart.
 - **Fix:** Rename one of them.
 
+<a id="rrs-e2006"></a>
+
+### RRS-E2006: Value isn't in its required form
+
+- **Severity:** error
+- **Message:** {found} isn't {expected}.
+- **In plain words:** A value in this file is written in a form Rastai can't use, such as a color that isn't six hex digits.
+- **Fix:** Rewrite the value in the form shown.
+
 <a id="rrs-e3001"></a>
 
 ### RRS-E3001: File requires a plugin that isn't installed or enabled

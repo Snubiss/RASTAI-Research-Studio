@@ -1,0 +1,16 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1002",
+      "path": "unknown_contribution.json:15:7#/contributes/lenses/0"
+    },
+    {
+      "code": "RRS-E1003",
+      "path": "unknown_contribution.json:13:5#/contributes/widgets"
+    },
+    {
+      "code": "RRS-E1004",
+      "path": "unknown_contribution.json:20:5#/ui/kind"
+    }
+  ]
+}

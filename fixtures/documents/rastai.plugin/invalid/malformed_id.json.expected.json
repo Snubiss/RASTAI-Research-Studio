@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "malformed_id.json:6:3#/plugin_id"
+    }
+  ]
+}

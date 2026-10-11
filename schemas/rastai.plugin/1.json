@@ -1,0 +1,658 @@
+{
+  "$defs": {
+    "CommandContribution": {
+      "additionalProperties": false,
+      "description": "A command the plugin adds; its types are in types.json.",
+      "properties": {
+        "arguments_type": {
+          "description": "Arguments type in types.json.",
+          "type": "string"
+        },
+        "basic": {
+          "description": "Shown in Basic mode too.",
+          "type": "boolean"
+        },
+        "command_id": {
+          "description": "Starts with the plugin id.",
+          "type": "string"
+        },
+        "default_shortcut": {
+          "description": "Default key binding.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "sync, job or stream.",
+          "enum": [
+            "sync",
+            "job",
+            "stream"
+          ],
+          "type": "string"
+        },
+        "result_type": {
+          "description": "Result type in types.json.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Scope a caller needs (contracts 6.3).",
+          "type": "string"
+        },
+        "summary": {
+          "description": "One sentence on what it does.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Palette entry.",
+          "type": "string"
+        },
+        "undoable": {
+          "description": "Records an undo step.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command_id",
+        "title",
+        "kind",
+        "arguments_type",
+        "result_type"
+      ],
+      "title": "CommandContribution",
+      "type": "object"
+    },
+    "EventHandlerContribution": {
+      "additionalProperties": false,
+      "description": "A command run when a durable event is indexed.",
+      "properties": {
+        "command_id": {
+          "description": "One of the plugin's own commands.",
+          "type": "string"
+        },
+        "event_type": {
+          "description": "Durable event type (contracts 7.3).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "command_id"
+      ],
+      "title": "EventHandlerContribution",
+      "type": "object"
+    },
+    "PanelContribution": {
+      "additionalProperties": false,
+      "description": "A panel.",
+      "properties": {
+        "basic": {
+          "description": "Shown in Basic mode too.",
+          "type": "boolean"
+        },
+        "dock_section": {
+          "description": "Section it docks into; empty for any.",
+          "type": "string"
+        },
+        "panel_id": {
+          "description": "Panel id.",
+          "type": "string"
+        },
+        "placement": {
+          "description": "right, bottom or tab.",
+          "enum": [
+            "right",
+            "bottom",
+            "tab"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "description": "Panel title.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "panel_id",
+        "title",
+        "placement"
+      ],
+      "title": "PanelContribution",
+      "type": "object"
+    },
+    "PluginContributions": {
+      "additionalProperties": false,
+      "description": "One list per extension point (contracts 5.5).",
+      "properties": {
+        "adapters": {
+          "description": "Gateway adapters (experimental).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "assistant_skills": {
+          "description": "Assistant skills (Phase 2).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "benchmark_loaders": {
+          "description": "Benchmark loaders.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "chat_templates": {
+          "description": "Chat template files (M8).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "commands": {
+          "description": "Commands.",
+          "items": {
+            "$ref": "#/$defs/CommandContribution"
+          },
+          "type": "array"
+        },
+        "compute_targets": {
+          "description": "Compute targets (Phase 3).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "converters": {
+          "description": "Dataset converters.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "data_sources": {
+          "description": "Streaming data sources (experimental).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "event_handlers": {
+          "description": "Event handlers.",
+          "items": {
+            "$ref": "#/$defs/EventHandlerContribution"
+          },
+          "type": "array"
+        },
+        "exporters": {
+          "description": "File exporters.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "file_types": {
+          "description": "File extensions the plugin opens.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "icon_sets": {
+          "description": "rastai.icon_set/1 files (M8).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "importers": {
+          "description": "File importers.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "keybindings": {
+          "description": "Keybinding entries.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "layouts": {
+          "description": "rastai.layout/1 files.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "lenses": {
+          "description": "Psychology lenses.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "locales": {
+          "description": "Catalog and UI string files (Phase 2).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "macros": {
+          "description": "Palette actions: a title and a list of command calls (M8).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "description": "Evaluation metrics.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "node_types": {
+          "description": "Designer node types.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "panels": {
+          "description": "Panels.",
+          "items": {
+            "$ref": "#/$defs/PanelContribution"
+          },
+          "type": "array"
+        },
+        "recipes": {
+          "description": "Training recipes.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "reward_functions": {
+          "description": "Reward functions.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sae_loaders": {
+          "description": "SAE loaders.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "samplers": {
+          "description": "Samplers and logits processors.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sandbox_images": {
+          "description": "OCI images pinned by digest.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "sections": {
+          "description": "Sections.",
+          "items": {
+            "$ref": "#/$defs/SectionContribution"
+          },
+          "type": "array"
+        },
+        "settings_pages": {
+          "description": "Settings pages.",
+          "items": {
+            "$ref": "#/$defs/SettingsPageContribution"
+          },
+          "type": "array"
+        },
+        "templates": {
+          "description": "Starter documents and projects.",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "themes": {
+          "description": "Themes (from M8).",
+          "items": {
+            "$ref": "#/$defs/ThemeContribution"
+          },
+          "type": "array"
+        },
+        "tokenizers": {
+          "description": "Tokenizer files (experimental).",
+          "items": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [],
+      "title": "PluginContributions",
+      "type": "object"
+    },
+    "PluginEngines": {
+      "additionalProperties": false,
+      "description": "The hosts the plugin runs on.",
+      "properties": {
+        "rastai": {
+          "description": "Semver range of the plugin API.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rastai"
+      ],
+      "title": "PluginEngines",
+      "type": "object"
+    },
+    "PluginProvider": {
+      "additionalProperties": false,
+      "description": "Provider binaries (Phase 3).",
+      "properties": {
+        "binaries": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Platform to the binary's path.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "binaries"
+      ],
+      "title": "PluginProvider",
+      "type": "object"
+    },
+    "PluginPython": {
+      "additionalProperties": false,
+      "description": "The plugin's Python module.",
+      "properties": {
+        "lockfile": {
+          "description": "The module's uv lock file.",
+          "type": "string"
+        },
+        "module": {
+          "description": "Module with register() and handle_command().",
+          "type": "string"
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "title": "PluginPython",
+      "type": "object"
+    },
+    "PluginUi": {
+      "additionalProperties": false,
+      "description": "The plugin's UI entry.",
+      "properties": {
+        "entry": {
+          "description": "Path under the plugin's ui/ folder.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "in_process (first-party only) or iframe.",
+          "enum": [
+            "in_process",
+            "iframe"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "entry",
+        "kind"
+      ],
+      "title": "PluginUi",
+      "type": "object"
+    },
+    "SectionContribution": {
+      "additionalProperties": false,
+      "description": "The plugin's sidebar section.",
+      "properties": {
+        "default_layout": {
+          "description": "Layout the section opens with.",
+          "type": "string"
+        },
+        "icon": {
+          "description": "Icon id.",
+          "type": "string"
+        },
+        "order": {
+          "description": "Sidebar position; lower comes first.",
+          "type": "integer"
+        },
+        "section_id": {
+          "description": "Equal to the plugin id.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Sidebar title.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "section_id",
+        "title"
+      ],
+      "title": "SectionContribution",
+      "type": "object"
+    },
+    "SettingsPageContribution": {
+      "additionalProperties": false,
+      "description": "A settings page.",
+      "properties": {
+        "page_id": {
+          "description": "Page id.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Page title.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_id",
+        "title"
+      ],
+      "title": "SettingsPageContribution",
+      "type": "object"
+    },
+    "ThemeContribution": {
+      "additionalProperties": false,
+      "description": "A theme (from M8).",
+      "properties": {
+        "theme_id": {
+          "description": "Theme id, the value of ui.theme.",
+          "type": "string"
+        },
+        "title": {
+          "description": "Shown in the theme picker.",
+          "type": "string"
+        },
+        "tokens_file": {
+          "description": "A rastai.theme/1 file in the plugin.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "theme_id",
+        "title",
+        "tokens_file"
+      ],
+      "title": "ThemeContribution",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A plugin's manifest (rastai-plugin.json).",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "catalog": {
+      "description": "Folder of its error catalog.",
+      "type": "string"
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "contributes": {
+      "$ref": "#/$defs/PluginContributions",
+      "description": "Every contribution, by id."
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "dependencies": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugin id to semver range.",
+      "type": "object"
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "display_name": {
+      "description": "Name shown to people.",
+      "type": "string"
+    },
+    "engines": {
+      "$ref": "#/$defs/PluginEngines",
+      "description": "The plugin API versions it supports."
+    },
+    "experimental": {
+      "description": "Uses experimental extension points.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "permissions": {
+      "description": "Permission names (contracts 6.3).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "plugin_id": {
+      "description": "One id segment; its commands' first.",
+      "type": "string"
+    },
+    "provider": {
+      "$ref": "#/$defs/PluginProvider",
+      "description": "Provider binaries (Phase 3)."
+    },
+    "python": {
+      "$ref": "#/$defs/PluginPython",
+      "description": "The plugin's Python module."
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "requires_capabilities": {
+      "description": "As <name>@<major>.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    },
+    "ui": {
+      "$ref": "#/$defs/PluginUi",
+      "description": "The plugin's UI entry."
+    },
+    "version": {
+      "description": "Plugin version (semver).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id",
+    "plugin_id",
+    "display_name",
+    "version",
+    "engines"
+  ],
+  "title": "PluginManifest",
+  "type": "object"
+}

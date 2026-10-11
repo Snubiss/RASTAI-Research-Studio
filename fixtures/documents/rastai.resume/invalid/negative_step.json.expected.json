@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1002",
+      "path": "negative_step.json"
+    }
+  ]
+}

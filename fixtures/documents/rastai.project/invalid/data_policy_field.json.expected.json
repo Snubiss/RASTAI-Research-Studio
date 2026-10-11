@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1003",
+      "path": "data_policy_field.json:7:3#/data_policy"
+    }
+  ]
+}

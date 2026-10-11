@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.resume/1.json",
+  "type": "rastai.resume",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2P",
+  "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "step": "1500",
+  "epoch": 1,
+  "samples_seen": 48000,
+  "rng_file": "rng.safetensors",
+  "weights_file": "adapter.safetensors",
+  "scheduler": [],
+  "created_at": "2026-10-11T13:00:00Z",
+  "optimizer": "optimizer.safetensors"
+}

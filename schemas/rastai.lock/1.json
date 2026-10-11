@@ -1,0 +1,157 @@
+{
+  "$defs": {
+    "LockEnvironment": {
+      "additionalProperties": false,
+      "description": "The Python environment a project uses.",
+      "properties": {
+        "environment_id": {
+          "description": "Environment id, such as cpu or cuda13.",
+          "type": "string"
+        },
+        "lock_hash": {
+          "description": "Hash of the environment's uv lock file.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_id",
+        "lock_hash"
+      ],
+      "title": "LockEnvironment",
+      "type": "object"
+    },
+    "LockedModel": {
+      "additionalProperties": false,
+      "description": "A model revision a project uses.",
+      "properties": {
+        "model_hash": {
+          "description": "Model hash of its weight files.",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Revision, such as a commit hash.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "model_hash"
+      ],
+      "title": "LockedModel",
+      "type": "object"
+    },
+    "LockedPlugin": {
+      "additionalProperties": false,
+      "description": "A plugin version a project uses.",
+      "properties": {
+        "content_hash": {
+          "description": "Hash of the plugin archive.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Plugin version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "content_hash"
+      ],
+      "title": "LockedPlugin",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.lock/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What a project was last used with (rastai.lock).",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "datasets": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Dataset id to snapshot content hash.",
+      "type": "object"
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "environment": {
+      "$ref": "#/$defs/LockEnvironment",
+      "description": "Environment id and lock hash."
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "models": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LockedModel"
+      },
+      "description": "Model ref to revision and model hash.",
+      "type": "object"
+    },
+    "plugins": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LockedPlugin"
+      },
+      "description": "Plugin id to version and archive hash.",
+      "type": "object"
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id",
+    "environment"
+  ],
+  "title": "LockFile",
+  "type": "object"
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "plugin_id": "Acme-Tools",
+  "display_name": "Acme tools",
+  "version": "1.2.0",
+  "engines": {
+    "rastai": "^1.0"
+  }
+}
