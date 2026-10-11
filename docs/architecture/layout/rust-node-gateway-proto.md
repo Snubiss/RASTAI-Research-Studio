@@ -225,7 +225,7 @@ The typed command wrappers in `@rastai/client` are not made by buf. Arguments ar
 |---|---|
 | `common/v1/*` (with `Stability`), `commands/v1/*`, `events/v1/*` (with `EventTypeDescriptor` and `ListEventTypes`) | 1 (Foundation: the command layer and durability) |
 | `node/v1/node_service.proto` (Handshake, GetHardware, StartJob, SignalJob, ListJobs, WatchRunEvents, WatchLive), `jobs.proto`, `live.proto`, `node_hub_service.proto` (Heartbeat, ExecuteCommand) | 1 (daemon + embedded node; weeks 3–4 skeleton) |
-| `worker/v1/worker_service.proto` (Hello, Control), `worker_host_service.proto` (Register) | 1 (worker protocol v0 runs TextCNN training) |
+| `worker/v1/worker_service.proto` (Hello, Control, WatchLive), `worker_host_service.proto` (Register) | 1 (worker protocol v0 runs TextCNN training) |
 | `environments.proto`; `EgressActive` in `payloads.proto` and `LiveEvent`; `NodeHubService.GetSecret` with purpose `hf_download` (gated models need the token) | 2 (uv environments; HF downloads are the first egress) |
 | `leases.proto` (with `RequestLeaseRequest.may_reclaim_evictable`), `ResourceRequest.may_reclaim_evictable`, `models.proto` (with `ModelInfo.engine_build`), `generation.proto` (minus `interventions_json`, tensors and sessions) | 3 (Inference) |
 | `TokenizationOverride`, `HandshakeRequest.tokenization_overrides`, `HeartbeatRequest.tokenization_overrides_hash`, `HeartbeatResponse.tokenization_overrides` | 3 (user overrides); plugin templates and tokenizers use them from 8 |
@@ -234,7 +234,7 @@ The typed command wrappers in `@rastai/client` are not made by buf. Arguments ar
 | `sandbox_service.proto`, `WorkerHostService` sandbox RPCs | 5 (Pass@k needs sandboxes), completed at 7 |
 | `WorkerHostService.ListTools`, `CallTool`, `PauseSandbox`, `ResumeSandbox`; `sandbox_id` and `arguments_json` on `SignalJobRequest` and `ControlRequest`; `GatewayGenerateRequest.prior_token_ids` | 7 (Agent Gym: tools in sandboxes, step mode, multi-turn rollouts) |
 | `GatewayGenerateRequest.lens`, `.pin_attention_kernel`, `.session_id`; `max_new_tokens = 0` | 4 (Psychology replay through the node gateway) |
-| `command_call.proto`, `HandleCommand`, `ExecuteCommand` | 4 (Psychology is the first plugin module); used by every plugin at 8. `WorkerHostService.StartJob` is not built in the prototype: modules return `CommandReply.follow_up_jobs` and the daemon starts them (plan §10 row 31) |
+| `command_call.proto`, `HandleCommand`, `WorkerHostService.ExecuteCommand` | 4 (Psychology is the first plugin module); used by every plugin at 8. `WorkerHostService.StartJob` is not built in the prototype: modules return `CommandReply.follow_up_jobs` and the daemon starts them (plan §10 row 31) |
 | `files.proto`, `PutFile`, `GetFile`, `StatFile`, `UpdateNode` | 9 (Remote) |
 | the `archive.*` payloads in `payloads.proto` | M11 (long-term storage, after the 90-day plan; M11-E01 is the contracts epic) |
 | `provider/v1/*` | Phase 3 |

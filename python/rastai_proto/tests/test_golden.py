@@ -1,11 +1,10 @@
 """Golden messages (layout: rust-node-gateway-proto.md section 3.5).
 
 Every message of rastai.common.v1, rastai.commands.v1, rastai.events.v1, rastai.node.v1 and rastai.worker.v1 has a
-golden in
-fixtures/proto-golden/<package>/, and its .binpb decodes and encodes back to exactly the same bytes. The Rust and
-JavaScript tests compare against the same files, so the three encoders agree byte for byte. Python keeps fields it
-doesn't know and writes them back, which would hide a module that lags behind the .proto, so the test drops unknown
-fields before encoding.
+golden in fixtures/proto-golden/<package>/, and its .binpb decodes and encodes back to exactly the same bytes. The
+Rust and JavaScript tests compare against the same files, so the three encoders agree byte for byte. Python keeps
+fields it doesn't know and writes them back, which would hide a module that lags behind the .proto, so the test drops
+unknown fields before encoding.
 """
 
 import importlib
