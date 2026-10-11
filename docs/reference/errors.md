@@ -531,7 +531,7 @@ Source: `catalog/errors/RRS-P.json`.
 ### RRS-P0004: Plugin command id outside the plugin's namespace or in a reserved area
 
 - **Severity:** error
-- **Message:** The command id {command_id} is outside the plugin's namespace or in a reserved area.
+- **Message:** The command id {command_id} is outside the namespace of plugin {plugin_id}, or in a reserved area.
 - **In plain words:** This plugin tries to add a command under a name it isn't allowed to use.
 - **Fix:** The plugin's author must name the command under the plugin's own id.
 
@@ -822,7 +822,7 @@ Source: `catalog/errors/RRS-C.json`.
 ### RRS-C0002: Invalid command arguments
 
 - **Severity:** error
-- **Message:** Invalid arguments for {command_id}: {reason}.
+- **Message:** Invalid arguments: got {found}; expected {expected}.
 - **In plain words:** This request is missing something or has a wrong value.
 - **Fix:** Fix the argument shown and try again.
 
@@ -965,7 +965,7 @@ Source: `catalog/errors/RRS-C.json`.
 ### RRS-C1005: Scope not granted
 
 - **Severity:** error
-- **Message:** This needs the scope {scope}, which the credential wasn't granted.
+- **Message:** {command_id} needs the scope {scope}, which {principal} wasn't granted.
 - **In plain words:** You don't have permission to do this.
 - **Fix:** Use a token that has the scope shown.
 
@@ -1089,6 +1089,24 @@ Source: `catalog/errors/RRS-S.json`.
 - **In plain words:** The file that holds your conversations is damaged, so chat is turned off for now.
 - **Fix:** Recover the vault from its newest good snapshot.
 - **Fix command:** `storage.vault.recover`
+
+<a id="rrs-s0006"></a>
+
+### RRS-S0006: Database read failed
+
+- **Severity:** error
+- **Message:** A database read failed: {reason}.
+- **In plain words:** Rastai couldn't read its saved data just now. Your data is not damaged.
+- **Fix:** Try again in a moment. If it keeps failing, check the disk.
+
+<a id="rrs-s0007"></a>
+
+### RRS-S0007: The runtime folder or its daemon.lock isn't private to this user
+
+- **Severity:** error
+- **Message:** The runtime path {path} isn't private to this user: {reason}. Nothing was written to it.
+- **In plain words:** Rastai's working folder could be reached by another user, so Rastai won't use it.
+- **Fix:** Remove it, or set XDG_RUNTIME_DIR to a folder only you can open.
 
 <a id="rrs-s1001"></a>
 
@@ -1459,6 +1477,59 @@ Source: `catalog/errors/RRS-N.json`.
 - **Severity:** info
 - **Message:** Node {node_id} reconnected; its jobs were reattached.
 - **In plain words:** The connection to that computer is back.
+
+<a id="rrs-n2004"></a>
+
+### RRS-N2004: Local socket not reachable
+
+- **Severity:** error
+- **Message:** Nothing is listening at the local socket {path}.
+- **In plain words:** The Rastai service this needs isn't running.
+- **Fix:** Start Rastai, or the node, and try again.
+
+<a id="rrs-n2005"></a>
+
+### RRS-N2005: Socket folder isn't private; refused
+
+- **Severity:** error
+- **Message:** The socket folder {path} is owned by another user, open to group or others, or not a folder; it is refused.
+- **In plain words:** Rastai's folder for local connections could be reached by another user, so Rastai won't use it.
+- **Fix:** Remove the folder; Rastai creates it again so only you can open it.
+
+<a id="rrs-n2006"></a>
+
+### RRS-N2006: The peer of a local socket is another user; connection refused
+
+- **Severity:** error
+- **Message:** The local socket {path} is held by another user; the connection is refused.
+- **In plain words:** Another user's program answered on Rastai's local connection, so Rastai refused it.
+- **Fix:** Stop the other user's program, or use a runtime folder only you can open.
+
+<a id="rrs-n2007"></a>
+
+### RRS-N2007: Local socket can't be created
+
+- **Severity:** error
+- **Message:** The local socket {path} can't be created: {reason}.
+- **In plain words:** Rastai couldn't open its local connection.
+- **Fix:** Stop the other Rastai that is running, or remove the file in the way, then try again.
+
+<a id="rrs-n2008"></a>
+
+### RRS-N2008: Local connection failed or timed out mid-request
+
+- **Severity:** error
+- **Message:** The local connection at {path} failed or timed out mid-request: {reason}.
+- **In plain words:** Rastai lost its local connection while working.
+- **Fix:** Try again. If it keeps failing, restart Rastai.
+
+<a id="rrs-n2009"></a>
+
+### RRS-N2009: Local sockets aren't supported on this platform yet
+
+- **Severity:** error
+- **Message:** Local sockets aren't supported on {platform} yet.
+- **In plain words:** This part of Rastai doesn't work on this computer's system yet.
 
 <a id="rrs-n3001"></a>
 

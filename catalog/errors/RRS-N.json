@@ -170,6 +170,66 @@
     "retired": false
   },
   {
+    "code": "RRS-N2004",
+    "severity": "error",
+    "title": "Local socket not reachable",
+    "message": "Nothing is listening at the local socket {path}.",
+    "basic_text": "The Rastai service this needs isn't running.",
+    "fix_text": "Start Rastai, or the node, and try again.",
+    "docs_anchor": "rrs-n2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2005",
+    "severity": "error",
+    "title": "Socket folder isn't private; refused",
+    "message": "The socket folder {path} is owned by another user, open to group or others, or not a folder; it is refused.",
+    "basic_text": "Rastai's folder for local connections could be reached by another user, so Rastai won't use it.",
+    "fix_text": "Remove the folder; Rastai creates it again so only you can open it.",
+    "docs_anchor": "rrs-n2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2006",
+    "severity": "error",
+    "title": "The peer of a local socket is another user; connection refused",
+    "message": "The local socket {path} is held by another user; the connection is refused.",
+    "basic_text": "Another user's program answered on Rastai's local connection, so Rastai refused it.",
+    "fix_text": "Stop the other user's program, or use a runtime folder only you can open.",
+    "docs_anchor": "rrs-n2006",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2007",
+    "severity": "error",
+    "title": "Local socket can't be created",
+    "message": "The local socket {path} can't be created: {reason}.",
+    "basic_text": "Rastai couldn't open its local connection.",
+    "fix_text": "Stop the other Rastai that is running, or remove the file in the way, then try again.",
+    "docs_anchor": "rrs-n2007",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2008",
+    "severity": "error",
+    "title": "Local connection failed or timed out mid-request",
+    "message": "The local connection at {path} failed or timed out mid-request: {reason}.",
+    "basic_text": "Rastai lost its local connection while working.",
+    "fix_text": "Try again. If it keeps failing, restart Rastai.",
+    "docs_anchor": "rrs-n2008",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2009",
+    "severity": "error",
+    "title": "Local sockets aren't supported on this platform yet",
+    "message": "Local sockets aren't supported on {platform} yet.",
+    "basic_text": "This part of Rastai doesn't work on this computer's system yet.",
+    "fix_text": "",
+    "docs_anchor": "rrs-n2009",
+    "retired": false
+  },
+  {
     "code": "RRS-N3001",
     "severity": "error",
     "title": "Transfer path outside the allowed folders",

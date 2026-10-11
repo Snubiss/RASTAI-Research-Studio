@@ -127,8 +127,8 @@ fn training_defaults() -> Value {
 }
 
 fn eval_defaults() -> Value {
-    // An empty judge skips judge tests with RRS-V1001 (flows/training-evaluation.md); an empty drift prompt set
-    // means the built-in one.
+    // An empty judge skips judge tests with the evaluation plugin's "judge not configured" warning (M5,
+    // flows/training-evaluation.md); an empty drift prompt set means the built-in one.
     json!({
         "drift_prompt_set": "",
         "run_on_new_checkpoint": true,

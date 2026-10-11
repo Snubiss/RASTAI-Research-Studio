@@ -239,6 +239,12 @@ RRS_N1009 = "RRS-N1009"
 RRS_N2001 = "RRS-N2001"
 RRS_N2002 = "RRS-N2002"
 RRS_N2003 = "RRS-N2003"
+RRS_N2004 = "RRS-N2004"
+RRS_N2005 = "RRS-N2005"
+RRS_N2006 = "RRS-N2006"
+RRS_N2007 = "RRS-N2007"
+RRS_N2008 = "RRS-N2008"
+RRS_N2009 = "RRS-N2009"
 RRS_N3001 = "RRS-N3001"
 RRS_N3002 = "RRS-N3002"
 RRS_N3003 = "RRS-N3003"
@@ -322,6 +328,8 @@ RRS_S0002 = "RRS-S0002"
 RRS_S0003 = "RRS-S0003"
 RRS_S0004 = "RRS-S0004"
 RRS_S0005 = "RRS-S0005"
+RRS_S0006 = "RRS-S0006"
+RRS_S0007 = "RRS-S0007"
 RRS_S1001 = "RRS-S1001"
 RRS_S1002 = "RRS-S1002"
 RRS_S2001 = "RRS-S2001"
@@ -401,7 +409,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         code=RRS_C0002,
         severity="error",
         title="Invalid command arguments",
-        message="Invalid arguments for {command_id}: {reason}.",
+        message="Invalid arguments: got {found}; expected {expected}.",
         basic_text="This request is missing something or has a wrong value.",
         fix_text="Fix the argument shown and try again.",
         fix_command_id="",
@@ -577,7 +585,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         code=RRS_C1005,
         severity="error",
         title="Scope not granted",
-        message="This needs the scope {scope}, which the credential wasn't granted.",
+        message="{command_id} needs the scope {scope}, which {principal} wasn't granted.",
         basic_text="You don't have permission to do this.",
         fix_text="Use a token that has the scope shown.",
         fix_command_id="",
@@ -2653,6 +2661,72 @@ CATALOG: tuple[CatalogEntry, ...] = (
         retired=False,
     ),
     CatalogEntry(
+        code=RRS_N2004,
+        severity="error",
+        title="Local socket not reachable",
+        message="Nothing is listening at the local socket {path}.",
+        basic_text="The Rastai service this needs isn't running.",
+        fix_text="Start Rastai, or the node, and try again.",
+        fix_command_id="",
+        docs_anchor="rrs-n2004",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N2005,
+        severity="error",
+        title="Socket folder isn't private; refused",
+        message="The socket folder {path} is owned by another user, open to group or others, or not a folder; it is refused.",
+        basic_text="Rastai's folder for local connections could be reached by another user, so Rastai won't use it.",
+        fix_text="Remove the folder; Rastai creates it again so only you can open it.",
+        fix_command_id="",
+        docs_anchor="rrs-n2005",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N2006,
+        severity="error",
+        title="The peer of a local socket is another user; connection refused",
+        message="The local socket {path} is held by another user; the connection is refused.",
+        basic_text="Another user's program answered on Rastai's local connection, so Rastai refused it.",
+        fix_text="Stop the other user's program, or use a runtime folder only you can open.",
+        fix_command_id="",
+        docs_anchor="rrs-n2006",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N2007,
+        severity="error",
+        title="Local socket can't be created",
+        message="The local socket {path} can't be created: {reason}.",
+        basic_text="Rastai couldn't open its local connection.",
+        fix_text="Stop the other Rastai that is running, or remove the file in the way, then try again.",
+        fix_command_id="",
+        docs_anchor="rrs-n2007",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N2008,
+        severity="error",
+        title="Local connection failed or timed out mid-request",
+        message="The local connection at {path} failed or timed out mid-request: {reason}.",
+        basic_text="Rastai lost its local connection while working.",
+        fix_text="Try again. If it keeps failing, restart Rastai.",
+        fix_command_id="",
+        docs_anchor="rrs-n2008",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N2009,
+        severity="error",
+        title="Local sockets aren't supported on this platform yet",
+        message="Local sockets aren't supported on {platform} yet.",
+        basic_text="This part of Rastai doesn't work on this computer's system yet.",
+        fix_text="",
+        fix_command_id="",
+        docs_anchor="rrs-n2009",
+        retired=False,
+    ),
+    CatalogEntry(
         code=RRS_N3001,
         severity="error",
         title="Transfer path outside the allowed folders",
@@ -2865,7 +2939,7 @@ CATALOG: tuple[CatalogEntry, ...] = (
         code=RRS_P0004,
         severity="error",
         title="Plugin command id outside the plugin's namespace or in a reserved area",
-        message="The command id {command_id} is outside the plugin's namespace or in a reserved area.",
+        message="The command id {command_id} is outside the namespace of plugin {plugin_id}, or in a reserved area.",
         basic_text="This plugin tries to add a command under a name it isn't allowed to use.",
         fix_text="The plugin's author must name the command under the plugin's own id.",
         fix_command_id="",
@@ -3563,6 +3637,28 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Recover the vault from its newest good snapshot.",
         fix_command_id="storage.vault.recover",
         docs_anchor="rrs-s0005",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_S0006,
+        severity="error",
+        title="Database read failed",
+        message="A database read failed: {reason}.",
+        basic_text="Rastai couldn't read its saved data just now. Your data is not damaged.",
+        fix_text="Try again in a moment. If it keeps failing, check the disk.",
+        fix_command_id="",
+        docs_anchor="rrs-s0006",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_S0007,
+        severity="error",
+        title="The runtime folder or its daemon.lock isn't private to this user",
+        message="The runtime path {path} isn't private to this user: {reason}. Nothing was written to it.",
+        basic_text="Rastai's working folder could be reached by another user, so Rastai won't use it.",
+        fix_text="Remove it, or set XDG_RUNTIME_DIR to a folder only you can open.",
+        fix_command_id="",
+        docs_anchor="rrs-s0007",
         retired=False,
     ),
     CatalogEntry(
