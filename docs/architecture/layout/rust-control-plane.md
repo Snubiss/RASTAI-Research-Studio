@@ -163,6 +163,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
+publish = false            # nothing goes to crates.io; also lets cargo-deny accept path deps between our crates
 
 [workspace.dependencies]
 # Every external crate is declared here once, with an exact version. Member crates write `tokio = { workspace = true }`.
@@ -194,7 +195,7 @@ cognitive_complexity = "warn"
 
 - `version` exact-pins (`=`) every external crate, so `Cargo.lock` and the allowlist agree and an update is a deliberate PR.
 - `default-features = false` on big crates; each member turns on only the features it uses (for example `tokio` features `rt-multi-thread`, `net`, `sync`, `time`, `process`, `fs`, `io-util`, `macros` in `rastai-server`; only `sync` in `rastai-store`).
-- Each member's `Cargo.toml` has `[lints] workspace = true`.
+- Each member's `Cargo.toml` has `[lints] workspace = true` and `publish.workspace = true`. cargo-deny accepts a path dependency between our own crates only when the crate can't be published, so a member without it fails `just deny` as soon as it depends on another rastai crate.
 
 ### 2.3 Lint and format rules
 

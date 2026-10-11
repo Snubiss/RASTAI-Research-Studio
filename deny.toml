@@ -42,7 +42,9 @@ allow-git = []
 
 [bans]
 multiple-versions = "warn"
-# A `*` version is never allowed; path dependencies between our own crates are.
+# A `*` version is never allowed. A path dependency between our own crates (rastai-formats on rastai-diag) is
+# allowed, but cargo-deny only lets it through for crates that can't be published: that is why the root
+# Cargo.toml sets `publish = false` in [workspace.package] and every member inherits it.
 wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
@@ -50,12 +52,12 @@ deny = [
   # Banned outright (contracts §2.5 and §12.2).
   { crate = "anyhow", reason = "one hand-written error enum per crate (contracts §12.2)" },
   { crate = "thiserror", reason = "one hand-written error enum per crate (contracts §12.2)" },
-  { crate = "reqwest", reason = "never carried over from the spike; HTTP goes through rastai-transport (contracts §2.5)" },
-  { crate = "memmap2", reason = "never carried over from the spike; no mmap (layout section 4.12)" },
+  { crate = "reqwest", reason = "not carried over from the spike; HTTP is rastai-transport's job (contracts §2.5)" },
+  { crate = "memmap2", reason = "not carried over from the spike; no mmap (layout section 4.12)" },
   { crate = "openssl", reason = "TLS is rustls only (contracts §2.5)" },
   { crate = "openssl-sys", reason = "TLS is rustls only (contracts §2.5)" },
   { crate = "async-trait", reason = "async polymorphism is an enum (contracts §12.2)" },
-  { crate = "schemars", reason = "JSON Schema comes from hand-written type descriptions until the rule in contracts §5.4" },
+  { crate = "schemars", reason = "JSON Schema comes from hand-written type descriptions (contracts §5.4)" },
   { crate = "sqlx", reason = "RUSTSEC-2023-0071 through rsa; the MySQL client is mysql_async (contracts §2.5)" },
 
   # Single-owner crates (contracts §2.5 "Enforced owners"): only the crates in `wrappers` may depend on them
@@ -63,14 +65,14 @@ deny = [
   # under flate2); the PR that first brings in such a parent adds it here by name, as Cargo.lock shows it,
   # so a new third-party parent fails CI and gets a look in review.
   { crate = "tokenizers", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (tokenizer.rs)" },
-  { crate = "minijinja", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (the chat-template module)" },
+  { crate = "minijinja", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (chat templates)" },
   { crate = "rusqlite", wrappers = ["rastai-store"], reason = "one owner: rastai-store (sqlite.rs)" },
   { crate = "libc", wrappers = ["rastai-store"], reason = "one owner: rastai-store (disk_space.rs, ADR-0033)" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },
   { crate = "keyring", wrappers = ["rastai-server"], reason = "one owner: rastai-server (secrets.rs)" },
   { crate = "blake3", wrappers = ["rastai-formats"], reason = "one owner: rastai-formats (hashing.rs)" },
-  { crate = "miniz_oxide", wrappers = ["rastai-formats"], reason = "one owner: rastai-formats (zip/inflate.rs, ADR-0037)" },
+  { crate = "miniz_oxide", wrappers = ["rastai-formats"], reason = "one owner: rastai-formats (inflate, ADR-0037)" },
   { crate = "ed25519-dalek", wrappers = ["rastai-node"], reason = "one owner: rastai-node (identity.rs)" },
   { crate = "mysql_async", wrappers = ["rastai-archive"], reason = "one owner: rastai-archive (mysql.rs, M11)" },
 ]
