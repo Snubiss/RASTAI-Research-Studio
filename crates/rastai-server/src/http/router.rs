@@ -24,7 +24,9 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_diag::render_json::render_json;
 use serde_json::{Value, json};
 
-use crate::http::gate::{HEALTH_PATH, LOGIN_PATH, Listener, RequestHead, check_request_gate, read_request_head};
+use crate::http::gate::{
+    HEALTH_PATH, LOGIN_PATH, Listener, MISSING_HEADER_TEXT, RequestHead, check_request_gate, read_request_head,
+};
 use crate::http::health::health_endpoint;
 use crate::http::listeners::SocketPeer;
 use crate::http::sessions::{NewSession, redeem_login_code, session_cookie_header};
@@ -98,7 +100,7 @@ async fn login_endpoint(
 ) -> Response {
     let Some(origin) = head.origin else {
         // Unreachable behind the gate; checked again so a session can never be bound to no origin.
-        return refusal_response(&diagnostic("RRS-C1004", &[("origin", "(none)")]));
+        return refusal_response(&diagnostic("RRS-C1004", &[("origin", MISSING_HEADER_TEXT)]));
     };
     let code = match read_login_code(&body) {
         Ok(code) => code,

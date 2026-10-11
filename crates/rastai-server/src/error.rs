@@ -5,6 +5,7 @@
 //! variant and code, so a refused start says what really went wrong (a held lock is `RRS-S0001`, a socket folder
 //! another user owns `RRS-N2005`). Request-time refusals are `Diagnostic`s straight away (http/gate.rs).
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use rastai_core::error::CoreError;
@@ -25,8 +26,12 @@ pub enum ServerError {
     /// `owner.token` or its folder can't be read or created: a permission, a folder in the file's place, an empty
     /// file, an I/O error. `reason` keeps the operating system's words.
     OwnerTokenUnusable { path: PathBuf, reason: String },
-    /// No port among the ones tried could be bound on the listen address.
+    /// Every port tried was already in use on the listen address.
     NoFreePort { tried_ports: Vec<u16> },
+    /// Binding failed for a reason other than a port in use: `daemon.listen` names an address this machine doesn't
+    /// have, or the port is one this user may not open. It is `RRS-C0002`, because the fix is to the daemon's own
+    /// arguments (`daemon.listen`, `daemon.port`, `--port`); `reason` keeps the operating system's words.
+    ListenAddressUnusable { address: SocketAddr, reason: String },
     /// A file in the runtime folder (`daemon.port`) couldn't be written.
     RuntimeFileNotWritable { path: PathBuf, reason: String },
     /// A `--set` flag that isn't `section.key=value`. `message` is the `RRS-C0002` diagnostic's, which names the
@@ -47,6 +52,7 @@ impl ServerError {
             ServerError::OwnerTokenTooOpen { .. } => CODE_OWNER_TOKEN_TOO_OPEN,
             ServerError::OwnerTokenUnusable { .. } => CODE_OWNER_TOKEN_UNUSABLE,
             ServerError::NoFreePort { .. } => CODE_NO_FREE_PORT,
+            ServerError::ListenAddressUnusable { .. } => CODE_INVALID_ARGUMENTS,
             ServerError::RuntimeFileNotWritable { .. } => CODE_DATA_DIRECTORY_NOT_WRITABLE,
             ServerError::InvalidSetFlag { .. } => CODE_INVALID_ARGUMENTS,
             ServerError::Core(error) => error.code(),

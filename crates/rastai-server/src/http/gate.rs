@@ -48,8 +48,8 @@ const METHODS_WITHOUT_SESSION_KEY: &[&str] = &["GET", "HEAD"];
 const NULL_ORIGIN: &str = "null";
 const ORIGIN_SCHEME: &str = "http://";
 const BEARER_SCHEME: &str = "bearer";
-/// How a refusal names a header that wasn't sent.
-const MISSING_HEADER_TEXT: &str = "(none)";
+/// How a refusal names a header that wasn't sent (the login endpoint's own Origin check uses it too).
+pub const MISSING_HEADER_TEXT: &str = "(none)";
 const HOST_PORT_SEPARATOR: char = ':';
 const IPV6_HOST_END: char = ']';
 const IPV6_HOST_START: char = '[';
@@ -339,7 +339,11 @@ fn bearer_token_of(authorization: &str) -> Option<String> {
     let (scheme, token) = authorization.split_once(' ')?;
     let token = token.trim();
     let is_bearer = scheme.eq_ignore_ascii_case(BEARER_SCHEME);
-    (is_bearer && !token.is_empty() && !token.contains(' ')).then(|| token.to_string())
+    if is_bearer && !token.is_empty() && !token.contains(' ') {
+        Some(token.to_string())
+    } else {
+        None
+    }
 }
 
 // ---- Refusals ----
