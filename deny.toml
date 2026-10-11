@@ -61,7 +61,13 @@ deny = [
   { crate = "memmap2", reason = "not carried over from the spike; no mmap (layout section 4.12)" },
   { crate = "openssl", reason = "TLS is rustls only (contracts §2.5)" },
   { crate = "openssl-sys", reason = "TLS is rustls only (contracts §2.5)" },
-  { crate = "async-trait", reason = "async polymorphism is an enum (contracts §12.2)" },
+  # tonic 0.14's generated server traits (rastai-proto, M1-10) are #[async_trait] traits, so tonic's `codegen` feature
+  # brings async-trait in, and tonic is its one allowed parent. Our own crates still can't depend on it: a handler
+  # implements a generated service trait with tonic's re-export (#[tonic::async_trait]), and every interface of
+  # our own is still an enum (contracts §12.2).
+  { crate = "async-trait", wrappers = [
+    "tonic",
+  ], reason = "async polymorphism is an enum (contracts §12.2); tonic's generated service traits only" },
   { crate = "schemars", reason = "JSON Schema comes from hand-written type descriptions (contracts §5.4)" },
   { crate = "sqlx", reason = "RUSTSEC-2023-0071 through rsa; the MySQL client is mysql_async (contracts §2.5)" },
 

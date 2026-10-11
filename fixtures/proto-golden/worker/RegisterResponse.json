@@ -1,0 +1,11 @@
+{
+  "diagnostic": {
+    "code": "RRS-J2002",
+    "severity": "SEVERITY_ERROR",
+    "message": "Job token rejected.",
+    "path": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2S/job.json",
+    "fix_text": "Cancel the job and run it again.",
+    "fix_command_id": "job.cancel",
+    "fix_arguments_json": "{\"job_id\":\"job_01JA2B3C4D5E6F7G8H9J0K1M2Q\"}"
+  }
+}

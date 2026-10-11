@@ -1,0 +1,26 @@
+// The live stream (contracts 4.9; node layout 3.1): ephemeral events that are never written to a log, such as
+// progress and log lines. NodeService.WatchLive sends a node's events to the daemon, which puts them on its bus;
+// WorkerService.WatchLive sends one job's events to its node. Either may drop events under load.
+syntax = "proto3";
+
+package rastai.node.v1;
+
+import "rastai/events/v1/payloads.proto";
+
+// WatchLive takes no arguments yet; the empty request lets fields be added without a breaking change.
+message WatchLiveRequest {}
+
+// One ephemeral event. The payloads of later milestones (LivePacket, GymPeekStep, TransferProgress,
+// DownloadProgress, EgressActive) join the oneof with the next free numbers, so it stays last (contracts 4.3).
+message LiveEvent {
+  string job_id = 1;
+  // The generation session the event belongs to; empty for an event that isn't part of one.
+  string session_id = 2;
+  int64 emitted_unix_ms = 3;
+  // The oneof comes last, field numbers included: prost writes a oneof after a message's other fields and the
+  // other languages write in field-number order, so only this order gives the same bytes in all three.
+  oneof payload {
+    rastai.events.v1.JobProgress job_progress = 4;
+    rastai.events.v1.JobLogLine job_log_line = 5;
+  }
+}

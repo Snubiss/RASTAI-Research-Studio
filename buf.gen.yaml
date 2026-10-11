@@ -19,10 +19,13 @@ plugins:
   # The tonic service code for the same packages; it writes nothing for a package without services.
   # CommandService and EventService are left out: the daemon serves them as Connect over HTTP/1.1 with its own
   # prost encoding (layout rust-control-plane.md 8.4 and 11.3), never through tonic, so their stubs would be unused.
+  # no_transport: no `connect(url)` on the clients. Every gRPC connection runs over a Unix socket that
+  # rastai-transport opens (grpc_channel.rs), so rastai-proto needs only tonic's codegen feature, not its transport.
   - local: protoc-gen-tonic
     out: crates/rastai-proto/src/generated
     opt:
       - flat_output_dir
+      - no_transport
     exclude_types:
       - rastai.commands.v1.CommandService
       - rastai.events.v1.EventService

@@ -19,7 +19,7 @@ Conventions in this file:
 
 ### Changes in v1.2
 
-Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR. Item 15 is the catalog and content-hash contract that M1-14 builds on, for the owner's review in its PR. Item 16 is M1-09's command and event wire, for the owner's review in its PR. Item 17 is the catalog contract that M1-20 builds on, for the owner's review in its PR. Item 18 is M1-20's text form of a plugin's own scope and its Linux runtime folder, for the owner's review in its PR.
+Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR. Item 15 is the catalog and content-hash contract that M1-14 builds on, for the owner's review in its PR. Item 16 is M1-09's command and event wire, for the owner's review in its PR. Item 17 is the catalog contract that M1-20 builds on, for the owner's review in its PR. Item 18 is M1-20's text form of a plugin's own scope and its Linux runtime folder, for the owner's review in its PR. Item 19 is M1-10's node and worker skeleton wire, for the owner's review in its PR.
 
 1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
 2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
@@ -39,6 +39,7 @@ Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass
 16. **The command and event wire (M1-09).** `rastai.commands.v1` and `rastai.events.v1` are fixed field by field, for the owner's review in its PR (4.2, 4.3). New wire names: `CommandKind` as an enum, `ListCommandsResponse.commands`, `EventPayload` (the one `oneof` of payloads that `EventRecord` and `BusEvent` share, 7.1, 7.2), `ListEventTypesRequest` (empty) and `ListEventTypesResponse.event_types`, the M1 payload messages with `ArtifactParent` and `LogStream`. `node.heartbeat`'s payload is `NodeTelemetry` itself. State changes say `from_state` and `to_state` (`from` is a Python keyword). `checkpoint.saved` gains `checkpoint_id`, so `rebuild-index` restores the checkpoint's id and its `checkpoint_of` row (7.3, 8.2). Rust gets no tonic code for these two Connect services; tonic arrives with `NodeService` (M1-10). A oneof comes last in its message and maps are written in key order, so the goldens are byte-identical in all three languages (4.3).
 17. **Codes for rastai-core's process environment (M1-20).** Two codes whose titles are true for the errors that use them, where M1-20's first draft borrowed codes that misled the user: `RRS-C0501` (no home folder to put the data folders in; it borrowed `RRS-S0004`, "Data directory not writable") and `RRS-C0502` (the operating system's random source can't be read; it borrowed `RRS-D3001`, a data-import code, so a daemon start would have shown a data-source error). They sit in a new `RRS-C` range, 0500–0599, for the process's environment (10.1, 10.3).
 18. **A plugin's own scope as text, and the Linux runtime folder (M1-20).** `Scope::Plugin(<plugin_id>)` is written `plugin:<plugin_id>` wherever a scope is text (`CommandDescriptor.scope`, token and manifest scope lists). The colon can't occur in a fixed scope or a plugin id, so the two kinds never read as each other (6.3). Without `XDG_RUNTIME_DIR`, `<runtime>` is `/tmp/rastai-<uid>`, which keeps every socket path within the 107 bytes a Unix socket address holds (8.1). `rastai-core` gets the fuzz targets `base32_decode` and `rfc3339_parse` (12.5, ADR-0037), and path functions for the database copies and the daemon log's rolled segments (15.1).
+19. **The node and worker skeleton wire (M1-10).** `rastai.node.v1` and `rastai.worker.v1` get the RPCs of the M1 skeleton only, fixed field by field (4.4, 4.5): `NodeService` Handshake, GetHardware, StartJob, SignalJob, ListJobs, WatchRunEvents, WatchLive; `NodeHubService` Heartbeat, ExecuteCommand; `WorkerService` Hello, Control, WatchLive; `WorkerHostService` Register. Every other RPC arrives with the milestone that uses it, in its own contract PR (node layout 3.6). New wire names: `JobSpec.resources` (the field that holds the `ResourceRequest`), `HandshakeResponse` (`node_id`, the node's `protocol_version`, `app_version` and `capabilities`, `hardware`, `session_token`, `node_signature`, `diagnostic`), `GetHardwareResponse`, `SignalJobResponse`, `ControlResponse`, `RegisterRequest` (`job_id`, `job_socket_path`) and `RegisterResponse`, each refusal carrying a `Diagnostic` as section 4 requires; `ListJobsRequest`, `GetHardwareRequest`, `WatchLiveRequest`, `HelloRequest` and `HeartbeatResponse` are empty for now. `ControlRequest.action` is a `JobSignal`, so the worker protocol has one signal enum. `WorkerService.WatchLive` reuses `WatchLiveRequest` and `LiveEvent` from `node.v1`, and `NodeHubService.ExecuteCommand` reuses the `commands.v1` messages. The tonic code needs two things the docs didn't list: `tonic-prost`, tonic 0.14's own prost codec, which the generated code calls (2.5, part of the tonic row of spec §27); and `async-trait`, which tonic's generated server traits use, so `deny.toml` lets tonic be its one parent while our own crates still never depend on it (2.5, 12.2).
 
 ### Changes in v1.1
 
@@ -385,7 +386,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 |---|---|---|---|
 | serde, serde_json | Foundation | the crates in 2.1 | direct |
 | tokio, axum | Foundation | the crates in 2.1 | direct (axum handlers only under `rastai-server/src/http/` and the gateway's endpoint files) |
-| prost, tonic | Compatibility: protobuf | the crates in 2.1 | direct |
+| prost, tonic (with `tonic-prost`, tonic 0.14's prost codec, which the generated code calls) | Compatibility: protobuf | the crates in 2.1 (`tonic-prost`: `rastai-proto` only) | direct |
 | hyper, hyper-util | Foundation: HTTP | `rastai-transport`, `rastai-sandbox` | `rastai-transport/src/http_client.rs`; `rastai-sandbox/src/engine_http.rs` |
 | rustls, tokio-rustls, webpki-roots | Security: TLS | `rastai-transport` | `http_client.rs`. SHA-256 and HMAC for HF files, llama-server builds and (later) SigV4 come from the rustls crypto provider through this file; no new crate. |
 | tower | Foundation: HTTP | `rastai-transport` | `grpc_channel.rs` (the connector tonic needs on Unix sockets) |
@@ -408,7 +409,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | HF `transformers` (optional) | Engine (optional) | `rastai_models`, tests | `compat/transformers_runtime.py`; `tests/parity/hf_reference.py` |
 | HF `tokenizers` (Python) | Compatibility | `rastai_data` | `tokenization.py` |
 | bitsandbytes (optional) | Kernel | `rastai_train` | `kernels/four_bit_linear.py` |
-| grpcio | Compatibility: protobuf | `rastai_worker`, `rastai_plugin` | `rastai_worker/worker_server.py`; `rastai_plugin`'s host client |
+| grpcio | Compatibility: protobuf | `rastai_worker`, `rastai_plugin` | `rastai_worker/worker_server.py`; `rastai_plugin`'s host client; the generated `rastai_proto` code and its own tests (`check-imports` lets a package's tests use a library the package may use throughout) |
 | Python `protobuf` | Compatibility: protobuf | generated code | generated code, `rastai_worker/event_payloads.py`, the ONNX importer's generated module |
 | pyarrow | Compatibility: Parquet | `rastai_data` | `readers/parquet.py` |
 | PyMySQL | Compatibility: MySQL client (MIT) | `rastai_data` | `readers/mysql_reader.py` |
@@ -427,7 +428,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 
 **Enforced owners:** `deny.toml` `wrappers` pins each single-owner crate to its owner (`tokenizers` and `minijinja` to `rastai-gateway`; `rusqlite` and `libc` to `rastai-store`, with `cpufeatures` (under `blake3`) as libc's one allowed third-party parent so far; `pyo3` and `wasm-bindgen` to the binding crates; `keyring` to `rastai-server`; `blake3` and `miniz_oxide` to `rastai-formats`; `ed25519-dalek` to `rastai-node`; `mysql_async` to `rastai-archive`), and `check-imports` checks the file inside the owner.
 
-**Never carried over from the spike:** `reqwest`, `futures-util`, `memmap2`. `deny.toml` bans `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl`, `openssl-sys`, `async-trait`, `schemars` and `sqlx`. `schemars` comes back only by the rule in 5.4.
+**Never carried over from the spike:** `reqwest`, `futures-util`, `memmap2`. `deny.toml` bans `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl`, `openssl-sys`, `async-trait`, `schemars` and `sqlx`. `schemars` comes back only by the rule in 5.4. Two banned crates have one allowed third-party parent each, at build time: `anyhow` under `prost-derive` and `async-trait` under `tonic`, whose generated service traits are `#[async_trait]` traits (12.2).
 
 ---
 
@@ -730,6 +731,26 @@ Files `event_service.proto`, `event_record.proto` and `payloads.proto`. Golden m
 - A `CANCEL`, `STOP` or `TERMINATE` that hasn't ended the job by the node's grace period is followed by `KILL` (`RRS-J1003`).
 - Exit codes and job states are also listed in section 9.1.
 
+**The M1 skeleton** (M1-10). Files `node_service.proto`, `jobs.proto`, `live.proto` and `node_hub_service.proto` hold only the RPCs and messages below; every other RPC and message of this section arrives with the milestone that uses it, in its own contract PR (node layout 3.6). Golden messages: `fixtures/proto-golden/node/`. A refusal comes back as a `Diagnostic` in the response with gRPC status `OK` (section 4). An RPC with no arguments yet takes its own empty request, so fields can be added without a breaking change.
+
+| Message | File | Fields |
+|---|---|---|
+| `JobKind` | `jobs.proto` | `JOB_KIND_SERVE_INSPECTABLE` = 1, `TRAIN`, `EVAL`, `GYM`, `LENS`, `DATA_IMPORT`, `DATA_CHECK`, `COMPILE`, `EXPORT`, `DOCTOR_SELFTEST`, `PLUGIN_MODULE`, `DOWNLOAD`, `TRANSFER`, `SERVE_FAST`, `DAEMON_TASK` = 15, in the order of 9.1 |
+| `JobSignal` | `jobs.proto` | `JOB_SIGNAL_CANCEL` = 1, `STOP`, `PAUSE`, `RESUME`, `CHECKPOINT_NOW`, `STEP`, `TERMINATE`, `KILL` = 8 |
+| `JobSpec` | `jobs.proto` | `job_id`, `run_id`, `JobKind kind`, `environment_id`, `entry`, `arguments_json`, `ResourceRequest resources`, `repeated string network_hosts`, `data_policy`, `checkpoint_policy_json`, `plugin_id` |
+| `JobInfo` | `jobs.proto` | `job_id`, `run_id`, `JobKind kind`, `JobState state`, `uint32 pid`, `uint32 process_group_id`, `started_unix_ms`, `optional int32 exit_code` (set only once the process exited, since 0 is a real code), `Diagnostic last_error` |
+| `SignalJobRequest` / `SignalJobResponse` | `jobs.proto` | `job_id`, `JobSignal signal` (`sandbox_id` and `arguments_json` join with step mode, M7) / `Diagnostic diagnostic` |
+| `ListJobsRequest` / `ListJobsResponse` | `jobs.proto` | no fields yet / `repeated JobInfo jobs` |
+| `WatchRunEventsRequest` | `jobs.proto` | `run_id`, `uint64 after_sequence`; the stream is `rastai.events.v1.EventRecord` |
+| `WatchLiveRequest` | `live.proto` | no fields yet |
+| `LiveEvent` | `live.proto` | `job_id`, `session_id`, `emitted_unix_ms`, then `oneof payload { JobProgress job_progress; JobLogLine job_log_line }` (the `events.v1` messages). The later payloads of 4.9 join the oneof with the next free numbers, so it stays last |
+| `HandshakeRequest` | `node_service.proto` | `uint32 protocol_version`, `repeated string capabilities`, `app_version`, `daemon_id`, `bytes daemon_nonce`, `sent_unix_ms`, `bytes daemon_signature`, `hub_socket_path` (`tokenization_overrides` joins in M3) |
+| `HandshakeResponse` | `node_service.proto` | `node_id`, `uint32 protocol_version` and `app_version` (the node's own, for the decision in designer flow C3b), `repeated string capabilities`, `HardwareProfile hardware`, `session_token`, `bytes node_signature`, `Diagnostic diagnostic` |
+| `GetHardwareRequest` / `GetHardwareResponse` | `node_service.proto` | no fields yet / `HardwareProfile hardware`, `NodeTelemetry telemetry` |
+| `HeartbeatRequest` / `HeartbeatResponse` | `node_hub_service.proto` | `node_id`, `NodeTelemetry telemetry`, `repeated JobInfo jobs` (leases, models, sandboxes and `tokenization_overrides_hash` join in M3 and M5) / no fields yet (`tokenization_overrides` joins in M3) |
+
+`NodeHubService.ExecuteCommand` takes `rastai.commands.v1.ExecuteRequest` and returns `ExecuteResponse`, so a command looks the same from a node as from any other client.
+
 ### 4.5 `rastai.worker.v1`
 
 **`WorkerService`**, served by each Python job on `jobs/<job_id>.sock`; the node is the client.
@@ -759,6 +780,16 @@ Files `event_service.proto`, `event_record.proto` and `payloads.proto`. Golden m
 | `ExecuteCommand` | unary | forwarded to `NodeHubService.ExecuteCommand` |
 
 A plugin module starts jobs only through `CommandReply.follow_up_jobs`; the daemon starts them as the plugin principal, so scheduling and the journal stay in the daemon. There is no `WorkerHostService.StartJob` in the prototype (plan §10 row 31).
+
+**The M1 skeleton** (M1-10, worker protocol v0). Files `worker_service.proto` (`Hello`, `Control`, `WatchLive`) and `worker_host_service.proto` (`Register`); every other RPC above arrives with the milestone that uses it (node layout 3.6). Golden messages: `fixtures/proto-golden/worker/`. The job token is never a field: it travels in gRPC metadata (3.2).
+
+| Message | File | Fields |
+|---|---|---|
+| `HelloRequest` / `WorkerInfo` | `worker_service.proto` | no fields yet / `job_id`, `uint32 pid`, `rastai.node.v1.JobKind kind`, `uint32 protocol_version` (`WORKER_PROTOCOL_VERSION`), `rastai_version`, `environment_id` |
+| `ControlRequest` / `ControlResponse` | `worker_service.proto` | `rastai.node.v1.JobSignal action` (only the six Control values; `TERMINATE` and `KILL` are OS signals; `sandbox_id` and `arguments_json` join with step mode, M7) / `Diagnostic diagnostic` |
+| `RegisterRequest` / `RegisterResponse` | `worker_host_service.proto` | `job_id`, `job_socket_path` / `Diagnostic diagnostic` (a wrong token is `RRS-J2002`) |
+
+`WorkerService.WatchLive` takes `rastai.node.v1.WatchLiveRequest` and streams `rastai.node.v1.LiveEvent`, the same messages as `NodeService.WatchLive`, so the node passes a worker's events on unchanged.
 
 ### 4.6 `rastai.provider.v1` (Phase 3)
 
@@ -2427,6 +2458,7 @@ pub trait LogSink {
 }
 ```
 
+- **gRPC handlers are the one async-trait exception.** tonic generates each service as an `#[async_trait]` trait (`rastai_proto::node::v1::node_service_server::NodeService`, ...), and the crate that serves it implements that trait with tonic's re-export, `#[tonic::async_trait]`. No crate depends on `async-trait` itself or declares an async trait of its own (2.5).
 - Errors: a hand-written enum per crate (`StoreError`, `GatewayError`, `ArchiveError`) with a `fn code(&self) -> &'static str`. No `anyhow`, no `thiserror`.
 - SQLite: one writer thread per database file; callers send a record and await the commit (spike lesson). Readers open their own connections. MySQL (archive only): every write goes through `build_upsert`.
 - Streaming HTTP sockets set `TCP_NODELAY` (spike).
@@ -2852,6 +2884,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `crates/rastai-diag/src/generated/` (`mod.rs`, `catalog_table.rs`, `terms_table.rs`), `packages/catalog/src/generated/catalog.js`, `python/rastai_plugin/rastai_plugin/catalog/generated.py`, `docs/reference/errors.md` | the four outputs `rastai-catalog-codegen` writes and `check-generated` compares (a folder it owns whole, or a single file); `packages/catalog/src/index.js` and `python/rastai_plugin/rastai_plugin/catalog/__init__.py` are hand-written |
 | `tools/codegen/tests/catalog_checks.rs`, `tools/codegen/tests/outputs_check.rs` | the catalog rules (codes well formed, unique, in the owner's file and range, never deleted since the merge base; `catalog_ranges.rs` equals the 10.1 table) and the outputs check (generated JavaScript passes `tsc`, generated JavaScript and Python read back the entries); the merge-base and outputs tests are `#[ignore]`d in a plain `cargo test` and run by `just codegen-check` |
 | `fixtures/proto-golden/<package>/<MessageName>.json`, `.binpb`, `fixtures/proto-golden/README.md` | one filled golden per message: protobuf JSON with proto field names, and its binary form from `buf convert`; read by `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py` and `packages/proto/src/golden.test.js` |
+| `crates/rastai-proto/tests/services.rs`, `python/rastai_proto/tests/test_services.py` | the gRPC services build from the generated code: a tonic server stub per service (Rust), and per service its RPC list, a grpcio servicer on a server, and a `WorkerService` call over a Unix socket (Python) (node layout 3.5) |
 | `fixtures/proto-golden/commands/without_stability/`, `fixtures/proto-golden/events/without_stability/` | a `CommandDescriptor` and an `EventTypeDescriptor` without `stability`, as a daemon that predates the field sends them; the three golden tests check that they decode as `STABILITY_UNSPECIFIED` (read as `PREVIEW`) and round-trip (node layout 3.5) |
 | `tools/checks/check-deps`, `tools/checks/check-imports`, `tools/checks/check-generated`, `tools/checks/check-colors`, `tools/checks/check-no-typescript`, `tools/checks/check-unsafe`, `tools/checks/check-no-pickle`, `tools/checks/check-dco`, `tools/checks/check-names`, `tools/checks/check-schema-diff` | CI checks (the last two in M1, 12.6) |
 | `tools/checks/repo_files.py`, `tools/checks/pyproject.toml`, `tools/checks/tests/` | the checks' shared helpers (tree walk, `--root`, the report format, the JavaScript and Rust string and comment splitters); their ruff and pytest settings (ruff extends `python/pyproject.toml`); one test file per check, each running it on passing and failing fixture trees, and `test_repo_files.py` for the shared splitters |

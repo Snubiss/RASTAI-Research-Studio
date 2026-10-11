@@ -1,0 +1,49 @@
+// WorkerService: served by each Python job on jobs/<job_id>.sock, called by its node (contracts 3.2 and 4.5). The
+// job token travels in gRPC metadata. This file has the RPCs of worker protocol v0 (M1); every other RPC of
+// contracts 4.5 arrives with the milestone that uses it (node layout 3.6).
+syntax = "proto3";
+
+package rastai.worker.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+import "rastai/node/v1/jobs.proto";
+import "rastai/node/v1/live.proto";
+
+service WorkerService {
+  // Called after the worker's Register, on start and again on reattach. Hello never changes in a way an older
+  // worker can't answer, so any node version can find out what it is talking to (contracts 9.2).
+  rpc Hello(HelloRequest) returns (WorkerInfo);
+  // CANCEL, STOP, PAUSE, RESUME, CHECKPOINT_NOW or STEP; the worker acts at its next step boundary.
+  rpc Control(ControlRequest) returns (ControlResponse);
+  // The job's ephemeral events (progress, log lines); the node passes them on in NodeService.WatchLive.
+  rpc WatchLive(rastai.node.v1.WatchLiveRequest) returns (stream rastai.node.v1.LiveEvent);
+}
+
+// Hello takes no arguments yet; the empty request lets fields be added without a breaking change.
+message HelloRequest {}
+
+// What the worker says it is. The node checks job_id against the job it registered and protocol_version against
+// the versions it speaks (RRS-J2003 when it speaks none of them).
+message WorkerInfo {
+  string job_id = 1;
+  uint32 pid = 2;
+  rastai.node.v1.JobKind kind = 3;
+  // WORKER_PROTOCOL_VERSION; 1 in the prototype.
+  uint32 protocol_version = 4;
+  // The rastai version the worker was installed with.
+  string rastai_version = 5;
+  // The uv environment it runs in (contracts 8.6).
+  string environment_id = 6;
+}
+
+// sandbox_id and arguments_json join with step mode in M7 (node layout 3.6).
+message ControlRequest {
+  // One of the six Control values of the JobSignal table (contracts 4.4). TERMINATE and KILL are never sent this
+  // way: they are OS signals, so that any node version can stop any worker version.
+  rastai.node.v1.JobSignal action = 1;
+}
+
+message ControlResponse {
+  // Why the worker refused the action (for example TERMINATE or KILL); unset when it took it.
+  rastai.common.v1.Diagnostic diagnostic = 1;
+}

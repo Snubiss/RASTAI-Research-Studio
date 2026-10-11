@@ -25,6 +25,7 @@ PASSING_PYTHON = {
     "python/rastai_worker/rastai_worker/distributed.py": "import torch.distributed as dist\n",
     "python/rastai/rastai/connect_transport.py": "from rastai_proto.rastai.events.v1 import events_pb2\n",
     "python/rastai_models/tests/test_compiler.py": "import pytest\n\nfrom rastai_models import compiler\n",
+    "python/rastai_proto/tests/test_services.py": "import grpc\n\nfrom rastai_proto.node.v1 import jobs_pb2\n",
     "python/conftest.py": "import pytest\n",
     "python/envs/tests/test_cpu_environment.py": "import torch\nimport grpc\n",
     "plugins/evaluation/python/rastai_eval/rastai_eval/metrics.py": "import rastai\nfrom rastai_plugin import Metric\n",
@@ -53,6 +54,8 @@ FAILING_PYTHON = [
         "rastai-formats owns the safetensors",
     ),
     ("python/rastai_models/rastai_models/helpers.py", "import pytest\n", "`pytest` is for tests only"),
+    # Only the tests of a package that owns the library throughout (rastai_proto/*) may import it.
+    ("python/rastai_data/tests/test_loader.py", "import grpc\n", "`grpc` is imported only in"),
     ("python/rastai_newthing/rastai_newthing/a.py", "import json\n", "package `rastai_newthing` isn't in contracts"),
 ]
 

@@ -1,0 +1,26 @@
+// WorkerHostService: served by the node on worker-host.sock, called by its jobs (contracts 3.2 and 4.5). The job
+// token travels in gRPC metadata and the node maps token to job to permissions. This file has the RPC of worker
+// protocol v0 (M1); every other RPC of contracts 4.5 arrives with the milestone that uses it (node layout 3.6).
+syntax = "proto3";
+
+package rastai.worker.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+
+service WorkerHostService {
+  // The job announces its socket, first on start and again on reattach. The node checks the BLAKE3 of the token
+  // against job.json's job_token_hash, and only then calls WorkerService.Hello (contracts 3.2, plan §10 row 5).
+  // The worker serves WorkerService before it registers, so that first Hello finds the socket.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+}
+
+message RegisterRequest {
+  string job_id = 1;
+  // The socket the worker serves WorkerService on: jobs/<job_id>.sock under the node's runtime folder.
+  string job_socket_path = 2;
+}
+
+message RegisterResponse {
+  // Why the node refused the registration (a wrong token is RRS-J2002); unset when it accepted it.
+  rastai.common.v1.Diagnostic diagnostic = 1;
+}

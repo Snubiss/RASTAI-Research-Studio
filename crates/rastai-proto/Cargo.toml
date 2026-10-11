@@ -9,10 +9,14 @@ publish.workspace = true
 
 # Everything under src/generated/ is written by `just codegen` (buf with protoc-gen-prost and protoc-gen-tonic) and
 # checked in, so there is no build.rs and building never needs buf or protoc (layout rust-node-gateway-proto.md 3.4).
-# tonic joins with the first gRPC service, NodeService (M1-10). CommandService and EventService are Connect services
-# that rastai-server serves with prost alone, so buf.gen.yaml generates no tonic code for them.
+# tonic arrives with the first gRPC services, NodeService and WorkerService (M1-10). CommandService and EventService
+# are Connect services that rastai-server serves with prost alone, so buf.gen.yaml generates no tonic code for them.
+# Only tonic's codegen feature: the generated clients have no connect(url) (buf.gen.yaml no_transport), because
+# rastai-transport opens every channel itself over a Unix socket. tonic-prost is the codec the generated code calls.
 [dependencies]
 prost = { workspace = true }
+tonic = { workspace = true, features = ["codegen"] }
+tonic-prost = { workspace = true }
 
 [lints]
 workspace = true

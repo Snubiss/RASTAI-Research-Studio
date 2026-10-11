@@ -1,0 +1,11 @@
+{
+  "diagnostic": {
+    "code": "RRS-J2003",
+    "severity": "SEVERITY_ERROR",
+    "message": "Worker protocol version not supported by this node; stopped with a checkpoint.",
+    "path": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2S/job.json",
+    "fix_text": "Update the node, then resume the run.",
+    "fix_command_id": "train.resume",
+    "fix_arguments_json": "{\"run_id\":\"run_01JA2B3C4D5E6F7G8H9J0K1M2S\"}"
+  }
+}

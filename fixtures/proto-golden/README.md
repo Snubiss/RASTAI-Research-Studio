@@ -5,7 +5,7 @@ One filled instance of every message in `proto/rastai/`, one folder per package 
 - `<package>/<MessageName>.json`: the message in the protobuf JSON mapping, with proto field names (`snake_case`), 64-bit integers as strings and enums by name, the form contracts §4 stores wire types in documents. This is the file people write.
 - `<package>/<MessageName>.binpb`: the same message in the binary wire format, written from the `.json` by `buf convert`.
 
-Every field is set to a value other than its default, so a field missing from one language's generated code shows up as a difference. An `optional` field set to its default (`ResourceRequest.may_reclaim_evictable = false`) is still on the wire, which is the point of `optional`. A `oneof` can hold only one of its fields, so its golden sets one (`EventPayload`, `RunStateChanged`). A message with no fields (`ListEventTypesRequest`) has `{}` and an empty `.binpb`. Values are realistic but illustrative: they show the shape, not real records.
+Every field is set to a value other than its default, so a field missing from one language's generated code shows up as a difference. An `optional` field set to its default (`ResourceRequest.may_reclaim_evictable = false`) is still on the wire, which is the point of `optional`. A `oneof` can hold only one of its fields, so its golden sets one (`EventPayload`, `RunStateChanged`). A message with no fields (`ListEventTypesRequest`, `HelloRequest`, ...) has `{}` and an empty `.binpb`; the Rust test lists them in `FIELDLESS_MESSAGES`. Values are realistic but illustrative: they show the shape, not real records.
 
 Extra goldens live in subfolders and aren't counted as "one per message":
 

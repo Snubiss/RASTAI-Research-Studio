@@ -1,0 +1,30 @@
+// NodeHubService: served by the daemon, called by nodes (contracts 3.2 and 4.4). The embedded node calls
+// node-hub.sock directly; a remote node calls the reverse-forwarded socket named in HandshakeRequest.hub_socket_path.
+// This file has the RPCs of the M1 skeleton; GatewayGenerate and GetSecret arrive with the milestones that use them
+// (node layout 3.6).
+syntax = "proto3";
+
+package rastai.node.v1;
+
+import "rastai/commands/v1/command_service.proto";
+import "rastai/common/v1/hardware.proto";
+import "rastai/node/v1/jobs.proto";
+
+service NodeHubService {
+  // Every 5 s, and at once on any job change. Three missed heartbeats mark the node unreachable (contracts 9.2).
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // A plugin module or job runs a command; the daemon applies the plugin principal and its scopes. It takes the
+  // daemon's own command messages, so a command looks the same from a node as from any other client.
+  rpc ExecuteCommand(rastai.commands.v1.ExecuteRequest) returns (rastai.commands.v1.ExecuteResponse);
+}
+
+// The node's state as a snapshot, so the daemon reconciles by snapshot after a disconnect (contracts 7.3).
+// leases, models, sandboxes and tokenization_overrides_hash join with M3 and M5 (node layout 3.6).
+message HeartbeatRequest {
+  string node_id = 1;
+  rastai.common.v1.NodeTelemetry telemetry = 2;
+  repeated JobInfo jobs = 3;
+}
+
+// No fields yet; tokenization_overrides joins in M3 (node layout 3.2).
+message HeartbeatResponse {}

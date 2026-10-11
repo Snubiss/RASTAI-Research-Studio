@@ -1,0 +1,11 @@
+{
+  "diagnostic": {
+    "code": "RRS-J3003",
+    "severity": "SEVERITY_ERROR",
+    "message": "Job didn't reconnect after a node restart.",
+    "path": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2S/job.json",
+    "fix_text": "Resume the run from its last checkpoint.",
+    "fix_command_id": "train.resume",
+    "fix_arguments_json": "{\"run_id\":\"run_01JA2B3C4D5E6F7G8H9J0K1M2S\"}"
+  }
+}

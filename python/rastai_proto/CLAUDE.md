@@ -6,4 +6,5 @@ Read the root `CLAUDE.md` and `python/CLAUDE.md` first. The layout is `docs/arch
 - The proto package `rastai.common.v1` is the Python module `rastai_proto.common.v1`. `tools/codegen/rewrite_python_imports` (buf's Python plugin) moves the files and rewrites the imports, so nothing here shadows the `rastai` SDK. The wire names inside the descriptors stay `rastai.common.v1`.
 - Only `rastai_worker`, `rastai_plugin` and `rastai/connect_transport.py` import this package (contracts 2.2; `check-imports`). Engines never do.
 - `tests/test_golden.py` is hand-written: every message of the package round-trips the goldens in `fixtures/proto-golden/` byte for byte.
+- `tests/test_services.py` is hand-written: each gRPC service has exactly the RPCs of its build-order step, every generated servicer registers on a grpcio server, and `WorkerService` answers over a Unix socket.
 - To change a message, edit the `.proto` (in its own contract PR), run `just codegen` and update the goldens (`fixtures/proto-golden/README.md`).

@@ -1,0 +1,10 @@
+{
+  "protocol_version": 1,
+  "capabilities": ["generate.inspectable", "lens.live"],
+  "app_version": "0.1.0",
+  "daemon_id": "daemon_7ZRQ4M2KX9D3TA6B8C1EFGHJNP5VWY0SMV4K2QX7RTB3DC9AE1FG",
+  "daemon_nonce": "768s2XyQHkPLjzPeRy/2ugekrSQIglFfNhsDZ0/IvFM=",
+  "sent_unix_ms": "1791700000000",
+  "daemon_signature": "uPcQoI0eUgpyBh6dVXKsloHiUiLcsLZ8qRWCQBWxnWROP8ampfFCSEQLLR3h/jg27uyhhR3CIt5J6AfcSsQqBQ==",
+  "hub_socket_path": "/run/user/1000/rastai/node-hub-ses_01JA2B3C4D5E6F7G8H9J0K1M2Y.sock"
+}

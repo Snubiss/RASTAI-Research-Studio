@@ -1,0 +1,119 @@
+// Jobs on a node (contracts 4.4 and 9.1; node layout 3.2 and 7.4): what the daemon asks a node to run (JobSpec),
+// what the node reports back (JobInfo), and the signals that stop, pause or checkpoint a running job (JobSignal).
+// This file holds what the M1 skeleton needs; SignalJobRequest gains sandbox_id and arguments_json with step mode
+// in M7 (node layout 3.6).
+syntax = "proto3";
+
+package rastai.node.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+import "rastai/common/v1/resources.proto";
+import "rastai/common/v1/states.proto";
+
+// The job kinds of contracts 9.1, in that order. The first eleven run as Python worker jobs, the next three are
+// native to the node, and DAEMON_TASK runs inside the daemon and never reaches a node (platform flow).
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  JOB_KIND_SERVE_INSPECTABLE = 1;
+  JOB_KIND_TRAIN = 2;
+  JOB_KIND_EVAL = 3;
+  JOB_KIND_GYM = 4;
+  JOB_KIND_LENS = 5;
+  JOB_KIND_DATA_IMPORT = 6;
+  JOB_KIND_DATA_CHECK = 7;
+  // Also design.import.
+  JOB_KIND_COMPILE = 8;
+  JOB_KIND_EXPORT = 9;
+  JOB_KIND_DOCTOR_SELFTEST = 10;
+  JOB_KIND_PLUGIN_MODULE = 11;
+  JOB_KIND_DOWNLOAD = 12;
+  JOB_KIND_TRANSFER = 13;
+  JOB_KIND_SERVE_FAST = 14;
+  // Job commands whose work runs inside the daemon: plugin.install, storage.gc, system.update.apply, ...
+  JOB_KIND_DAEMON_TASK = 15;
+}
+
+// One meaning per value; the JobSignal table in contracts 4.4 says what the node sends and what the worker does.
+// CANCEL to STEP reach the worker as WorkerService.Control at its next step boundary. TERMINATE (SIGTERM,
+// preemption) and KILL (SIGKILL) are OS signals to the process group, so they mean the same in every version.
+enum JobSignal {
+  JOB_SIGNAL_UNSPECIFIED = 0;
+  // Stop without a checkpoint; the job ends cancelled (exit 3).
+  JOB_SIGNAL_CANCEL = 1;
+  // Write a final checkpoint and complete the run with reason "stopped" (exit 0).
+  JOB_SIGNAL_STOP = 2;
+  JOB_SIGNAL_PAUSE = 3;
+  JOB_SIGNAL_RESUME = 4;
+  // Checkpoint now and keep running.
+  JOB_SIGNAL_CHECKPOINT_NOW = 5;
+  // Run one step, then pause (step mode).
+  JOB_SIGNAL_STEP = 6;
+  // Preemption: checkpoint if it fits the budget, then exit 75.
+  JOB_SIGNAL_TERMINATE = 7;
+  // The node's last resort, for a job still alive after STOP_GRACE_SECONDS.
+  JOB_SIGNAL_KILL = 8;
+}
+
+// What the daemon asks a node to run (NodeService.StartJob). A run record keeps it in the protobuf JSON mapping
+// (contracts 4, "wire types inside documents"), so its field numbers and names are read back from documents too.
+message JobSpec {
+  string job_id = 1;
+  string run_id = 2;
+  JobKind kind = 3;
+  // The uv environment to run in: "cpu", "cuda13", "cuda126" or "rocm" (contracts 8.6).
+  string environment_id = 4;
+  // "<module>:<function>" for a plugin module's job; empty for a core job kind.
+  string entry = 5;
+  // The job's arguments as JSON text, validated by rastai-formats at both ends (contracts 4).
+  string arguments_json = 6;
+  rastai.common.v1.ResourceRequest resources = 7;
+  // The only hosts the job may reach, for example the one MySQL host of a data_import job (node layout 7.9).
+  repeated string network_hosts = 8;
+  // The project's data policy when the job was submitted: "local-only", "trusted-remote" or "any" (contracts 11.2).
+  string data_policy = 9;
+  // How often and where the job checkpoints, as JSON text; empty for a kind with nothing to save.
+  string checkpoint_policy_json = 10;
+  // The plugin whose module or job this is; empty for a core job.
+  string plugin_id = 11;
+}
+
+// A job as the node sees it: returned by StartJob, listed by ListJobs and carried in every Heartbeat, so the
+// daemon can rebuild its jobs table from a snapshot after a reconnect.
+message JobInfo {
+  string job_id = 1;
+  string run_id = 2;
+  JobKind kind = 3;
+  rastai.common.v1.JobState state = 4;
+  // The worker's process id and process group; 0 before the process starts and for a job with no process.
+  uint32 pid = 5;
+  uint32 process_group_id = 6;
+  int64 started_unix_ms = 7;
+  // Set only once the process has exited, because 0 is a real exit code (contracts 9.1 lists the codes).
+  optional int32 exit_code = 8;
+  // Why the job failed or was refused; unset otherwise.
+  rastai.common.v1.Diagnostic last_error = 9;
+}
+
+message SignalJobRequest {
+  string job_id = 1;
+  JobSignal signal = 2;
+}
+
+message SignalJobResponse {
+  // Why the node didn't deliver the signal (for example the job had already ended); unset when it did.
+  rastai.common.v1.Diagnostic diagnostic = 1;
+}
+
+// ListJobs takes no arguments yet; the empty request lets fields be added without a breaking change.
+message ListJobsRequest {}
+
+message ListJobsResponse {
+  // Every job the node knows, live or ended, for the daemon to reconcile against after a reconnect.
+  repeated JobInfo jobs = 1;
+}
+
+message WatchRunEventsRequest {
+  string run_id = 1;
+  // The daemon's acked sequence for this run: the stream starts with the record after it. 0 reads from the start.
+  uint64 after_sequence = 2;
+}
