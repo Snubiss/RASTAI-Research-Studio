@@ -415,7 +415,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 
 **Never bundled:** MySQL server and MariaDB are GPL-2.0. Rastai never bundles or distributes them; the user runs their own. The clients are `mysql_async` and PyMySQL only: not sqlx (RUSTSEC-2023-0071 through `rsa`), not Oracle's connectors, not mysqlclient. MinIO is a test-only CI service (the `mysql-archive` job's S3 target), never shipped.
 
-**Enforced owners:** `deny.toml` `wrappers` pins each single-owner crate to its owner (`tokenizers` and `minijinja` to `rastai-gateway`; `rusqlite` and `libc` to `rastai-store`; `pyo3` and `wasm-bindgen` to the binding crates; `keyring` to `rastai-server`; `blake3` and `miniz_oxide` to `rastai-formats`; `ed25519-dalek` to `rastai-node`; `mysql_async` to `rastai-archive`), and `check-imports` checks the file inside the owner.
+**Enforced owners:** `deny.toml` `wrappers` pins each single-owner crate to its owner (`tokenizers` and `minijinja` to `rastai-gateway`; `rusqlite` and `libc` to `rastai-store`, with `cpufeatures` (under `blake3`) as libc's one allowed third-party parent so far; `pyo3` and `wasm-bindgen` to the binding crates; `keyring` to `rastai-server`; `blake3` and `miniz_oxide` to `rastai-formats`; `ed25519-dalek` to `rastai-node`; `mysql_async` to `rastai-archive`), and `check-imports` checks the file inside the owner.
 
 **Never carried over from the spike:** `reqwest`, `futures-util`, `memmap2`. `deny.toml` bans `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl`, `openssl-sys`, `async-trait`, `schemars` and `sqlx`. `schemars` comes back only by the rule in 5.4.
 

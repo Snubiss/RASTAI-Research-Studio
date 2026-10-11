@@ -16,11 +16,16 @@ const DEFAULT_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const DEFAULT_MAX_JSON_DEPTH: u32 = 128;
 
 /// Values (objects, arrays, strings, numbers, literals) in one JSON document. A real graph is a few thousand nodes
-/// at a few dozen values each; 2 million also fits a 100,000-node graph (the cap below) at 20 values a node.
-/// Measured on x86-64, release build, peak RSS while reading: the costliest shape found, one object of 2 million
-/// members with 27-character keys (61 MiB of text, near both caps), takes 692 MiB (serde_json alone would take
-/// 362 MiB); a 64 MiB `[0,0,...]` stops at the cap with a 203 MiB peak, where it took 4.2 GB with no cap.
-const DEFAULT_MAX_JSON_VALUES: u64 = 2_000_000;
+/// at a few dozen values each, well under 100,000 values; 1 million fits a 50,000-node graph at 20 values a node.
+/// A graph near the 100,000-node cap below must stay under 10 values a node, so raise both together if real files
+/// get there. Every value costs memory whatever its length in the text, and a non-empty object costs most: serde_json
+/// gives each one a BTreeMap node of about 600 bytes.
+/// Measured on x86-64, release build, peak RSS while reading (tests/reader_memory_objects.rs guards the bound): the
+/// costliest shape found is 120-deep chains of one-member objects, `{"k…":{"k…":…{}…}}`. With 55-character keys
+/// (60 MB of text, near both caps) it takes 801 MiB, serde_json alone 665 MiB; with 1-character keys (6 MB), 741 MiB.
+/// The cap was 2 million until those chains were measured at 1.45 GiB (1.24 GiB in serde_json alone), too close to
+/// the 32-bit WASM address space. A 64 MiB `[0,0,...]` stops at the cap with a 67 MiB peak (serde_json: 1 GiB).
+const DEFAULT_MAX_JSON_VALUES: u64 = 1_000_000;
 
 /// A ModelSpec graph after block expansion: a 100-layer transformer is a few thousand nodes.
 const DEFAULT_MAX_GRAPH_NODES: u64 = 100_000;
@@ -83,7 +88,7 @@ mod tests {
         let limits = ImportLimits::default();
         assert_eq!(limits.max_file_bytes, 64 * 1024 * 1024);
         assert_eq!(limits.max_json_depth, 128);
-        assert_eq!(limits.max_json_values, 2_000_000);
+        assert_eq!(limits.max_json_values, 1_000_000);
         // The ZIP64 round-trip test writes 70,000 entries (layout 4.11); the default must let it through.
         assert!(limits.max_zip_entries > 70_000);
     }
