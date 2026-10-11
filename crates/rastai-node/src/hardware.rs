@@ -46,6 +46,15 @@ const KFD_PROPERTIES_FILE: &str = "properties";
 const AMD_VRAM_TOTAL_FILE: &str = "mem_info_vram_total";
 const CPU_INFO_FILE: &str = "cpuinfo";
 const MEMORY_INFO_FILE: &str = "meminfo";
+const CPU_MODEL_KEY: &str = "model name";
+const CPU_PROCESSOR_KEY: &str = "processor";
+/// The keys of a kfd node's `properties` file that detection reads.
+const KFD_SIMD_COUNT_KEY: &str = "simd_count";
+const KFD_LOCATION_KEY: &str = "location_id";
+const KFD_DOMAIN_KEY: &str = "domain";
+const KFD_TARGET_VERSION_KEY: &str = "gfx_target_version";
+const KFD_VENDOR_ID_KEY: &str = "vendor_id";
+const KFD_DEVICE_ID_KEY: &str = "device_id";
 const BYTES_PER_MIB: u64 = 1024 * 1024;
 const BYTES_PER_KIB: u64 = 1024;
 
@@ -62,19 +71,23 @@ pub struct HardwareSources {
     pub tool_timeout: Duration,
 }
 
-/// One NVIDIA GPU's index and PCI bus id as nvidia-smi writes it, so telemetry can map per-process rows to GPUs.
+/// One GPU's profile index and PCI bus id, so telemetry can match a tool's rows to GPUs by bus rather than by the
+/// tool's own numbering. NVIDIA's are as nvidia-smi writes them (`00000000:01:00.0`), AMD's as kfd gives them
+/// (`0000:17:00.0`, rocm-smi's `PCI Bus` form).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuAddress {
     pub index: u32,
     pub bus_id: String,
 }
 
-/// What detection found: the profile, the notes to show and log (RRS-H0001, RRS-H0002), and the NVIDIA bus ids.
+/// What detection found: the profile, the notes to show and log (RRS-H0001, RRS-H0002), and the bus ids of each
+/// vendor's GPUs that a tool described (none for a GPU listed as unknown).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DetectedHardware {
     pub profile: HardwareProfile,
     pub notes: Vec<Diagnostic>,
     pub nvidia_gpus: Vec<GpuAddress>,
+    pub amd_gpus: Vec<GpuAddress>,
 }
 
 /// How a tool run ended.
@@ -129,6 +142,7 @@ pub async fn detect_hardware(sources: &HardwareSources) -> DetectedHardware {
         profile,
         notes,
         nvidia_gpus: nvidia.addresses,
+        amd_gpus: amd.addresses,
     }
 }
 
@@ -242,14 +256,20 @@ async fn detect_amd(sources: &HardwareSources, devices: &[DisplayDevice]) -> Ven
         };
     }
     let (product_names, notes) = read_rocm_product_names(sources).await;
-    let gpus = kfd_gpus
-        .iter()
-        .enumerate()
-        .map(|(position, kfd_gpu)| amd_gpu_info(sources, position, kfd_gpu, &product_names))
-        .collect();
+    let mut gpus = Vec::new();
+    let mut addresses = Vec::new();
+    for (position, kfd_gpu) in kfd_gpus.iter().enumerate() {
+        let gpu = amd_gpu_info(sources, position, kfd_gpu, &product_names);
+        addresses.push(GpuAddress {
+            index: gpu.index,
+            bus_id: kfd_gpu.address.clone(),
+        });
+        gpus.push(gpu);
+    }
     VendorGpus {
         gpus,
         notes,
+        addresses,
         ..VendorGpus::default()
     }
 }
@@ -351,27 +371,36 @@ fn read_kfd_gpus(sys_root: &Path) -> Vec<KfdGpu> {
 
 /// One kfd node's `properties` file (`key value` lines), as a GPU; None for a CPU node or a file without the keys.
 fn parse_kfd_gpu(text: &str) -> Option<KfdGpu> {
-    let properties: HashMap<&str, u64> = text
-        .lines()
-        .filter_map(|line| {
-            let (key, value) = line.split_once(' ')?;
-            Some((key, value.trim().parse().ok()?))
-        })
-        .collect();
-    if properties.get("simd_count").copied().unwrap_or(0) == 0 {
+    let properties = parse_kfd_properties(text);
+    let simd_count = properties.get(KFD_SIMD_COUNT_KEY).copied().unwrap_or(0);
+    if simd_count == 0 {
         return None;
     }
-    let location = *properties.get("location_id")?;
-    let domain = *properties.get("domain")?;
+    let location = *properties.get(KFD_LOCATION_KEY)?;
+    let domain = *properties.get(KFD_DOMAIN_KEY)?;
+    let target_version = *properties.get(KFD_TARGET_VERSION_KEY)?;
+    let vendor_id = *properties.get(KFD_VENDOR_ID_KEY)?;
+    let device_id = *properties.get(KFD_DEVICE_ID_KEY)?;
+    let architecture = gfx_target_name(target_version)?;
     Some(KfdGpu {
         address: pci_address(domain, location),
-        architecture: gfx_target_name(*properties.get("gfx_target_version")?)?,
-        pci_ids: format!(
-            "{:04x}:{:04x}",
-            properties.get("vendor_id")?,
-            properties.get("device_id")?
-        ),
+        architecture,
+        pci_ids: format!("{vendor_id:04x}:{device_id:04x}"),
     })
+}
+
+/// The numeric `key value` lines of a kfd `properties` file. Lines that aren't a key and a number are skipped.
+fn parse_kfd_properties(text: &str) -> HashMap<&str, u64> {
+    let mut properties = HashMap::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once(' ') else {
+            continue;
+        };
+        if let Ok(number) = value.trim().parse::<u64>() {
+            properties.insert(key, number);
+        }
+    }
+    properties
 }
 
 /// kfd's location id is the PCI bus, device and function packed as `bus << 8 | device << 3 | function`.
@@ -418,42 +447,56 @@ fn list_display_devices(sys_root: &Path) -> Vec<DisplayDevice> {
     let devices_folder = sys_root.join(PCI_DEVICES_FOLDER);
     let mut addresses = list_folder_names(&devices_folder);
     addresses.sort();
-    addresses
-        .into_iter()
-        .filter_map(|address| {
-            let folder = devices_folder.join(&address);
-            let class = read_text_file(&folder.join("class"))?;
-            if !class.starts_with(DISPLAY_CLASS_PREFIX) {
-                return None;
-            }
-            Some(DisplayDevice {
-                vendor_id: read_text_file(&folder.join("vendor"))?,
-                device_id: read_text_file(&folder.join("device"))?,
-                address,
-            })
-        })
-        .collect()
+    let mut devices = Vec::new();
+    for address in addresses {
+        if let Some(device) = read_display_device(&devices_folder, address) {
+            devices.push(device);
+        }
+    }
+    devices
+}
+
+/// The PCI device at `address`, if it is a display device whose ids can be read.
+fn read_display_device(devices_folder: &Path, address: String) -> Option<DisplayDevice> {
+    let folder = devices_folder.join(&address);
+    let class = read_text_file(&folder.join("class"))?;
+    if !class.starts_with(DISPLAY_CLASS_PREFIX) {
+        return None;
+    }
+    let vendor_id = read_text_file(&folder.join("vendor"))?;
+    let device_id = read_text_file(&folder.join("device"))?;
+    Some(DisplayDevice {
+        address,
+        vendor_id,
+        device_id,
+    })
 }
 
 /// The first `model name` of /proc/cpuinfo (x86), else empty.
 fn read_cpu_model(proc_root: &Path) -> String {
     let text = fs::read_to_string(proc_root.join(CPU_INFO_FILE)).unwrap_or_default();
-    text.lines()
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            (key.trim() == "model name").then(|| value.trim().to_string())
-        })
-        .unwrap_or_default()
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.trim() == CPU_MODEL_KEY {
+            return value.trim().to_string();
+        }
+    }
+    String::new()
 }
 
 /// The logical CPUs: one `processor` line each in /proc/cpuinfo.
 fn read_cpu_count(proc_root: &Path) -> u32 {
     let text = fs::read_to_string(proc_root.join(CPU_INFO_FILE)).unwrap_or_default();
-    let count = text
-        .lines()
-        .filter(|line| line.split(':').next().map(str::trim) == Some("processor"))
-        .count();
-    u32::try_from(count).unwrap_or(u32::MAX)
+    let mut count: u32 = 0;
+    for line in text.lines() {
+        let key = line.split(':').next().unwrap_or_default();
+        if key.trim() == CPU_PROCESSOR_KEY {
+            count = count.saturating_add(1);
+        }
+    }
+    count
 }
 
 fn read_memory_total(proc_root: &Path) -> u64 {

@@ -3,10 +3,13 @@
 //! node.key and the handshake, and rastai-server for daemon.key, through these functions only.
 //!
 //! A key file holds the 32-byte Ed25519 secret seed and nothing else, mode 0600. A new one is written to a
-//! temporary file first and then hard-linked into place, which fails when a key already exists, so two processes
-//! starting at once can never replace each other's key: the loser reads the winner's. A key that can't be read, has
-//! the wrong size, or is open to group or others is refused with RRS-N0006. It is never replaced, because a new key
-//! is a new node id, which would silently break every pairing.
+//! temporary file of its creator's own (`<key>.new-<pid>-<random>`, never touched by anyone else) and then
+//! hard-linked into place, which fails when a key already exists, so two processes starting at once can never
+//! replace each other's key: the loser reads the winner's. A key that can't be read, has the wrong size, or is open
+//! to group or others is refused with RRS-N0006. It is never replaced, because a new key is a new node id, which
+//! would silently break every pairing.
+//!
+//! The same private-file helpers write paired_daemons.json (handshake.rs), the other file of the node's identity.
 
 use std::fs;
 use std::io::{ErrorKind, Write};
@@ -31,8 +34,10 @@ const KEY_FOLDER_MODE: u32 = 0o700;
 /// Permission bits a key file must not have: any access for group or others.
 #[cfg(unix)]
 const GROUP_AND_OTHER_BITS: u32 = 0o077;
-/// The temporary file beside the key while a new one is written.
-const NEW_KEY_SUFFIX: &str = "new";
+/// A temporary file beside its target is `<target>.new-<pid>-<random>`.
+const TEMPORARY_SUFFIX: &str = "new";
+/// Random bytes in a temporary name, so two threads of one process never pick the same name either.
+const TEMPORARY_NAME_RANDOM_BYTES: usize = 8;
 /// The daemon's id prefix: `daemon_<base32 of its public key>` (contracts 8.6). Node ids come from rastai-core.
 const DAEMON_ID_PREFIX: &str = "daemon_";
 
@@ -151,10 +156,10 @@ fn create_identity(key_path: &Path) -> Result<NodeIdentity, NodeError> {
         .as_slice()
         .try_into()
         .map_err(|_| unusable(key_path, "the random source gave too few bytes"))?;
-    let new_key_path = new_key_file_path(key_path);
-    write_new_key_file(&new_key_path, &secret)?;
+    let new_key_path = temporary_path_beside(key_path)?;
+    write_private_file(&new_key_path, &secret)?;
     let linked = fs::hard_link(&new_key_path, key_path);
-    // The temporary name is only ever ours to remove; the key stays under its real name.
+    // The temporary name is this call's alone (create_new made it); the key stays under its real name.
     let _ = fs::remove_file(&new_key_path);
     match linked {
         Ok(()) => Ok(identity_from_secret(&secret)),
@@ -170,20 +175,30 @@ fn load_existing_identity(key_path: &Path) -> Result<NodeIdentity, NodeError> {
     }
 }
 
-/// `<key>.new`. A file of that name left by a crash is replaced: nothing but this function writes it.
-fn new_key_file_path(key_path: &Path) -> PathBuf {
-    let mut file_name = key_path.file_name().unwrap_or_default().to_os_string();
-    file_name.push(".");
-    file_name.push(NEW_KEY_SUFFIX);
-    key_path.with_file_name(file_name)
+/// `<target>.new-<pid>-<random>`: a name no other writer, in this process or another, will pick. A file left by a
+/// crash is never reused or removed by a later writer, since nobody can tell it from one being written right now.
+pub(crate) fn temporary_path_beside(target: &Path) -> Result<PathBuf, NodeError> {
+    let random = random_bytes(TEMPORARY_NAME_RANDOM_BYTES)?;
+    let mut file_name = target.file_name().unwrap_or_default().to_os_string();
+    file_name.push(format!(
+        ".{TEMPORARY_SUFFIX}-{}-{}",
+        std::process::id(),
+        encode_base32(&random)
+    ));
+    Ok(target.with_file_name(file_name))
 }
 
-fn write_new_key_file(new_key_path: &Path, secret: &[u8; SECRET_KEY_BYTES]) -> Result<(), NodeError> {
-    let _ = fs::remove_file(new_key_path);
-    let mut file = open_private_file(new_key_path)?;
-    file.write_all(secret)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| unusable(new_key_path, format!("can't be written: {error}")))
+/// Creates `path`, which must not exist yet, mode 0600 from the start, and writes `bytes` to the disk before it
+/// returns, so a crash can't leave a renamed or linked file empty. On a failed write the file is removed again:
+/// create_new made it, so it is ours.
+pub(crate) fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), NodeError> {
+    let mut file = open_private_file(path)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    if let Err(error) = written {
+        let _ = fs::remove_file(path);
+        return Err(unusable(path, format!("can't be written: {error}")));
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -249,16 +264,71 @@ fn signature_refused(reason: String) -> NodeError {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Barrier};
 
     const CHALLENGE: &[u8] = b"rastai-node-handshake-v1 test challenge";
+    /// Creators racing for one key file, and how many times they race.
+    const RACING_CREATORS: usize = 8;
+    const RACE_ROUNDS: usize = 100;
     static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
 
-    fn new_test_folder() -> PathBuf {
+    /// A fresh folder, removed when the test ends, also when an assertion fails.
+    struct TestFolder {
+        path: PathBuf,
+    }
+
+    impl Drop for TestFolder {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn new_test_folder() -> TestFolder {
         let number = NEXT_FOLDER_NUMBER.fetch_add(1, Ordering::SeqCst);
-        let folder = std::env::temp_dir().join(format!("rni-{}-{number}", std::process::id()));
-        let _ = fs::remove_dir_all(&folder);
-        fs::create_dir_all(&folder).unwrap();
-        folder
+        let path = std::env::temp_dir().join(format!("rni-{}-{number}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        TestFolder { path }
+    }
+
+    fn file_names(folder: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    // Every creator must come back with the key that is on disk, whoever won, and leave no temporary file behind.
+    #[test]
+    fn creators_racing_for_one_key_all_get_the_key_on_disk() {
+        let folder = new_test_folder();
+        let start = Arc::new(Barrier::new(RACING_CREATORS));
+        let mut creators = Vec::new();
+        for _ in 0..RACING_CREATORS {
+            let start = Arc::clone(&start);
+            let root = folder.path.clone();
+            creators.push(std::thread::spawn(move || {
+                let mut ids = Vec::new();
+                for round in 0..RACE_ROUNDS {
+                    let key_path = root.join(round.to_string()).join("node.key");
+                    start.wait();
+                    ids.push(load_or_create_identity(&key_path).map(|identity| identity.public_id));
+                }
+                ids
+            }));
+        }
+        let results: Vec<Vec<Result<String, NodeError>>> =
+            creators.into_iter().map(|creator| creator.join().unwrap()).collect();
+        for round in 0..RACE_ROUNDS {
+            let key_folder = folder.path.join(round.to_string());
+            let on_disk = load_or_create_identity(&key_folder.join("node.key")).unwrap().public_id;
+            for creator_ids in &results {
+                assert_eq!(creator_ids[round].as_ref(), Ok(&on_disk), "round {round}");
+            }
+            assert_eq!(file_names(&key_folder), ["node.key"], "round {round}");
+        }
     }
 
     #[cfg(unix)]
@@ -267,7 +337,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let folder = new_test_folder();
-        let key_path = folder.join("identity").join("node.key");
+        let key_path = folder.path.join("identity").join("node.key");
         let created = load_or_create_identity(&key_path).unwrap();
         let loaded = load_or_create_identity(&key_path).unwrap();
         assert_eq!(created.public_id, loaded.public_id);
@@ -276,15 +346,14 @@ mod tests {
         assert_eq!(mode, KEY_FILE_MODE);
         let folder_mode = fs::metadata(key_path.parent().unwrap()).unwrap().permissions().mode() & 0o777;
         assert_eq!(folder_mode, KEY_FOLDER_MODE);
-        assert!(!new_key_file_path(&key_path).exists());
-        let _ = fs::remove_dir_all(&folder);
+        assert_eq!(file_names(key_path.parent().unwrap()), ["node.key"]);
     }
 
     #[test]
     fn a_signature_verifies_only_for_its_key_and_challenge() {
         let folder = new_test_folder();
-        let first = load_or_create_identity(&folder.join("a.key")).unwrap();
-        let second = load_or_create_identity(&folder.join("b.key")).unwrap();
+        let first = load_or_create_identity(&folder.path.join("a.key")).unwrap();
+        let second = load_or_create_identity(&folder.path.join("b.key")).unwrap();
         let signature = sign_challenge(&first, CHALLENGE);
         assert_eq!(signature.len(), SIGNATURE_BYTES);
         assert!(verify_challenge(&public_key_bytes(&first), CHALLENGE, &signature).is_ok());
@@ -296,20 +365,18 @@ mod tests {
         assert!(short_signature.is_err());
         let short_key = verify_challenge(&[1, 2, 3], CHALLENGE, &signature);
         assert!(short_key.is_err());
-        let _ = fs::remove_dir_all(&folder);
     }
 
     // A damaged key is refused, never replaced: a new key would be a new node id.
     #[test]
     fn a_key_of_the_wrong_size_is_refused_and_left_alone() {
         let folder = new_test_folder();
-        let key_path = folder.join("node.key");
+        let key_path = folder.path.join("node.key");
         fs::write(&key_path, b"short").unwrap();
         set_owner_only(&key_path);
         let error = load_or_create_identity(&key_path).err().unwrap();
         assert_eq!(error.code(), "RRS-N0006");
         assert_eq!(fs::read(&key_path).unwrap(), b"short");
-        let _ = fs::remove_dir_all(&folder);
     }
 
     #[cfg(unix)]
@@ -318,26 +385,24 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let folder = new_test_folder();
-        let key_path = folder.join("node.key");
+        let key_path = folder.path.join("node.key");
         load_or_create_identity(&key_path).unwrap();
         fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
         let error = load_or_create_identity(&key_path).err().unwrap();
         assert_eq!(error.code(), "RRS-N0006");
         assert!(format!("{error:?}").contains("0644"), "{error:?}");
-        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]
     fn ids_round_trip_to_their_public_key() {
         let folder = new_test_folder();
-        let identity = load_or_create_identity(&folder.join("daemon.key")).unwrap();
+        let identity = load_or_create_identity(&folder.path.join("daemon.key")).unwrap();
         let public_key = public_key_bytes(&identity);
         let daemon_id = daemon_id_from_public_key(&public_key);
         assert_eq!(daemon_id, format!("daemon_{}", identity.public_id));
         assert_eq!(public_key_from_id(&daemon_id, DAEMON_ID_PREFIX), Some(public_key));
         assert_eq!(public_key_from_id(&daemon_id, "node_"), None);
         assert_eq!(public_key_from_id("daemon_TOOSHORT", DAEMON_ID_PREFIX), None);
-        let _ = fs::remove_dir_all(&folder);
     }
 
     #[cfg(unix)]

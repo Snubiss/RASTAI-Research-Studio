@@ -60,10 +60,12 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
     log_hardware_notes(&detected);
     let hardware_sources = options.hardware_sources.clone();
     let nvidia_gpus = detected.nvidia_gpus.clone();
+    let amd_gpus = detected.amd_gpus.clone();
     let state = Arc::new(build_node_state(options, identity, detected.profile));
     // serve_worker_host (M1-43) goes here, first, so live jobs can re-Register; then reattach_jobs (M1-45),
     // reattach_llama_servers (M3) and adopt_and_sweep_sandboxes (M5).
-    start_telemetry(&state, &hardware_sources, nvidia_gpus);
+    // The loops stop when `_telemetry` is dropped: when serving ends or fails, or this future is dropped.
+    let _telemetry = start_telemetry(&state, &hardware_sources, nvidia_gpus, amd_gpus);
     // start_heartbeat_loop (M1-45) goes here.
     serve_node_services(state).await
 }
