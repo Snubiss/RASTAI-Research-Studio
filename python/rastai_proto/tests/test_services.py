@@ -85,7 +85,8 @@ SERVER_THREADS = 1
 # Long enough for a slow CI machine to start a server and answer one call.
 CALL_TIMEOUT_SECONDS = 10
 JOB_ID = "job_01JA2B3C4D5E6F7G8H9J0K1M2Q"
-WORKER_PROTOCOL_VERSION = 1
+# The version the test worker reports in Hello; any value works, so this is not contracts' WORKER_PROTOCOL_VERSION.
+HELLO_PROTOCOL_VERSION = 1
 
 
 def service_rpcs(service_name: str) -> list[tuple[str, str, str, bool]]:
@@ -118,7 +119,7 @@ class StubWorker(worker_service_pb2_grpc.WorkerServiceServicer):
     """A worker that answers Hello and streams one progress event; Control stays the generated UNIMPLEMENTED."""
 
     def Hello(self, request: HelloRequest, context: grpc.ServicerContext) -> WorkerInfo:  # noqa: N802 (gRPC name)
-        return WorkerInfo(job_id=JOB_ID, kind=JOB_KIND_TRAIN, protocol_version=WORKER_PROTOCOL_VERSION)
+        return WorkerInfo(job_id=JOB_ID, kind=JOB_KIND_TRAIN, protocol_version=HELLO_PROTOCOL_VERSION)
 
     def WatchLive(  # noqa: N802 (gRPC name)
         self, request: WatchLiveRequest, context: grpc.ServicerContext
@@ -148,6 +149,6 @@ def test_worker_service_answers_over_a_unix_socket(tmp_path: Path) -> None:
         server.stop(grace=None)
 
     assert info.job_id == JOB_ID
-    assert info.protocol_version == WORKER_PROTOCOL_VERSION
+    assert info.protocol_version == HELLO_PROTOCOL_VERSION
     assert [event.WhichOneof("payload") for event in live_events] == ["job_progress"]
     assert live_events[0].job_progress.message == "epoch 1 of 2"
