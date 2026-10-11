@@ -1,18 +1,35 @@
-//! The reference docs output: `docs/reference/errors.md`, every catalog code grouped by prefix in contracts 10.1's
-//! order (layout rust-control-plane.md 4.9). commands.md and settings.md join with rastai-formats-codegen (M1-16).
-//!
-//! Each entry gets an HTML anchor named by its `docs_anchor`, so a fix link can point at it.
+//! The reference docs outputs (layout rust-control-plane.md 4.9):
+//! - `docs/reference/errors.md`, every catalog code grouped by prefix in contracts 10.1's order, from
+//!   rastai-catalog-codegen. Each entry gets an HTML anchor named by its `docs_anchor`, so a fix link can point at it.
+//! - `docs/reference/commands.md`, every core command with its kind and stability, from rastai-formats-codegen.
+//!   settings.md joins it once the settings document is described (M1-17).
 
 use std::path::Path;
 
 use crate::catalog_ranges::{CATALOG_PREFIXES, CatalogPrefix, split_code};
 use crate::catalog_source::{CatalogSource, ErrorRecord};
+use crate::command_source::CommandDescription;
 use crate::error::CodegenError;
-use crate::literals::{CATALOG_SOURCE_NOTE, GENERATED_NOTICE, severity_word};
+use crate::literals::{CATALOG_SOURCE_NOTE, FORMATS_SOURCE_NOTE, GENERATED_NOTICE, severity_word};
 use crate::write_if_changed::write_if_changed;
 
 const ERRORS_REFERENCE_FILE: &str = "docs/reference/errors.md";
 const EMPTY_PREFIX_LINE: &str = "No codes yet.\n";
+const COMMANDS_REFERENCE_FILE: &str = "docs/reference/commands.md";
+const NO_COMMANDS_LINE: &str = "No core commands yet: the command table arrives with rastai-core (M1-21, M1-22).\n";
+const COMMANDS_TABLE_HEADER: &str = "| Command | Title | Kind | Stability | Since | Arguments | Result |
+|---|---|---|---|---|---|---|
+";
+
+const COMMANDS_INTRODUCTION: &str = "# Commands
+
+Every core command, from rastai-core's command table (contracts §6). Each one is also a CLI verb, an MCP tool, a
+palette entry and a typed JavaScript wrapper in `@rastai/client` (contracts §6.1). Its arguments and result are in
+`schemas/commands/`.
+
+Stability is `preview` for every command until the stable commands API 1.0 subset in Phase 2. From the day a command
+is `stable`, `check-schema-diff` fails a breaking change to its schema (contracts §12.6).
+";
 
 const INTRODUCTION: &str = "# Error catalog
 
@@ -84,6 +101,43 @@ fn render_entry(record: &ErrorRecord) -> String {
         text.push_str(&format!("- **Fix command:** `{}`\n", record.fix_command_id));
     }
     text
+}
+
+/// Writes commands.md under `output_root`. Returns how many files changed (0 or 1).
+pub fn write_commands_reference(output_root: &Path, commands: &[CommandDescription]) -> Result<usize, CodegenError> {
+    let changed = write_if_changed(
+        &output_root.join(COMMANDS_REFERENCE_FILE),
+        &render_commands_reference(commands),
+    )?;
+    Ok(usize::from(changed))
+}
+
+/// The whole page: notice, introduction, then one table row per command in the order given (sorted by id).
+pub fn render_commands_reference(commands: &[CommandDescription]) -> String {
+    let mut text = format!("<!-- {GENERATED_NOTICE} -->\n<!-- {FORMATS_SOURCE_NOTE} -->\n\n{COMMANDS_INTRODUCTION}\n");
+    if commands.is_empty() {
+        text.push_str(NO_COMMANDS_LINE);
+        return text;
+    }
+    text.push_str(COMMANDS_TABLE_HEADER);
+    for command in commands {
+        text.push_str(&format!(
+            "| `{}` | {} | {} | {} | {} | `{}` | `{}` |\n",
+            command.command_id,
+            table_cell(&command.title),
+            command.kind,
+            command.stability,
+            command.since_version,
+            command.arguments_type,
+            command.result_type
+        ));
+    }
+    text
+}
+
+/// Text inside a Markdown table cell: HTML escaped like the rest of the page, and a `|` can't end the cell early.
+fn table_cell(text: &str) -> String {
+    escape_html(text).replace('|', "\\|")
 }
 
 fn prefix_of(record: &ErrorRecord) -> &str {
@@ -183,6 +237,38 @@ Source: `catalog/errors/RRS-S.json`.
         };
         let text = render_errors_reference(&catalog);
         assert!(text.contains("<a id=\"disk&quot; onclick=&quot;x\"></a>"), "{text}");
+    }
+
+    fn command(command_id: &str, title: &str) -> CommandDescription {
+        CommandDescription {
+            command_id: command_id.to_string(),
+            title: title.to_string(),
+            kind: "job".to_string(),
+            stability: "preview".to_string(),
+            since_version: "0.1.0".to_string(),
+            arguments_type: "ModelLoadArgs".to_string(),
+            result_type: "ModelLoadResult".to_string(),
+        }
+    }
+
+    #[test]
+    fn no_commands_gives_the_introduction_and_one_line() {
+        let text = render_commands_reference(&[]);
+        assert!(text.starts_with(&format!(
+            "<!-- {GENERATED_NOTICE} -->\n<!-- {FORMATS_SOURCE_NOTE} -->\n\n# Commands\n"
+        )));
+        assert!(text.ends_with(&format!("\n\n{NO_COMMANDS_LINE}")));
+        assert!(!text.contains("| Command |"));
+    }
+
+    #[test]
+    fn each_command_is_a_row_with_its_stability() {
+        let text = render_commands_reference(&[command("model.load", "Load a model | <fast>")]);
+        let expected = "| Command | Title | Kind | Stability | Since | Arguments | Result |
+|---|---|---|---|---|---|---|
+| `model.load` | Load a model \\| &lt;fast&gt; | job | preview | 0.1.0 | `ModelLoadArgs` | `ModelLoadResult` |
+";
+        assert!(text.ends_with(expected), "{text}");
     }
 
     #[test]

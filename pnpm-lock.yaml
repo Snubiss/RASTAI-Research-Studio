@@ -181,6 +181,8 @@ importers:
 
   packages/catalog: {}
 
+  packages/formats: {}
+
   packages/proto:
     dependencies:
       '@bufbuild/protobuf':

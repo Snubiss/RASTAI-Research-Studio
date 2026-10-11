@@ -1,0 +1,19 @@
+# rastai_formats: rastai-formats for Python (contracts 2.2; layout rust-control-plane.md 4.7 and 4.9). M1-16 lands the
+# package with its generated dataclasses (rastai_formats/generated/, written by `just codegen`); M1-19 adds the PyO3
+# wheel (module rastai_formats._native: read_document, write_document, content hashes, the safetensors header check)
+# and moves this package's build to maturin.
+
+[project]
+name = "rastai-formats"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+# None: the generated dataclasses use the standard library only.
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_formats/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""

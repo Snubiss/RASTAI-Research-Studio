@@ -36,8 +36,8 @@
 # CI installs the same versions with tools/ci/install-dev-tools (prebuilt downloads, each checked against its SHA-256);
 # it also works here, for example `tools/ci/install-dev-tools just uv node`.
 #
-# Later tasks add their recipes here: check-names (M1-57) and check-schema-diff (M1-58), and the other rastai-codegen
-# bins join `codegen` (M1-16, M1-57).
+# Later tasks add their recipes here: check-names (M1-57) and check-schema-diff (M1-58), and rastai-names-codegen
+# joins `codegen` (M1-57).
 
 # `deny` refuses any other cargo-deny version, so every machine reads deny.toml the same way.
 cargo_deny_version := "0.20.2"
@@ -61,9 +61,9 @@ cpu_python := if os() == "windows" { cpu_environment / "Scripts/python.exe" } el
 # so every machine runs them with the same interpreter.
 check_python := cpu_python
 # The test folders under python/ that test-python-portable runs on macOS and Windows: the cpu environment's smoke
-# test and the pure-compute packages' tests (plan 8.7). rastai_data is here; rastai_formats, rastai_models and
+# test and the pure-compute packages' tests (plan 8.7). rastai_formats and rastai_data are here; rastai_models and
 # rastai_train join as they land (tests/workspace/ci-workflows.test.js fails until they do).
-portable_test_folders := "envs/tests rastai_data/tests"
+portable_test_folders := "envs/tests rastai_formats/tests rastai_data/tests"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -208,17 +208,21 @@ check-no-typescript: env-cpu
 
 # buf.gen.yaml runs the Rust plugins from your PATH, grpcio-tools from the cpu environment and protoc-gen-es from
 # node_modules, so it needs both environments. The rastai-codegen bins run after buf, in the order of layout
-# rust-control-plane.md 4.9: the catalog first, because every other crate's build needs rastai-diag's tables.
-# Regenerate every generated output: the protobuf code of proto/, then the error and term catalog of catalog/.
+# rust-control-plane.md 4.9: the catalog first, because every other crate's build needs rastai-diag's tables, then
+# the formats generator.
+# Regenerate every generated output: the protobuf code of proto/, the error and term catalog of catalog/, then the
+# schemas, JavaScript types, typed command wrappers, Python dataclasses and commands reference of rastai-formats.
 codegen: env-cpu env-js proto-tools
     buf generate
     cargo run --quiet --locked -p rastai-codegen --bin rastai-catalog-codegen
+    cargo run --quiet --locked -p rastai-codegen --bin rastai-formats-codegen
 
 # It runs the same generators as `codegen`, so it needs the same tools and both environments. Checking the tool
 # versions first means a wrong plugin shows up as an install hint, not as generated code that differs.
 # The second line runs rastai-codegen's #[ignore]d tests, the ones a plain `cargo test` on a CI runner can't: the
 # catalog's merge-base check (a code present on `base` is never deleted; it needs git history, like proto-check)
-# and the outputs check (generated JavaScript passes tsc and generated Python imports; it needs both environments).
+# and the outputs checks (generated JavaScript passes tsc and generated Python imports and round-trips; they need both
+# environments).
 # Checked-in generated code equals a fresh codegen run, and the generators' outputs work in their languages.
 codegen-check base=base_branch: env-cpu env-js proto-tools
     "{{check_python}}" tools/checks/check-generated
