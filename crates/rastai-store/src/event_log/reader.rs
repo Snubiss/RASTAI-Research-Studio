@@ -8,16 +8,26 @@
 //!
 //! How a bad frame is told apart from a torn tail (contracts 7.1): a crash can only damage the end of the file, so a
 //! frame that fails its checks counts as the torn tail when nothing but zeros follows its start (a power cut can
-//! leave a zero-filled block) or, for a checksum mismatch, when it ends exactly at the end of the file. A bad frame
-//! with real bytes after it is corruption (`RRS-S2002`).
+//! leave a zero-filled block) or, for a checksum mismatch, when nothing but zeros follows its declared end (the frame
+//! ends at the end of the file, or a power cut kept its header but zeroed its body and the block after it). A bad
+//! frame with real bytes after it is corruption (`RRS-S2002`).
 //!
 //! A frame whose declared end lies past the end of the file is usually the tail: the writer is still writing it, or
 //! died while writing it. Bit rot in its `body_length` looks the same, though, and would make a torn-tail cut drop
 //! every whole frame after it. The writer makes one write per frame, so a crash tears at most the last frame: when a
-//! whole, CRC-valid, version-1 frame with a later sequence lies in the `LATER_FRAME_SEARCH_BYTES` after the
-//! overrunning frame's header, the length was damaged and the frame is corrupt. The search checks at most
-//! `LATER_FRAME_CRC_BUDGET_BYTES` of candidate bodies; once that runs out it gives up and the frame counts as the
-//! torn tail, so crafted or unlucky bytes can't make one read slow.
+//! whole, CRC-valid, version-1 frame with a later sequence lies in the `LATER_FRAME_SEARCH_BYTES` after the bad
+//! frame's header, the length was damaged and the frame is corrupt. The same search runs before a checksum mismatch
+//! with only zeros after it is called the tail, so a length damaged to end inside a zero-filled tail can't hide the
+//! frames inside its span.
+//!
+//! Where the search looks: when the bytes after the header start as the record this frame should hold (version 1,
+//! the expected sequence), a later frame can only start where one of that record's top-level fields ends. A frame
+//! inside a field is the record's own content, a text that quotes one, and proves nothing: otherwise a torn record
+//! quoting a frame would read as corruption and stop the run from resuming. When the bytes don't start as that
+//! record (its header and body are both damaged), every byte offset is a candidate. Either way the search checks at
+//! most `LATER_FRAME_CRC_BUDGET_BYTES` of candidate bodies; once that runs out it gives up and the frame counts as
+//! the torn tail, so crafted or unlucky bytes can't make one read slow. A candidate is only evidence: the reader
+//! never returns it as a record.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -25,15 +35,15 @@ use std::path::{Path, PathBuf};
 
 use rastai_proto::events::v1::EventRecord;
 
-use crate::error::{StoreError, event_log_io_error};
+use crate::error::{StoreError, event_log_read_error};
 use crate::event_log::frame::{
-    EVENT_LOG_HEADER, FIRST_SEQUENCE, FRAME_HEADER_BYTES, FrameHeader, body_matches_header, decode_frame_body,
-    decode_frame_header,
+    EVENT_LOG_HEADER, FIRST_SEQUENCE, FRAME_HEADER_BYTES, FrameHeader, body_matches_header, body_starts_as_record,
+    decode_frame_body, decode_frame_header, field_end_at,
 };
 
 /// How much of the file the zero-tail check reads at a time.
 const ZERO_SCAN_CHUNK_BYTES: usize = 64 * 1024;
-/// How far past an overrunning frame's header the reader looks for a whole later frame (see the top of this file).
+/// How far past a bad frame's header the reader looks for a whole later frame (see the top of this file).
 /// A record carries hashes, not data, so a real frame is a few KiB: 1 MiB holds the damaged frame's true body and
 /// the frame after it many times over, and it bounds the memory a damaged length can cost. A later frame that
 /// doesn't lie wholly inside it isn't seen, and the overrunning frame is then cut off as the torn tail.
@@ -42,8 +52,15 @@ const LATER_FRAME_SEARCH_BYTES: usize = 1024 * 1024;
 /// byte offset is a candidate, and each candidate whose length fits costs a CRC over its body, so bytes crafted to
 /// fit at every offset would cost about 1 MiB times 1 MiB (minutes per read, repeated on every tailer poll). With
 /// this budget the work is linear, milliseconds at most. A real search spends a few KiB of it, because random
-/// lengths rarely fit; when it runs out the overrunning frame counts as the torn tail.
+/// lengths rarely fit; when it runs out the bad frame counts as the torn tail.
 const LATER_FRAME_CRC_BUDGET_BYTES: usize = 4 * 1024 * 1024;
+
+/// What trying one candidate offset in the search found.
+enum Candidate {
+    LaterFrame,
+    Nothing,
+    BudgetSpent,
+}
 
 /// What one `read_next_frame` call found.
 // The record is held by value, as the layout's signature has it (rust-control-plane.md 6.2): one FrameRead exists
@@ -76,7 +93,7 @@ pub struct EventLogReader {
 /// Opens a log for reading. Nothing is read yet: the first `read_next_frame` checks the header, so a tailer may open
 /// a log whose writer hasn't written its header yet.
 pub fn open_event_log(path: &Path) -> Result<EventLogReader, StoreError> {
-    let file = File::open(path).map_err(|error| event_log_io_error(path, &error))?;
+    let file = File::open(path).map_err(|error| event_log_read_error(path, &error))?;
     Ok(EventLogReader {
         file,
         path: path.to_path_buf(),
@@ -117,7 +134,7 @@ pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreEr
     let frame_end = frame_start + FRAME_HEADER_BYTES as u64 + u64::from(header.body_length);
     // Checked before allocating, so a damaged length can't ask for 4 GiB of memory.
     if frame_end > file_length {
-        return classify_overrunning_frame(reader, frame_start, file_length);
+        return torn_unless_a_later_frame_follows(reader, frame_start, file_length);
     }
 
     let mut body = vec![0u8; header.body_length as usize];
@@ -181,18 +198,21 @@ fn classify_bad_frame(
     file_length: u64,
     checksum_matches: bool,
 ) -> Result<FrameRead, StoreError> {
-    let torn_at_the_end = !checksum_matches && frame_end == file_length;
-    if torn_at_the_end || rest_of_file_is_zero(reader, frame_start, file_length)? {
+    if rest_of_file_is_zero(reader, frame_start, file_length)? {
         return Ok(FrameRead::Incomplete {
             valid_bytes: frame_start,
         });
     }
+    // A matching checksum means these are the bytes the writer wrote, so a crash didn't make them.
+    if !checksum_matches && rest_of_file_is_zero(reader, frame_end, file_length)? {
+        return torn_unless_a_later_frame_follows(reader, frame_start, file_length);
+    }
     Ok(FrameRead::Corrupt { offset: frame_start })
 }
 
-/// A frame whose declared end lies past the end of the file: the torn (or still unfinished) tail, unless a whole
-/// later frame follows its header, which proves its length is damaged (see the top of this file).
-fn classify_overrunning_frame(
+/// A bad frame with nothing but its own bytes and zeros left in the file: the torn (or still unfinished) tail,
+/// unless a whole later frame follows its header, which proves its length is damaged (see the top of this file).
+fn torn_unless_a_later_frame_follows(
     reader: &mut EventLogReader,
     frame_start: u64,
     file_length: u64,
@@ -206,9 +226,9 @@ fn classify_overrunning_frame(
     })
 }
 
-/// True when a whole later frame lies inside the `LATER_FRAME_SEARCH_BYTES` from `search_start`. Every byte offset
-/// is tried, because the damaged length says nothing about where the next frame really starts. False as well when
-/// the candidates use up `LATER_FRAME_CRC_BUDGET_BYTES` before one is found.
+/// True when a whole later frame lies inside the `LATER_FRAME_SEARCH_BYTES` from `search_start`, the first byte
+/// after the bad frame's header. False as well when the candidates use up `LATER_FRAME_CRC_BUDGET_BYTES` before one
+/// is found.
 fn whole_later_frame_follows(
     reader: &mut EventLogReader,
     search_start: u64,
@@ -220,22 +240,60 @@ fn whole_later_frame_follows(
     let bytes_read = read_at(reader, search_start, &mut window)?;
     window.truncate(bytes_read);
 
-    let mut crc_budget_left = LATER_FRAME_CRC_BUDGET_BYTES;
-    let mut candidate_start = 0;
-    while candidate_start + FRAME_HEADER_BYTES <= window.len() {
-        let candidate = &window[candidate_start..];
-        if let Some(body_length) = body_length_if_it_fits(candidate) {
-            if body_length > crc_budget_left {
-                return Ok(false);
-            }
-            crc_budget_left -= body_length;
-            if is_whole_later_frame(candidate, body_length, reader.next_sequence) {
-                return Ok(true);
-            }
-        }
-        candidate_start += 1;
+    if body_starts_as_record(&window, reader.next_sequence) {
+        return Ok(later_frame_at_a_field_end(&window, reader.next_sequence));
     }
-    Ok(false)
+    Ok(later_frame_at_any_offset(&window, reader.next_sequence))
+}
+
+/// The search when `window` starts as the bad frame's own record: a later frame can only start where one of the
+/// record's top-level fields ends, because anything inside a field is the record's own content. Past the record's
+/// true end the walk reads the next frame's bytes as fields, but by then the true end has been tried.
+fn later_frame_at_a_field_end(window: &[u8], next_sequence: u64) -> bool {
+    let mut crc_budget_left = LATER_FRAME_CRC_BUDGET_BYTES;
+    let mut field_end = 0;
+    while let Some(next_field_end) = field_end_at(window, field_end) {
+        field_end = next_field_end;
+        match try_candidate(&window[field_end..], next_sequence, &mut crc_budget_left) {
+            Candidate::LaterFrame => return true,
+            Candidate::BudgetSpent => return false,
+            Candidate::Nothing => {}
+        }
+    }
+    false
+}
+
+/// The search when `window` doesn't start as the bad frame's own record (its body is damaged too): every byte offset
+/// is tried, because the damaged length says nothing about where the next frame really starts.
+fn later_frame_at_any_offset(window: &[u8], next_sequence: u64) -> bool {
+    let mut crc_budget_left = LATER_FRAME_CRC_BUDGET_BYTES;
+    for candidate_start in 0..window.len() {
+        match try_candidate(&window[candidate_start..], next_sequence, &mut crc_budget_left) {
+            Candidate::LaterFrame => return true,
+            Candidate::BudgetSpent => return false,
+            Candidate::Nothing => {}
+        }
+    }
+    false
+}
+
+/// Whether `bytes` start with a whole later frame, paying for its CRC-32 out of `crc_budget_left`. A candidate whose
+/// declared body doesn't fit in `bytes` costs nothing.
+fn try_candidate(bytes: &[u8], next_sequence: u64, crc_budget_left: &mut usize) -> Candidate {
+    if bytes.len() < FRAME_HEADER_BYTES {
+        return Candidate::Nothing;
+    }
+    let Some(body_length) = body_length_if_it_fits(bytes) else {
+        return Candidate::Nothing;
+    };
+    if body_length > *crc_budget_left {
+        return Candidate::BudgetSpent;
+    }
+    *crc_budget_left -= body_length;
+    if is_whole_later_frame(bytes, body_length, next_sequence) {
+        return Candidate::LaterFrame;
+    }
+    Candidate::Nothing
 }
 
 /// The body length the frame header at the start of `bytes` declares, when that body lies wholly inside `bytes`;
@@ -292,7 +350,7 @@ fn current_file_length(reader: &EventLogReader) -> Result<u64, StoreError> {
     let metadata = reader
         .file
         .metadata()
-        .map_err(|error| event_log_io_error(&reader.path, &error))?;
+        .map_err(|error| event_log_read_error(&reader.path, &error))?;
     Ok(metadata.len())
 }
 
@@ -302,14 +360,14 @@ fn read_at(reader: &mut EventLogReader, offset: u64, buffer: &mut [u8]) -> Resul
     reader
         .file
         .seek(SeekFrom::Start(offset))
-        .map_err(|error| event_log_io_error(&reader.path, &error))?;
+        .map_err(|error| event_log_read_error(&reader.path, &error))?;
     let mut filled = 0;
     while filled < buffer.len() {
         match reader.file.read(&mut buffer[filled..]) {
             Ok(0) => break,
             Ok(count) => filled += count,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(event_log_io_error(&reader.path, &error)),
+            Err(error) => return Err(event_log_read_error(&reader.path, &error)),
         }
     }
     Ok(filled)

@@ -25,7 +25,10 @@ are in `docs/architecture/contracts.md` §8.2 (tables and columns) and §15.1 (c
   `src/`. Every test removes its temporary folder at its end.
 - **A failed read is `RRS-S0006`, a failed write `RRS-S3005`** (or `RRS-S3002` for a full disk): `sqlite.rs`
   decides by the connection, a reader's or the writer's. A reader that can't open its file failed a read too;
-  `RRS-S0004` ("not writable") is the writer's alone.
+  `RRS-S0004` ("not writable") is the writer's alone. Event logs follow the same split: opening or reading a log is
+  `RRS-S0006`, creating, writing or syncing one `RRS-S3005` (`error.rs`).
+- **One parser of event-log bytes.** Every reader of a log goes through `event_log/reader.rs`, and only
+  `event_log/frame.rs` encodes or decodes frame bytes; the `event_frame` fuzz target covers both (ADR-0037).
 - **The runtime folder may be shared `/tmp`.** `take_daemon_lock` refuses (`RRS-S0007`) a runtime folder that is a
   link, another user's or open to group or others, and a `daemon.lock` that is a link or not a regular file, before
   writing anything; the lock file is never truncated on open, only rewritten once the lock is held.
