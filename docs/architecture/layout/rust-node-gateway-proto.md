@@ -1695,11 +1695,11 @@ One table for the plan. Each row is what this doc's crates must deliver for that
 | 3 Inference (7–8) | leases (with `may_reclaim_evictable`), models, generation, `TokenizationOverride` | `sse.rs` | | endpoints, both runtimes through the node, API adapters, templates (with user overrides), tokenizer, logging, incognito, retention | leases, models, routing, llama-server |
 | 4 Psychology (9–10) | `interventions_json`, tensors, sessions, `command_call.proto` | | | live packets, steering presets | session routing, plugin modules (namespace probe, first-party fallback) |
 | 5 Training and Evaluation (11–12) | `GatewayGenerate`, `TokenizeChat`, blobs, `ResizeLease`, `GetSecret` (`hf_upload`, `mysql:`), sandbox service | | create, exec, remove, caps, labels, deadlines, orphan sweep | node gateway, `DaemonForward`, target masks | `gateway_host.rs`, sandbox RPCs, blob RPCs, the MySQL reader's credential |
-| 7 Agent Gym | | | pause and resume, pull progress | `job:` refs, tool-call deltas (L2) | gym tools, step mode |
+| 7 Agent Gym | | | pause and resume, pull progress, the egress proxy for `network_hosts` (plan §10 row 27) | `job:` refs, tool-call deltas (L2) | gym tools, step mode |
 | 8 Plugins | | | | plugin chat templates and tokenizer files | |
 | 9 Remote (11–12) | files, `UpdateNode` | `ssh.rs`, SSH `NodeConnection`, `transfer.rs` | | | transfers, node cache, self-update (minimal path), key pinning |
 | 11 Long-term storage (after the 90 days) | the `archive.*` event payloads | `http_client.rs` for an S3 target (M11-E04) | | | nothing: the node never talks to the archive |
-| Phase 2 / 3 | `provider/v1` (Phase 3) | `quic.rs` (iroh), named pipes | egress proxy for allowlists | | |
+| Phase 2 / 3 | `provider/v1` (Phase 3) | `quic.rs` (iroh), named pipes | | | |
 
 Step 6 (Designer) needs nothing new from these crates beyond what earlier steps built.
 

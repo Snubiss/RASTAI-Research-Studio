@@ -1,6 +1,6 @@
 # Frontend and Plugins: Code Layout
 
-**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names (`docs/architecture/contracts.md` v1.2). v1.1 applies the owner decisions of 2026-10-10: plain JavaScript instead of TypeScript (ADR-0036), the theme token contract and the locked security UI, the `CommandExecutor` shape and the client's credential option, no domain logic in `apps/web`, custom frontends (2.11), origin-bound sessions (ADR-0034), direct core commands for Psychology's interactive controls, and blind A/B votes as a project document. Its "New names" section is gone: those names now live in contracts.md.
+**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names (`docs/architecture/contracts.md` v1.2). v1.1 applies the owner decisions of 2026-10-10: plain JavaScript instead of TypeScript (ADR-0036), the theme token contract and the locked security UI, the `CommandExecutor` shape and the client's credential option, no domain logic in `apps/web`, custom frontends (2.11), origin-bound sessions (ADR-0034), direct core commands for Psychology's interactive controls, and blind A/B votes as a project document. Its "New names" section is gone: those names now live in contracts.md. M1-01 (2026-10-11) moves the tutorials and assistant skills to Phase 2, as the plan's level table has them (plan §10 row 45; tutorials are L3 work, ADR-0017); their design stays in 8.4.
 
 **Covers:**
 - `apps/web` (the React app) and `apps/desktop` (the Tauri 2 shell);
@@ -1984,7 +1984,7 @@ Every section folder has `section.json` (the plugin manifest schema, contracts �
 ```
 src/sections/
   home/
-    HomeSection.jsx             outcome cards, the First Run checklist, "Take the tour" (opens core.assistant on first-run)
+    HomeSection.jsx             outcome cards, the First Run checklist, "Take the tour" (Phase 2 with the tutorials, plan §10 row 45)
     OutcomeCard.jsx
     FirstRunChecklist.jsx       hardware, environment, model and SAE download, HF sign-in; each step is a command
     HardwareSummary.jsx         system.hardware and the doctor result; says plainly when no GPU is usable, offers 270M
@@ -2185,7 +2185,7 @@ sequenceDiagram
   - **Show me:** runs `show_me_command_id`. A view action navigates or opens a panel. A daemon command opens in `CommandForm`, prefilled, so the user presses Run. Nothing runs without the user.
   - `tutorial.list` (scope `read`, sync) returns the built-in tutorials with titles and step counts. Progress lives in React state for the session; a finished step is re-checked, not remembered.
   - **Assistant skills:** `assistant-skills.js` reads `host.contributions("assistant_skills")`. Each skill is `{skill_id, title, prompt, command_ids[]}`. In the prototype the panel lists each skill and its commands, and each command opens in `CommandForm`. The capability `assistant.skill@1` is experimental (contracts §5.5), so a third-party skill loads only with `plugins.experimental_apis` on.
-  - The language-model assistant that answers free text and runs "do it" by itself is Phase 2 (section 19, question 11). The prototype ships tutorials at L0/L1 and skill registration.
+  - The language-model assistant that answers free text and runs "do it" by itself is Phase 2 (section 19, question 11). The tutorials and assistant skills above are Phase 2 too: tutorials are L3 work (ADR-0017 decision 3), and plan §10 row 45 schedules both there. This design is ready for then.
 - **Sending files:** `FileDrop` uploads files up to 256 MiB with `PUT /api/blobs` and calls `file.open` with the blob. Bigger files get "Open from disk", which uses `file.browse` and opens by path.
 - **Embedding:** `rastai-server` embeds `apps/web/dist/` in the binary. `index.html` is served `no-store`; hashed assets `immutable`. The CSP the daemon sends must allow `'wasm-unsafe-eval'` (the `@rastai/formats` validator) and `frame-src` for `/plugins/*`, and nothing from other origins.
 - **Dev loop:** `just dev-web` runs Vite with a proxy to `127.0.0.1:47820` that rewrites the `Host` and `Origin` headers on every request, `/api/login` included, so the session is bound to the daemon's origin and every later request matches it. The daemon needs no dev flag.
@@ -2204,7 +2204,7 @@ One step of the First Run tutorial (`templates/tutorials/first-run.tutorial.json
 }
 ```
 
-The First Run tutorial covers minutes 3–10 of spec §6: load a model, chat, open the live panel, drag a concept slider, branch, Teach it, read the Verify panel. Home's First Run checklist already covers minutes 0–3 (environment, downloads, HF sign-in), so the two don't repeat each other. Steps are added as their sections land (8.9).
+The First Run tutorial covers minutes 3–10 of spec §6: load a model, chat, open the live panel, drag a concept slider, branch, Teach it, read the Verify panel. Home's First Run checklist already covers minutes 0–3 (environment, downloads, HF sign-in), so the two don't repeat each other. Tutorials are L3 work, built in Phase 2 (ADR-0017 decision 3, plan §10 row 45); this design is ready for them.
 
 ### 8.5 Dependencies
 
@@ -2241,7 +2241,7 @@ The First Run tutorial covers minutes 3–10 of spec §6: load a model, chat, op
 | `chat.spec.js` | send, stream, stop, branch, star, pin, incognito never stored |
 | `reconnect.spec.js` | kill -9 the daemon mid-stream; restart; resync; the user message is stored and Regenerate works (plan §10 row 23); a typed but unsent message in the composer survives a page reload and is gone after it's sent |
 | `second-window.spec.js` | "Open in new window" on a run dashboard: the new window is signed in by the cookie alone, opens its own event stream, and shows the same live metrics; hiding it for 60 s pauses only its stream |
-| `tutorial.spec.js` | the First Run tutorial on the fixture model: each step's check fails before the action and passes after it; every command id in `templates/tutorials/` is a `view.*` action or exists in `ListCommands` |
+| `tutorial.spec.js` (Phase 2, plan §10 row 45) | the First Run tutorial on the fixture model: each step's check fails before the action and passes after it; every command id in `templates/tutorials/` is a `view.*` action or exists in `ListCommands` |
 | `egress.spec.js` | an HF download from `fixtures/hf-server/` and an API chat against the mock API server turn the badge on with the right host; `privacy.show_egress_badge` off hides it |
 | `palette.spec.js` | Ctrl/Cmd-K, Basic filtering, forms, copy as, keybindings |
 | `basic-advanced.spec.js` | the two rules of 2.4 for every section |
@@ -2264,13 +2264,13 @@ None directly. Lessons: render at frame rate, not event rate (spike 02 packet ra
 | Step | What lands in `apps/web` |
 |---|---|
 | 1 | shell: boot, routing, event hub, stores, the theme (`state/theme.js`, Appearance page), the security UI from `@rastai/ui/security`, palette, workspace, plugin host (in-process), Settings (settings, tokens, secrets), Plugins (list only), Remote (local node only) |
-| 2 | Home's First Run checklist: environments, doctor, downloads, HF sign-in; the egress badge (HF downloads are the first egress); `core.assistant` with `tutorial-runner.js` and `TutorialList` |
-| 3 | Inference; the First Run tutorial's chat steps |
-| 4 | Psychology loads (plugin); Designer's live-highlight hook point; the tutorial's live panel and slider steps |
-| 5 | Training, Data; Evaluation loads (plugin); the dashboard's second window; the tutorial's Teach it and Verify steps |
+| 2 | Home's First Run checklist: environments, doctor, downloads, HF sign-in; the egress badge (HF downloads are the first egress). `tutorial-runner.js`, `TutorialList` and the tutorial steps of later rows move to Phase 2 (plan §10 row 45); so do `core.assistant` and assistant skills |
+| 3 | Inference |
+| 4 | Psychology loads (plugin); Designer's live-highlight hook point |
+| 5 | Training, Data; Evaluation loads (plugin); the dashboard's second window |
 | 6 | Designer |
 | 7 | Gym |
-| 8 | Plugins section complete (install, trust prompt, dev), `IframePanel` and the bridge, macros, `assistant-skills.js` |
+| 8 | Plugins section complete (install, trust prompt, dev), `IframePanel` and the bridge, macros (`assistant-skills.js` is Phase 2, plan §10 row 45) |
 | 9 | Remote: pairing, transfers, headless help |
 | M8 | plugin themes in the Appearance picker, the high-contrast built-ins, `theme_override` per panel (or Phase 2) |
 | M11 | `ArchivePage.jsx` (Settings > Storage > Archive), pruned-run stubs with Restore (M11-E06) |
@@ -3453,13 +3453,13 @@ UI fixtures (contracts §12.5): `fixtures/ui/graphs/`, `fixtures/ui/live-packets
 | Step | Frontend and plugin work that lands |
 |---|---|
 | 1 Foundation (M1) | `@rastai/client` with the credential option, `CommandExecutor`, the generated wrappers and the executor contract table; `@rastai/ui` theme token contract (built-in themes, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS`), the security components, basics and mode primitives; `@rastai/plugin` host shape, registry, state tools, host contract table; `apps/web` shell with the theme, the Appearance page, palette, workspace and in-process plugin host; Settings, Plugins (list), Remote (local node); `apps/desktop` window and launch; `check-js`, `check-no-typescript`, `check-colors`, prettier; `rastai_plugin` registry, module loader, `JobEvents`, `JobControl`, `WorkerHost.register` |
-| 2 Unified runtime | Home's First Run checklist (environments, doctor, downloads, HF sign-in); the egress badge from `egress.active`; `core.assistant`, the tutorial runner, `tutorial.list` and `tutorial.check` |
-| 3 Inference | Inference section; chat streaming through `LiveBuffer`; the composer's draft store; `model.vocabulary`; Markdown; blob upload; `rastai_plugin.Sampler`; the First Run tutorial's chat steps |
-| 4 Psychology | `@rastai/psychology-ui`; `@rastai/viz` heatmaps, bars, histograms, then 3D flow and vector space; `@rastai/canvas` core for the attribution graph; `LensView`; `rastai_plugin.Lens`; direct `chat.settings.set` sliders and the latency budget test; the tutorial's live panel and slider steps |
-| 5 Training and Evaluation | Training and Data sections; `LineChart`; the dashboard's second window (`view.window.open`, desktop second windows); `@rastai/eval-ui` with votes in `evals/votes.rrsdata` and the judge trust bar; `MetricView`; `rastai_plugin.Metric`, `Recipe`, `Converter`, `BenchmarkLoader`, `DataSource`; the tutorial's Teach it and Verify steps |
+| 2 Unified runtime | Home's First Run checklist (environments, doctor, downloads, HF sign-in); the egress badge from `egress.active`. The tutorial runner, `tutorial.list`, `tutorial.check` and every tutorial step are Phase 2 (plan §10 row 45) |
+| 3 Inference | Inference section; chat streaming through `LiveBuffer`; the composer's draft store; `model.vocabulary`; Markdown; blob upload; `rastai_plugin.Sampler` |
+| 4 Psychology | `@rastai/psychology-ui`; `@rastai/viz` heatmaps, bars, histograms, then 3D flow and vector space; `@rastai/canvas` core for the attribution graph; `LensView`; `rastai_plugin.Lens`; direct `chat.settings.set` sliders and the latency budget test |
+| 5 Training and Evaluation | Training and Data sections; `LineChart`; the dashboard's second window (`view.window.open`, desktop second windows); `@rastai/eval-ui` with votes in `evals/votes.rrsdata` and the judge trust bar; `MetricView`; `rastai_plugin.Metric`, `Recipe`, `Converter`, `BenchmarkLoader`, `DataSource` |
 | 6 Designer | Designer section; `@rastai/canvas` editing, hierarchy, accessibility mirror; `NodeType`, `Importer`, `Exporter`. §32 week 13: AppImage, `.deb`, file associations, updater |
 | 7 Agent Gym | Gym section; `RewardFunction`; `WorkerHost.list_tools` and `call_tool` |
-| 8 Plugins | iframe bridge; `IframePanel`; Plugins section (install, trust prompt, dev); `.jsx` templates; `plugin.new`, `plugin.codegen`, `dev`, `test`, `lint`, `pack`; `rastai_plugin.testing`; `crates/rastai-plugin` skeleton; macros; assistant skills (`assistant-skills.js`). Theme plugins end to end with the accessibility check and the picker, follow-OS high-contrast themes, the font assets path, icon sets (`rastai.icon_set/1`), per-panel `theme_override` (or Phase 2) |
+| 8 Plugins | iframe bridge; `IframePanel`; Plugins section (install, trust prompt, dev); `.jsx` templates; `plugin.new`, `plugin.codegen`, `dev`, `test`, `lint`, `pack`; `rastai_plugin.testing`; `crates/rastai-plugin` skeleton; macros (assistant skills are Phase 2, plan §10 row 45). Theme plugins end to end with the accessibility check and the picker, follow-OS high-contrast themes, the font assets path, icon sets (`rastai.icon_set/1`), per-panel `theme_override` (or Phase 2) |
 | 9 Remote | Remote section (pairing, transfers, headless help); SSH traffic in the egress badge (purpose `remote_node`) |
 | M11 Long-term storage | Settings > Storage > Archive (`ArchivePage.jsx`), pruned-run stubs with Restore, the egress badge during sync (M11-E06) |
 | Phase 2 | the unsupported user stylesheet with the security UI in closed shadow roots; daemon-hosted alternative UIs; `token.pair`; an origin allowlist with CORS (on demand); the stable commands API 1.0 subset (`check-schema-diff` runs from M1); npm packages with `PacketStore` and token decoding in a shared package; a reference TUI in CI; proto-JSON for `EventService` if M9 didn't need it |
@@ -3504,6 +3504,6 @@ Each has the default this doc uses until the owner decides. Row numbers are stab
 | 4 | Should a daemon started by the desktop exit when idle? | No in the prototype (jobs may be running). Revisit with the daemon doc. |
 | 9 | Browser upload cap for dropped files. | 256 MiB; bigger files open by path with `file.browse`. |
 | 10 | AppImage file associations. | Not self-registered in the prototype; the `.deb` registers them. |
-| 11 | The language-model assistant: free-text questions, and "show me" or "do it" decided by a model (spec §7). | Phase 2. The prototype ships tutorials at L0/L1 (checks through `tutorial.check`, Show me that opens a view or a prefilled `CommandForm`) and assistant-skill registration (skills listed, their commands runnable by the user). Nothing in the prototype interprets free text or runs a command the user didn't press. |
+| 11 | The language-model assistant: free-text questions, and "show me" or "do it" decided by a model (spec §7). | Phase 2, with the tutorials (checks through `tutorial.check`, Show me that opens a view or a prefilled `CommandForm`) and assistant-skill registration (skills listed, their commands runnable by the user): tutorials are L3 work (ADR-0017 decision 3), and plan §10 row 45 schedules both in Phase 2. Their design in 8.4 is ready for then. Nothing in the prototype interprets free text or runs a command the user didn't press. |
 | 12 | Does the pinned Tauri version expose a new-window hook on the webview, so `window.open` can create a second guarded window? | Verify against the pinned version in M1-55. If it doesn't, the navigation guard does it: `view.window.open` navigates to `/?new_window=1#<route>`, and the guard cancels that navigation and opens a second window at `/#<route>` instead. The page detects neither case; both are plain URLs. |
 | 14 | How do npm packages (Phase 2) ship declarations for `@rastai/plugin`'s hand-written JSDoc? | Not needed in the prototype: packages export their source, and editors read the JSDoc directly. At Phase 2 publishing, decide between shipping source only and generating a `.d.ts` bundle; generating one with `tsc --emitDeclarationOnly` would widen the `typescript` package's dev-tool role, so it needs the owner's yes. |

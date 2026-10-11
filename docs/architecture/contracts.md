@@ -13,13 +13,13 @@ Conventions in this file:
 - "Phase 2" or "Phase 3" marks something designed now and built later. Everything else is in the prototype.
 - **"(L2)"** marks a name designed now but built only after the core loop reaches L2 (ADR-0017). Build the minimal durable path first: event logs, reattach, atomic writes.
 - "(M8)", "(M11)" and so on mark a name first built in that milestone (plan §2).
-- **Milestone markers are read by `check-names`.** A name listed here but not yet in the code must carry one of these markers: `(M<n>)`, `(L2)`, `(Phase 2)` or `(Phase 3)`. A marker covers the name it follows, the table row it sits in, or the whole section when it is in the heading. An unmarked name that the code doesn't have fails as stale (12.6).
+- **Milestone markers are read by `check-names`.** A name listed here but not yet in the code must carry one of these markers: `(M<n>)`, `(L2)`, `(Phase 2)` or `(Phase 3)`. A marker covers the name it follows, the table row it sits in, or the whole section when it is in the heading. When markers nest, the nearest one is the name's milestone: its own, then its row's, then its heading's (`plugin.list` (M1) / `plugin.permissions` (M8) in one cell). An unmarked name that the code doesn't have fails as stale (12.6).
 - "(spike)" marks a decision that comes from a measured spike result.
 - Spec section numbers are written as §n.
 
 ### Changes in v1.2
 
-Owner-approved on 2026-10-11.
+Items 1–10 owner-approved on 2026-10-11. Items 11 and 12 are M1-01's marker pass, for the owner's review in its PR.
 
 1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
 2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
@@ -31,6 +31,8 @@ Owner-approved on 2026-10-11.
 8. **Theme token group key is `typography` everywhere**; no `type` group remains in any document, token file or example (5.2, 5.6, 15.11).
 9. **Small fixes so `check-names` can read this file:** the desktop crate is named by its Cargo package, `rastai-desktop` (2.1, 15.1, 15.11); `apps/web` rows lead with `@rastai/web` (15.3); 8.2 and 8.3 list every column, and 8.3 gains the vault's `schema_migrations`; the `archive.objects` settings cell is valid markup (11.2).
 10. **§27 approvals noted where this file lists them** (2.5): `@vitest/browser`, axe-core and the Tauri CLI as dev tooling, the Tauri updater plugin as foundation, MinIO as a test-only CI service, and a named license entry for pillow (MIT-CMU/HPND) in `deps/allowlist-python.json`.
+11. **Every registered name carries its milestone** (M1-01; 12.6 "Landing"). No code exists yet, so each name `check-names` reads has a marker: the crates and packages of 2.1–2.3 and 15.1–15.3, the schema ids of 5.2, the commands of 6.4, the event types of 7.3, the tables of 8.2 and 8.3, the 10.3 codes (the heading's "(M1)", with the plugin ranges `RRS-L` (M4) and `RRS-V` (M5)) and the settings sections of 11.2. Each milestone is the one whose task builds or registers the name. When markers nest, the nearest wins (conventions).
+12. **Fixes found while marking.** Tutorials and assistant skills are Phase 2 (plan §10 row 45: `tutorial.list`, `tutorial.check`, `rastai.tutorial/1`). `vault_changes` is built in M3 by M3-E02, not M11 (8.3). `archive_cursors` arrives with M11's migration, as plan M1-23 says; the control-plane layout follows. The settings example is `RASTAI_DAEMON__PORT` (11.1), because `gateway.port` isn't a key. 15.6 registers the settings page id `psychology.settings`. 2.5 cites ADR-0037 beside `miniz_oxide` and `torchvision.io.decode_image`. The node layout's build table puts the egress proxy at step 7 (plan §10 row 27).
 
 ### Changes in v1.1
 
@@ -215,42 +217,42 @@ Decisions in this tree:
 
 | Crate | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
-| `rastai-diag` | Catalog tables (generated from `catalog/`), `Diagnostic` type, text renderer, JSON-lines logger (`init_logger`, `log_info`) | all Rust processes, WASM | none | serde, serde_json |
-| `rastai-proto` | Generated protobuf messages and gRPC stubs | daemon, node, CLI, provider | none | prost, tonic |
-| `rastai-formats` | Every document type: parse, validate (4 layers), migrate, write; safetensors reader/writer (the one header validator); GGUF header reader and writer; zip reader and writer; content hashing (the one BLAKE3 wrapper); CRC-32 table; type descriptions for codegen | daemon, node, CLI, browser (WASM), Python (PyO3) | `rastai-diag` | serde, serde_json, blake3, miniz_oxide |
-| `rastai-formats-wasm` | `crates/rastai-formats/bindings/wasm/`: cdylib, plain string and byte functions for the browser | browser | `rastai-formats`, `rastai-diag` | wasm-bindgen |
-| `rastai-formats-python` | `crates/rastai-formats/bindings/python/`: cdylib, module `rastai_formats._native` | Python | `rastai-formats`, `rastai-diag` | pyo3 |
-| `rastai-core` | Command registry (`CommandRow` table + dispatch), ids, principals, scopes, shared state enums, settings resolution, paths, versions, protobuf JSON for wire types stored in documents (section 4) | daemon, node, CLI | `rastai-diag`, `rastai-formats`, `rastai-proto` | serde, serde_json |
-| `rastai-plugin` | Rust plugin SDK: provider-process skeleton, manifest helpers | provider processes | `rastai-diag`, `rastai-formats`, `rastai-proto` | tokio, tonic |
-| `rastai-store` | `rastai.db` and `vault.db` (one writer thread each), blob store, event-log reader/writer, migrations, rebuild, daemon lock, free disk space | daemon, node, CLI (offline rebuild) | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-diag` | rusqlite, prost, tokio (`sync` only), libc (one file, ADR-0033) |
-| `rastai-transport` | Local IPC (Unix socket; named pipe later), SSH via the OpenSSH binary, HTTP(S) client, tonic channels over these, resumable transfers | daemon, node, CLI | `rastai-core`, `rastai-formats` (hashing), `rastai-proto`, `rastai-diag` | tokio, tonic, tower, hyper, hyper-util, rustls, tokio-rustls, webpki-roots |
-| `rastai-sandbox` | Docker-API client over the engine socket: create, exec, pause, remove, caps, labels, orphan sweep; the HTTP CONNECT egress proxy | node | `rastai-core`, `rastai-proto`, `rastai-diag` | tokio, hyper, hyper-util, serde_json |
-| `rastai-gateway` | OpenAI and Anthropic endpoints, adapters, chat templates, tokenization, token logging through a `LogSink` | daemon (user endpoints), node (rollout and judge gateway) | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-transport`, `rastai-diag` | axum, tokio, tonic (node-runtime and daemon-forward adapters), tokenizers, minijinja, serde, serde_json |
-| `rastai-mcp` | MCP server (tools generated from the command registry) and MCP client (harness tools) | daemon, CLI (`rastai mcp` stdio bridge), node (gym tools) | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-transport`, `rastai-diag` | tokio, serde_json |
-| `rastai-node` | Node agent: job supervisor, uv environments, VRAM leases, telemetry, hardware detection, HF downloads, transfers, llama-server management, NodeService server, the one Ed25519 wrapper | daemon (embedded node), `rastai node serve` | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-store`, `rastai-transport`, `rastai-sandbox`, `rastai-gateway`, `rastai-mcp`, `rastai-diag` | tokio, tonic, ed25519-dalek |
-| `rastai-archive` | Long-term archive (M11): one-way, idempotent replication of event records, index rows and blob metadata to MySQL or MariaDB; blob copies to archive targets; prune, restore, verify, purge (8.7) | daemon | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-store`, `rastai-transport`, `rastai-diag` | mysql_async (`default-rustls-ring`, default features off), tokio |
-| `rastai-server` | Daemon: Connect HTTP API, request gate and sessions, scheduling and chain driver, plugin host, import/export, ModelSpec analysis (live stats, memory, the one layer-placement planner), data-policy check, NodeHubService, MCP endpoint, static web app | daemon | every crate above except `rastai-plugin` and the two binding crates | axum, tokio, tonic, prost, serde_json, keyring |
-| `rastai-cli` | The `rastai` binary: argument parsing (in-house), process modes, generated CLI verbs, offline `storage rebuild-index` | CLI, daemon, node | `rastai-server`, `rastai-node`, `rastai-mcp`, `rastai-store`, `rastai-core`, `rastai-transport`, `rastai-formats`, `rastai-proto`, `rastai-diag` | tokio, prost |
-| `rastai-codegen` (dev) | `tools/codegen/`: bins `rastai-formats-codegen`, `rastai-catalog-codegen` and `rastai-names-codegen` (12.6) | dev only | `rastai-formats`, `rastai-core`, `rastai-diag` | serde_json |
-| `rastai-crash-tests` (dev) | `tests/crash/`: the kill -9 matrix | dev only | `rastai-store`, `rastai-core`, `rastai-proto`, `rastai-diag` | tokio |
-| `rastai-desktop` (`apps/desktop/src-tauri`) | Tauri shell: window, file associations, updater; starts or finds the daemon by running `rastai open --print-url` | desktop shell | none (spawns `rastai`, loads a URL; no HTTP) | tauri, tauri-build, Tauri updater plugin, serde, serde_json |
+| `rastai-diag` (M1) | Catalog tables (generated from `catalog/`), `Diagnostic` type, text renderer, JSON-lines logger (`init_logger`, `log_info`) | all Rust processes, WASM | none | serde, serde_json |
+| `rastai-proto` (M1) | Generated protobuf messages and gRPC stubs | daemon, node, CLI, provider | none | prost, tonic |
+| `rastai-formats` (M1) | Every document type: parse, validate (4 layers), migrate, write; safetensors reader/writer (the one header validator); GGUF header reader and writer; zip reader and writer; content hashing (the one BLAKE3 wrapper); CRC-32 table; type descriptions for codegen | daemon, node, CLI, browser (WASM), Python (PyO3) | `rastai-diag` | serde, serde_json, blake3, miniz_oxide |
+| `rastai-formats-wasm` (M4) | `crates/rastai-formats/bindings/wasm/`: cdylib, plain string and byte functions for the browser | browser | `rastai-formats`, `rastai-diag` | wasm-bindgen |
+| `rastai-formats-python` (M1) | `crates/rastai-formats/bindings/python/`: cdylib, module `rastai_formats._native` | Python | `rastai-formats`, `rastai-diag` | pyo3 |
+| `rastai-core` (M1) | Command registry (`CommandRow` table + dispatch), ids, principals, scopes, shared state enums, settings resolution, paths, versions, protobuf JSON for wire types stored in documents (section 4) | daemon, node, CLI | `rastai-diag`, `rastai-formats`, `rastai-proto` | serde, serde_json |
+| `rastai-plugin` (M8) | Rust plugin SDK: provider-process skeleton, manifest helpers | provider processes | `rastai-diag`, `rastai-formats`, `rastai-proto` | tokio, tonic |
+| `rastai-store` (M1) | `rastai.db` and `vault.db` (one writer thread each), blob store, event-log reader/writer, migrations, rebuild, daemon lock, free disk space | daemon, node, CLI (offline rebuild) | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-diag` | rusqlite, prost, tokio (`sync` only), libc (one file, ADR-0033) |
+| `rastai-transport` (M1) | Local IPC (Unix socket; named pipe later), SSH via the OpenSSH binary, HTTP(S) client, tonic channels over these, resumable transfers | daemon, node, CLI | `rastai-core`, `rastai-formats` (hashing), `rastai-proto`, `rastai-diag` | tokio, tonic, tower, hyper, hyper-util, rustls, tokio-rustls, webpki-roots |
+| `rastai-sandbox` (M5) | Docker-API client over the engine socket: create, exec, pause, remove, caps, labels, orphan sweep; the HTTP CONNECT egress proxy | node | `rastai-core`, `rastai-proto`, `rastai-diag` | tokio, hyper, hyper-util, serde_json |
+| `rastai-gateway` (M3) | OpenAI and Anthropic endpoints, adapters, chat templates, tokenization, token logging through a `LogSink` | daemon (user endpoints), node (rollout and judge gateway) | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-transport`, `rastai-diag` | axum, tokio, tonic (node-runtime and daemon-forward adapters), tokenizers, minijinja, serde, serde_json |
+| `rastai-mcp` (M1) | MCP server (tools generated from the command registry) and MCP client (harness tools) | daemon, CLI (`rastai mcp` stdio bridge), node (gym tools) | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-transport`, `rastai-diag` | tokio, serde_json |
+| `rastai-node` (M1) | Node agent: job supervisor, uv environments, VRAM leases, telemetry, hardware detection, HF downloads, transfers, llama-server management, NodeService server, the one Ed25519 wrapper | daemon (embedded node), `rastai node serve` | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-store`, `rastai-transport`, `rastai-sandbox`, `rastai-gateway`, `rastai-mcp`, `rastai-diag` | tokio, tonic, ed25519-dalek |
+| `rastai-archive` (M11) | Long-term archive (M11): one-way, idempotent replication of event records, index rows and blob metadata to MySQL or MariaDB; blob copies to archive targets; prune, restore, verify, purge (8.7) | daemon | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-store`, `rastai-transport`, `rastai-diag` | mysql_async (`default-rustls-ring`, default features off), tokio |
+| `rastai-server` (M1) | Daemon: Connect HTTP API, request gate and sessions, scheduling and chain driver, plugin host, import/export, ModelSpec analysis (live stats, memory, the one layer-placement planner), data-policy check, NodeHubService, MCP endpoint, static web app | daemon | every crate above except `rastai-plugin` and the two binding crates | axum, tokio, tonic, prost, serde_json, keyring |
+| `rastai-cli` (M1) | The `rastai` binary: argument parsing (in-house), process modes, generated CLI verbs, offline `storage rebuild-index` | CLI, daemon, node | `rastai-server`, `rastai-node`, `rastai-mcp`, `rastai-store`, `rastai-core`, `rastai-transport`, `rastai-formats`, `rastai-proto`, `rastai-diag` | tokio, prost |
+| `rastai-codegen` (dev) (M1) | `tools/codegen/`: bins `rastai-formats-codegen`, `rastai-catalog-codegen` and `rastai-names-codegen` (12.6) | dev only | `rastai-formats`, `rastai-core`, `rastai-diag` | serde_json |
+| `rastai-crash-tests` (dev) (M1) | `tests/crash/`: the kill -9 matrix | dev only | `rastai-store`, `rastai-core`, `rastai-proto`, `rastai-diag` | tokio |
+| `rastai-desktop` (`apps/desktop/src-tauri`) (M1) | Tauri shell: window, file associations, updater; starts or finds the daemon by running `rastai open --print-url` | desktop shell | none (spawns `rastai`, loads a URL; no HTTP) | tauri, tauri-build, Tauri updater plugin, serde, serde_json |
 
 ### 2.2 Python packages
 
 | Package | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
-| `rastai_proto` | Generated protobuf and grpcio stubs | worker jobs | none | grpcio, protobuf runtime |
-| `rastai_formats` | PyO3 wheel of `rastai-formats` + generated dataclasses for every document type; the safetensors header validator for Python | worker jobs, notebooks | none | none (native wheel) |
-| `rastai_plugin` | Extension-point base classes, the in-process registry, the WorkerHost client, plugin test host | worker jobs, plugin modules | `rastai_proto`, `rastai_formats` | grpcio |
-| `rastai_models` | ModelSpec compiler, blocks (attention variants, MoE, MLA, ALiBi, AttnRes), families, tensor I/O (header checks through `rastai_formats`), KV caches, static decode, LoRA, `apply_placement` (never plans) | worker jobs, notebooks | `rastai_formats`, `rastai_plugin` | torch; transformers only for the compat runtime (optional); onnx and onnxscript through `torch.onnx` (export jobs only) |
-| `rastai_data` | Task detection, preview, converters (declarative + Python fallback), readers, MinHash, leakage, PII, loaders, image decoding | worker jobs | `rastai_formats`, `rastai_plugin` | tokenizers (HF, for token counts), pyarrow (Parquet), torchvision (`decode_image`), PyMySQL (the MySQL reader) |
-| `rastai_lens` | Observation readouts, logit lens (fused), attention capture, entropy, SAE runtime, probes, steering/ablation hooks, live packets, summary layer, offline analysis math | worker jobs | `rastai_models`, `rastai_formats`, `rastai_plugin` | torch |
-| `rastai_train` | Trainer loop, resume contract, checkpoints, anchors, all recipes | worker jobs | `rastai_models`, `rastai_data`, `rastai_lens`, `rastai_formats`, `rastai_plugin` | torch, torch.distributed; bitsandbytes (optional, QLoRA) |
-| `rastai_rl` | Rollout manager, group advantages, GRPO/GSPO/PPO glue, Harbor task importer | worker jobs | `rastai_train`, `rastai_models`, `rastai_data`, `rastai_formats`, `rastai_plugin` | torch |
-| `rastai_worker` | Job entry point (`python -m rastai_worker`), WorkerService server, event-log writer, hardware fingerprint, job-kind dispatch | worker jobs | everything above | grpcio |
-| `rastai` | Public SDK: `load()`, `observe()`, `log()`, `connect()`, the wandb-compatible tracking surface, and the stable facades plugins use (`rastai.runtime`, `rastai.data`, `rastai.lens`, `rastai.train`) | notebooks, plugin modules | everything above except `rastai_worker` | torch |
-| `rastai_psychology` | Psychology plugin module: command handlers, offline analysis jobs | plugin module, worker jobs | `rastai`, `rastai_plugin` only | torch |
-| `rastai_eval` | Evaluation plugin module: suites, metrics, judges, Pass@k, Elo, perplexity, drift, benchmarks | plugin module, worker jobs | `rastai`, `rastai_plugin` only | torch |
+| `rastai_proto` (M1) | Generated protobuf and grpcio stubs | worker jobs | none | grpcio, protobuf runtime |
+| `rastai_formats` (M1) | PyO3 wheel of `rastai-formats` + generated dataclasses for every document type; the safetensors header validator for Python | worker jobs, notebooks | none | none (native wheel) |
+| `rastai_plugin` (M1) | Extension-point base classes, the in-process registry, the WorkerHost client, plugin test host | worker jobs, plugin modules | `rastai_proto`, `rastai_formats` | grpcio |
+| `rastai_models` (M1) | ModelSpec compiler, blocks (attention variants, MoE, MLA, ALiBi, AttnRes), families, tensor I/O (header checks through `rastai_formats`), KV caches, static decode, LoRA, `apply_placement` (never plans) | worker jobs, notebooks | `rastai_formats`, `rastai_plugin` | torch; transformers only for the compat runtime (optional); onnx and onnxscript through `torch.onnx` (export jobs only) |
+| `rastai_data` (M1) | Task detection, preview, converters (declarative + Python fallback), readers, MinHash, leakage, PII, loaders, image decoding | worker jobs | `rastai_formats`, `rastai_plugin` | tokenizers (HF, for token counts), pyarrow (Parquet), torchvision (`decode_image`), PyMySQL (the MySQL reader) |
+| `rastai_lens` (M4) | Observation readouts, logit lens (fused), attention capture, entropy, SAE runtime, probes, steering/ablation hooks, live packets, summary layer, offline analysis math | worker jobs | `rastai_models`, `rastai_formats`, `rastai_plugin` | torch |
+| `rastai_train` (M1) | Trainer loop, resume contract, checkpoints, anchors, all recipes | worker jobs | `rastai_models`, `rastai_data`, `rastai_lens`, `rastai_formats`, `rastai_plugin` | torch, torch.distributed; bitsandbytes (optional, QLoRA) |
+| `rastai_rl` (M5) | Rollout manager, group advantages, GRPO/GSPO/PPO glue, Harbor task importer | worker jobs | `rastai_train`, `rastai_models`, `rastai_data`, `rastai_formats`, `rastai_plugin` | torch |
+| `rastai_worker` (M1) | Job entry point (`python -m rastai_worker`), WorkerService server, event-log writer, hardware fingerprint, job-kind dispatch | worker jobs | everything above | grpcio |
+| `rastai` (M4) | Public SDK: `load()`, `observe()`, `log()`, `connect()`, the wandb-compatible tracking surface, and the stable facades plugins use (`rastai.runtime`, `rastai.data`, `rastai.lens`, `rastai.train`) | notebooks, plugin modules | everything above except `rastai_worker` | torch |
+| `rastai_psychology` (M4) | Psychology plugin module: command handlers, offline analysis jobs | plugin module, worker jobs | `rastai`, `rastai_plugin` only | torch |
+| `rastai_eval` (M5) | Evaluation plugin module: suites, metrics, judges, Pass@k, Elo, perplexity, drift, benchmarks | plugin module, worker jobs | `rastai`, `rastai_plugin` only | torch |
 
 ### 2.3 Apps and JavaScript packages
 
@@ -258,19 +260,19 @@ All hand-written code here is plain JavaScript (`.js`, `.jsx`) with JSDoc types 
 
 | Package | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
-| `@rastai/proto` | Generated protobuf-es messages and connect-es service stubs (`.js` + `.d.ts`) | browser | none | connect-es, protobuf-es runtime |
-| `@rastai/formats` | Generated document types (JSDoc `@typedef` modules or `.d.ts`) + WASM validator | browser | none | none |
-| `@rastai/catalog` | Generated error and term catalog | browser | none | none |
-| `@rastai/ui` | Design system: theme tokens (5.6), locked security-UI tokens and components, components, Basic/Advanced primitives, diagnostics view | browser, iframes, viewer | `@rastai/catalog`; `@rastai/proto`, `@rastai/canvas`, `@rastai/viz` (JSDoc type imports only: `Diagnostic`, `CanvasColors`, `VizColors`) | react, react-dom |
-| `@rastai/client` | Daemon client: Connect transport, credential (cookie or bearer), login, event subscription with resume, `CommandExecutor`, generated typed command wrappers | browser | `@rastai/proto`, `@rastai/formats` | connect-es, protobuf-es runtime |
-| `@rastai/canvas` | WebGL2 graph renderer (nodes, edges, glyph atlas, hierarchy collapse); colors through `setColors` | browser, iframes, viewer | none | none |
-| `@rastai/viz` | Charts, vector-space view, 3D data-flow view (WebGL2); colors through `setColors` | browser, iframes, viewer | `@rastai/canvas` (`gl` module only) | none |
-| `@rastai/plugin` | JS plugin SDK: register sections/panels/commands, `PluginHost` (a `CommandExecutor`), event subscription, iframe bridge; generated declarations for authors | browser, iframes | `@rastai/client`, `@rastai/ui`, `@rastai/formats`, `@rastai/proto`, `@rastai/catalog` | react |
-| `@rastai/psychology-ui` | Psychology section (in-process, first-party) | browser | `@rastai/plugin`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz` | react |
-| `@rastai/eval-ui` | Evaluation section (in-process, first-party) | browser | `@rastai/plugin`, `@rastai/ui`, `@rastai/viz` | react |
-| `@rastai/web` (`apps/web`) | The app: shell, plugin host (UI side), core sections. No domain logic (2.4 rule 9). | browser / Tauri webview | all packages above | react, react-dom |
-| `@rastai/viewer` (`apps/viewer`) | Read-only viewer for replays and designs | browser (static) | `@rastai/formats`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz` | react |
-| `@rastai/desktop` (`apps/desktop`) | Tauri front config; loads the URL `rastai open --print-url` prints | Tauri | none | Tauri 2, Tauri updater plugin |
+| `@rastai/proto` (M1) | Generated protobuf-es messages and connect-es service stubs (`.js` + `.d.ts`) | browser | none | connect-es, protobuf-es runtime |
+| `@rastai/formats` (M1) | Generated document types (JSDoc `@typedef` modules or `.d.ts`) + WASM validator | browser | none | none |
+| `@rastai/catalog` (M1) | Generated error and term catalog | browser | none | none |
+| `@rastai/ui` (M1) | Design system: theme tokens (5.6), locked security-UI tokens and components, components, Basic/Advanced primitives, diagnostics view | browser, iframes, viewer | `@rastai/catalog`; `@rastai/proto`, `@rastai/canvas`, `@rastai/viz` (JSDoc type imports only: `Diagnostic`, `CanvasColors`, `VizColors`) | react, react-dom |
+| `@rastai/client` (M1) | Daemon client: Connect transport, credential (cookie or bearer), login, event subscription with resume, `CommandExecutor`, generated typed command wrappers | browser | `@rastai/proto`, `@rastai/formats` | connect-es, protobuf-es runtime |
+| `@rastai/canvas` (M4) | WebGL2 graph renderer (nodes, edges, glyph atlas, hierarchy collapse); colors through `setColors` | browser, iframes, viewer | none | none |
+| `@rastai/viz` (M4) | Charts, vector-space view, 3D data-flow view (WebGL2); colors through `setColors` | browser, iframes, viewer | `@rastai/canvas` (`gl` module only) | none |
+| `@rastai/plugin` (M1) | JS plugin SDK: register sections/panels/commands, `PluginHost` (a `CommandExecutor`), event subscription, iframe bridge; generated declarations for authors | browser, iframes | `@rastai/client`, `@rastai/ui`, `@rastai/formats`, `@rastai/proto`, `@rastai/catalog` | react |
+| `@rastai/psychology-ui` (M4) | Psychology section (in-process, first-party) | browser | `@rastai/plugin`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz` | react |
+| `@rastai/eval-ui` (M5) | Evaluation section (in-process, first-party) | browser | `@rastai/plugin`, `@rastai/ui`, `@rastai/viz` | react |
+| `@rastai/web` (`apps/web`) (M1) | The app: shell, plugin host (UI side), core sections. No domain logic (2.4 rule 9). | browser / Tauri webview | all packages above | react, react-dom |
+| `@rastai/viewer` (`apps/viewer`) (M4) | Read-only viewer for replays and designs | browser (static) | `@rastai/formats`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz` | react |
+| `@rastai/desktop` (`apps/desktop`) (M1) | Tauri front config; loads the URL `rastai open --print-url` prints | Tauri | none | Tauri 2, Tauri updater plugin |
 
 ### 2.4 Layering rules
 
@@ -376,7 +378,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | rusqlite (bundled SQLite) | Foundation | `rastai-store` | `sqlite.rs` |
 | libc | Foundation | `rastai-store` | `disk_space.rs`: one `statvfs` call, the only `unsafe` in the workspace (ADR-0033). `rastai_store::free_bytes` serves the store and the node. |
 | blake3 | Security | `rastai-formats` | `hashing.rs` |
-| miniz_oxide | Compatibility: zip | `rastai-formats` | `zip/inflate.rs` |
+| miniz_oxide | Compatibility: zip | `rastai-formats` | `zip/inflate.rs` (DEFLATE instead of an in-house decoder, ADR-0037) |
 | ed25519-dalek | Security | `rastai-node` | `identity.rs` (daemon and node keys, release and update signatures) |
 | tokenizers (HF) | Compatibility | `rastai-gateway` | `tokenizer.rs` |
 | minijinja | Compatibility | `rastai-gateway` | the chat-template module: `chat_template.rs` and `template_methods.rs` |
@@ -388,7 +390,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | PyTorch (`torch`) | Foundation | Python engines | direct |
 | `torch.onnx` with `onnx`, `onnxscript` | Foundation | `rastai_models` | `onnx_export.py` (export jobs only) |
 | `torch.distributed` | Foundation | `rastai_train`, `rastai_worker` | `rastai_train/distributed.py`, `rastai_worker/distributed.py` |
-| torchvision (`torchvision.io.decode_image`) | Foundation: PyTorch row | `rastai_data` | `image_decode.py` (brings pillow and numpy into each lock as transitive packages; pillow has a named license entry, MIT-CMU/HPND, in `deps/allowlist-python.json`) |
+| torchvision (`torchvision.io.decode_image`) | Foundation: PyTorch row | `rastai_data` | `image_decode.py` (PNG and JPEG instead of in-house decoders, ADR-0037; brings pillow and numpy into each lock as transitive packages; pillow has a named license entry, MIT-CMU/HPND, in `deps/allowlist-python.json`) |
 | HF `transformers` (optional) | Engine (optional) | `rastai_models`, tests | `compat/transformers_runtime.py`; `tests/parity/hf_reference.py` |
 | HF `tokenizers` (Python) | Compatibility | `rastai_data` | `tokenization.py` |
 | bitsandbytes (optional) | Kernel | `rastai_train` | `kernels/four_bit_linear.py` |
@@ -802,32 +804,32 @@ Each type is defined once in `crates/rastai-formats/src/documents/` (the file is
 
 | Document | Type / schema id | Container | Main fields (after the header) |
 |---|---|---|---|
-| **ModelSpec** `.rrsmodel` | `rastai.model/1` | JSON | `graph{nodes[], edges[]}`; `blocks{block_id: graph}` (reusable definitions); `inputs[]` (input map: `name`, `range`, `encoder_node`); `outputs[]` (heads); `objective{kind, settings}`; `defaults{dtype, sequence_length, batch_size}`; `weights[]{source (hf:/blob:/ckpt:), family, name_mapping, prefix}` (a list, so a design can compose several pretrained parts; plan §10 row 11); `placement{graph_node_id: gpu_index}` (written only by `plan_layer_placement`, 2.4 rule 10) |
+| **ModelSpec** `.rrsmodel` | `rastai.model/1` (M1) | JSON | `graph{nodes[], edges[]}`; `blocks{block_id: graph}` (reusable definitions); `inputs[]` (input map: `name`, `range`, `encoder_node`); `outputs[]` (heads); `objective{kind, settings}`; `defaults{dtype, sequence_length, batch_size}`; `weights[]{source (hf:/blob:/ckpt:), family, name_mapping, prefix}` (a list, so a design can compose several pretrained parts; plan §10 row 11); `placement{graph_node_id: gpu_index}` (written only by `plan_layer_placement`, 2.4 rule 10) |
 | ModelSpec graph node | (part of `rastai.model`) | | `node_id`, `op` (section 5.3), `label`, `attributes{}`, `train_mode` (`freeze`/`lora`/`train`), `lora{rank, alpha}`, `block_ref` (instance of a block), `repeat` (stamp N copies), `observe` (default true), `opaque{input_shapes, output_shapes, compat_class}`, `layout{x, y, collapsed}` (canvas position and collapse state; plan §10 row 10) |
-| **Harness** `.rrsharness` | `rastai.harness/1` | JSON | `system_prompt`; `tools[]{name, mcp_ref (command/url/server.json ref), enabled, network_hosts[], env_secret_names[]}`; `environment{image, caps{cpu, ram_bytes, time_seconds, pids_limit, disk_bytes}, files[]}`; `reward{kind (metric/reward_function/reward_model), name, settings}`; `tasks[]{task_id, prompt, files[], check}`; `task_sources[]` (Harbor dirs as data) |
-| **Dataset** `.rrsdata` | `rastai.data/1` (`DatasetSpec`, `data.rs`) | JSON | `sources[]{kind, ...}` with kinds `path`, `hf`, `url` (`location`, `revision`, `content_hash`), `blob` (an uploaded file), `inline` (`rows[]` stored in the document), `mysql` (`connection` (`MysqlConnection`, below), `query`, `snapshot_format` `jsonl`/`parquet`); `task` (`classification` (text, or an `image` column), `sft`, `dpo`, `pretraining`, `synthetic_qa`); `converter{kind (declarative/python), ref}`; `columns{}`; `splits{train, validation, test}` (ratios or explicit); `checks{dedupe, leakage, pii}` + last results; `examples[]{example_id, kind (dpo/sft), conversation_id, chosen_message_id, rejected_message_id, target_text}` (references, used only by `dataset.from_conversations`, materialized by `dataset.snapshot`); `snapshot{artifact_id, content_hash, row_count}`; `croissant{}` |
+| **Harness** `.rrsharness` | `rastai.harness/1` (M7) | JSON | `system_prompt`; `tools[]{name, mcp_ref (command/url/server.json ref), enabled, network_hosts[], env_secret_names[]}`; `environment{image, caps{cpu, ram_bytes, time_seconds, pids_limit, disk_bytes}, files[]}`; `reward{kind (metric/reward_function/reward_model), name, settings}`; `tasks[]{task_id, prompt, files[], check}`; `task_sources[]` (Harbor dirs as data) |
+| **Dataset** `.rrsdata` | `rastai.data/1` (M5) (`DatasetSpec`, `data.rs`) | JSON | `sources[]{kind, ...}` with kinds `path`, `hf`, `url` (`location`, `revision`, `content_hash`), `blob` (an uploaded file), `inline` (`rows[]` stored in the document), `mysql` (`connection` (`MysqlConnection`, below), `query`, `snapshot_format` `jsonl`/`parquet`); `task` (`classification` (text, or an `image` column), `sft`, `dpo`, `pretraining`, `synthetic_qa`); `converter{kind (declarative/python), ref}`; `columns{}`; `splits{train, validation, test}` (ratios or explicit); `checks{dedupe, leakage, pii}` + last results; `examples[]{example_id, kind (dpo/sft), conversation_id, chosen_message_id, rejected_message_id, target_text}` (references, used only by `dataset.from_conversations`, materialized by `dataset.snapshot`); `snapshot{artifact_id, content_hash, row_count}`; `croissant{}` |
 | `.rrsdata` preference row | (an `inline` row) | | `source` (`branch_pick` or `blind_vote`), `prompt{messages[], token_ids[]}`, `chosen{text, token_ids[], model_ref}`, `rejected{text, token_ids[], model_ref}` (absent for SFT), `chosen_side` (`a`/`b`, blind votes only), `edited`, `conversation_id`, `chosen_message_id`, `rejected_message_id` (lineage only). Prefer this branch appends one (default `data/preferences.rrsdata`); a blind A/B vote appends one to `evals/votes.rrsdata`. |
-| **Eval suite** `.rrseval` | `rastai.eval/1` | JSON | `tests[]{test_id, input (messages or conversation ref), expectation{kind (text/keywords/pattern/reference/check_command/held_out_text/none), value}, metric, pass_threshold}`; `pinned_conversations[]`; `judges[]{judge_id, model_ref, rubric, reference_answer, pairwise, calibration{examples[], min_agreement}}`; `benchmarks[]{source, tasks}`; `metrics[]`; `drift{prompt_set_ref, max_kl}`; `pass_rule` (`all` default, `min_fraction`) |
-| **Eval result** | `rastai.eval_result/1` (`EvalResult`, `eval_result.rs`) | JSON blob (artifact kind `eval_result`) | answers, token ids, scores, pass flags, judge transcript hashes, per test and checkpoint |
-| **Replay** `.rrsreplay` | `rastai.replay/1` | Zip | `replay.json` (header, `model_hash`, `model_ref`, `settings`, `branches[]`, `annotations[]`, `hardware_fingerprint` (proto JSON of `HardwareFingerprint`), `fidelity` exact/approximate/proxy); `conversation.jsonl`; `summary/summary.safetensors` + `summary/features.json` (summary layer, always present); `activations/*.safetensors` (optional) |
-| **Model diff** | `rastai.model_diff/1` (`ModelDiffReport`, `model_diff.rs`) | JSON blob | feature-frequency, lens and routing shifts, eval deltas |
-| **SAE fit check** | `rastai.sae_fit_check/1` (`SaeFitCheckReport`) | JSON blob | per-SAE reconstruction quality before and after, stale-label flags |
-| **Plugin manifest** (inside `.rrsplugin`) | `rastai.plugin/1` | `rastai-plugin.json` in a Zip | `plugin_id`, `display_name`, `version`, `engines{rastai: semver}`, `requires_capabilities[]` (`designer.node@1`; table 5.5), `contributes{...}` (keys in 5.5, rules below), `permissions[]`, `ui{entry, kind (in_process/iframe)}`, `python{module, lockfile}`, `provider{binaries{platform: path}}`, `dependencies{plugin_id: semver}`, `catalog`, `experimental` |
+| **Eval suite** `.rrseval` | `rastai.eval/1` (M5) | JSON | `tests[]{test_id, input (messages or conversation ref), expectation{kind (text/keywords/pattern/reference/check_command/held_out_text/none), value}, metric, pass_threshold}`; `pinned_conversations[]`; `judges[]{judge_id, model_ref, rubric, reference_answer, pairwise, calibration{examples[], min_agreement}}`; `benchmarks[]{source, tasks}`; `metrics[]`; `drift{prompt_set_ref, max_kl}`; `pass_rule` (`all` default, `min_fraction`) |
+| **Eval result** | `rastai.eval_result/1` (M5) (`EvalResult`, `eval_result.rs`) | JSON blob (artifact kind `eval_result`) | answers, token ids, scores, pass flags, judge transcript hashes, per test and checkpoint |
+| **Replay** `.rrsreplay` | `rastai.replay/1` (M4) | Zip | `replay.json` (header, `model_hash`, `model_ref`, `settings`, `branches[]`, `annotations[]`, `hardware_fingerprint` (proto JSON of `HardwareFingerprint`), `fidelity` exact/approximate/proxy); `conversation.jsonl`; `summary/summary.safetensors` + `summary/features.json` (summary layer, always present); `activations/*.safetensors` (optional) |
+| **Model diff** | `rastai.model_diff/1` (M4) (`ModelDiffReport`, `model_diff.rs`) | JSON blob | feature-frequency, lens and routing shifts, eval deltas |
+| **SAE fit check** | `rastai.sae_fit_check/1` (M4) (`SaeFitCheckReport`) | JSON blob | per-SAE reconstruction quality before and after, stale-label flags |
+| **Plugin manifest** (inside `.rrsplugin`) | `rastai.plugin/1` (M1) | `rastai-plugin.json` in a Zip | `plugin_id`, `display_name`, `version`, `engines{rastai: semver}`, `requires_capabilities[]` (`designer.node@1`; table 5.5), `contributes{...}` (keys in 5.5, rules below), `permissions[]`, `ui{entry, kind (in_process/iframe)}`, `python{module, lockfile}`, `provider{binaries{platform: path}}`, `dependencies{plugin_id: semver}`, `catalog`, `experimental` |
 | Plugin command types | `types.json` beside the manifest | JSON | a list of `TypeDescription` records (5.4) for the plugin's own command arguments and results; `x-rastai-cli-position` hints; core types referred to as `core:<Type>` |
-| **Converter** | `rastai.converter/1` (`ConverterDocument`, `converter.rs`) | JSON in `data/converters/` | column mapping, templates, filters (declarative; the Python fallback is a plugin `Converter`) |
-| **Project** `.rrsproj` | `rastai.project/1` | Folder `<name>.rrsproj/` or Zip | `project.json` (header, `name`, `default_node`); folders `designs/ harnesses/ data/ data/converters/ evals/ replays/ presets/ layouts/ runs/` (run records only); `evals/pinned.rrseval` (created on the first pin), `evals/votes.rrsdata` (blind A/B votes), `evals/teach-<run_id>.rrseval` (generated Verify suites); `rastai.lock`; `settings.json` (the project settings layer, 11.1; it holds the project's data policy as `privacy.data_policy`, `local-only`/`trusted-remote`/`any`); `weights/` only in offline bundles |
-| **Lock file** | `rastai.lock/1` | JSON `rastai.lock` | `environment{environment_id, lock_hash}`, `plugins{plugin_id: {version, content_hash}}`, `models{model_ref: {revision, model_hash}}`, `datasets{id: content_hash}` |
-| **Conversation** | `rastai.conversation/1` | JSONL | line 1: header (`conversation_id`, `title`, `model_ref`, `model_hash`, `chat_template_hash`, `fidelity`); then one message per line: `message_id`, `parent_id`, `role`, `parts[]{kind (text/image/audio/tool_call/tool_result), ...}`, `token_ids[]` (optional; for assistant rows the full context), `settings` (proto JSON of `SamplingSettings`), `max_new_tokens`, `created_at`, `branch_label`, `starred`, `pinned` |
-| **Run record** | `rastai.run_record/1` | JSON `runs/<run_id>/run.json` | `run_id`, `kind` (9.5 list), `job_spec` (proto JSON of `JobSpec`), `recipe{name, settings}`, `dataset_hashes[]`, `base_model{model_ref, model_hash}`, `plugin_versions{}`, `environment_lock_hash`, `seed`, `hardware_fingerprint` (proto JSON of `HardwareFingerprint`), `git_commit`, `app_version`, `parent_run_id`, `chain{steps[]}` (chain runs: steps with their child run ids), `source{kind, location, original_run_id}` (imported runs), `created_at` |
-| **Resume state** | `rastai.resume/1` | JSON `resume.json` in a checkpoint folder | `run_id`, `step`, `epoch`, `samples_seen`, `dataloader{dataset_hash, split, shuffle_seed, epoch, position}`, `rng_file` (`rng.safetensors`), `weights_file`, `optimizer_file`, `scheduler{}`, `recipe_state{}`, `created_at` |
-| **Steering preset** | `rastai.steering_preset/1` | JSON in `presets/` | `model_hash`, `interventions` (an `InterventionSet`, next row), `served_model_name`, `notes` |
+| **Converter** | `rastai.converter/1` (M5) (`ConverterDocument`, `converter.rs`) | JSON in `data/converters/` | column mapping, templates, filters (declarative; the Python fallback is a plugin `Converter`) |
+| **Project** `.rrsproj` | `rastai.project/1` (M1) | Folder `<name>.rrsproj/` or Zip | `project.json` (header, `name`, `default_node`); folders `designs/ harnesses/ data/ data/converters/ evals/ replays/ presets/ layouts/ runs/` (run records only); `evals/pinned.rrseval` (created on the first pin), `evals/votes.rrsdata` (blind A/B votes), `evals/teach-<run_id>.rrseval` (generated Verify suites); `rastai.lock`; `settings.json` (the project settings layer, 11.1; it holds the project's data policy as `privacy.data_policy`, `local-only`/`trusted-remote`/`any`); `weights/` only in offline bundles |
+| **Lock file** | `rastai.lock/1` (M1) | JSON `rastai.lock` | `environment{environment_id, lock_hash}`, `plugins{plugin_id: {version, content_hash}}`, `models{model_ref: {revision, model_hash}}`, `datasets{id: content_hash}` |
+| **Conversation** | `rastai.conversation/1` (M3) | JSONL | line 1: header (`conversation_id`, `title`, `model_ref`, `model_hash`, `chat_template_hash`, `fidelity`); then one message per line: `message_id`, `parent_id`, `role`, `parts[]{kind (text/image/audio/tool_call/tool_result), ...}`, `token_ids[]` (optional; for assistant rows the full context), `settings` (proto JSON of `SamplingSettings`), `max_new_tokens`, `created_at`, `branch_label`, `starred`, `pinned` |
+| **Run record** | `rastai.run_record/1` (M1) | JSON `runs/<run_id>/run.json` | `run_id`, `kind` (9.5 list), `job_spec` (proto JSON of `JobSpec`), `recipe{name, settings}`, `dataset_hashes[]`, `base_model{model_ref, model_hash}`, `plugin_versions{}`, `environment_lock_hash`, `seed`, `hardware_fingerprint` (proto JSON of `HardwareFingerprint`), `git_commit`, `app_version`, `parent_run_id`, `chain{steps[]}` (chain runs: steps with their child run ids), `source{kind, location, original_run_id}` (imported runs), `created_at` |
+| **Resume state** | `rastai.resume/1` (M1) | JSON `resume.json` in a checkpoint folder | `run_id`, `step`, `epoch`, `samples_seen`, `dataloader{dataset_hash, split, shuffle_seed, epoch, position}`, `rng_file` (`rng.safetensors`), `weights_file`, `optimizer_file`, `scheduler{}`, `recipe_state{}`, `created_at` |
+| **Steering preset** | `rastai.steering_preset/1` (M4) | JSON in `presets/` | `model_hash`, `interventions` (an `InterventionSet`, next row), `served_model_name`, `notes` |
 | Intervention set | `InterventionSet` (shared type, no header) | inside other documents and command arguments | `steering[]{point, vector_ref, strength}`, `ablations[]{point, head}`, `feature_edits[]{sae_id, feature_index, strength}`, `expert_overrides[]{layer, expert, action}`. Defined once in `rastai-formats/src/documents/steering_preset.rs`. It crosses the wire as `interventions_json` (4.4), and a plugin's `types.json` names it `core:InterventionSet`. |
 | MySQL connection | `MysqlConnection` (shared type, no header; `mysql_connection.rs`) | inside `settings.json` (`archive.connection`) and `.rrsdata` `mysql` sources | `name`, `host`, `port` (3306), `socket_path`, `database`, `user`, `password_secret` (a keychain account, never the password), `tls{mode (required/verify_identity/disabled), ca_file}`. `disabled` validates only for a loopback host or a Unix socket (one TLS policy for the archive and the reader). Golden type-mapping fixtures in `fixtures/mysql/type-mapping/` are checked by both Rust and Python. |
-| **Workspace layout** | `rastai.layout/1` | JSON in `layouts/` | `root` tree: `{kind: split/tabs/panel, direction, sizes[], children[], panel_id, section_id, mode_override, theme_override (M8 or Phase 2)}` |
-| **Keybindings** | `rastai.keybindings/1` | JSON | `bindings[]{keys, command_id, arguments_json, when}`; `when` is empty or one `<key>=<value>` test on a context key (15.6) |
-| **Theme** | `rastai.theme/1` (`ThemeDocument`, `theme.rs`) | JSON (`<plugin>/themes/<name>.theme.json`; built-ins in `@rastai/ui`) | `name`, `base` (`light`/`dark`), `colors{role: "#rrggbb"}`, `typography{font_family_ui, font_family_mono, font_weights{regular, medium, bold}, font_sizes_px{xs, sm, md, lg, xl}, line_heights{body, heading, code}}`, `density{comfortable{spacing_px[]}, compact{spacing_px[]}}`, `radius_px{small, medium, large}`, `motion{fast_ms, slow_ms, easing}`, `focus_ring{width_px, offset_px}` (its color is the `focus_ring` role), `elevation{level_1, level_2, level_3}`. Keys and rules in 5.6. |
-| **Tutorial** | `rastai.tutorial/1` | JSON in `templates/tutorials/` | `title`, `summary`, `steps[]{step_id, text, check_command_id, check_arguments_json, expected{path (JSON Pointer into the check result), test (equals/not_empty/at_least/contains), value}, show_me_command_id, show_me_arguments_json}` |
-| **Settings** | `rastai.settings/1` | JSON `settings.json` | the keys in section 11 |
+| **Workspace layout** | `rastai.layout/1` (M6) | JSON in `layouts/` | `root` tree: `{kind: split/tabs/panel, direction, sizes[], children[], panel_id, section_id, mode_override, theme_override (M8 or Phase 2)}` |
+| **Keybindings** | `rastai.keybindings/1` (M6) | JSON | `bindings[]{keys, command_id, arguments_json, when}`; `when` is empty or one `<key>=<value>` test on a context key (15.6) |
+| **Theme** | `rastai.theme/1` (M1) (`ThemeDocument`, `theme.rs`) | JSON (`<plugin>/themes/<name>.theme.json`; built-ins in `@rastai/ui`) | `name`, `base` (`light`/`dark`), `colors{role: "#rrggbb"}`, `typography{font_family_ui, font_family_mono, font_weights{regular, medium, bold}, font_sizes_px{xs, sm, md, lg, xl}, line_heights{body, heading, code}}`, `density{comfortable{spacing_px[]}, compact{spacing_px[]}}`, `radius_px{small, medium, large}`, `motion{fast_ms, slow_ms, easing}`, `focus_ring{width_px, offset_px}` (its color is the `focus_ring` role), `elevation{level_1, level_2, level_3}`. Keys and rules in 5.6. |
+| **Tutorial** | `rastai.tutorial/1` (Phase 2) | JSON in `templates/tutorials/` | `title`, `summary`, `steps[]{step_id, text, check_command_id, check_arguments_json, expected{path (JSON Pointer into the check result), test (equals/not_empty/at_least/contains), value}, show_me_command_id, show_me_arguments_json}` |
+| **Settings** | `rastai.settings/1` (M1) | JSON `settings.json` | the keys in section 11 |
 | **Command arguments** | `rastai.command.<command_id>/1` | JSON in `ExecuteRequest.arguments_json` | one `<Name>Args` and `<Name>Result` type per core command (e.g. `ModelLoadArgs`) in `rastai-formats/src/commands/`; plugin commands use their `types.json` |
 
 Later (plan, not M1): `rastai.icon_set/1` (M8) for icon-set plugins.
@@ -1005,31 +1007,31 @@ The owner (cookie, socket peer, `owner.token`) has every scope. A plugin's `comm
 
 ### 6.4 Initial command catalog
 
-Columns: **Scope**; **Undo** (U = undoable); **Kind**. Every command is `preview` (6.1). Job commands whose work runs inside the daemon use job kind `daemon_task` (9.1).
+Columns: **Scope**; **Undo** (U = undoable); **Kind**. Every command is `preview` (6.1). Job commands whose work runs inside the daemon use job kind `daemon_task` (9.1). The marker after each id is the milestone that registers its row, usually as an L0 stub in that milestone's contract task (M1-22, M2-12, M3-E01, M4-E01, M5-E01, M6-E01, M7-E01, M8-E01, M9-E01, M11-E01); `check-names` reads it (12.6).
 
 **System, project and files**
 
 | Command | Purpose | Scope | Undo | Kind |
 |---|---|---|---|---|
-| `system.status` | daemon, nodes, versions, protocol versions | read | | sync |
-| `system.doctor` | hardware detection + 20 s numerical self-test (CPU reference); CLI alias `rastai doctor` | system.admin | | job |
-| `system.bundle` | pack logs, hardware profile, versions into one file (never `plugin-data/`) | system.admin | | job |
-| `system.hardware` | hardware profile of a node | read | | sync |
-| `system.env.list` | uv environments and their lock hashes (`EnvironmentInfo`) | read | | sync |
-| `system.env.install` | create or sync an environment for a backend | system.admin | | job |
-| `system.update.check` / `system.update.apply` | self-update | system.admin | | sync / job |
-| `system.shutdown` | stop the daemon gracefully; jobs keep running in their process groups and are reattached on the next start | system.admin | | sync |
-| `system.crash_report.list` / `system.crash_report.get` | local crash reports: summaries with `issue_url` / every file as text and the zip as a `BlobRef` | read | | sync |
-| `system.crash_report.record` / `system.crash_report.delete` | record a UI crash (`PanelFrame` on `RRS-U1004`) / delete a report | system.admin | | sync |
-| `settings.get` | effective settings with the source of each key | read | | sync |
-| `settings.set` | set one key at user or project level; writes the layer's `settings.json` (11.1) | system.admin | | sync |
-| `token.create` / `token.list` / `token.revoke` | scoped API tokens | system.admin | | sync |
-| `token.login_code.create` | a single-use login code (expires after 60 s) for the UI start URL's `#login=<code>` fragment; called by `rastai open` over `daemon.sock` and by `rastai tunnel` over SSH (as the generated verb `rastai token login-code create`). Result `TokenLoginCodeCreateResult{code, expires_unix_ms, http_port}` | system.admin | | sync |
-| `secret.set` / `secret.delete` / `secret.list` | keychain entries (names only on list) | secrets | | sync |
-| `hf.login` | store and verify an HF token | secrets | | sync |
-| `hf.license.check` | is a gated model's license accepted | inference.manage | | sync |
-| `storage.usage` | disk use by category | read | | sync |
-| `storage.gc` | delete unpinned blobs, old checkpoints, expired logs, plugin version folders no installed plugin uses; never `plugin-data/` (8.1) | system.admin | | job |
+| `system.status` (M1) | daemon, nodes, versions, protocol versions | read | | sync |
+| `system.doctor` (M2) | hardware detection + 20 s numerical self-test (CPU reference); CLI alias `rastai doctor` | system.admin | | job |
+| `system.bundle` (M2) | pack logs, hardware profile, versions into one file (never `plugin-data/`) | system.admin | | job |
+| `system.hardware` (M2) | hardware profile of a node | read | | sync |
+| `system.env.list` (M2) | uv environments and their lock hashes (`EnvironmentInfo`) | read | | sync |
+| `system.env.install` (M2) | create or sync an environment for a backend | system.admin | | job |
+| `system.update.check` / `system.update.apply` (M9) | self-update | system.admin | | sync / job |
+| `system.shutdown` (M1) | stop the daemon gracefully; jobs keep running in their process groups and are reattached on the next start | system.admin | | sync |
+| `system.crash_report.list` / `system.crash_report.get` (M6) | local crash reports: summaries with `issue_url` / every file as text and the zip as a `BlobRef` | read | | sync |
+| `system.crash_report.record` / `system.crash_report.delete` (M6) | record a UI crash (`PanelFrame` on `RRS-U1004`) / delete a report | system.admin | | sync |
+| `settings.get` (M1) | effective settings with the source of each key | read | | sync |
+| `settings.set` (M1) | set one key at user or project level; writes the layer's `settings.json` (11.1) | system.admin | | sync |
+| `token.create` / `token.list` / `token.revoke` (M1) | scoped API tokens | system.admin | | sync |
+| `token.login_code.create` (M1) | a single-use login code (expires after 60 s) for the UI start URL's `#login=<code>` fragment; called by `rastai open` over `daemon.sock` and by `rastai tunnel` over SSH (as the generated verb `rastai token login-code create`). Result `TokenLoginCodeCreateResult{code, expires_unix_ms, http_port}` | system.admin | | sync |
+| `secret.set` / `secret.delete` / `secret.list` (M2) | keychain entries (names only on list) | secrets | | sync |
+| `hf.login` (M2) | store and verify an HF token | secrets | | sync |
+| `hf.license.check` (M2) | is a gated model's license accepted | inference.manage | | sync |
+| `storage.usage` (M5) | disk use by category | read | | sync |
+| `storage.gc` (M5) | delete unpinned blobs, old checkpoints, expired logs, plugin version folders no installed plugin uses; never `plugin-data/` (8.1) | system.admin | | job |
 | `storage.vault.recover` (L2) | rebuild `vault.db` from the newest good snapshot plus every row the damaged file still reads; the fix on `RRS-S0005`; result `VaultRecoveryReport` | system.admin | | job |
 | `archive.configure` (M11) | set or change the archive connection and blob target; checks TLS, the server's encryption report, and runs the archive migrations | system.admin | | sync |
 | `archive.status` (M11) | state, lag per stream, last error, pending outbox rows, projects skipped by their data policy | read | | sync |
@@ -1037,191 +1039,191 @@ Columns: **Scope**; **Undo** (U = undoable); **Kind**. Every command is `preview
 | `archive.restore` (M11) | bring back a run, conversation or artifact, or `source_id` + `all`, from the archive into this daemon | system.admin | | job |
 | `archive.verify` (M11) | re-hash archived blobs (BLAKE3) and compare row counts with the local index | system.admin | | job |
 | `archive.purge` (M11) | physically remove tombstoned or chosen rows and objects from the archive; takes admin credentials as a `secret` argument, used once, never stored or journaled | system.admin | | job |
-| `artifact.list` / `artifact.lineage` | artifact catalog, lineage graph | read | | sync |
-| `artifact.pin` / `artifact.unpin` | protect from GC (emits `pin.changed`) | system.admin | | sync |
-| `project.create` / `project.open` / `project.close` | project lifecycle | project | | sync |
-| `project.export` / `project.import` | `.rrsproj` zip (artifact kind `project_export`) | project | | job |
-| `file.open` | route a file to its handler by extension | project | | sync |
-| `file.browse` | list a directory on a node (names, sizes, kinds) to open large files by path | project | | sync |
-| `file.validate` | four validation layers, all diagnostics (`rastai file validate`; the daemon-free check is `rastai validate <file>`) | read | | sync |
-| `file.migrate` | write an upgraded copy at the current schema version | project | | sync |
-| `document.undo` / `document.redo` | undo stack of one document | project | | sync |
-| `workspace.layout.save` / `workspace.layout.apply` | layouts | project | | sync |
-| `workspace.keybindings.get` / `workspace.keybindings.set` | read and write the user's `<config>/keybindings.json` | project | | sync |
-| `command.list` | the registry (also `ListCommands`) | read | | sync |
-| `job.list` / `job.get` / `job.cancel` | jobs | read / scope of the job | | sync |
-| `tutorial.list` | the built-in tutorials: id, title, step count | read | | sync |
-| `tutorial.check` | run one tutorial step's check command with the caller narrowed to `read` and `conversations.read`; returns `{passed, actual_json}` | read | | sync |
+| `artifact.list` / `artifact.lineage` (M5) | artifact catalog, lineage graph | read | | sync |
+| `artifact.pin` / `artifact.unpin` (M5) | protect from GC (emits `pin.changed`) | system.admin | | sync |
+| `project.create` / `project.open` / `project.close` (M3) | project lifecycle | project | | sync |
+| `project.export` / `project.import` (M3) | `.rrsproj` zip (artifact kind `project_export`) | project | | job |
+| `file.open` (M3) | route a file to its handler by extension | project | | sync |
+| `file.browse` (M3) | list a directory on a node (names, sizes, kinds) to open large files by path | project | | sync |
+| `file.validate` (M3) | four validation layers, all diagnostics (`rastai file validate`; the daemon-free check is `rastai validate <file>`) | read | | sync |
+| `file.migrate` (M3) | write an upgraded copy at the current schema version | project | | sync |
+| `document.undo` / `document.redo` (M4) | undo stack of one document | project | | sync |
+| `workspace.layout.save` / `workspace.layout.apply` (M6) | layouts | project | | sync |
+| `workspace.keybindings.get` / `workspace.keybindings.set` (M6) | read and write the user's `<config>/keybindings.json` | project | | sync |
+| `command.list` (M1) | the registry (also `ListCommands`) | read | | sync |
+| `job.list` / `job.get` / `job.cancel` (M1) | jobs | read / scope of the job | | sync |
+| `tutorial.list` (Phase 2) | the built-in tutorials: id, title, step count | read | | sync |
+| `tutorial.check` (Phase 2) | run one tutorial step's check command with the caller narrowed to `read` and `conversations.read`; returns `{passed, actual_json}` | read | | sync |
 
 **Inference**
 
 | Command | Purpose | Scope | Undo | Kind |
 |---|---|---|---|---|
-| `model.list` | local, HF-cache and API models | read | | sync |
-| `model.inspect` | config, family, size, license, replay twin, fits per GPU | read | | sync |
-| `model.vocabulary` | `BlobRef` of a model's token piece table, built by the gateway's tokenizer | read | | sync |
-| `model.download` | resumable HF download into the HF cache (or `url` + `hash` file entries, e.g. Neuronpedia labels); disk check first | inference.manage | | job |
-| `model.load` | load on a node and GPU under a lease, runtime inspectable/fast | inference.manage | | job |
-| `model.unload` | unload and release the lease | inference.manage | | sync |
-| `model.twin.set` | map a quantized Fast model to its full-precision weights | inference.manage | | sync |
-| `chat.create` | new conversation with model and settings (incognito flag) | chat | | sync |
-| `chat.send` | append a user message and generate; tokens stream as `chat.token` | chat | | stream |
-| `chat.continue` | extend an assistant message by `max_new_tokens` on its session (step mode, resume after a stop) | chat | | stream |
-| `chat.stop` | stop generation | chat | | sync |
-| `chat.regenerate` | new branch from a message (optionally from a token index, with interventions) | chat | | stream |
-| `chat.settings.set` | sampling, plus the conversation's `lens` (`LensRequest`) and `interventions` (`InterventionSet`), applied to its live session; the only way interventions reach a session | chat | | sync |
-| `chat.runtime.set` | Inspectable/Fast toggle (optionally which GGUF or twin) | chat | | sync |
-| `chat.tensor.fetch` | `FetchTensor` for a conversation's context; returns a `BlobRef` | conversations.read | | sync |
-| `conversation.list` | titles and flags | read | | sync |
-| `conversation.get` | full tree | conversations.read | | sync |
-| `conversation.rename` / `conversation.archive` | | chat | | sync |
-| `conversation.star` | mark for datasets | chat | | sync |
-| `conversation.pin` | mark as a behavior test (Evaluation picks it up) | chat | | sync |
-| `conversation.delete` | permanent, from every copy: local rows, derived replays and analyses (found through lineage), remote nodes and, when configured, the archive. Result `{removed[], kept[], pending_nodes[]}`; the dry run fills the confirm dialog | chat | | sync |
-| `conversation.import` | ChatGPT, Claude, OpenAI JSONL, ShareGPT, `rastai.conversation/1` | chat | | job |
-| `conversation.export` | JSONL formats | conversations.read | | job |
-| `adapter.list` / `adapter.configure` / `adapter.test` | third-party API adapters (an external vLLM is an OpenAI-compatible adapter) | inference.manage | | sync |
-| `gateway.status` | endpoints, port, active tokens | read | | sync |
-| `gateway.log.list` | gateway log rows | conversations.read | | sync |
+| `model.list` (M2) | local, HF-cache and API models | read | | sync |
+| `model.inspect` (M2) | config, family, size, license, replay twin, fits per GPU | read | | sync |
+| `model.vocabulary` (M3) | `BlobRef` of a model's token piece table, built by the gateway's tokenizer | read | | sync |
+| `model.download` (M2) | resumable HF download into the HF cache (or `url` + `hash` file entries, e.g. Neuronpedia labels); disk check first | inference.manage | | job |
+| `model.load` (M3) | load on a node and GPU under a lease, runtime inspectable/fast | inference.manage | | job |
+| `model.unload` (M3) | unload and release the lease | inference.manage | | sync |
+| `model.twin.set` (M3) | map a quantized Fast model to its full-precision weights | inference.manage | | sync |
+| `chat.create` (M3) | new conversation with model and settings (incognito flag) | chat | | sync |
+| `chat.send` (M3) | append a user message and generate; tokens stream as `chat.token` | chat | | stream |
+| `chat.continue` (M3) | extend an assistant message by `max_new_tokens` on its session (step mode, resume after a stop) | chat | | stream |
+| `chat.stop` (M3) | stop generation | chat | | sync |
+| `chat.regenerate` (M3) | new branch from a message (optionally from a token index, with interventions) | chat | | stream |
+| `chat.settings.set` (M3) | sampling, plus the conversation's `lens` (`LensRequest`) and `interventions` (`InterventionSet`), applied to its live session; the only way interventions reach a session | chat | | sync |
+| `chat.runtime.set` (M3) | Inspectable/Fast toggle (optionally which GGUF or twin) | chat | | sync |
+| `chat.tensor.fetch` (M3) | `FetchTensor` for a conversation's context; returns a `BlobRef` | conversations.read | | sync |
+| `conversation.list` (M3) | titles and flags | read | | sync |
+| `conversation.get` (M3) | full tree | conversations.read | | sync |
+| `conversation.rename` / `conversation.archive` (M3) | | chat | | sync |
+| `conversation.star` (M3) | mark for datasets | chat | | sync |
+| `conversation.pin` (M3) | mark as a behavior test (Evaluation picks it up) | chat | | sync |
+| `conversation.delete` (M3) | permanent, from every copy: local rows, derived replays and analyses (found through lineage), remote nodes and, when configured, the archive. Result `{removed[], kept[], pending_nodes[]}`; the dry run fills the confirm dialog | chat | | sync |
+| `conversation.import` (M3) | ChatGPT, Claude, OpenAI JSONL, ShareGPT, `rastai.conversation/1` | chat | | job |
+| `conversation.export` (M3) | JSONL formats | conversations.read | | job |
+| `adapter.list` / `adapter.configure` / `adapter.test` (M3) | third-party API adapters (an external vLLM is an OpenAI-compatible adapter) | inference.manage | | sync |
+| `gateway.status` (M3) | endpoints, port, active tokens | read | | sync |
+| `gateway.log.list` (M3) | gateway log rows | conversations.read | | sync |
 
 **Psychology** (plugin `psychology`; all scope `psychology`). Sliders and toggles call the core `chat.*` commands directly from the UI (2.4 rule 12); `psychology.branch.create` reaches the gateway as `chat.regenerate`.
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `psychology.replay.open` | recompute a conversation's full view from token IDs (a `message_id`, a `/v1` `request_id`, or a rollout `trace_ref`; `observer_model_ref` for proxy replays) | | job |
-| `psychology.replay.export` | write `.rrsreplay` with the summary layer | | job |
-| `psychology.replay.import` | open a `.rrsreplay` | | sync |
-| `psychology.live.start` / `psychology.live.stop` | per-token packets beside a chat | | sync |
-| `psychology.step` | generate one token and pause | | stream |
-| `psychology.tensor.fetch` | full tensor for one point and token range | | sync |
-| `psychology.intervention.set` / `psychology.intervention.clear` | resolve and validate steering, concept boost, head ablation, expert force/block/swap, then call `chat.settings.set` | | sync |
-| `psychology.branch.create` | rewind, intervene, regenerate | | stream |
-| `psychology.branch.prefer` | save a branch pair as a DPO pair or SFT target (an inline row in `document_id`, default `data/preferences.rrsdata`; `kind`, `target_text`) | U | sync |
-| `psychology.preset.save` | save interventions as a steering preset | U | sync |
-| `psychology.preset.serve` | expose a preset as a gateway model name | | sync |
-| `psychology.preset.distill` | train a LoRA that reproduces a preset (recipe `psychology.steering_distill`) | | job |
-| `psychology.diff.run` | model diff (feature frequency, lens shifts, routing shifts, eval deltas) | | job |
-| `psychology.sae.load` | load SAE weights for layers | | job |
-| `psychology.sae.fit_check` | reconstruction quality after fine-tuning | | job |
-| `psychology.attribution.run` | attribution graph | | job |
-| `psychology.projection.run` | 2D/3D projection per layer (fit once) | | job |
-| `psychology.probe.train` | linear probe | | job |
-| `psychology.feature.search` | labeled features by text | | sync |
-| `psychology.routing.stats` | MoE expert usage over a conversation or dataset | | job |
+| `psychology.replay.open` (M4) | recompute a conversation's full view from token IDs (a `message_id`, a `/v1` `request_id`, or a rollout `trace_ref`; `observer_model_ref` for proxy replays) | | job |
+| `psychology.replay.export` (M4) | write `.rrsreplay` with the summary layer | | job |
+| `psychology.replay.import` (M4) | open a `.rrsreplay` | | sync |
+| `psychology.live.start` / `psychology.live.stop` (M4) | per-token packets beside a chat | | sync |
+| `psychology.step` (M4) | generate one token and pause | | stream |
+| `psychology.tensor.fetch` (M4) | full tensor for one point and token range | | sync |
+| `psychology.intervention.set` / `psychology.intervention.clear` (M4) | resolve and validate steering, concept boost, head ablation, expert force/block/swap, then call `chat.settings.set` | | sync |
+| `psychology.branch.create` (M4) | rewind, intervene, regenerate | | stream |
+| `psychology.branch.prefer` (M4) | save a branch pair as a DPO pair or SFT target (an inline row in `document_id`, default `data/preferences.rrsdata`; `kind`, `target_text`) | U | sync |
+| `psychology.preset.save` (M4) | save interventions as a steering preset | U | sync |
+| `psychology.preset.serve` (M4) | expose a preset as a gateway model name | | sync |
+| `psychology.preset.distill` (M4) | train a LoRA that reproduces a preset (recipe `psychology.steering_distill`) | | job |
+| `psychology.diff.run` (M4) | model diff (feature frequency, lens shifts, routing shifts, eval deltas) | | job |
+| `psychology.sae.load` (M4) | load SAE weights for layers | | job |
+| `psychology.sae.fit_check` (M4) | reconstruction quality after fine-tuning | | job |
+| `psychology.attribution.run` (M4) | attribution graph | | job |
+| `psychology.projection.run` (M4) | 2D/3D projection per layer (fit once) | | job |
+| `psychology.probe.train` (M4) | linear probe | | job |
+| `psychology.feature.search` (M4) | labeled features by text | | sync |
+| `psychology.routing.stats` (M4) | MoE expert usage over a conversation or dataset | | job |
 
 **Training**
 
 | Command | Purpose | Scope | Undo | Kind |
 |---|---|---|---|---|
-| `recipe.list` | recipes and their availability on each node (capability matrix from the doctor job) | read | | sync |
-| `train.start` | start a run: recipe + model/design + dataset (`eval_suite_ids[]` auto-run; result `plan` is a `TrainingPlan`) | training | | job |
-| `train.stop` | stop with a final checkpoint (`SignalJob STOP`); the run ends `completed`, reason `stopped`. On a chain it sends `STOP` to the running child and ends the chain `cancelled`. | training | | sync |
-| `train.resume` | resume from a checkpoint (also `failed` and `cancelled` runs with a complete checkpoint) | training | | job |
-| `train.checkpoint` | checkpoint now | training | | sync |
-| `teach.start` | Teach it: preferred branches/SFT targets + anchors → LoRA → Verify (`TeachStartArgs`) | training | | job |
-| `rlhf.start` | preference pairs → reward model → PPO chain (`RlhfStartArgs`) | training | | job |
-| `sweep.start` | grid or random sweep | training | | job |
-| `run.list` / `run.get` / `run.compare` | runs table, config diff, metric overlay; a pruned run shows as a stub until restored | read | | sync |
-| `run.tag` | tags (emits `run.tags_changed`) | training | | sync |
-| `run.rerun` | reproduce a run record | training | | job |
-| `run.notebook` | write the run as a script or notebook | training | | sync |
-| `run.delete` | delete an unpinned run; emits `run.deleted`, which the archive records as a tombstone | training | | sync |
-| `run.import_logs` | W&B, TensorBoard, Trackio, the SDK's offline spool (`rastai_spool`) | training | | job |
-| `run.external.start` / `run.external.log` / `run.external.finish` | a notebook's `rastai.init()` run: create it (the daemon writes its event log), append a batch of metric records, close it with a final state | training | | sync |
-| `checkpoint.list` | per run | read | | sync |
-| `checkpoint.export` | GGUF, safetensors, Ollama Modelfile (`CheckpointExportArgs`) | training | | job |
-| `checkpoint.push` | HF Hub push (`CheckpointPushArgs`) | training | | job |
+| `recipe.list` (M5) | recipes and their availability on each node (capability matrix from the doctor job) | read | | sync |
+| `train.start` (M1) | start a run: recipe + model/design + dataset (`eval_suite_ids[]` auto-run; result `plan` is a `TrainingPlan`) | training | | job |
+| `train.stop` (M5) | stop with a final checkpoint (`SignalJob STOP`); the run ends `completed`, reason `stopped`. On a chain it sends `STOP` to the running child and ends the chain `cancelled`. | training | | sync |
+| `train.resume` (M5) | resume from a checkpoint (also `failed` and `cancelled` runs with a complete checkpoint) | training | | job |
+| `train.checkpoint` (M5) | checkpoint now | training | | sync |
+| `teach.start` (M5) | Teach it: preferred branches/SFT targets + anchors → LoRA → Verify (`TeachStartArgs`) | training | | job |
+| `rlhf.start` (M5) | preference pairs → reward model → PPO chain (`RlhfStartArgs`) | training | | job |
+| `sweep.start` (M5) | grid or random sweep | training | | job |
+| `run.list` / `run.get` / `run.compare` (M5) | runs table, config diff, metric overlay; a pruned run shows as a stub until restored | read | | sync |
+| `run.tag` (M5) | tags (emits `run.tags_changed`) | training | | sync |
+| `run.rerun` (M5) | reproduce a run record | training | | job |
+| `run.notebook` (M5) | write the run as a script or notebook | training | | sync |
+| `run.delete` (M5) | delete an unpinned run; emits `run.deleted`, which the archive records as a tombstone | training | | sync |
+| `run.import_logs` (M5) | W&B, TensorBoard, Trackio, the SDK's offline spool (`rastai_spool`) | training | | job |
+| `run.external.start` / `run.external.log` / `run.external.finish` (M5) | a notebook's `rastai.init()` run: create it (the daemon writes its event log), append a batch of metric records, close it with a final state | training | | sync |
+| `checkpoint.list` (M5) | per run | read | | sync |
+| `checkpoint.export` (M5) | GGUF, safetensors, Ollama Modelfile (`CheckpointExportArgs`) | training | | job |
+| `checkpoint.push` (M5) | HF Hub push (`CheckpointPushArgs`) | training | | job |
 
 **Evaluation** (plugin `eval`; all scope `eval`)
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `eval.test` | run a suite on a model or checkpoint (`baseline_model` optional); CLI exits 0 passed, 1 failed, 2 errored, cancelled or refused (ADR-0020) | | job |
-| `eval.checkpoint.evaluate` | run by the plugin's `checkpoint.saved` handler (auto-run; coalesces to the newest checkpoint) | | job |
-| `eval.suite.create` / `eval.suite.edit` | suites | U | sync |
-| `eval.suite.add_conversation` | pinned conversation → test (also from the `conversation.changed` handler) | U | sync |
-| `eval.judge.calibrate` | judge agreement against hand labels | | job |
-| `eval.benchmark.import` | lm-eval-harness task definitions as data | | job |
-| `eval.benchmark.run` | run benchmarks, side by side | | job |
-| `eval.result.list` / `eval.result.diff` | results per checkpoint; regression diff | | sync |
-| `eval.vote` | record a blind A/B preference as an inline row in the project's `evals/votes.rrsdata` (journaled, undoable) | U | sync |
-| `eval.elo.fit` | Bradley-Terry fit, bootstrap CIs; reads `evals/votes.rrsdata` like any preference dataset | | job |
-| `eval.perplexity.run` | perplexity + bits per byte | | job |
-| `eval.drift.run` | KL from base on the fixed prompt set | | job |
+| `eval.test` (M5) | run a suite on a model or checkpoint (`baseline_model` optional); CLI exits 0 passed, 1 failed, 2 errored, cancelled or refused (ADR-0020) | | job |
+| `eval.checkpoint.evaluate` (M5) | run by the plugin's `checkpoint.saved` handler (auto-run; coalesces to the newest checkpoint) | | job |
+| `eval.suite.create` / `eval.suite.edit` (M5) | suites | U | sync |
+| `eval.suite.add_conversation` (M5) | pinned conversation → test (also from the `conversation.changed` handler) | U | sync |
+| `eval.judge.calibrate` (M5) | judge agreement against hand labels | | job |
+| `eval.benchmark.import` (M5) | lm-eval-harness task definitions as data | | job |
+| `eval.benchmark.run` (M5) | run benchmarks, side by side | | job |
+| `eval.result.list` / `eval.result.diff` (M5) | results per checkpoint; regression diff | | sync |
+| `eval.vote` (M5) | record a blind A/B preference as an inline row in the project's `evals/votes.rrsdata` (journaled, undoable) | U | sync |
+| `eval.elo.fit` (M5) | Bradley-Terry fit, bootstrap CIs; reads `evals/votes.rrsdata` like any preference dataset | | job |
+| `eval.perplexity.run` (M5) | perplexity + bits per byte | | job |
+| `eval.drift.run` (M5) | KL from base on the fixed prompt set | | job |
 
 **Designer** (scope `designer`)
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `design.create` | blank or from a template | U | sync |
-| `design.edit` | edit ops: add/remove/move node (writes `layout{}`), connect, set attribute, set train_mode | U | sync |
-| `design.block.define` | turn a selection into a reusable block | U | sync |
-| `design.validate` | four-layer diagnostics | | sync |
-| `design.stats` | params, FLOPs/token, memory, fits per target, time estimate, layer placement | | sync |
-| `design.import` | HF config.json, torch.export, ONNX → ModelSpec (opaque fallback); job kind `compile` | | job |
-| `design.compile` | compile to modules, load/init weights, smoke forward (`parity_check` `off`/`smoke`/`reference`) | | job |
-| `design.eject` | readable PyTorch + safetensors | | job |
-| `design.export_onnx` | ONNX via `torch.onnx` (`opset`, `verify`) | | job |
-| `design.diff` | diff two versions | | sync |
-| `design.template.list` | templates | | sync |
+| `design.create` (M6) | blank or from a template | U | sync |
+| `design.edit` (M6) | edit ops: add/remove/move node (writes `layout{}`), connect, set attribute, set train_mode | U | sync |
+| `design.block.define` (M6) | turn a selection into a reusable block | U | sync |
+| `design.validate` (M6) | four-layer diagnostics | | sync |
+| `design.stats` (M6) | params, FLOPs/token, memory, fits per target, time estimate, layer placement | | sync |
+| `design.import` (M6) | HF config.json, torch.export, ONNX → ModelSpec (opaque fallback); job kind `compile` | | job |
+| `design.compile` (M6) | compile to modules, load/init weights, smoke forward (`parity_check` `off`/`smoke`/`reference`) | | job |
+| `design.eject` (M6) | readable PyTorch + safetensors | | job |
+| `design.export_onnx` (M6) | ONNX via `torch.onnx` (`opset`, `verify`) | | job |
+| `design.diff` (M6) | diff two versions | | sync |
+| `design.template.list` (M6) | templates | | sync |
 
 **Agent Gym** (scope `gym` unless noted)
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `harness.create` / `harness.edit` | harnesses | U | sync |
-| `harness.tool.toggle` | enable or disable a tool | U | sync |
-| `harness.import` | MCP configs, server.json, .mcpb, Agent Skills | U | sync |
-| `harness.export` | MCP config formats | | sync |
-| `gym.task.import` | Harbor task directories | | job |
-| `gym.start` | RL run (GRPO, GSPO, PPO) on a harness | | job |
-| `gym.stop` | stop with checkpoint | | sync |
-| `gym.peek.start` / `gym.peek.stop` | live peek | | sync |
-| `gym.step` | hold, step or release one sandbox (`action`) | | sync |
-| `sandbox.list` | sandboxes per node (scope read) | | sync |
-| `sandbox.kill` / `sandbox.cleanup` | remove one / remove orphans (scope sandbox.spawn) | | sync / job |
+| `harness.create` / `harness.edit` (M7) | harnesses | U | sync |
+| `harness.tool.toggle` (M7) | enable or disable a tool | U | sync |
+| `harness.import` (M7) | MCP configs, server.json, .mcpb, Agent Skills | U | sync |
+| `harness.export` (M7) | MCP config formats | | sync |
+| `gym.task.import` (M7) | Harbor task directories | | job |
+| `gym.start` (M7) | RL run (GRPO, GSPO, PPO) on a harness | | job |
+| `gym.stop` (M7) | stop with checkpoint | | sync |
+| `gym.peek.start` / `gym.peek.stop` (M7) | live peek | | sync |
+| `gym.step` (M7) | hold, step or release one sandbox (`action`) | | sync |
+| `sandbox.list` (M7) | sandboxes per node (scope read) | | sync |
+| `sandbox.kill` / `sandbox.cleanup` (M7) | remove one / remove orphans (scope sandbox.spawn) | | sync / job |
 
 **Plugins** (scope `plugins.manage` unless noted)
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `plugin.list` / `plugin.permissions` | installed plugins, requested and granted permissions (scope read) | | sync |
-| `plugin.install` | install a `.rrsplugin` (trust prompt; `granted_permissions`, `expected_content_hash`) | | job |
-| `plugin.uninstall` | remove the plugin's version folders; its `plugin-data/` folder stays unless the argument `delete_data` is `true` (8.1) | | job |
-| `plugin.enable` / `plugin.disable` | | | sync |
-| `plugin.suggest` | plugins that handle an unknown file or missing node (scope read) | | sync |
-| `plugin.new` | scaffold from a template (UIs are `.jsx`) | | sync |
-| `plugin.dev` | load unpacked, hot reload | | sync |
-| `plugin.codegen` | generate JS wrappers (with JSDoc and declarations) and Python dataclasses from the plugin's `types.json` | | sync |
-| `plugin.test` | headless host + mock worker + fixtures | | job |
-| `plugin.lint` / `plugin.pack` | | | sync |
-| `plugin.publish` | Phase 2 | | job |
+| `plugin.list` (M1) / `plugin.permissions` (M8) | installed plugins, requested and granted permissions (scope read) | | sync |
+| `plugin.install` (M8) | install a `.rrsplugin` (trust prompt; `granted_permissions`, `expected_content_hash`) | | job |
+| `plugin.uninstall` (M8) | remove the plugin's version folders; its `plugin-data/` folder stays unless the argument `delete_data` is `true` (8.1) | | job |
+| `plugin.enable` / `plugin.disable` (M8) | | | sync |
+| `plugin.suggest` (M8) | plugins that handle an unknown file or missing node (scope read) | | sync |
+| `plugin.new` (M8) | scaffold from a template (UIs are `.jsx`) | | sync |
+| `plugin.dev` (M8) | load unpacked, hot reload | | sync |
+| `plugin.codegen` (M8) | generate JS wrappers (with JSDoc and declarations) and Python dataclasses from the plugin's `types.json` | | sync |
+| `plugin.test` (M8) | headless host + mock worker + fixtures | | job |
+| `plugin.lint` / `plugin.pack` (M8) | | | sync |
+| `plugin.publish` (Phase 2) | Phase 2 | | job |
 
 **Remote** (scope `remote` unless noted)
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `node.list` / `node.status` | nodes, heartbeat, telemetry, jobs (scope read) | | sync |
-| `node.pair` | SSH pairing: install binary, exchange keys, start node | | job |
-| `node.unpair` | forget keys; wipe unpinned remote data (`force`) | | job |
-| `node.update` | push the matching binary (`force` stops running jobs with a checkpoint) | | job |
-| `node.cache.list` / `node.cache.wipe` | per-node cache | | sync / job |
-| `transfer.list` / `transfer.cancel` | resumable transfers | | sync |
+| `node.list` / `node.status` (M1) | nodes, heartbeat, telemetry, jobs (scope read) | | sync |
+| `node.pair` (M9) | SSH pairing: install binary, exchange keys, start node | | job |
+| `node.unpair` (M9) | forget keys; wipe unpinned remote data (`force`) | | job |
+| `node.update` (M9) | push the matching binary (`force` stops running jobs with a checkpoint) | | job |
+| `node.cache.list` / `node.cache.wipe` (M9) | per-node cache | | sync / job |
+| `transfer.list` / `transfer.cancel` (M9) | resumable transfers | | sync |
 
 **Data** (scope `data`)
 
 | Command | Purpose | Undo | Kind |
 |---|---|---|---|
-| `dataset.import` | detect task, build `.rrsdata` (also from a MySQL query) | | job |
-| `dataset.preview` | rows, token counts, splits | | sync |
-| `dataset.edit` | splits, filters, converter choice | U | sync |
-| `dataset.check` | MinHash dedupe, leakage, PII | | job |
-| `dataset.from_conversations` | starred conversations → dataset (`examples[]` references) | U | sync |
-| `dataset.snapshot` | freeze into the blob store (JSONL or Parquet); a `mysql` source streams through a server-side cursor | | job |
-| `dataset.export` | JSONL / Parquet with PII redaction, plus `croissant.json` | | job |
-| `converter.list` | | | sync |
-| `converter.generate` | declarative converter from the preview | U | sync |
-| `converter.test` | run a converter on a sample | | job |
+| `dataset.import` (M5) | detect task, build `.rrsdata` (also from a MySQL query) | | job |
+| `dataset.preview` (M5) | rows, token counts, splits | | sync |
+| `dataset.edit` (M5) | splits, filters, converter choice | U | sync |
+| `dataset.check` (M5) | MinHash dedupe, leakage, PII | | job |
+| `dataset.from_conversations` (M5) | starred conversations → dataset (`examples[]` references) | U | sync |
+| `dataset.snapshot` (M5) | freeze into the blob store (JSONL or Parquet); a `mysql` source streams through a server-side cursor | | job |
+| `dataset.export` (M5) | JSONL / Parquet with PII redaction, plus `croissant.json` | | job |
+| `converter.list` (M5) | | | sync |
+| `converter.generate` (M5) | declarative converter from the preview | U | sync |
+| `converter.test` (M5) | run a converter on a sample | | job |
 
 **Not commands:** `chat.lens.set`, `chat.interventions.set` and `gateway.tokenize` don't exist (15.11). `rastai storage rebuild-index` is CLI-only and offline.
 
@@ -1311,48 +1313,48 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 
 | Event type | Class | Emitter | Main payload |
 |---|---|---|---|
-| `job.state_changed` | durable | node | job_id, from, to, reason, exit_code, Diagnostic |
-| `job.progress` | ephemeral | worker | fraction, message |
-| `job.log_line` | ephemeral | node | stream (stdout/stderr), text |
-| `run.state_changed` | durable | worker, chain driver | run state (9.5 / 9.6), reason |
-| `run.metrics` | durable | worker | step, `values{name: f64}` (names in 15.7) |
-| `run.tags_changed` | durable | daemon | run_id, tags |
-| `run.imported` | durable | worker (`data_import`, mode `run_logs`) | source kind, source id, imported run id, config and metrics blob refs |
-| `run.deleted` | durable | daemon | run_id (the archive's tombstone) |
-| `chain.step_started` | durable | daemon chain driver | chain run id, step index and name, child run id |
-| `chain.step_finished` | durable | daemon chain driver | step index, child outcome, gate result |
-| `checkpoint.saved` | durable | worker | step, folder, file hashes, is_best |
-| `checkpoint.resumed` | durable | worker | step, from checkpoint |
-| `train.preempted` | durable | worker | signal, checkpoint step |
-| `artifact.created` | durable | worker, daemon | artifact_id, kind, content_hash, size_bytes, home_node_id, parents[]{id, relation} (one `lineage` row each, 8.2) |
-| `lineage.linked` | durable | daemon | from_id, to_id, relation: a lineage link whose child isn't an artifact (8.2) |
-| `pin.changed` | durable | daemon | subject kind and id, pinned |
-| `model.state_changed` | durable | node | model_ref, runtime, state, gpu_indices, lease_id |
-| `lease.state_changed` | durable | node | lease, from, to |
-| `node.heartbeat` | ephemeral | node | telemetry (GPU util, VRAM, temps, RAM, disk) |
-| `node.state_changed` | durable | daemon | node_id, from, to |
-| `sandbox.state_changed` | durable | node | sandbox_id, run_id, from, to |
-| `transfer.progress` | ephemeral | node | transfer_id, bytes_done, bytes_total |
-| `transfer.finished` | durable | node | transfer_id, hash, ok, Diagnostic |
-| `download.progress` | ephemeral | node | model_ref, bytes_done, bytes_total |
-| `download.finished` | durable | node | model_ref, revision, ok, model_hash, size_bytes |
-| `egress.active` | ephemeral | daemon, node (from an `EgressReport`) | `EgressActive{purpose, host, subject_id}`; the egress badge reads nothing else. Purposes include `api_adapter`, `hf_download`, `hf_upload`, `remote_node` (an SSH node's link while it carries data) and `archive` (during sync). |
-| `chat.token` | ephemeral | gateway (daemon) | conversation_id, message_id, token_id, text, logprob |
-| `conversation.changed` | durable | daemon | conversation_id, message_ids added, flags changed |
-| `conversation.deleted` | durable | daemon | conversation_id, node_id, run_ids[], blob_hashes[] (ids and hashes only): a removal that waits for an unreachable node |
-| `gateway.request_logged` | durable | worker (from the node gateway's `GenerateFinished.gateway_log`) | `GatewayRequestLogged` (4.9): content-free; the record itself is a blob the daemon writes into `gateway_log`, then deletes |
-| `psychology.packet` | ephemeral | Inspectable worker via node | `LivePacket` |
-| `gym.peek_step` | ephemeral | worker | sandbox_id, rollout_id, step_index, kind (thought/action/observation), text |
-| `gym.rollout_finished` | durable | worker | rollout_id, group_id, reward, outcome (`done`, `max_turns`, `time_cap`, `sandbox_oom`, `infra_failure`), detached, policy_step, trace blob |
-| `gym.group_finished` | durable | worker | group_id, advantages, partial flag |
-| `eval.test_result` | durable | eval plugin job | test_id, checkpoint ref, passed, score, judge verdict blob |
-| `eval.suite_finished` | durable | eval plugin job | passed, counts, changed tests |
-| `dataset.check_finished` | durable | worker | duplicates, leakage, PII counts, report blob |
-| `design.stats_updated` | ephemeral | daemon | document_id, params, FLOPs/token, memory, fits[] |
-| `document.changed` | durable | daemon | document_id, content_hash, undo position |
-| `command.finished` | durable | daemon | journal_id, command_id, principal, ok, code |
-| `plugin.state_changed` | durable | daemon | plugin_id, from, to, Diagnostic |
-| `diagnostic.reported` | durable | any | Diagnostic, subject_id |
+| `job.state_changed` (M1) | durable | node | job_id, from, to, reason, exit_code, Diagnostic |
+| `job.progress` (M1) | ephemeral | worker | fraction, message |
+| `job.log_line` (M1) | ephemeral | node | stream (stdout/stderr), text |
+| `run.state_changed` (M1) | durable | worker, chain driver | run state (9.5 / 9.6), reason |
+| `run.metrics` (M1) | durable | worker | step, `values{name: f64}` (names in 15.7) |
+| `run.tags_changed` (M1) | durable | daemon | run_id, tags |
+| `run.imported` (M5) | durable | worker (`data_import`, mode `run_logs`) | source kind, source id, imported run id, config and metrics blob refs |
+| `run.deleted` (M5) | durable | daemon | run_id (the archive's tombstone) |
+| `chain.step_started` (M5) | durable | daemon chain driver | chain run id, step index and name, child run id |
+| `chain.step_finished` (M5) | durable | daemon chain driver | step index, child outcome, gate result |
+| `checkpoint.saved` (M1) | durable | worker | step, folder, file hashes, is_best |
+| `checkpoint.resumed` (M1) | durable | worker | step, from checkpoint |
+| `train.preempted` (M5) | durable | worker | signal, checkpoint step |
+| `artifact.created` (M1) | durable | worker, daemon | artifact_id, kind, content_hash, size_bytes, home_node_id, parents[]{id, relation} (one `lineage` row each, 8.2) |
+| `lineage.linked` (M5) | durable | daemon | from_id, to_id, relation: a lineage link whose child isn't an artifact (8.2) |
+| `pin.changed` (M1) | durable | daemon | subject kind and id, pinned |
+| `model.state_changed` (M3) | durable | node | model_ref, runtime, state, gpu_indices, lease_id |
+| `lease.state_changed` (M3) | durable | node | lease, from, to |
+| `node.heartbeat` (M1) | ephemeral | node | telemetry (GPU util, VRAM, temps, RAM, disk) |
+| `node.state_changed` (M1) | durable | daemon | node_id, from, to |
+| `sandbox.state_changed` (M5) | durable | node | sandbox_id, run_id, from, to |
+| `transfer.progress` (M9) | ephemeral | node | transfer_id, bytes_done, bytes_total |
+| `transfer.finished` (M9) | durable | node | transfer_id, hash, ok, Diagnostic |
+| `download.progress` (M2) | ephemeral | node | model_ref, bytes_done, bytes_total |
+| `download.finished` (M2) | durable | node | model_ref, revision, ok, model_hash, size_bytes |
+| `egress.active` (M2) | ephemeral | daemon, node (from an `EgressReport`) | `EgressActive{purpose, host, subject_id}`; the egress badge reads nothing else. Purposes include `api_adapter`, `hf_download`, `hf_upload`, `remote_node` (an SSH node's link while it carries data) and `archive` (during sync). |
+| `chat.token` (M3) | ephemeral | gateway (daemon) | conversation_id, message_id, token_id, text, logprob |
+| `conversation.changed` (M3) | durable | daemon | conversation_id, message_ids added, flags changed |
+| `conversation.deleted` (M3) | durable | daemon | conversation_id, node_id, run_ids[], blob_hashes[] (ids and hashes only): a removal that waits for an unreachable node |
+| `gateway.request_logged` (M3) | durable | worker (from the node gateway's `GenerateFinished.gateway_log`) | `GatewayRequestLogged` (4.9): content-free; the record itself is a blob the daemon writes into `gateway_log`, then deletes |
+| `psychology.packet` (M4) | ephemeral | Inspectable worker via node | `LivePacket` |
+| `gym.peek_step` (M7) | ephemeral | worker | sandbox_id, rollout_id, step_index, kind (thought/action/observation), text |
+| `gym.rollout_finished` (M7) | durable | worker | rollout_id, group_id, reward, outcome (`done`, `max_turns`, `time_cap`, `sandbox_oom`, `infra_failure`), detached, policy_step, trace blob |
+| `gym.group_finished` (M7) | durable | worker | group_id, advantages, partial flag |
+| `eval.test_result` (M5) | durable | eval plugin job | test_id, checkpoint ref, passed, score, judge verdict blob |
+| `eval.suite_finished` (M5) | durable | eval plugin job | passed, counts, changed tests |
+| `dataset.check_finished` (M5) | durable | worker | duplicates, leakage, PII counts, report blob |
+| `design.stats_updated` (M6) | ephemeral | daemon | document_id, params, FLOPs/token, memory, fits[] |
+| `document.changed` (M1) | durable | daemon | document_id, content_hash, undo position |
+| `command.finished` (M1) | durable | daemon | journal_id, command_id, principal, ok, code |
+| `plugin.state_changed` (M1) | durable | daemon | plugin_id, from, to, Diagnostic |
+| `diagnostic.reported` (M1) | durable | any | Diagnostic, subject_id |
 | `archive.status_changed` (M11) | durable | daemon | from, to (`off`, `ok`, `lagging`, `unreachable`, `misconfigured`), Diagnostic |
 | `archive.synced` (M11) | durable | daemon | stream, acked position, rows and objects written |
 | `archive.progress` (M11) | ephemeral | daemon | stream, items done, items total |
@@ -1434,26 +1436,26 @@ Every table and every column is listed here and in 8.3, because `check-names` co
 
 | Table | Columns |
 |---|---|
-| `schema_migrations` | `version`, `applied_unix_ms` |
-| `projects` | `project_id`, `path`, `name`, `opened_unix_ms` (no `data_policy`: a project's policy is a setting, read from its `settings.json`, 11.1) |
-| `documents` | `document_id`, `type`, `path`, `project_id`, `content_hash`, `updated_unix_ms` |
-| `undo_steps` | `document_id`, `position`, `forward_patch_json`, `inverse_patch_json`, `journal_id` |
-| `command_journal` | `journal_id`, `command_id`, `principal`, `arguments_json` (`secret` and `content` fields redacted, 5.1), `ok`, `code`, `idempotency_key`, `result_json`, `job_id`, `started_unix_ms`, `finished_unix_ms` |
-| `tokens` | `token_id`, `name`, `token_hash` (BLAKE3), `scopes`, `created_unix_ms`, `revoked_unix_ms` |
-| `nodes` | `node_id`, `name`, `transport` (local/ssh), `address`, `state`, `protocol_version`, `capabilities`, `last_heartbeat_unix_ms` |
-| `runs` | `run_id`, `kind`, `state`, `project_id`, `node_id`, `parent_run_id`, `record_hash`, `acked_sequence`, `created_unix_ms`, `finished_unix_ms`, `pinned`, `archive_state` (`local`, `archived`, `pruned`; 9.9) |
-| `run_metrics` | `run_id`, `sequence`, `step`, `name`, `value`, `emitted_unix_ms` |
-| `run_tags` | `run_id`, `tag` |
-| `jobs` | `job_id`, `run_id`, `node_id`, `kind`, `state`, `pid`, `process_group_id`, `exit_code`, `error_code` |
-| `checkpoints` | `checkpoint_id`, `run_id`, `step`, `folder`, `node_id`, `is_best`, `pinned` |
-| `artifacts` | `artifact_id`, `kind` (15.7), `content_hash`, `size_bytes`, `home_node_id`, `pinned`, `created_unix_ms` |
-| `artifact_copies` | `artifact_id`, `node_id`, `path`, `verified_unix_ms` |
-| `lineage` | `from_id`, `to_id`, `relation` (the list below) |
-| `models` | `model_ref`, `model_hash`, `family`, `license`, `gated`, `twin_of`, `twin_same_weights`, `format_info_json` (GGUF or safetensors header facts), `size_bytes` |
-| `plugins` | `plugin_id`, `version`, `state`, `content_hash`, `granted_permissions`, `source` |
-| `transfers` | `transfer_id`, `node_id`, `direction`, `path`, `hash`, `bytes_done`, `bytes_total`, `state` |
-| `log_cursors` | `log_name`, `acked_sequence`: the daemon log's ack, like `runs.acked_sequence` |
-| `plugin_event_deliveries` | `plugin_id`, `handler_id`, `command_id`, `event_type`, `log_name`, `sequence`, `run_id`, `subject_id`, `queued_unix_ms`, `delivered_unix_ms`, `journal_id`, `code`; key `plugin_id`, `handler_id`, `log_name`, `sequence`. M5 builds only what Evaluation auto-run and pins need (queue, deliver once, retry on restart); backlog views, per-plugin limits and redelivery tools are (L2). |
+| `schema_migrations` (M1) | `version`, `applied_unix_ms` |
+| `projects` (M1) | `project_id`, `path`, `name`, `opened_unix_ms` (no `data_policy`: a project's policy is a setting, read from its `settings.json`, 11.1) |
+| `documents` (M1) | `document_id`, `type`, `path`, `project_id`, `content_hash`, `updated_unix_ms` |
+| `undo_steps` (M1) | `document_id`, `position`, `forward_patch_json`, `inverse_patch_json`, `journal_id` |
+| `command_journal` (M1) | `journal_id`, `command_id`, `principal`, `arguments_json` (`secret` and `content` fields redacted, 5.1), `ok`, `code`, `idempotency_key`, `result_json`, `job_id`, `started_unix_ms`, `finished_unix_ms` |
+| `tokens` (M1) | `token_id`, `name`, `token_hash` (BLAKE3), `scopes`, `created_unix_ms`, `revoked_unix_ms` |
+| `nodes` (M1) | `node_id`, `name`, `transport` (local/ssh), `address`, `state`, `protocol_version`, `capabilities`, `last_heartbeat_unix_ms` |
+| `runs` (M1) | `run_id`, `kind`, `state`, `project_id`, `node_id`, `parent_run_id`, `record_hash`, `acked_sequence`, `created_unix_ms`, `finished_unix_ms`, `pinned`, `archive_state` (`local`, `archived`, `pruned`; 9.9) |
+| `run_metrics` (M1) | `run_id`, `sequence`, `step`, `name`, `value`, `emitted_unix_ms` |
+| `run_tags` (M1) | `run_id`, `tag` |
+| `jobs` (M1) | `job_id`, `run_id`, `node_id`, `kind`, `state`, `pid`, `process_group_id`, `exit_code`, `error_code` |
+| `checkpoints` (M1) | `checkpoint_id`, `run_id`, `step`, `folder`, `node_id`, `is_best`, `pinned` |
+| `artifacts` (M1) | `artifact_id`, `kind` (15.7), `content_hash`, `size_bytes`, `home_node_id`, `pinned`, `created_unix_ms` |
+| `artifact_copies` (M1) | `artifact_id`, `node_id`, `path`, `verified_unix_ms` |
+| `lineage` (M1) | `from_id`, `to_id`, `relation` (the list below) |
+| `models` (M1) | `model_ref`, `model_hash`, `family`, `license`, `gated`, `twin_of`, `twin_same_weights`, `format_info_json` (GGUF or safetensors header facts), `size_bytes` |
+| `plugins` (M1) | `plugin_id`, `version`, `state`, `content_hash`, `granted_permissions`, `source` |
+| `transfers` (M1) | `transfer_id`, `node_id`, `direction`, `path`, `hash`, `bytes_done`, `bytes_total`, `state` |
+| `log_cursors` (M1) | `log_name`, `acked_sequence`: the daemon log's ack, like `runs.acked_sequence` |
+| `plugin_event_deliveries` (M1) | `plugin_id`, `handler_id`, `command_id`, `event_type`, `log_name`, `sequence`, `run_id`, `subject_id`, `queued_unix_ms`, `delivered_unix_ms`, `journal_id`, `code`; key `plugin_id`, `handler_id`, `log_name`, `sequence`. M5 builds only what Evaluation auto-run and pins need (queue, deliver once, retry on restart); backlog views, per-plugin limits and redelivery tools are (L2). |
 | `archive_cursors` (M11) | `stream` (`log:<log_name>`, `run_log:<run_id>`, `table:<name>`, `vault_changes`, `blobs`), `position`, `acked_unix_ms`. Written only after the MySQL commit for that position. |
 
 **There is no `settings` table.** Settings, keybindings and layouts live only in the files of 11.1; `rastai.db` keeps no copy (spec v5.4 §19). Platform flow §8.4 and any other doc must not name a settings table.
@@ -1489,12 +1491,12 @@ Every row comes from a durable event, so `rebuild-index` restores all of them:
 
 | Table | Columns |
 |---|---|
-| `schema_migrations` | `version`, `applied_unix_ms` (the vault's own migrations) |
-| `conversations` | `conversation_id`, `project_id`, `title`, `model_ref`, `archived`, `starred`, `pinned`, `settings_json` (current sampling, runtime, lens and interventions), `created_unix_ms`, `updated_unix_ms` |
-| `messages` | `message_id`, `conversation_id`, `parent_id`, `role`, `parts_json`, `token_ids` (blob, little-endian u32; for assistant rows the full context, prompt then generated), `model_hash`, `chat_template_hash`, `settings_json` (`prompt_token_count`, `rewind_from{message_id, token_index}`, `lens`, `interventions`, `interventions_changed_mid_answer`, `runtime`, `engine`), `fidelity`, `finish_reason`, `created_unix_ms` |
-| `annotations` | `annotation_id`, `message_id`, `kind`, `body_json` |
-| `gateway_log` | `request_id`, `conversation_id`, `run_id`, `principal`, `adapter`, `model_ref`, `model_hash`, `runtime`, `prompt_ids`, `generated_ids`, `logprobs` (blob), `sampling_json` (with `template_source`, `engine_build`), `text` (API adapters), `finish_reason`, `stop_kind`, `started_unix_ms`, `finished_unix_ms` |
-| `vault_changes` (M11) | `change_id` (increasing), `table_name`, `row_id`, `op` (`upsert`/`delete`), `project_id`, `changed_unix_ms`. The archive outbox, created by vault migration `0001`, written in the same transaction as the row it describes. `upsert` rows are written only while `archive.enabled` is true. `delete` rows are written whenever an archive connection has ever been configured (`archive.connection` set), even while `archive.enabled` is false, and are sent on the next enabled pass; only an explicit archive removal (forgetting the connection) stops delete recording. Rows of projects without `archive.include_conversations` are dropped by the archiver, except `delete`, which is always sent. Retention (`gateway.retention_days`) is housekeeping, not user intent: it writes no outbox row, so archived `gateway_log` rows stay until `archive.purge`. User deletes (`conversation.delete`) always write a `delete` row. |
+| `schema_migrations` (M3) | `version`, `applied_unix_ms` (the vault's own migrations) |
+| `conversations` (M3) | `conversation_id`, `project_id`, `title`, `model_ref`, `archived`, `starred`, `pinned`, `settings_json` (current sampling, runtime, lens and interventions), `created_unix_ms`, `updated_unix_ms` |
+| `messages` (M3) | `message_id`, `conversation_id`, `parent_id`, `role`, `parts_json`, `token_ids` (blob, little-endian u32; for assistant rows the full context, prompt then generated), `model_hash`, `chat_template_hash`, `settings_json` (`prompt_token_count`, `rewind_from{message_id, token_index}`, `lens`, `interventions`, `interventions_changed_mid_answer`, `runtime`, `engine`), `fidelity`, `finish_reason`, `created_unix_ms` |
+| `annotations` (M3) | `annotation_id`, `message_id`, `kind`, `body_json` |
+| `gateway_log` (M3) | `request_id`, `conversation_id`, `run_id`, `principal`, `adapter`, `model_ref`, `model_hash`, `runtime`, `prompt_ids`, `generated_ids`, `logprobs` (blob), `sampling_json` (with `template_source`, `engine_build`), `text` (API adapters), `finish_reason`, `stop_kind`, `started_unix_ms`, `finished_unix_ms` |
+| `vault_changes` (M3) | `change_id` (increasing), `table_name`, `row_id`, `op` (`upsert`/`delete`), `project_id`, `changed_unix_ms`. The archive outbox, created by vault migration `0001` (M3-E02 builds it; the archiver that reads it is M11), written in the same transaction as the row it describes. `upsert` rows are written only while `archive.enabled` is true. `delete` rows are written whenever an archive connection has ever been configured (`archive.connection` set), even while `archive.enabled` is false, and are sent on the next enabled pass; only an explicit archive removal (forgetting the connection) stops delete recording. Rows of projects without `archive.include_conversations` are dropped by the archiver, except `delete`, which is always sent. Retention (`gateway.retention_days`) is housekeeping, not user intent: it writes no outbox row, so archived `gateway_log` rows stay until `archive.purge`. User deletes (`conversation.delete`) always write a `delete` row. |
 
 - **Finish reasons** (the gateway's `FinishReason`): `stop`, `length`, `cancelled`, `client_disconnected`, `error`, `evicted`.
 - Incognito conversations never reach any table. Retention deletes `gateway_log` rows by age (`gateway.retention_days`).
@@ -1803,9 +1805,9 @@ Earlier drafts gave some numbers two meanings. Each number below keeps one; the 
 - `RRS-V0002` → `RRS-V0101`; `RRS-J3001` → `RRS-J3002`; `RRS-J0003` → `RRS-J1003`;
 - inference flow drafts: `G0003` → `G0005`; `G0007` (stall) and `G0008` (busy) → `G0009`; `G0009` (no twin) → `G3009`; `G1001`/`G1002` (template, prompt length) → `G1002`/`G1005`; `G1003` (twin mismatch) → `G3010`; `G2005` → `G2002`; `G2006` → `C1005`; `G3001` → `G3005`; `G3002`–`G3004` (startup) → `G3002`; `G3005` (died serving) → `G3003`; `G3006` (no GGUF) → `G3008`; `G4001` (incognito) → `L0006`; `H3002` → `H3006`; `H3003` → `H3007`; `S3001` (disk full while writing) → `S3002`; `L0004`–`L0006` → `L0003`–`L0005`; `L1001`, `L3001` (needs Inspectable) → `G3004`; `L1002`, `L1003` → `L1001`, `L1002`; `L3002`, `L3003`, `L3005`, `L3006` → `L3001`, `L3002`, `L3003`, `L3004`; `L3004` (preset for other weights) → `G0010`.
 
-### 10.3 Codes assigned so far
+### 10.3 Codes assigned so far (M1)
 
-The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). Titles only; the catalog adds messages, plain-English text and fixes.
+The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The heading's "(M1)" covers every core range; the `RRS-L` rows are marked (M4) and the `RRS-V` rows (M5), because those codes live in the plugins' own catalogs, written by M4-E01 (`plugins/psychology/catalog/`) and M5-E01 (`plugins/evaluation/catalog/`). Titles only; the catalog adds messages, plain-English text and fixes.
 
 **`RRS-E`**
 
@@ -2190,41 +2192,41 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). Tit
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `RRS-L0001` | error | Replay weights not present (fix `model.download`) |
-| `RRS-L0002` | warning | Weights differ from the conversation's; replay is approximate |
-| `RRS-L0003` | warning | Replay diverged from the logged tokens at token N |
-| `RRS-L0004` | error | Replay file has no readable summary layer |
-| `RRS-L0005` | info | API conversation: pick a local observer model |
-| `RRS-L0006` | error | Incognito conversations are never saved, so replay, export and Prefer are refused |
-| `RRS-L1001` | warning | Live panel overhead above `psychology.overhead_budget_percent` |
-| `RRS-L1002` | error | Tensor request over 64 MiB; pick a smaller range |
-| `RRS-L2001` | error | SAE weights missing (fix `psychology.sae.load`) |
-| `RRS-L2002` | error | SAE doesn't match the model (hook point or width) |
-| `RRS-L2003` | warning | SAE labels stale after fine-tuning (training-evaluation §12.2's `RRS-L2xxx`) |
-| `RRS-L2004` | error | No published SAEs for this model (fix `train.start` recipe `sae`) |
-| `RRS-L3001` | error | Not an intervention point |
-| `RRS-L3002` | error | Expert override on a dense model or an unknown expert |
-| `RRS-L3003` | error | Steering vector size differs from the model |
-| `RRS-L3004` | error | The two branches don't share a prompt |
-| `RRS-L4001` | info | Model diff ran without SAE features (training-evaluation §12.1's `RRS-L4xxx`) |
-| `RRS-L4002` | error | No transcoders for this model (fix `train.start` recipe `sae`, transcoder mode) |
-| `RRS-L4003` | error | Routing stats need an MoE model |
+| `RRS-L0001` (M4) | error | Replay weights not present (fix `model.download`) |
+| `RRS-L0002` (M4) | warning | Weights differ from the conversation's; replay is approximate |
+| `RRS-L0003` (M4) | warning | Replay diverged from the logged tokens at token N |
+| `RRS-L0004` (M4) | error | Replay file has no readable summary layer |
+| `RRS-L0005` (M4) | info | API conversation: pick a local observer model |
+| `RRS-L0006` (M4) | error | Incognito conversations are never saved, so replay, export and Prefer are refused |
+| `RRS-L1001` (M4) | warning | Live panel overhead above `psychology.overhead_budget_percent` |
+| `RRS-L1002` (M4) | error | Tensor request over 64 MiB; pick a smaller range |
+| `RRS-L2001` (M4) | error | SAE weights missing (fix `psychology.sae.load`) |
+| `RRS-L2002` (M4) | error | SAE doesn't match the model (hook point or width) |
+| `RRS-L2003` (M4) | warning | SAE labels stale after fine-tuning (training-evaluation §12.2's `RRS-L2xxx`) |
+| `RRS-L2004` (M4) | error | No published SAEs for this model (fix `train.start` recipe `sae`) |
+| `RRS-L3001` (M4) | error | Not an intervention point |
+| `RRS-L3002` (M4) | error | Expert override on a dense model or an unknown expert |
+| `RRS-L3003` (M4) | error | Steering vector size differs from the model |
+| `RRS-L3004` (M4) | error | The two branches don't share a prompt |
+| `RRS-L4001` (M4) | info | Model diff ran without SAE features (training-evaluation §12.1's `RRS-L4xxx`) |
+| `RRS-L4002` (M4) | error | No transcoders for this model (fix `train.start` recipe `sae`, transcoder mode) |
+| `RRS-L4003` (M4) | error | Routing stats need an MoE model |
 
 **`RRS-V`**
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `RRS-V0001` | error | Suite has no tests |
-| `RRS-V0003` | error | Model or checkpoint not found |
-| `RRS-V0101` | warning | Suite checks generated text only with keyword or regex metrics |
-| `RRS-V1001` | warning | Judge uncalibrated or not configured |
-| `RRS-V1002` | error | Judge agreement below the bar |
-| `RRS-V1004` | error | Judge timed out or gave no parseable verdict |
-| `RRS-V2001` | error | Metric plugin not installed |
-| `RRS-V2002` | error | Sandbox engine unavailable |
-| `RRS-V2003` | info | Test needs logits the model under test can't give (API model) |
-| `RRS-V2004` | warning | Elo comparison graph is disconnected |
-| `RRS-V3001` | warning | Benchmark task uses an unsupported YAML feature, field, `!function` or Jinja; task skipped |
+| `RRS-V0001` (M5) | error | Suite has no tests |
+| `RRS-V0003` (M5) | error | Model or checkpoint not found |
+| `RRS-V0101` (M5) | warning | Suite checks generated text only with keyword or regex metrics |
+| `RRS-V1001` (M5) | warning | Judge uncalibrated or not configured |
+| `RRS-V1002` (M5) | error | Judge agreement below the bar |
+| `RRS-V1004` (M5) | error | Judge timed out or gave no parseable verdict |
+| `RRS-V2001` (M5) | error | Metric plugin not installed |
+| `RRS-V2002` (M5) | error | Sandbox engine unavailable |
+| `RRS-V2003` (M5) | info | Test needs logits the model under test can't give (API model) |
+| `RRS-V2004` (M5) | warning | Elo comparison graph is disconnected |
+| `RRS-V3001` (M5) | warning | Benchmark task uses an unsupported YAML feature, field, `!function` or Jinja; task skipped |
 
 **`RRS-U`**
 
@@ -2263,7 +2265,7 @@ Lowest to highest. A later layer overrides individual keys, not whole sections.
 | defaults | compiled into `rastai-core` (`settings_defaults.rs`), documented in `docs/reference/settings.md` (generated) |
 | user | `<config>/settings.json` |
 | project | `<project>.rrsproj/settings.json` |
-| environment | `RASTAI_<SECTION>__<KEY>`, double underscore for nesting (`RASTAI_GATEWAY__PORT=8899`) |
+| environment | `RASTAI_<SECTION>__<KEY>`, double underscore for nesting (`RASTAI_DAEMON__PORT=8899` sets `daemon.port`) |
 | flags | `--set <section>.<key>=<value>` on any `rastai` command, plus dedicated flags (`--port`, `--headless`, `--data-dir`) |
 
 `settings.get` returns each key with the layer it came from. Secrets are never settings; a setting that needs one names a keychain account.
@@ -2280,23 +2282,23 @@ Lowest to highest. A later layer overrides individual keys, not whole sections.
 
 | Section | Main keys (defaults) |
 |---|---|
-| `ui` | `mode` (`advanced` in the prototype), `theme` (`system`; also `light`, `dark`, or a plugin theme id from M8), `density` (`comfortable`; also `compact`), `locale`, `reduced_motion`, `colorblind_palette` |
-| `daemon` | `port` (47820), `listen` (`127.0.0.1`), `open_browser` (true), `bus_buffer_events` (10000) |
-| `gateway` | `enabled` (true), `retention_days` (30), `incognito_default` (false), `redact_pii_on_export` (true), `default_adapter` |
-| `inference` | `default_runtime` (`inspectable`), `default_model`, `sampling{temperature 0.7, top_k 64, top_p 0.95, repetition_penalty 1.0, max_tokens 1024, seed null}`, `pin_attention_kernel_for_replay` (true) |
-| `psychology` | `live_panel` (false), `overhead_budget_percent` (35: the live panel may cost at most +35% at CUDA-graph speed; shown in the UI, `RRS-L1001` above it, and a nightly GPU test fails above it), `sae_layers_default`, `top_k` (16), `summary_layer_top_k`, `sae_fit_max_fvu_increase` (0.05) |
-| `training` | `anchors_default` (true, for SFT and for DPO, where anchors are an SFT term beside the DPO loss), `answer_only_loss` (true), `gradient_checkpointing` (true), `lora{rank 16, alpha 32}`, `checkpoint{keep_last 3, interval_minutes 15, preemption_budget_seconds 25}`, `memory_cap_bytes`, `auto_resume` (true), `rlhf_reward_model_min_accuracy` (0.65) |
-| `eval` | `drift_prompt_set`, `run_on_new_checkpoint` (true), `judge_default`, `judge_min_agreement` (0.8), `judge_min_labels` (10) |
-| `compute` | `default_node` (`local`), `gpu_assignment{chat, training}`, `vram_reserve_bytes`, `sandbox_cap` (8) |
-| `nodes` | `heartbeat_seconds` (5), `missed_heartbeats_unreachable` (3), `ssh_binary` (`ssh`) |
-| `storage` | `data_dir`, `quota_bytes` (unset: no quota), `gc_interval_hours` (24), `free_space_margin_bytes` (5 GiB), `db_snapshot_days` (7, L2), `db_snapshot_hour` (3, L2) |
+| `ui` (M1) | `mode` (`advanced` in the prototype), `theme` (`system`; also `light`, `dark`, or a plugin theme id from M8), `density` (`comfortable`; also `compact`), `locale`, `reduced_motion`, `colorblind_palette` |
+| `daemon` (M1) | `port` (47820), `listen` (`127.0.0.1`), `open_browser` (true), `bus_buffer_events` (10000) |
+| `gateway` (M1) | `enabled` (true), `retention_days` (30), `incognito_default` (false), `redact_pii_on_export` (true), `default_adapter` |
+| `inference` (M1) | `default_runtime` (`inspectable`), `default_model`, `sampling{temperature 0.7, top_k 64, top_p 0.95, repetition_penalty 1.0, max_tokens 1024, seed null}`, `pin_attention_kernel_for_replay` (true) |
+| `psychology` (M1) | `live_panel` (false), `overhead_budget_percent` (35: the live panel may cost at most +35% at CUDA-graph speed; shown in the UI, `RRS-L1001` above it, and a nightly GPU test fails above it), `sae_layers_default`, `top_k` (16), `summary_layer_top_k`, `sae_fit_max_fvu_increase` (0.05) |
+| `training` (M1) | `anchors_default` (true, for SFT and for DPO, where anchors are an SFT term beside the DPO loss), `answer_only_loss` (true), `gradient_checkpointing` (true), `lora{rank 16, alpha 32}`, `checkpoint{keep_last 3, interval_minutes 15, preemption_budget_seconds 25}`, `memory_cap_bytes`, `auto_resume` (true), `rlhf_reward_model_min_accuracy` (0.65) |
+| `eval` (M1) | `drift_prompt_set`, `run_on_new_checkpoint` (true), `judge_default`, `judge_min_agreement` (M5) (0.8), `judge_min_labels` (M5) (10) |
+| `compute` (M1) | `default_node` (`local`), `gpu_assignment{chat, training}`, `vram_reserve_bytes`, `sandbox_cap` (8) |
+| `nodes` (M1) | `heartbeat_seconds` (5), `missed_heartbeats_unreachable` (3), `ssh_binary` (`ssh`) |
+| `storage` (M1) | `data_dir`, `quota_bytes` (unset: no quota), `gc_interval_hours` (24), `free_space_margin_bytes` (5 GiB), `db_snapshot_days` (7, L2), `db_snapshot_hour` (3, L2) |
 | `archive` (M11) | `enabled` (false), `connection` (a `MysqlConnection`, 5.2), `objects{target, folder_path, s3{endpoint, bucket, region, prefix}}` (`target` is `folder`; `s3` later), `interval_seconds` (60), `prune_after_days` (unset: local pruning off), `include_conversations` (false; project layer only), `backoff_min_seconds` (5), `backoff_max_seconds` (300), `lag_warning_hours` (24) |
-| `hf` | `cache_dir` (HF default), `offline` (false) |
-| `plugins` | `dev_paths[]`, `experimental_apis` (false), `sources[]` (Phase 2) |
-| `privacy` | `data_policy` (`local-only`; a project sets its own in its `settings.json`; the first refusal's `RRS-C1009` fix sets it in one click), `crash_reports` (false: whether to show the review prompt after a crash; reports are written locally either way and never uploaded), `show_egress_badge` (true) |
-| `sandbox` | `engine_socket` (auto: Podman, then Docker), `default_caps{cpu 2, ram_bytes 4 GiB, time_seconds 600, pids_limit 512, disk_bytes 10 GiB}` |
-| `logging` | `level` (`info`), `max_file_bytes`, `keep_files` |
-| `updates` | `channel` (`stable`), `auto_check` (true) |
+| `hf` (M1) | `cache_dir` (HF default), `offline` (false) |
+| `plugins` (M1) | `dev_paths[]`, `experimental_apis` (false), `sources[]` (Phase 2) |
+| `privacy` (M1) | `data_policy` (`local-only`; a project sets its own in its `settings.json`; the first refusal's `RRS-C1009` fix sets it in one click), `crash_reports` (false: whether to show the review prompt after a crash; reports are written locally either way and never uploaded), `show_egress_badge` (true) |
+| `sandbox` (M1) | `engine_socket` (auto: Podman, then Docker), `default_caps{cpu 2, ram_bytes 4 GiB, time_seconds 600, pids_limit 512, disk_bytes 10 GiB}` |
+| `logging` (M1) | `level` (`info`), `max_file_bytes`, `keep_files` |
+| `updates` (M1) | `channel` (`stable`), `auto_check` (true) |
 
 ---
 
@@ -2666,48 +2668,48 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 
 | Crate | Names |
 |---|---|
-| `rastai-diag` | `Diagnostic`, `Severity`, `DiagnosticPath`, `format_path`, `parse_path` (the 4.1 path grammar); `RuntimeCatalog`, `PluginCatalogEntry`, `add_plugin_catalog`, `plugin_diagnostic` (third-party `PLG-` codes); `render_text`, `render_basic`, `render_json`; `init_logger`, `log_info` (the JSON-lines logger) |
-| `rastai-formats` | byte access: `ByteSource`, `SliceSource`, `FileSource`, `ByteSink`, `VecSink`, `FileSink`. Four-layer API: `ImportLimits`, `ReadOutcome`, `read_document`, `Document`, `EnvironmentFacts`, `check_environment`, `write_document`. Types: `DatasetSpec`, `ConverterDocument`, `ThemeDocument`, `EvalResult`, `ModelDiffReport`, `SaeFitCheckReport`, `MysqlConnection`, `InterventionSet`, `SteeringPreset`, `ConversationMessage`; `check_connection_tls` (the one TLS rule for `MysqlConnection`, used by the MySQL reader through the wheel, by `rastai-archive` and by the `archive.configure` handler). Descriptions: `TypeDescription`, `FieldDescription`, `FieldKind` (`Json`, `Enum`, `Proto` plus the plain kinds), the `secret` and `content` flags (5.1), `cli_position` (`x-rastai-cli-position` in `types.json`). Commands: `parse_arguments`, `describe_arguments`, `describe_result`, `json_schema_for`, `read_plugin_types`, `HandlerEventArgs`. Byte formats: `plan_safetensors`, `read_safetensors_header`, `check_safetensors_header`, `plan_gguf`, `encode_gguf_tensor`, `read_gguf_header`, `GgufHeader`, `GgufTensorInfo`, `gguf_tensor_bytes`, `write_zip_stored`, `ZipSource`, `copy_zip_entry`, `write_small_zip`, `zip/inflate.rs`, `crc32.rs`. Hashing: `hash_bytes`, `StreamHasher` (`new_stream_hasher`, `update_stream_hasher`, `finish_stream_hasher`), `content_hash_of_value`, `model_hash`. Undo: `apply_patch`, `diff_values`, `JsonPatchOperation`. Wheel: module `rastai_formats._native`, exception `FormatsValidationError` (carries diagnostics JSON). |
-| `rastai-core` | `CommandRow`, `CommandRegistry`, `CommandFilter`, `CommandOutput`, `descriptor_from_row`, `find_command`, `list_commands`, `RETIRED_COMMANDS`, `RetiredCommand`; naming: `cli_words`, `command_id_from_cli_words`, `flag_name`, `mcp_tool_name`, `command_id_from_mcp_tool_name`, `check_command_id`, `ALIASES` (`doctor` → `system.doctor`, `rerun` → `run.rerun`) and `CLI_MODE_WORDS` (`open`, `serve`, `node serve`, `node init`, `node check-update` (L2), `tunnel`, `mcp`, `validate`, `version`, `storage rebuild-index`, `help`): the CLI's fixed words, moved here in v1.2 so codegen can read them; `rastai-cli`'s `modes.rs` uses them; event types (`event_types.rs`): `EVENT_TYPES`, `EventTypeRow` (the core event-type table, moved here from `rastai-server` in v1.2, 7.3); `Principal`, `Scope` (with `Scope::Plugin(String)`); proto JSON: `job_spec_to_json`, `job_spec_from_json` and the same pair for `HardwareFingerprint` and `SamplingSettings`; settings: `NodeSettings`, `node_settings`, `GatewaySettings`, `gateway_settings`; paths: `PathEnvironment`, `DataPaths`, `read_path_environment`, `resolve_paths`, `hf_cache_dir`, `chat_template_override_path`, `hf_lock_path`, `daemon_key_path`, `node_key_path`, `node_socket_path`, `node_hub_socket_path`, `worker_host_socket_path`, `job_socket_path`, `remote_node_socket_path`; ids and randomness: `new_id(prefix)` (8.6), `random_bytes(count)` (from `/dev/urandom`); versions: `APP_VERSION`, `PLUGIN_API_VERSION`, `NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`, `API_PACKAGES` |
-| `rastai-store` | `Store`, `open_store`, `IndexWrite`, `VaultWrite`, `write_index`, `write_vault`, `queue_vault_write`, `VaultCommit`, `wait_for_commit`, `ReaderPool`, `open_index_reader`, `open_vault_reader`, `IndexReaderGuard`, `VaultReaderGuard`; `HandlerCall`, `list_pending_handler_calls`, `vault_writes_for_records`; `EventLogWriter`, `EventLogReader`, `SyncPolicy`, `append_raw_frame`, `read_next_frame`, `apply_event_record` (the one indexing path, also for restored frames), `rebuild_index`, `RebuildOptions`, `RebuildReport`; `take_daemon_lock`, `free_bytes`, `check_free_space`, `write_config_file`; `delete_gateway_log_older_than(cutoff_unix_ms)` (retention, local only, writes no outbox row, 8.3); archive path (M3-E02 for the outbox switch, M11 for the rest): `set_vault_change_recording`, `RawFrame`, `RawFrameRead`, `read_next_raw_frame`, `frame_bytes_from_body`, `list_archive_cursors`, `list_journal_rows_after`, `list_vault_changes_after`, `list_prune_candidates`, `IndexWrite::SetArchiveCursor`, `IndexWrite::MarkRunsArchived`, `IndexWrite::ResetArchiveCursors`, `VaultWrite::DeleteConversation`, `VaultWrite::RestoreConversation`, `VaultWrite::TrimVaultChanges`; `WRITER_BATCH_MAX` (256, equal to `INDEX_BATCH_RECORDS`); (L2) `backups.rs` snapshots and salvage |
-| `rastai-transport` | `LocalListener`, `LocalStream`, `bind_local_socket`, `PeerIdentity`, `NodeTarget`, `NodeConnection`, `open_node_connection`, `SshSession`, `SshOptions`, `SshForwards`, `RemoteOutput`, `run_remote_command`, `upload_over_ssh`, `start_ssh_forwarding`, `HttpTarget`, `HttpRequest`, `HttpResponse`, `HttpStream`, `EgressReport` (every outbound HTTPS request carries an egress tag, else `RRS-N3008`), `SseEvent`, `SseReader`, `PartialFile`, `TRANSFER_CHUNK_BYTES`; `sha256_digest`, `hmac_sha256` (in `http_client.rs`, from the rustls crypto provider: HF file checks, llama-server builds, SigV4 later; 2.5) |
-| `rastai-sandbox` | `DockerEngine`, `SandboxManager`, `SandboxTable`, `SandboxRecord`, `SandboxReservation`, `reserve_sandboxes`, `release_reservation`, `remove_job_sandboxes`, `adopt_existing_containers`, `stop_egress_network`; files `manager.rs`, `container_spec.rs`, `deadlines.rs`, `orphan_sweep.rs`, `egress_proxy.rs` (the HTTP CONNECT proxy on network `rastai-egress-<run_id>`, M7-E02), `engine_http.rs` |
-| `rastai-gateway` | `Gateway`, `GatewayPlace`, `ChatRequest`, `CompletionRequest`, `PromptTokens`, `PreparedPrompt` (`route`), `RouteTarget`, `route_model`, `prepare_chat` (route, render, encode, BOS rule, context check, seed; no I/O), `run_chat` (generate, stream, log), `generate_chat` (both, for `/v1`), `set_served_presets`, `set_served_models`, `set_tokenization_overrides`, `gateway_routes` (the axum router `rastai-server` mounts), `GenerateSummary`, `StopKind` (`StopToken`, `StopString`), `retention_cutoff_unix_ms` (`privacy.rs`), `StreamItem`, `StreamedToken`, `TokenSink`, `FinishReason`, `TokenizedChat`, `ServedModel`, `ServedPreset`, `TokenizerFiles`, `TokenizerCache`, `check_tokenizer_parity`, `target_mask.rs`, `NamedAdapter`, `AdapterRequest`, `AdapterResult`, `Adapter`, `DaemonForwardAdapter`, `SecretReader`, `LogSink`, `LogCommit`, `ToolCallFormat` |
-| `rastai-mcp` | `McpStep`, `McpTool`, `ToolOutcome`, `McpSession`, `McpConnection`, `LineChannel`, `run_stdio_bridge`, `tool_from_command`, `MAX_MESSAGE_BYTES` (4 MiB), `SUPPORTED_PROTOCOL_VERSIONS` |
-| `rastai-node` | `NodeOptions`, `NodeMode`, `NodeState`, `JobTable`, `JobRecord`, `WorkerLink`, `RunEventPositions`, `LiveHub`, `LeaseTable`, `LeaseDecision`, `decide_lease`, `ModelTable`, `FastEngine`, `NodeIdentity` (`load_or_create_identity`, `sign_challenge`, `verify_challenge`; also used for `daemon.key`), `LlamaServerLaunch`, `LlamaServerProcess`, `FastQueue`, `EngineBuild`, `EnvironmentChoice`, `JobPermissions`, `HubConnection`, `JobEventLogSink`; files `identity.rs`, `fast_runtime.rs`, `downloads.rs`, `transfers.rs`, `gym_tools.rs`, `hf_upload.rs`, `plugin_modules.rs`, `spawn.rs`, `signals.rs`, `hardware.rs`, `telemetry.rs`, `environments.rs`, `self_update.rs` |
+| `rastai-diag` (M1) | `Diagnostic`, `Severity`, `DiagnosticPath`, `format_path`, `parse_path` (the 4.1 path grammar); `RuntimeCatalog`, `PluginCatalogEntry`, `add_plugin_catalog`, `plugin_diagnostic` (third-party `PLG-` codes); `render_text`, `render_basic`, `render_json`; `init_logger`, `log_info` (the JSON-lines logger) |
+| `rastai-formats` (M1) | byte access: `ByteSource`, `SliceSource`, `FileSource`, `ByteSink`, `VecSink`, `FileSink`. Four-layer API: `ImportLimits`, `ReadOutcome`, `read_document`, `Document`, `EnvironmentFacts`, `check_environment`, `write_document`. Types: `DatasetSpec`, `ConverterDocument`, `ThemeDocument`, `EvalResult`, `ModelDiffReport`, `SaeFitCheckReport`, `MysqlConnection`, `InterventionSet`, `SteeringPreset`, `ConversationMessage`; `check_connection_tls` (the one TLS rule for `MysqlConnection`, used by the MySQL reader through the wheel, by `rastai-archive` and by the `archive.configure` handler). Descriptions: `TypeDescription`, `FieldDescription`, `FieldKind` (`Json`, `Enum`, `Proto` plus the plain kinds), the `secret` and `content` flags (5.1), `cli_position` (`x-rastai-cli-position` in `types.json`). Commands: `parse_arguments`, `describe_arguments`, `describe_result`, `json_schema_for`, `read_plugin_types`, `HandlerEventArgs`. Byte formats: `plan_safetensors`, `read_safetensors_header`, `check_safetensors_header`, `plan_gguf`, `encode_gguf_tensor`, `read_gguf_header`, `GgufHeader`, `GgufTensorInfo`, `gguf_tensor_bytes`, `write_zip_stored`, `ZipSource`, `copy_zip_entry`, `write_small_zip`, `zip/inflate.rs`, `crc32.rs`. Hashing: `hash_bytes`, `StreamHasher` (`new_stream_hasher`, `update_stream_hasher`, `finish_stream_hasher`), `content_hash_of_value`, `model_hash`. Undo: `apply_patch`, `diff_values`, `JsonPatchOperation`. Wheel: module `rastai_formats._native`, exception `FormatsValidationError` (carries diagnostics JSON). |
+| `rastai-core` (M1) | `CommandRow`, `CommandRegistry`, `CommandFilter`, `CommandOutput`, `descriptor_from_row`, `find_command`, `list_commands`, `RETIRED_COMMANDS`, `RetiredCommand`; naming: `cli_words`, `command_id_from_cli_words`, `flag_name`, `mcp_tool_name`, `command_id_from_mcp_tool_name`, `check_command_id`, `ALIASES` (`doctor` → `system.doctor`, `rerun` → `run.rerun`) and `CLI_MODE_WORDS` (`open`, `serve`, `node serve`, `node init`, `node check-update` (L2), `tunnel`, `mcp`, `validate`, `version`, `storage rebuild-index`, `help`): the CLI's fixed words, moved here in v1.2 so codegen can read them; `rastai-cli`'s `modes.rs` uses them; event types (`event_types.rs`): `EVENT_TYPES`, `EventTypeRow` (the core event-type table, moved here from `rastai-server` in v1.2, 7.3); `Principal`, `Scope` (with `Scope::Plugin(String)`); proto JSON: `job_spec_to_json`, `job_spec_from_json` and the same pair for `HardwareFingerprint` and `SamplingSettings`; settings: `NodeSettings`, `node_settings`, `GatewaySettings`, `gateway_settings`; paths: `PathEnvironment`, `DataPaths`, `read_path_environment`, `resolve_paths`, `hf_cache_dir`, `chat_template_override_path`, `hf_lock_path`, `daemon_key_path`, `node_key_path`, `node_socket_path`, `node_hub_socket_path`, `worker_host_socket_path`, `job_socket_path`, `remote_node_socket_path`; ids and randomness: `new_id(prefix)` (8.6), `random_bytes(count)` (from `/dev/urandom`); versions: `APP_VERSION`, `PLUGIN_API_VERSION`, `NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`, `API_PACKAGES` |
+| `rastai-store` (M1) | `Store`, `open_store`, `IndexWrite`, `VaultWrite`, `write_index`, `write_vault`, `queue_vault_write`, `VaultCommit`, `wait_for_commit`, `ReaderPool`, `open_index_reader`, `open_vault_reader`, `IndexReaderGuard`, `VaultReaderGuard`; `HandlerCall`, `list_pending_handler_calls`, `vault_writes_for_records`; `EventLogWriter`, `EventLogReader`, `SyncPolicy`, `append_raw_frame`, `read_next_frame`, `apply_event_record` (the one indexing path, also for restored frames), `rebuild_index`, `RebuildOptions`, `RebuildReport`; `take_daemon_lock`, `free_bytes`, `check_free_space`, `write_config_file`; `delete_gateway_log_older_than(cutoff_unix_ms)` (retention, local only, writes no outbox row, 8.3); archive path (M3-E02 for the outbox switch, M11 for the rest): `set_vault_change_recording`, `RawFrame`, `RawFrameRead`, `read_next_raw_frame`, `frame_bytes_from_body`, `list_archive_cursors`, `list_journal_rows_after`, `list_vault_changes_after`, `list_prune_candidates`, `IndexWrite::SetArchiveCursor`, `IndexWrite::MarkRunsArchived`, `IndexWrite::ResetArchiveCursors`, `VaultWrite::DeleteConversation`, `VaultWrite::RestoreConversation`, `VaultWrite::TrimVaultChanges`; `WRITER_BATCH_MAX` (256, equal to `INDEX_BATCH_RECORDS`); (L2) `backups.rs` snapshots and salvage |
+| `rastai-transport` (M1) | `LocalListener`, `LocalStream`, `bind_local_socket`, `PeerIdentity`, `NodeTarget`, `NodeConnection`, `open_node_connection`, `SshSession`, `SshOptions`, `SshForwards`, `RemoteOutput`, `run_remote_command`, `upload_over_ssh`, `start_ssh_forwarding`, `HttpTarget`, `HttpRequest`, `HttpResponse`, `HttpStream`, `EgressReport` (every outbound HTTPS request carries an egress tag, else `RRS-N3008`), `SseEvent`, `SseReader`, `PartialFile`, `TRANSFER_CHUNK_BYTES`; `sha256_digest`, `hmac_sha256` (in `http_client.rs`, from the rustls crypto provider: HF file checks, llama-server builds, SigV4 later; 2.5) |
+| `rastai-sandbox` (M5) | `DockerEngine`, `SandboxManager`, `SandboxTable`, `SandboxRecord`, `SandboxReservation`, `reserve_sandboxes`, `release_reservation`, `remove_job_sandboxes`, `adopt_existing_containers`, `stop_egress_network`; files `manager.rs`, `container_spec.rs`, `deadlines.rs`, `orphan_sweep.rs`, `egress_proxy.rs` (the HTTP CONNECT proxy on network `rastai-egress-<run_id>`, M7-E02), `engine_http.rs` |
+| `rastai-gateway` (M3) | `Gateway`, `GatewayPlace`, `ChatRequest`, `CompletionRequest`, `PromptTokens`, `PreparedPrompt` (`route`), `RouteTarget`, `route_model`, `prepare_chat` (route, render, encode, BOS rule, context check, seed; no I/O), `run_chat` (generate, stream, log), `generate_chat` (both, for `/v1`), `set_served_presets`, `set_served_models`, `set_tokenization_overrides`, `gateway_routes` (the axum router `rastai-server` mounts), `GenerateSummary`, `StopKind` (`StopToken`, `StopString`), `retention_cutoff_unix_ms` (`privacy.rs`), `StreamItem`, `StreamedToken`, `TokenSink`, `FinishReason`, `TokenizedChat`, `ServedModel`, `ServedPreset`, `TokenizerFiles`, `TokenizerCache`, `check_tokenizer_parity`, `target_mask.rs`, `NamedAdapter`, `AdapterRequest`, `AdapterResult`, `Adapter`, `DaemonForwardAdapter`, `SecretReader`, `LogSink`, `LogCommit`, `ToolCallFormat` |
+| `rastai-mcp` (M1) | `McpStep`, `McpTool`, `ToolOutcome`, `McpSession`, `McpConnection`, `LineChannel`, `run_stdio_bridge`, `tool_from_command`, `MAX_MESSAGE_BYTES` (4 MiB), `SUPPORTED_PROTOCOL_VERSIONS` |
+| `rastai-node` (M1) | `NodeOptions`, `NodeMode`, `NodeState`, `JobTable`, `JobRecord`, `WorkerLink`, `RunEventPositions`, `LiveHub`, `LeaseTable`, `LeaseDecision`, `decide_lease`, `ModelTable`, `FastEngine`, `NodeIdentity` (`load_or_create_identity`, `sign_challenge`, `verify_challenge`; also used for `daemon.key`), `LlamaServerLaunch`, `LlamaServerProcess`, `FastQueue`, `EngineBuild`, `EnvironmentChoice`, `JobPermissions`, `HubConnection`, `JobEventLogSink`; files `identity.rs`, `fast_runtime.rs`, `downloads.rs`, `transfers.rs`, `gym_tools.rs`, `hf_upload.rs`, `plugin_modules.rs`, `spawn.rs`, `signals.rs`, `hardware.rs`, `telemetry.rs`, `environments.rs`, `self_update.rs` |
 | `rastai-archive` (M11) | `ArchiveError`, `ArchiveTarget` (`Folder`, later `S3`), `build_upsert` (all write SQL, in `upsert.rs`), `sync_archive`, `prune_archived_runs`, `restore_from_archive`, `verify_archive`, `purge_archive`, `run_archive_migrations`, `ArchiveSettings`, `archive_settings`, `ArchiveCredentials`, `SyncScope`, `ProjectRule`, `ArchiveState`, `ArchiveStatus`, `SyncReport`, `PrunePlan`, `plan_prune`, `RestoreRequest`, `PurgeSelection`, `AdminCredentials`; files `mysql.rs` (the only `mysql_async` import), `objects/folder.rs`, `objects/s3.rs` and `sigv4.rs` (later) |
-| `rastai-server` | `Server`, `run_daemon`, `DaemonOptions`, `CommandContext` (`context.server.gateway`), `execute_command`, `check_arguments`, `record_daemon_event`, `submit_job`, `NodeLink`, `NodeTransport`; request gate: `check_request_gate`, `RequestHead`, `Listener`, `AuthState`, `sessions.rs` (login codes, origin-bound sessions, idle expiry), `auth_files.rs`; chains: `record_chain_event`, `resume_chains`, `ChainStep`, `ChainAction`, `next_chain_action`, `start_next_chain_step`; policy: `check_data_policy`, `PolicyTarget` (with `PolicyTarget::ArchiveDatabase`), `policy_target_for_route` (`policy.rs`); plugin host: `HostCapability`, `FirstPartyCapability`, `HOST_CAPABILITIES`, `FIRST_PARTY_CAPABILITIES`, `negotiate_capabilities`, `NegotiationResult`, `LoadedPlugin`, `PluginSource`, `match_event_handlers`, `deliver_handler_calls`, `deliver_pending_handler_calls`; `VaultLogSink`; ModelSpec analysis: `DesignStats`, `compute_design_stats`, `estimate_memory_bytes`, `check_fits`, `estimate_time_seconds`, `TrainingMemoryEstimate`, `estimate_training_memory`, `largest_micro_batch`, `plan_layer_placement`, `PlacementUnit`, `GpuBudget`, `LayerPlacement`; files `commands/handlers/chat.rs`, `gateway_glue/routing.rs`, `nodes/node_links.rs`, `nodes/pairing.rs`, `scheduler/chains.rs`, `scheduler/launch.rs`, `scheduler/placement.rs` (which node and GPUs a job gets; not layer placement), `modelspec_analysis/memory.rs`, `modelspec_analysis/layer_placement.rs`, `storage_tasks.rs`, `crash_reports.rs`, `http/connect.rs`, `http/connect_json.rs`, `secrets.rs` |
-| `rastai-cli` | `Mode` (with `Tunnel`, `NodeInit`; its words and `ALIASES` come from `rastai-core`), `EXIT_OK` … `EXIT_ERRORED`, `modes.rs`, `output.rs`; global flags `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`; `rastai open --replace-older-daemon` (stop an older daemon with `system.shutdown`, take the database copies, start this version) |
-| `rastai-plugin` | `Provider`, `serve_provider`, `read_manifest`, `PluginSdkError` |
-| `rastai-codegen` (dev) | bins `rastai-formats-codegen`, `rastai-catalog-codegen`, `rastai-names-codegen` (writes `schemas/names.json`, 12.6); schema keywords `x-rastai-stability`, `x-rastai-since-version` (in `schemas/commands/` and `schemas/events/`) beside `x-rastai-cli-position` |
-| `rastai-desktop` (`apps/desktop/src-tauri`) | package and binary `rastai-desktop`, `allow_navigation`, `open_second_window`, `DesktopError`; flags `--disable-dmabuf`, `--devtools`, `--open-url <url>` (debug builds only) |
+| `rastai-server` (M1) | `Server`, `run_daemon`, `DaemonOptions`, `CommandContext` (`context.server.gateway`), `execute_command`, `check_arguments`, `record_daemon_event`, `submit_job`, `NodeLink`, `NodeTransport`; request gate: `check_request_gate`, `RequestHead`, `Listener`, `AuthState`, `sessions.rs` (login codes, origin-bound sessions, idle expiry), `auth_files.rs`; chains: `record_chain_event`, `resume_chains`, `ChainStep`, `ChainAction`, `next_chain_action`, `start_next_chain_step`; policy: `check_data_policy`, `PolicyTarget` (with `PolicyTarget::ArchiveDatabase`), `policy_target_for_route` (`policy.rs`); plugin host: `HostCapability`, `FirstPartyCapability`, `HOST_CAPABILITIES`, `FIRST_PARTY_CAPABILITIES`, `negotiate_capabilities`, `NegotiationResult`, `LoadedPlugin`, `PluginSource`, `match_event_handlers`, `deliver_handler_calls`, `deliver_pending_handler_calls`; `VaultLogSink`; ModelSpec analysis: `DesignStats`, `compute_design_stats`, `estimate_memory_bytes`, `check_fits`, `estimate_time_seconds`, `TrainingMemoryEstimate`, `estimate_training_memory`, `largest_micro_batch`, `plan_layer_placement`, `PlacementUnit`, `GpuBudget`, `LayerPlacement`; files `commands/handlers/chat.rs`, `gateway_glue/routing.rs`, `nodes/node_links.rs`, `nodes/pairing.rs`, `scheduler/chains.rs`, `scheduler/launch.rs`, `scheduler/placement.rs` (which node and GPUs a job gets; not layer placement), `modelspec_analysis/memory.rs`, `modelspec_analysis/layer_placement.rs`, `storage_tasks.rs`, `crash_reports.rs`, `http/connect.rs`, `http/connect_json.rs`, `secrets.rs` |
+| `rastai-cli` (M1) | `Mode` (with `Tunnel`, `NodeInit`; its words and `ALIASES` come from `rastai-core`), `EXIT_OK` … `EXIT_ERRORED`, `modes.rs`, `output.rs`; global flags `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`; `rastai open --replace-older-daemon` (stop an older daemon with `system.shutdown`, take the database copies, start this version) |
+| `rastai-plugin` (M8) | `Provider`, `serve_provider`, `read_manifest`, `PluginSdkError` |
+| `rastai-codegen` (dev) (M1) | bins `rastai-formats-codegen`, `rastai-catalog-codegen`, `rastai-names-codegen` (writes `schemas/names.json`, 12.6); schema keywords `x-rastai-stability`, `x-rastai-since-version` (in `schemas/commands/` and `schemas/events/`) beside `x-rastai-cli-position` |
+| `rastai-desktop` (`apps/desktop/src-tauri`) (M1) | package and binary `rastai-desktop`, `allow_navigation`, `open_second_window`, `DesktopError`; flags `--disable-dmabuf`, `--devtools`, `--open-url <url>` (debug builds only) |
 
 ### 15.2 Python names by package
 
 | Package | Names |
 |---|---|
-| `rastai_plugin` | `PluginRegistry` (`register(kind, name, implementation)`, `find(kind, name)`, `names(kind)`), `REGISTRY_KINDS` (the manifest keys); `PluginHost` (`execute_command`, `put_blob`, `get_blob`, `gateway_generate`); `WorkerHost(PluginHost)` (`register`, `resize_lease`, `tokenize_chat`, the sandbox calls, `list_tools`, `call_tool`, `resolve_model`), `connect_worker_host`; `JobEvents` (`emit_durable`, `emit_ephemeral`), `JobControl` (`stop_requested`, `cancel_requested`, `preempt_requested`; SIGTERM sets only `preempt_requested`), `PluginError`; base classes `Recipe` (with `restore_state`), `Metric` (with `prepare(EvalContext)`), `Lens`, `Converter`, `RewardFunction`, `NodeType`, `Importer`, `Exporter`, `Sampler`, `BenchmarkLoader`, `SaeLoader`, `DataSource`; `EvalContext`; `reply_ok`, `reply_with_jobs`, `reply_error`, `unknown_command`; module convention `register(registry)` and `handle_command(call, host)`; `rastai_plugin.testing.TestHost`, `RecordingEvents`; `rastai_plugin.catalog` |
-| `rastai` (SDK) | `load`, `observe`, `log`, `connect` (returns a `DaemonClient` with `execute(command_id, arguments)`; "Copy as Python" and macros use it), `init`, `finish`, `config` (the wandb-compatible tracking surface), `Design`, `RastaiError`; facades `rastai.runtime`, `rastai.data`, `rastai.lens`, `rastai.train` (re-exports only); re-exported engine functions `load_model_by_ref`, `next_token_log_probs`, `kl_divergence`, `load_feature_labels`, `search_feature_labels`, `read_dataset`, `load_tokenizer`, `count_tokens`; `python/rastai/public_api.txt` (the public-name snapshot); offline spool `./rastai-runs/<run_id>.jsonl` |
-| `rastai_worker` | `python -m rastai_worker run --job-file`, `plugin --plugin <id> --job-file`, `rank --job-file --rank <n>`, `python -I -m rastai_worker check` (one JSON line: torch version, backend, CUDA or HIP version, visible devices); `EventLogWriter`, `LiveStream`, `exit_codes.py`, `event_payloads.py`, `proto_convert.py`, `hardware_fingerprint.py`, `vram.py` (visible order is ascending physical index), `diagnostics.py` |
-| `rastai_models` | `Family`, `find_family`, `import_hf_config`, `import_onnx`, `import_exported_program`, `ImportResult`, `ImportReport`, `check_import_limits`, `mark_unsupported_features_opaque`, `check_weight_names`, `read_cached_headers`; `compile_model`, `init_weights`, `bind_weights`, `BindReport`, `smoke_forward`, `SmokeResult`, `load_compat_module`, `CompiledModel`, `ForwardContext`, `PointHook`, `DecodeReadout`; `apply_placement` (no planner); `export_onnx`, `eject/` (`source_writer.py`, `loader_source.py`); `SessionPool`, `DecodeSlot`, `StaticDecoder`, `DECODE_SLOT_COUNT` (2); `io/safetensors_reader.py` (tensor bytes after the wheel's header check), `io/safetensors_writer.py`, `io/gguf_writer.py`; `importers/onnx_proto/` (generated from `proto/third_party/onnx/onnx.proto`), `importers/torch_export` (live sessions only; `.pt2` files refused, `RRS-E7004`) |
-| `rastai_lens` | `LivePanelReadout`, `TensorRecorder`, `InterventionHook` (`interventions.py`: steering, feature edits, head ablation, expert overrides), `prefill_packets`, `SparseAutoencoder`, `load_feature_labels`, `search_feature_labels` |
-| `rastai_data` | `TrainingExample`, `PreferencePair`, `LabeledExample`, `ImageExample`, `PromptExample`, `tokenize_chat_rows`, `epoch_order`, `make_loader`, `BatchLoader` (`position`), `read_dataset`, `decode_image` (`image_decode.py`), readers `readers/jsonl.py`, `readers/csv_reader.py`, `readers/parquet.py`, `readers/image_folder.py`, `readers/mysql_reader.py` |
-| `rastai_train` | `train`, `optimizer_step`, `write_checkpoint`, `preempt_at_step_boundary`, `recipe_availability`, `capability.py`, `export_checkpoint`, `kl_divergence`, `distributed.py`, `kernels/four_bit_linear.py` |
-| `rastai_rl` | `PolicyServer`, `run_rl_training`, `RolloutBatch`, `import_harbor_tasks`, `rollout_manager.py`, `agent_loop.py`, `policy_server.py`, `rewards.py`, `peek.py`, `PEEK_EVENTS_PER_SECOND` |
-| `rastai_eval` | `pass_at_k`, `bits_per_byte`, `fit_bradley_terry`, `elo_with_intervals`, `pairwise_verdict`, `diff_results`, `yaml_subset.py` (lm-eval-harness task subset) |
+| `rastai_plugin` (M1) | `PluginRegistry` (`register(kind, name, implementation)`, `find(kind, name)`, `names(kind)`), `REGISTRY_KINDS` (the manifest keys); `PluginHost` (`execute_command`, `put_blob`, `get_blob`, `gateway_generate`); `WorkerHost(PluginHost)` (`register`, `resize_lease`, `tokenize_chat`, the sandbox calls, `list_tools`, `call_tool`, `resolve_model`), `connect_worker_host`; `JobEvents` (`emit_durable`, `emit_ephemeral`), `JobControl` (`stop_requested`, `cancel_requested`, `preempt_requested`; SIGTERM sets only `preempt_requested`), `PluginError`; base classes `Recipe` (with `restore_state`), `Metric` (with `prepare(EvalContext)`), `Lens`, `Converter`, `RewardFunction`, `NodeType`, `Importer`, `Exporter`, `Sampler`, `BenchmarkLoader`, `SaeLoader`, `DataSource`; `EvalContext`; `reply_ok`, `reply_with_jobs`, `reply_error`, `unknown_command`; module convention `register(registry)` and `handle_command(call, host)`; `rastai_plugin.testing.TestHost`, `RecordingEvents`; `rastai_plugin.catalog` |
+| `rastai` (SDK) (M4) | `load`, `observe`, `log`, `connect` (returns a `DaemonClient` with `execute(command_id, arguments)`; "Copy as Python" and macros use it), `init`, `finish`, `config` (the wandb-compatible tracking surface), `Design`, `RastaiError`; facades `rastai.runtime`, `rastai.data`, `rastai.lens`, `rastai.train` (re-exports only); re-exported engine functions `load_model_by_ref`, `next_token_log_probs`, `kl_divergence`, `load_feature_labels`, `search_feature_labels`, `read_dataset`, `load_tokenizer`, `count_tokens`; `python/rastai/public_api.txt` (the public-name snapshot); offline spool `./rastai-runs/<run_id>.jsonl` |
+| `rastai_worker` (M1) | `python -m rastai_worker run --job-file`, `plugin --plugin <id> --job-file`, `rank --job-file --rank <n>`, `python -I -m rastai_worker check` (one JSON line: torch version, backend, CUDA or HIP version, visible devices); `EventLogWriter`, `LiveStream`, `exit_codes.py`, `event_payloads.py`, `proto_convert.py`, `hardware_fingerprint.py`, `vram.py` (visible order is ascending physical index), `diagnostics.py` |
+| `rastai_models` (M1) | `Family`, `find_family`, `import_hf_config`, `import_onnx`, `import_exported_program`, `ImportResult`, `ImportReport`, `check_import_limits`, `mark_unsupported_features_opaque`, `check_weight_names`, `read_cached_headers`; `compile_model`, `init_weights`, `bind_weights`, `BindReport`, `smoke_forward`, `SmokeResult`, `load_compat_module`, `CompiledModel`, `ForwardContext`, `PointHook`, `DecodeReadout`; `apply_placement` (no planner); `export_onnx`, `eject/` (`source_writer.py`, `loader_source.py`); `SessionPool`, `DecodeSlot`, `StaticDecoder`, `DECODE_SLOT_COUNT` (2); `io/safetensors_reader.py` (tensor bytes after the wheel's header check), `io/safetensors_writer.py`, `io/gguf_writer.py`; `importers/onnx_proto/` (generated from `proto/third_party/onnx/onnx.proto`), `importers/torch_export` (live sessions only; `.pt2` files refused, `RRS-E7004`) |
+| `rastai_lens` (M4) | `LivePanelReadout`, `TensorRecorder`, `InterventionHook` (`interventions.py`: steering, feature edits, head ablation, expert overrides), `prefill_packets`, `SparseAutoencoder`, `load_feature_labels`, `search_feature_labels` |
+| `rastai_data` (M1) | `TrainingExample`, `PreferencePair`, `LabeledExample`, `ImageExample`, `PromptExample`, `tokenize_chat_rows`, `epoch_order`, `make_loader`, `BatchLoader` (`position`), `read_dataset`, `decode_image` (`image_decode.py`), readers `readers/jsonl.py`, `readers/csv_reader.py`, `readers/parquet.py`, `readers/image_folder.py`, `readers/mysql_reader.py` |
+| `rastai_train` (M1) | `train`, `optimizer_step`, `write_checkpoint`, `preempt_at_step_boundary`, `recipe_availability`, `capability.py`, `export_checkpoint`, `kl_divergence`, `distributed.py`, `kernels/four_bit_linear.py` |
+| `rastai_rl` (M5) | `PolicyServer`, `run_rl_training`, `RolloutBatch`, `import_harbor_tasks`, `rollout_manager.py`, `agent_loop.py`, `policy_server.py`, `rewards.py`, `peek.py`, `PEEK_EVENTS_PER_SECOND` |
+| `rastai_eval` (M5) | `pass_at_k`, `bits_per_byte`, `fit_bradley_terry`, `elo_with_intervals`, `pairwise_verdict`, `diff_results`, `yaml_subset.py` (lm-eval-harness task subset) |
 | error classes | `ModelError` (RRS-M), `LensError` (RRS-L), `DataError` (RRS-D), `TrainError` (RRS-T), `RlError` (RRS-R), `WorkerError` (RRS-J), `EvalError` (RRS-V), `RastaiError` (any code, SDK edge) |
 
 ### 15.3 JavaScript names by package
 
 | Package | Names |
 |---|---|
-| `@rastai/client` | `DaemonClient`, `connectToDaemon` (`credential` option), `CommandExecutor`, `ExecuteFunction`, `execute`, `listCommands`, `ExecuteOutcome`, `ExecuteOptions`, `openEventStream`, `EventStream`, `EventStreamStatus`, `uploadBlob`, `blobUrl`, `readBlobBytes`, `readLoginCode`, `removeLoginCodeFromUrl`, `exchangeLoginCode` (returns the session key, kept in memory; the cookie credential sends it as `Rastai-Session-Key` on every non-GET request), `checkHealth`, `clientDiagnostic`; `src/generated/commands.js` (one typed wrapper per core command); `MAX_BROWSER_UPLOAD_BYTES` (256 MiB) |
-| `@rastai/ui` | `UiMode`, `ModeProvider`, `useMode`, `AdvancedOnly`; `ThemeTokens`, `builtInTheme`, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS` (`tokens/locked.js`); `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen` (shell-only security UI); `FieldSpec`, `FieldForm`, `ChartFrame`, `DiagnosticView`, `useRenderer` |
-| `@rastai/plugin` | `PluginHost` (a `CommandExecutor`), `PluginUi`, `Section`, `Panel`, `LensView`, `MetricView`, `SettingsPage`, `registerPluginUi`, `usePluginHost`, `useQuery`, `useCommand`, `createStore`, `useStore`, `createLiveBuffer`, `useLiveBuffer`, `loadDraft`, `saveDraft`, `clearDraft`, `CommandForm`, `JobProgress`, `ModelPicker`, `FileBrowser`, `FileDrop`, `createBridgeHost`, `connectToHost`, `createMockHost`; plugin codegen output `ui/src/generated/commands.js` |
-| `@rastai/canvas` | `GraphRenderer` (`setColors`), `createGraphRenderer`, `GraphScene`, `CanvasColors`, `createGlyphAtlas`, `layoutLayered`, `attachInteraction`, `MAX_GRAPH_NODES` (50,000, measured) |
-| `@rastai/viz` | `LineChart`, `BarChart`, `Heatmap`, `Histogram`, `Scatter2d`, `DataFlowView`, `VectorSpaceView` (each with `setColors`), `TableData`, `VizColors` |
+| `@rastai/client` (M1) | `DaemonClient`, `connectToDaemon` (`credential` option), `CommandExecutor`, `ExecuteFunction`, `execute`, `listCommands`, `ExecuteOutcome`, `ExecuteOptions`, `openEventStream`, `EventStream`, `EventStreamStatus`, `uploadBlob`, `blobUrl`, `readBlobBytes`, `readLoginCode`, `removeLoginCodeFromUrl`, `exchangeLoginCode` (returns the session key, kept in memory; the cookie credential sends it as `Rastai-Session-Key` on every non-GET request), `checkHealth`, `clientDiagnostic`; `src/generated/commands.js` (one typed wrapper per core command); `MAX_BROWSER_UPLOAD_BYTES` (256 MiB) |
+| `@rastai/ui` (M1) | `UiMode`, `ModeProvider`, `useMode`, `AdvancedOnly`; `ThemeTokens`, `builtInTheme`, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS` (`tokens/locked.js`); `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen` (shell-only security UI); `FieldSpec`, `FieldForm`, `ChartFrame`, `DiagnosticView`, `useRenderer` |
+| `@rastai/plugin` (M1) | `PluginHost` (a `CommandExecutor`), `PluginUi`, `Section`, `Panel`, `LensView`, `MetricView`, `SettingsPage`, `registerPluginUi`, `usePluginHost`, `useQuery`, `useCommand`, `createStore`, `useStore`, `createLiveBuffer`, `useLiveBuffer`, `loadDraft`, `saveDraft`, `clearDraft`, `CommandForm`, `JobProgress`, `ModelPicker`, `FileBrowser`, `FileDrop`, `createBridgeHost`, `connectToHost`, `createMockHost`; plugin codegen output `ui/src/generated/commands.js` |
+| `@rastai/canvas` (M4) | `GraphRenderer` (`setColors`), `createGraphRenderer`, `GraphScene`, `CanvasColors`, `createGlyphAtlas`, `layoutLayered`, `attachInteraction`, `MAX_GRAPH_NODES` (50,000, measured) |
+| `@rastai/viz` (M4) | `LineChart`, `BarChart`, `Heatmap`, `Histogram`, `Scatter2d`, `DataFlowView`, `VectorSpaceView` (each with `setColors`), `TableData`, `VizColors` |
 | first-party UIs | `psychologyUi`, `evalUi`, `PacketStore`, `summarizeVerify`; `MAX_TOKENS_PER_STORE` (8192) |
-| `@rastai/web` (`apps/web`) | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js`; `DRAFT_MAX_AGE_DAYS` (30) |
+| `@rastai/web` (`apps/web`) (M1) | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js`; `DRAFT_MAX_AGE_DAYS` (30) |
 
 ### 15.4 Desktop shell, CLI and HTTP details
 
@@ -2730,6 +2732,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 - **Panel ids:** `core.lineage`, `core.assistant`, `psychology.live`, `psychology.steer`, `psychology.branches`, `eval.verify`, `eval.vote`.
 - **Lens ids:** `psychology.entropy`, `psychology.logit_lens`, `psychology.attention`, `psychology.sae_features`, `psychology.moe_routing`, `psychology.depth_attention`, `psychology.latent_cache`.
 - **SAE loader ids:** `psychology.gemma_scope`, `psychology.llama_scope`.
+- **Settings page ids** (`settings_pages[]{page_id, title}`): `psychology.settings` (the `psychology.*` settings keys).
 - **View actions** (UI only, never sent to the daemon): `view.section.open`, `view.panel.open`, `view.window.open`, `view.palette.repeat_last`. A second window opens at `/?new_window=1#<route>` when the webview has no new-window hook.
 - **Context keys** for palette prefill and keybinding `when`: `section`, `focus` (`chat`, `canvas`, `timeline`, `document`, `table`, `palette`), `conversation_id`, `document_id`, `run_id`, `checkpoint_id`, `model_ref`, `session_id`.
 - **Connection statuses:** `connecting`, `connected`, `reconnecting`, `resyncing`, `offline`, `signed_out`, `paused`.
@@ -2889,7 +2892,7 @@ Each lives at the top of the file that owns it, with a comment saying why.
 
 ## 16. Plan §10 Conflicts: The Answers in v1.1
 
-Every row of plan §10 (1–44) has one answer: rows 1–37 in the first table, rows 38–44 in the second. "Default" means the owner accepted the row's default on 2026-10-10. The fixes in the docs that lost go in the same M1-01 wave as one-line pointers.
+Every row of plan §10 (1–45) has one answer: rows 1–37 in the first table, rows 38–45 in the second. "Default" means the owner accepted the row's default on 2026-10-10. The fixes in the docs that lost go in the same M1-01 wave as one-line pointers.
 
 | Row | Answer | Where in this file |
 |---|---|---|
@@ -2931,7 +2934,7 @@ Every row of plan §10 (1–44) has one answer: rows 1–37 in the first table, 
 | 36 | Refuse to start with `RRS-C1008`; never rotate | 3.2 |
 | 37 | One `RRS-C1009`, raised by `check_data_policy` | 10.1 |
 
-**Other contradictions settled in v1.1.** Rows 38–44 are plan §10's own numbers. The last two rows have no plan §10 row; they were settled while folding in names.
+**Other contradictions settled in v1.1 and v1.2.** Rows 38–45 are plan §10's own numbers; row 45 is a v1.2 default, open to the owner. The last two rows have no plan §10 row; they were settled while folding in names.
 
 | # | Topic | Disagreement | Answer |
 |---|---|---|---|
@@ -2942,5 +2945,6 @@ Every row of plan §10 (1–44) has one answer: rows 1–37 in the first table, 
 | 42 | When the Rust safetensors header check lands | control-plane §4.13 (step 2) vs Python §2.9 (the wheel's `check_safetensors_header` must exist in M1) | M1: M1-34 ports the header check into `rastai-formats` and exposes it through the wheel; M2-13 keeps the `ByteSource` reader, the writer's planner and `model_hash` (2.4 rule 10) |
 | 43 | Sessions across a daemon restart | frontend §19 Q5 assumed they survive; platform 4.1 drops them | sessions live in daemon memory; a restart signs everyone out (`RRS-U0003`); the desktop shell reruns `rastai open --print-url` |
 | 44 | `node-over-ssh` | a required PR job in `ci.yml` (plan v1.2 8.7) vs a nightly job | `nightly.yml`, on schedule and `main` only (15.9); the PR-level `ssh-loopback` and `remote-network-drop` jobs stay required |
+| 45 | Tutorials and assistant skills | the frontend layout builds them from step 2 and step 8, the control-plane layout writes `tutorial.rs` at step 1; ADR-0017 decision 3, spec §7 and the plan's level table make them Phase 2, and no backlog task builds them | Phase 2: `tutorial.list`, `tutorial.check` (6.4) and `rastai.tutorial/1` (5.2) are marked "(Phase 2)"; the layouts keep the design and point to plan §10 row 45 |
 | none | Branch picks | `.rrsdata` `examples[]` references vs inline rows (training-evaluation §15 asked for a plan row) | Prefer this branch writes inline rows with copied token IDs; `examples[]` references are only for `dataset.from_conversations` (5.2) |
 | none | Psychology analyses | contracts v1 put the math in `rastai_psychology` | the math is in `rastai_lens`; the plugin owns commands, jobs and UI (section 1) |
