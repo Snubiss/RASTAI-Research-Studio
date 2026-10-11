@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E0002",
+      "path": "not_utf8.json:2:13"
+    }
+  ]
+}

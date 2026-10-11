@@ -583,7 +583,7 @@ crates/rastai-formats/
       plugin_types.rs         read a plugin's types.json into TypeDescriptions (frontend doc 10.4)
     header.rs                 SharedHeader (contracts §5.1) and its describe; header checks every document shares
     documents/
-      mod.rs                  Document enum, DocumentType enum, type detection from extension and the "type" field
+      mod.rs                  Document enum, the DocumentType rows (DOCUMENT_TYPES), type detection from extension and "type"
       model.rs                ModelSpec, GraphNode, GraphEdge, BlockDefinition, InputRange, OutputHead, Objective, WeightsSource
       model_ops.rs            the op vocabulary (contracts §5.3) and each op's attribute description
       harness.rs              Harness, HarnessTool, HarnessEnvironment, HarnessReward, HarnessTask

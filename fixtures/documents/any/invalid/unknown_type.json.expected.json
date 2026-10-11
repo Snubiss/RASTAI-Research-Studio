@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1004",
+      "path": "unknown_type.json:3:3#/type"
+    }
+  ]
+}

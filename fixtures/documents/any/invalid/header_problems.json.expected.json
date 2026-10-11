@@ -1,0 +1,28 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1004",
+      "path": "header_problems.json:3:3#/type"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "header_problems.json:4:3#/schema_version"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "header_problems.json:5:3#/created_with"
+    },
+    {
+      "code": "RRS-E1001",
+      "path": "header_problems.json:1:1#/id"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "header_problems.json:6:22#/authors/1"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "header_problems.json:7:16#/requires/psychology"
+    }
+  ]
+}

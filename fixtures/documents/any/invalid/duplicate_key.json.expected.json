@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E0003",
+      "path": "duplicate_key.json:4:5#/requires/psychology"
+    }
+  ]
+}

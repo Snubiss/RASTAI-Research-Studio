@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schemas.example/rastai.no_such_type/1.json",
+  "type": "rastai.no_such_type",
+  "schema_version": "1",
+  "created_with": 2,
+  "authors": ["Ada", 7],
+  "requires": {"psychology": 1},
+  "notes": "not judged: without a known type only the header is checked"
+}
