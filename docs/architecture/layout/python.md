@@ -1987,7 +1987,8 @@ python/envs/
   cpu/
     pyproject.toml
     uv.lock
-  tests/                      the cpu environment's smoke test (test_cpu_environment.py), run by `just test-python`
+  tests/                      the cpu environment's smoke test (test_cpu_environment.py), run by `just test-python`, and
+                              by `just test-python-portable` on macOS and Windows until the pure-compute packages land
   cuda13/                     default for NVIDIA (driver 580 or newer)
     pyproject.toml
     uv.lock
@@ -2068,7 +2069,7 @@ Warm reinstall from the uv cache took under 1 s for every backend (spike). The c
 |---|---|---|
 | `python/<package>/tests/`, `plugins/evaluation/tests/python/` | unit tests, CPU only | every CI run |
 | `python/envs/tests/` | the cpu environment's smoke test: Python 3.12, the CPU build of torch, the direct runtime packages importable, installed versions equal to the pins | every CI run (`just test-python`) |
-| `tests/workspace/` | vitest smoke tests of the JavaScript workspace: the checker settings in `jsconfig.base.json` and the pinned Node.js version. JavaScript, listed here so the repo-level `tests/` folders are all in one table | every CI run (`just test-js`) |
+| `tests/workspace/` | vitest smoke tests of the JavaScript workspace: the checker settings in `jsconfig.base.json`, the pinned Node.js version, and the CI workflows against plan 8.4's required checks, the fuzz targets and the tool pins (`ci-workflows.test.js`). JavaScript, listed here so the repo-level `tests/` folders are all in one table | every CI run (`just test-js`) |
 | `tests/parity/` | `hf_reference.py` (the only test-time `transformers` wrapper), `parity_prompts.py` (the spike's short, chat, code and long prompts; the long one crosses the 512-token window three times), `template_forced.py` (finds positions the chat template forces), and `test_<family>_parity.py` per family | CI with tiny random-weight configs from `fixtures/models/<family>/` (weights generated at test time with a seed and written with our writer); real weights nightly on GPU |
 | `tests/gpu/` | `@pytest.mark.gpu` tests listed in each package section: two-device capture, live-panel overhead (`test_live_panel_overhead.py`, fails above +35%), DPO anchor drift (`test_dpo_anchor_drift.py`, before L2), gym peek overhead, Teach it budget, QLoRA on sm_120, DDP, real-weight parity (`test_real_weight_parity.py`: Gemma 3 1B, OLMoE-1B-7B on one GPU, DeepSeek-V2-Lite on both), GGUF vs `llama-server` | nightly on the self-hosted GPU runner (`nightly-gpu.yml`: schedule and manual triggers on `main` only, separate runner user). Gated weights use a read-only HF token once the repo is public; until then, by hand on the owner's box |
 | `tests/mysql/` | the MySQL reader (and, from M11, the archive) against MySQL 8.4, 9.7 and MariaDB | the CI job `mysql-archive` only (M11-E07) |

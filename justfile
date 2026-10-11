@@ -33,6 +33,9 @@
 #   The Python and JavaScript plugins need no install of their own: grpcio-tools is in the cpu environment's dev group
 #   (python/envs/cpu/uv.lock) and protoc-gen-es in package.json (pnpm-lock.yaml).
 #
+# CI installs the same versions with tools/ci/install-dev-tools (prebuilt downloads, each checked against its SHA-256);
+# it also works here, for example `tools/ci/install-dev-tools just uv node`.
+#
 # Later tasks add their recipes here: the rastai-codegen steps of codegen (M1-12), check-names (M1-57) and
 # check-schema-diff (M1-58).
 
@@ -50,9 +53,16 @@ protoc_gen_tonic_version := "0.5.0"
 proto_base := "origin/main"
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
+# The cpu environment's interpreter. A virtual environment keeps it in Scripts\ on Windows and bin/ elsewhere; the
+# Windows CI job needs it for test-python-portable.
+cpu_python := if os() == "windows" { cpu_environment / "Scripts/python.exe" } else { cpu_environment / "bin/python" }
 # The repo checks in tools/checks are standard-library Python scripts. They run on the cpu environment's Python,
 # so every machine runs them with the same interpreter.
-check_python := cpu_environment / "bin/python"
+check_python := cpu_python
+# The test folders under python/ that test-python-portable runs on macOS and Windows: the pure-compute packages
+# rastai_formats, rastai_models, rastai_data and rastai_train join as they land (plan 8.7). Until M1-19 adds the first
+# one, the cpu environment's smoke test keeps those jobs honest.
+portable_test_folders := "envs/tests"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -117,6 +127,12 @@ test-python: env-cpu
     cd tools/codegen && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/fixtures && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/github && "{{cpu_environment}}/bin/python" -m pytest
+
+# The macOS and Windows CI jobs run this (tier 2 keeps compiling and passing, spec §28 risk 13). Tests that need Unix
+# sockets, flock or setsid carry the posix_only marker and are deselected here; Linux runs them in test-python.
+# pytest over the pure-compute packages, without the posix_only tests.
+test-python-portable: env-cpu
+    cd python && "{{cpu_python}}" -m pytest -m "not posix_only" {{portable_test_folders}}
 
 # The test files are listed in vitest.config.js.
 # vitest over the whole JavaScript workspace.

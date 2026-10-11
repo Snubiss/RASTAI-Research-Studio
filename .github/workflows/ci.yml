@@ -1,0 +1,191 @@
+# CI for pull requests and pushes to main (contracts 15.9, plan 8.7). The workflow stays thin: each job checks out
+# the repository, installs the pinned dev tools (tools/ci/install-dev-tools), restores its caches and runs one `just`
+# recipe, so a red job reproduces locally with the same command. The job ids are the required status checks of
+# branch protection (plan 8.4); tests/workspace/ci-workflows.test.js keeps the two lists equal.
+#
+# Steps that repeat are written once, where they first appear (`&name`), and reused by reference (`*name`).
+# Actions are pinned to a commit, with the release tag beside it, so a moved tag can't change what runs.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# No job writes to the repository.
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run it replaces. Every push to main runs to the end, so each merge keeps
+# its own result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # A runner builds everything once, so incremental compilation would only add work and cache size.
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  # corepack downloads the pnpm that package.json pins (checked against its sha512) without asking first.
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
+defaults:
+  run:
+    # Git Bash on Windows, so the install script and the justfile's bash recipes run the same on every runner.
+    shell: bash
+
+jobs:
+  # The gate every PR passes (contracts 12.6): format, lint, the JSDoc check, every test, wasm, cargo-deny and the
+  # repo checks. check-names and check-schema-diff join `just check` with M1-57 and M1-58.
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - &checkout
+        name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install just, uv, Node.js, pnpm and cargo-deny
+        run: tools/ci/install-dev-tools just uv node cargo-deny
+      - &cargo-cache
+        name: Restore the cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # The downloaded crates and the build output. Each job keeps its own, because clippy, tests and wasm
+          # builds leave different things in target/.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-${{ github.job }}-
+      - &uv-cache
+        name: Restore the uv cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # uv's download cache (torch alone is about 200 MB): ~/.cache/uv on Linux and macOS, AppData on Windows.
+          path: |
+            ~/.cache/uv
+            ~/AppData/Local/uv/cache
+          key: uv-${{ runner.os }}-${{ hashFiles('python/envs/*/uv.lock') }}
+          restore-keys: uv-${{ runner.os }}-
+      - &pnpm-cache
+        name: Restore the pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # pnpm's content-addressed store: ~/.local/share/pnpm on Linux, ~/Library/pnpm on macOS.
+          path: |
+            ~/.local/share/pnpm/store
+            ~/Library/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+      - name: just check
+        run: just check
+
+  # Every commit of the pull request carries a Signed-off-by matching its author (plan 8.6). In-house, so no
+  # GitHub App is needed.
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # check-dco reads each commit of the pull request, so it needs the history, not only the merge commit.
+          fetch-depth: 0
+      - &install-just-uv
+        name: Install just and uv
+        run: tools/ci/install-dev-tools just uv
+      - *uv-cache
+      - name: just check-dco
+        env:
+          # The pull request's own commits: from the base branch's tip to the branch's head.
+          COMMIT_RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: just check-dco "$COMMIT_RANGE"
+
+  # Rust tests on all three OS runners, CPU only: tier 2 keeps compiling and passing (ADR-0014, spec §28 risk 13).
+  test-rust-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - &install-just
+        name: Install just
+        run: tools/ci/install-dev-tools just
+      - *cargo-cache
+      - &test-rust
+        name: just test-rust
+        run: just test-rust
+
+  test-rust-macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *install-just
+      - *cargo-cache
+      - *test-rust
+
+  test-rust-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - *checkout
+      - *install-just
+      - *cargo-cache
+      - *test-rust
+
+  # Every Python test on Linux, posix_only ones included: python/ and the repo checks' tests.
+  test-python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *install-just-uv
+      - *uv-cache
+      - name: just test-python
+        run: just test-python
+
+  # The pure-compute packages' CPU tests on macOS and Windows, without the posix_only tests (plan 8.7).
+  test-python-macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *install-just-uv
+      - *uv-cache
+      - &test-python-portable
+        name: just test-python-portable
+        run: just test-python-portable
+
+  test-python-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - *checkout
+      - *install-just-uv
+      - *uv-cache
+      - *test-python-portable
+
+  test-js:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - *checkout
+      - &install-just-node
+        name: Install just, Node.js and pnpm
+        run: tools/ci/install-dev-tools just node
+      - *pnpm-cache
+      - &test-js
+        name: just test-js
+        run: just test-js
+
+  test-js-macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - *checkout
+      - *install-just-node
+      - *pnpm-cache
+      - *test-js
