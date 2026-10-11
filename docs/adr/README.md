@@ -94,6 +94,7 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
 | [0030](0030-diagnostics-catalog.md) | Decision 8 decided: the in-house JSON-lines logger. Collisions settled; ranges `RRS-S5xxx` and `RRS-D4xxx`; "TS" reads "JavaScript" | owner decision 2; language |
 | [0031](0031-sandbox-manager.md) | `hyper` on §27, wrapper `engine_http.rs`; the `rastai.job_id` label; the egress proxy | contracts v1.1 |
 | [0032](0032-document-files-and-validation.md) | The daemon-free validator is `rastai validate <file>`; `rastai file validate` is the daemon-backed verb. DEFLATE through `miniz_oxide`; fuzz targets for every in-house parser | path; 0037 |
+| [0036](0036-frontend-plain-javascript.md) | Decision 4: the generated folder of `@rastai/proto` is `packages/proto/src/generated/`, not the whole package | path |
 
 ## Writing a new ADR
 
