@@ -4,7 +4,7 @@
 
 **Changes of 2026-10-11 (owner-approved):** `schemas/names.json`, `check-names` and `check-schema-diff` move into M1 (sections 2.8 and 4.9); the theme token group is `typography` everywhere (contracts §5.2 now says so; the open question is gone); the core event-type table, `ALIASES` and the CLI mode words live in `rastai-core` so the codegen can read them (contracts v1.2 §15.1).
 
-**M1-01 alignments with the plan (2026-10-11):** `archive_cursors` arrives with M11's migration, not `0001` (plan M1-23); `tutorial.rs` and the `tutorial.*` commands are Phase 2, and `assistant.skill@1` is unsupported until then (plan §10 row 45); the `archive` settings section joins `SettingsDocument` in M11-E01; the settings precedence test uses `daemon.port`, a registered key (there is no `gateway.port`).
+**M1-01 alignments with the plan (2026-10-11):** `archive_cursors` arrives with M11's migration, not `0001` (plan M1-23); `tutorial.rs` and the `tutorial.*` commands are Phase 2, and `assistant.skill@1` is unsupported until then (plan §10 row 45); the `archive` settings section joins `SettingsDocument` in M11-E01; the settings precedence test uses `daemon.port`, a registered key (there is no `gateway.port`); `handlers/gym.rs` lands its `sandbox.*` arms at step 5 with M5-E10, because contracts 6.4 marks `sandbox.list`, `sandbox.kill` and `sandbox.cleanup` (M5), and its `harness.*` and `gym.*` arms at step 7 (8.8).
 
 **Changes in v1.1:** the new `rastai-archive` crate (section 14, M11); `archive_cursors`, `runs.archive_state` and the `vault_changes` outbox in `rastai-store`; settings live only in files (no `settings` table); `unsafe` for one `statvfs` call (ADR-0033); `miniz_oxide` behind `zip/inflate.rs` and a fuzz target for every in-house parser of untrusted input; plain JavaScript codegen output (ADR-0036); `stability` on commands and event types; origin-bound sessions in the request gate (ADR-0034); 31 plugin capabilities; the one layer-placement planner and per-op golden files; (L2) tags.
 
@@ -2155,7 +2155,7 @@ crates/rastai-server/
         train.rs              recipe.*, train.*, teach.*, rlhf.*, sweep.*
         run.rs                run.*, checkpoint.*
         design.rs             design.*
-        gym.rs                harness.*, gym.*, sandbox.*
+        gym.rs                harness.*, gym.*, sandbox.* (the sandbox.* arms land first, at step 5; 8.8)
         plugin.rs             plugin.*
         node.rs               node.*, transfer.*
         dataset.rs            dataset.*, converter.*
@@ -2583,9 +2583,9 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | `gateway_glue/`, `handlers/chat.rs`, `handlers/model.rs`, `handlers/adapter.rs`, `import_export/conversations.rs`, `http/blob_endpoints.rs`, `policy.rs` | 3 (Inference; API adapters are the first data leaving the machine) |
 | `plugin_host/forward.rs` | 4 (Psychology is the first plugin module) |
 | `commands/undo.rs` | 4 (`psychology.branch.prefer` is the first undoable command), used heavily at 6 |
-| `scheduler/chains.rs`, `handlers/train.rs`, `handlers/run.rs`, `storage_tasks.rs` GC, `modelspec_analysis/memory.rs` training estimate, `plugin_host/event_handlers.rs` | 5 (Teach it, RLHF, checkpoints, Evaluation auto-run) |
+| `scheduler/chains.rs`, `handlers/train.rs`, `handlers/run.rs`, `storage_tasks.rs` GC, `modelspec_analysis/memory.rs` training estimate, `plugin_host/event_handlers.rs`, `handlers/gym.rs` with only its `sandbox.*` arms (`sandbox.list`, `sandbox.kill`, `sandbox.cleanup`; M5-E10, calling the node's `sandbox_service.rs`) | 5 (Teach it, RLHF, checkpoints, Evaluation auto-run, Pass@k sandboxes) |
 | `modelspec_analysis/` (stats, fits, time, `layer_placement.rs`), `handlers/design.rs` | 6 (Designer; placement across the 5080 and the 3090) |
-| `handlers/gym.rs` | 7 |
+| `handlers/gym.rs` `harness.*` and `gym.*` arms | 7 |
 | `plugin_host/install.rs` for third-party archives, `handlers/plugin.rs` dev and test, the M8 capability rows (themes, icon sets, macros, chat templates) | 8 |
 | `nodes/pairing.rs`, SSH `NodeTransport`, `handlers/node.rs` | 9 |
 | `archive_task.rs`, `handlers/archive.rs`, `PolicyTarget::ArchiveDatabase` | M11 (section 14) |
@@ -2961,7 +2961,7 @@ pub const FIRST_PARTY_CAPABILITIES: &[FirstPartyCapability] = &[
 ```
 
 - **Every contribution key has a row**, so no key is silently accepted: a plugin using `icon_sets` must require `ui.icon_set@1` (`RRS-P0006` otherwise), and before M8 the host refuses that capability with `RRS-P1002`. `tests/plugin_host.rs` checks that the table's keys equal the manifest description's `contributes` keys exactly.
-- **The four declarative rows of owner decision N2** and what the host does once each is supported:
+- **The four declarative rows of owner decision N2, plus `assistant.skill@1`,** and what the host does once each is supported:
 
 | Capability | Key | Status now | When supported, the host |
 |---|---|---|---|
