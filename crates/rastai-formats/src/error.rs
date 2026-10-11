@@ -1,9 +1,10 @@
 //! `FormatsError`, the one error type of this crate (contracts 12.2). Library functions return it; the edge
 //! (layer 1 in validate/syntax.rs, a command handler, the CLI) turns it into a `Diagnostic` through `code()`.
 //!
-//! Every variant maps to a code that contracts 10.3 already lists. Five of them have no code of their own yet and
-//! borrow the nearest meaning (`InvalidVersion`, `PatchFailed`, `NotSerializable`, `ReadFailed`, `WriteFailed`);
-//! a dedicated code is a catalog contract change, made in its own PR.
+//! Every variant maps to a code that contracts 10.3 lists. Three have no code of their own and use the nearest
+//! meaning, whose title is still true for them: `InvalidVersion` ("value is not one of the allowed values"),
+//! `PatchFailed` ("reference doesn't resolve": the pointer is the reference) and `ReadFailed` ("source missing or
+//! not readable").
 
 use crate::json::positions::TextPosition;
 
@@ -11,13 +12,15 @@ const CODE_JSON_SYNTAX: &str = "RRS-E0001";
 const CODE_NOT_UTF8: &str = "RRS-E0002";
 const CODE_DUPLICATE_KEY: &str = "RRS-E0003";
 const CODE_NOT_A_NUMBER: &str = "RRS-E0004";
-const CODE_WRONG_KIND: &str = "RRS-E1002";
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
+const CODE_NOT_SERIALIZABLE: &str = "RRS-E1006";
 const CODE_REFERENCE_UNRESOLVED: &str = "RRS-E2001";
 const CODE_FILE_TOO_LARGE: &str = "RRS-E5003";
 const CODE_TOO_DEEP: &str = "RRS-E5004";
+const CODE_TOO_MANY_VALUES: &str = "RRS-E5006";
 const CODE_SOURCE_NOT_READABLE: &str = "RRS-D3001";
 const CODE_DISK_FULL_DURING_WRITE: &str = "RRS-S3002";
+const CODE_WRITE_FAILED: &str = "RRS-S3005";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormatsError {
@@ -38,22 +41,24 @@ pub enum FormatsError {
     /// Arrays and objects nest deeper than `ImportLimits.max_json_depth`. The position is the bracket that went
     /// past the limit.
     TooDeep { position: TextPosition, limit_depth: u32 },
-    /// A version or version range that semver.rs can't read. Borrows "value is not one of the allowed values".
+    /// The document has more values than `ImportLimits.max_json_values`. The position is the first value past the
+    /// limit.
+    TooManyValues { position: TextPosition, limit_count: u64 },
+    /// A version or version range that semver.rs can't read.
     InvalidVersion { text: String, reason: &'static str },
-    /// A JSON Patch operation whose path or `from` doesn't resolve in the document. Borrows "reference doesn't
-    /// resolve": the pointer is the reference.
+    /// A JSON Patch operation whose path or `from` doesn't resolve in the document.
     PatchFailed {
         operation_index: usize,
         path: String,
         reason: &'static str,
     },
-    /// serde refused to write a value (a map with non-string keys). Borrows "field has the wrong kind".
+    /// serde refused to write a value (a map with non-string keys). A bug in the caller, not in a user's file.
     NotSerializable { reason: String },
-    /// A `ByteSource` couldn't give the bytes asked for: past the end, or an I/O error. Borrows "source missing or
-    /// not readable".
+    /// A `ByteSource` couldn't give the bytes asked for: past the end, an I/O error, or a length it couldn't read.
     ReadFailed { offset: u64, length: u64, reason: String },
-    /// A `ByteSink` couldn't write. Borrows "disk full during a write", the usual cause; `reason` keeps the
-    /// operating system's own words.
+    /// A `ByteSink` write failed because the disk is full. `reason` keeps the operating system's own words.
+    DiskFull { reason: String },
+    /// A `ByteSink` write failed for any other reason (permissions, a closed handle, an I/O error).
     WriteFailed { reason: String },
 }
 
@@ -67,11 +72,13 @@ impl FormatsError {
             FormatsError::NotANumber { .. } => CODE_NOT_A_NUMBER,
             FormatsError::FileTooLarge { .. } => CODE_FILE_TOO_LARGE,
             FormatsError::TooDeep { .. } => CODE_TOO_DEEP,
+            FormatsError::TooManyValues { .. } => CODE_TOO_MANY_VALUES,
             FormatsError::InvalidVersion { .. } => CODE_VALUE_NOT_ALLOWED,
             FormatsError::PatchFailed { .. } => CODE_REFERENCE_UNRESOLVED,
-            FormatsError::NotSerializable { .. } => CODE_WRONG_KIND,
+            FormatsError::NotSerializable { .. } => CODE_NOT_SERIALIZABLE,
             FormatsError::ReadFailed { .. } => CODE_SOURCE_NOT_READABLE,
-            FormatsError::WriteFailed { .. } => CODE_DISK_FULL_DURING_WRITE,
+            FormatsError::DiskFull { .. } => CODE_DISK_FULL_DURING_WRITE,
+            FormatsError::WriteFailed { .. } => CODE_WRITE_FAILED,
         }
     }
 }
@@ -88,8 +95,12 @@ mod tests {
         }
     }
 
+    fn reason() -> String {
+        "r".to_string()
+    }
+
     #[test]
-    fn reader_errors_have_their_catalog_codes() {
+    fn every_error_has_its_catalog_code() {
         let syntax = FormatsError::JsonSyntax {
             position: START,
             expected: "a value",
@@ -106,6 +117,10 @@ mod tests {
             position: START,
             limit_depth: 1,
         };
+        let too_many = FormatsError::TooManyValues {
+            position: START,
+            limit_count: 1,
+        };
         assert_codes(vec![
             (syntax, "RRS-E0001"),
             (FormatsError::NotUtf8 { position: START }, "RRS-E0002"),
@@ -113,11 +128,15 @@ mod tests {
             (FormatsError::NotANumber { position: START }, "RRS-E0004"),
             (too_large, "RRS-E5003"),
             (too_deep, "RRS-E5004"),
+            (too_many, "RRS-E5006"),
+            (FormatsError::NotSerializable { reason: reason() }, "RRS-E1006"),
+            (FormatsError::DiskFull { reason: reason() }, "RRS-S3002"),
+            (FormatsError::WriteFailed { reason: reason() }, "RRS-S3005"),
         ]);
     }
 
     #[test]
-    fn borrowed_codes_are_the_nearest_existing_meaning() {
+    fn errors_without_their_own_code_use_the_nearest_true_meaning() {
         let version = FormatsError::InvalidVersion {
             text: "x".to_string(),
             reason: "r",
@@ -130,15 +149,8 @@ mod tests {
         let read = FormatsError::ReadFailed {
             offset: 0,
             length: 1,
-            reason: "r".to_string(),
+            reason: reason(),
         };
-        let reason = "r".to_string();
-        assert_codes(vec![
-            (version, "RRS-E1004"),
-            (patch, "RRS-E2001"),
-            (FormatsError::NotSerializable { reason: reason.clone() }, "RRS-E1002"),
-            (read, "RRS-D3001"),
-            (FormatsError::WriteFailed { reason }, "RRS-S3002"),
-        ]);
+        assert_codes(vec![(version, "RRS-E1004"), (patch, "RRS-E2001"), (read, "RRS-D3001")]);
     }
 }

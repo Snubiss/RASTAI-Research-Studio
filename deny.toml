@@ -71,7 +71,7 @@ deny = [
   { crate = "libc", wrappers = [
     "rastai-store",
     "cpufeatures",
-  ], reason = "one owner: rastai-store (disk_space.rs, ADR-0033)" },
+  ], reason = "rastai-store (disk_space.rs, ADR-0033) and cpufeatures (CPU feature detection under blake3)" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },
   { crate = "keyring", wrappers = ["rastai-server"], reason = "one owner: rastai-server (secrets.rs)" },

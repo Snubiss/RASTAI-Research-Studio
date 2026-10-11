@@ -1,7 +1,9 @@
 //! Canonical JSON: the exact bytes a content hash is taken over (contracts 5.1). One value has one canonical text,
 //! whatever spacing, key order or number spelling its file used.
 //!
-//! The rules follow RFC 8785 (the JSON Canonicalization Scheme), with keys sorted by Unicode code point:
+//! The rules are contracts 5.1 "Canonical JSON". They are RFC 8785's (the JSON Canonicalization Scheme) with two
+//! deliberate differences, listed there: keys sort by code point, not UTF-16 code unit, and integers outside ±2^53
+//! are written exactly, so integer 2^60 and float 2^60 have different text. In short:
 //! - no whitespace between tokens;
 //! - object keys sorted by code point, which is the byte order of their UTF-8;
 //! - strings as UTF-8, escaping only `"`, `\` and control characters: `\b \t \n \f \r` in short form, the others
@@ -51,7 +53,9 @@ fn write_array(output: &mut String, elements: &[Value]) {
 }
 
 /// Keys are sorted here, not taken in map order: if any crate in a build turned on serde_json's
-/// `preserve_order` feature, maps would iterate in insertion order and every content hash would change.
+/// `preserve_order` feature, maps would iterate in insertion order and every content hash would change. No test
+/// can catch the sort going missing, because this build's maps are already sorted (`cargo deny` would have to let
+/// the feature in first); keep it.
 fn write_object(output: &mut String, members: &serde_json::Map<String, Value>) {
     let mut keys: Vec<&String> = members.keys().collect();
     keys.sort();

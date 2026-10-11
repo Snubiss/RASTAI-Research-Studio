@@ -76,6 +76,6 @@ mod tests {
         let mut odd_keys: BTreeMap<Vec<u8>, u32> = BTreeMap::new();
         odd_keys.insert(vec![1], 1);
         let error = pretty_json(&odd_keys).unwrap_err();
-        assert_eq!(error.code(), "RRS-E1002");
+        assert_eq!(error.code(), "RRS-E1006");
     }
 }

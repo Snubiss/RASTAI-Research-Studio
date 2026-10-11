@@ -6,22 +6,25 @@
 //!   zeros, raw control characters in strings, lone UTF-16 surrogates, and anything after the value (`RRS-E0001`);
 //! - an object with the same key twice (`RRS-E0003`);
 //! - `NaN`, `Infinity`, `-Infinity`, and numbers too big for a 64-bit float (`RRS-E0004`);
-//! - input over `max_file_bytes` (`RRS-E5003`) or nested deeper than `max_json_depth` (`RRS-E5004`).
+//! - input over `max_file_bytes` (`RRS-E5003`), nested deeper than `max_json_depth` (`RRS-E5004`), or with more
+//!   than `max_json_values` values (`RRS-E5006`).
 //!
 //! Numbers become serde_json numbers the way serde_json makes them: an integer that fits u64 or i64 stays an
-//! integer, everything else is an f64. Every value's position goes into the `PositionMap` under its JSON pointer.
+//! integer, everything else is an f64. Every value's position goes into the `PositionMap`, a tree shaped like the
+//! value, so the reader never builds a pointer string per value (positions.rs says why).
 //!
 //! The reader is recursive; the depth limit is checked before each nested array or object, so recursion never
-//! goes deeper than `max_json_depth`.
+//! goes deeper than `max_json_depth`. The value count is checked before each value, so a document of tiny values
+//! (`[0,0,0,...]`) is refused before its tree outgrows the limits.rs budget.
+
+use std::collections::BTreeMap;
 
 use serde_json::{Map, Number, Value};
 
 use crate::error::FormatsError;
-use crate::json::pointer::join_pointer;
-use crate::json::positions::{PositionMap, TextPosition, record_position};
+use crate::json::pointer::{ROOT_POINTER, join_pointer};
+use crate::json::positions::{PositionChildren, PositionMap, PositionNode, TextPosition, position_map_from_root};
 use crate::limits::ImportLimits;
-
-const ROOT_POINTER: &str = "";
 
 // What the reader wanted where it stopped; carried in `FormatsError::JsonSyntax.expected`.
 const EXPECTED_VALUE: &str = "a value";
@@ -55,7 +58,8 @@ pub struct ParsedJson {
     pub positions: PositionMap,
 }
 
-/// The reader's state: the text, how far it got, and the line and column of that point.
+/// The reader's state: the text, how far it got, the line and column of that point, and the two counts that
+/// limits.rs caps.
 struct Cursor<'a> {
     text: &'a str,
     offset: usize,
@@ -63,7 +67,15 @@ struct Cursor<'a> {
     column: u32,
     depth: u32,
     max_depth: u32,
-    positions: PositionMap,
+    value_count: u64,
+    max_values: u64,
+}
+
+/// A value the reader finished, with the positions of everything inside it. Its own position belongs to the
+/// caller, because a member's position is its key's, not its value's.
+struct ReadValue {
+    value: Value,
+    children: PositionChildren,
 }
 
 /// Reads one JSON document from bytes. The first problem stops the read; JSON past a syntax error can't be
@@ -78,19 +90,23 @@ pub fn read_json(bytes: &[u8], limits: &ImportLimits) -> Result<ParsedJson, Form
         column: 1,
         depth: 0,
         max_depth: limits.max_json_depth,
-        positions: PositionMap::default(),
+        value_count: 0,
+        max_values: limits.max_json_values,
     };
     skip_whitespace(&mut cursor);
     let root_position = position(&cursor);
-    record_position(&mut cursor.positions, ROOT_POINTER, root_position);
-    let value = read_value(&mut cursor, ROOT_POINTER)?;
+    let root = read_value(&mut cursor)?;
     skip_whitespace(&mut cursor);
     if cursor.offset < cursor.text.len() {
         return Err(syntax_error(&cursor, EXPECTED_END));
     }
+    let root_node = PositionNode {
+        position: root_position,
+        children: root.children,
+    };
     Ok(ParsedJson {
-        value,
-        positions: cursor.positions,
+        value: root.value,
+        positions: position_map_from_root(root_node),
     })
 }
 
@@ -136,99 +152,145 @@ fn is_continuation_byte(byte: u8) -> bool {
     byte & 0b1100_0000 == 0b1000_0000
 }
 
-fn read_value(cursor: &mut Cursor, pointer: &str) -> Result<Value, FormatsError> {
+fn read_value(cursor: &mut Cursor) -> Result<ReadValue, FormatsError> {
+    count_value(cursor)?;
     if NON_FINITE_WORDS.iter().any(|word| starts_with(cursor, word)) {
         return Err(FormatsError::NotANumber {
             position: position(cursor),
         });
     }
-    match peek(cursor) {
-        Some(b'{') => read_object(cursor, pointer),
-        Some(b'[') => read_array(cursor, pointer),
-        Some(b'"') => read_string(cursor).map(Value::String),
-        Some(b't') => read_literal(cursor, "true", Value::Bool(true)),
-        Some(b'f') => read_literal(cursor, "false", Value::Bool(false)),
-        Some(b'n') => read_literal(cursor, "null", Value::Null),
-        Some(b'-' | b'0'..=b'9') => read_number(cursor),
-        _ => Err(syntax_error(cursor, EXPECTED_VALUE)),
-    }
+    let value = match peek(cursor) {
+        Some(b'{') => return read_object(cursor),
+        Some(b'[') => return read_array(cursor),
+        Some(b'"') => Value::String(read_string(cursor)?),
+        Some(b't') => read_literal(cursor, "true", Value::Bool(true))?,
+        Some(b'f') => read_literal(cursor, "false", Value::Bool(false))?,
+        Some(b'n') => read_literal(cursor, "null", Value::Null)?,
+        Some(b'-' | b'0'..=b'9') => read_number(cursor)?,
+        _ => return Err(syntax_error(cursor, EXPECTED_VALUE)),
+    };
+    Ok(ReadValue {
+        value,
+        children: PositionChildren::Leaf,
+    })
 }
 
-fn read_object(cursor: &mut Cursor, pointer: &str) -> Result<Value, FormatsError> {
+/// Counts one more value, refusing the one past `max_json_values`. Every value costs memory in the tree and the
+/// position map whatever its size in the text (`0,` is two bytes), so the byte limit alone doesn't bound memory.
+fn count_value(cursor: &mut Cursor) -> Result<(), FormatsError> {
+    if cursor.value_count >= cursor.max_values {
+        return Err(FormatsError::TooManyValues {
+            position: position(cursor),
+            limit_count: cursor.max_values,
+        });
+    }
+    cursor.value_count += 1;
+    Ok(())
+}
+
+fn read_object(cursor: &mut Cursor) -> Result<ReadValue, FormatsError> {
     enter_container(cursor)?;
     let mut members = Map::new();
+    let mut member_positions = BTreeMap::new();
     skip_whitespace(cursor);
-    if peek(cursor) == Some(b'}') {
-        advance(cursor, 1);
-        cursor.depth -= 1;
-        return Ok(Value::Object(members));
-    }
-    loop {
-        skip_whitespace(cursor);
-        read_member(cursor, pointer, &mut members)?;
-        skip_whitespace(cursor);
-        match peek(cursor) {
-            Some(b',') => advance(cursor, 1),
-            Some(b'}') => break,
-            _ => return Err(syntax_error(cursor, EXPECTED_MEMBER_END)),
+    if peek(cursor) != Some(b'}') {
+        loop {
+            skip_whitespace(cursor);
+            read_member(cursor, &mut members, &mut member_positions)?;
+            skip_whitespace(cursor);
+            match peek(cursor) {
+                Some(b',') => advance(cursor, 1),
+                Some(b'}') => break,
+                _ => return Err(syntax_error(cursor, EXPECTED_MEMBER_END)),
+            }
         }
     }
-    advance(cursor, 1);
-    cursor.depth -= 1;
-    Ok(Value::Object(members))
+    leave_container(cursor);
+    Ok(ReadValue {
+        value: Value::Object(members),
+        children: PositionChildren::Members(member_positions),
+    })
 }
 
 /// One `"key": value` pair. The key's position is the member's position; a repeated key is refused there.
-fn read_member(cursor: &mut Cursor, pointer: &str, members: &mut Map<String, Value>) -> Result<(), FormatsError> {
+fn read_member(
+    cursor: &mut Cursor,
+    members: &mut Map<String, Value>,
+    member_positions: &mut BTreeMap<String, PositionNode>,
+) -> Result<(), FormatsError> {
     if peek(cursor) != Some(b'"') {
         return Err(syntax_error(cursor, EXPECTED_KEY));
     }
     let key_position = position(cursor);
     let key = read_string(cursor)?;
-    let member_pointer = join_pointer(pointer, &key);
     if members.contains_key(&key) {
         return Err(FormatsError::DuplicateKey {
-            pointer: member_pointer,
+            pointer: join_pointer(ROOT_POINTER, &key),
             position: key_position,
         });
     }
-    record_position(&mut cursor.positions, &member_pointer, key_position);
     skip_whitespace(cursor);
     if peek(cursor) != Some(b':') {
         return Err(syntax_error(cursor, EXPECTED_COLON));
     }
     advance(cursor, 1);
     skip_whitespace(cursor);
-    let value = read_value(cursor, &member_pointer)?;
-    members.insert(key, value);
+    let member = read_value(cursor).map_err(|error| add_parent_token(error, &key))?;
+    let member_node = PositionNode {
+        position: key_position,
+        children: member.children,
+    };
+    member_positions.insert(key.clone(), member_node);
+    members.insert(key, member.value);
     Ok(())
 }
 
-fn read_array(cursor: &mut Cursor, pointer: &str) -> Result<Value, FormatsError> {
+fn read_array(cursor: &mut Cursor) -> Result<ReadValue, FormatsError> {
     enter_container(cursor)?;
     let mut elements = Vec::new();
+    let mut element_positions = Vec::new();
     skip_whitespace(cursor);
-    if peek(cursor) == Some(b']') {
-        advance(cursor, 1);
-        cursor.depth -= 1;
-        return Ok(Value::Array(elements));
-    }
-    loop {
-        skip_whitespace(cursor);
-        let element_pointer = join_pointer(pointer, &elements.len().to_string());
-        let element_position = position(cursor);
-        record_position(&mut cursor.positions, &element_pointer, element_position);
-        elements.push(read_value(cursor, &element_pointer)?);
-        skip_whitespace(cursor);
-        match peek(cursor) {
-            Some(b',') => advance(cursor, 1),
-            Some(b']') => break,
-            _ => return Err(syntax_error(cursor, EXPECTED_ELEMENT_END)),
+    if peek(cursor) != Some(b']') {
+        loop {
+            skip_whitespace(cursor);
+            let element_position = position(cursor);
+            let index = elements.len();
+            let element = read_value(cursor).map_err(|error| add_parent_token(error, &index.to_string()))?;
+            element_positions.push(PositionNode {
+                position: element_position,
+                children: element.children,
+            });
+            elements.push(element.value);
+            skip_whitespace(cursor);
+            match peek(cursor) {
+                Some(b',') => advance(cursor, 1),
+                Some(b']') => break,
+                _ => return Err(syntax_error(cursor, EXPECTED_ELEMENT_END)),
+            }
         }
     }
-    advance(cursor, 1);
-    cursor.depth -= 1;
-    Ok(Value::Array(elements))
+    leave_container(cursor);
+    Ok(ReadValue {
+        value: Value::Array(elements),
+        children: PositionChildren::Elements(element_positions),
+    })
+}
+
+/// A duplicate key's pointer is built on the way back out of the recursion: the object that found it names only
+/// the key, and each enclosing member or element puts its own token in front. Only this error carries a pointer,
+/// and building it here costs nothing for documents that have no duplicate.
+fn add_parent_token(error: FormatsError, token: &str) -> FormatsError {
+    match error {
+        FormatsError::DuplicateKey { pointer, position } => {
+            let mut full_pointer = join_pointer(ROOT_POINTER, token);
+            full_pointer.push_str(&pointer);
+            FormatsError::DuplicateKey {
+                pointer: full_pointer,
+                position,
+            }
+        }
+        other => other,
+    }
 }
 
 /// Steps over an opening `{` or `[`, after checking the nesting limit at that bracket.
@@ -242,6 +304,12 @@ fn enter_container(cursor: &mut Cursor) -> Result<(), FormatsError> {
     cursor.depth += 1;
     advance(cursor, 1);
     Ok(())
+}
+
+/// Steps over the closing `}` or `]` that `read_object` or `read_array` stopped at.
+fn leave_container(cursor: &mut Cursor) {
+    advance(cursor, 1);
+    cursor.depth -= 1;
 }
 
 /// A string, from its opening quote to its closing one. Plain runs are copied whole; escapes one at a time.
@@ -467,6 +535,7 @@ fn syntax_error(cursor: &Cursor, expected: &'static str) -> FormatsError {
 mod tests {
     use super::*;
     use crate::json::positions::{position_count, position_of};
+    use crate::test_random::next_random;
     use serde_json::json;
 
     fn read(text: &str) -> Result<ParsedJson, FormatsError> {
@@ -525,6 +594,14 @@ mod tests {
             FormatsError::DuplicateKey {
                 pointer: "/outer/0/x".to_string(),
                 position: at(1, 29)
+            }
+        );
+        let escaped = read(r#"{"a/b": [0, {"m~n": 1, "m~n": 2}]}"#).unwrap_err();
+        assert_eq!(
+            escaped,
+            FormatsError::DuplicateKey {
+                pointer: "/a~1b/1/m~0n".to_string(),
+                position: at(1, 24)
             }
         );
         // The same key in two different objects is fine.
@@ -651,6 +728,37 @@ mod tests {
     }
 
     #[test]
+    fn value_count_limit_is_e5006_before_the_tree_grows() {
+        let limits = ImportLimits {
+            max_json_values: 4,
+            ..ImportLimits::default()
+        };
+        // The array and its three numbers are four values; nested containers count too.
+        assert!(read_json(b"[1, 2, 3]", &limits).is_ok());
+        assert!(read_json(br#"{"a": [{}]}"#, &limits).is_ok());
+        let error = read_json(b"[1, 2, 3, 4]", &limits).unwrap_err();
+        assert_eq!(
+            error,
+            FormatsError::TooManyValues {
+                position: at(1, 11),
+                limit_count: 4
+            }
+        );
+        assert_eq!(error.code(), "RRS-E5006");
+        let nested = read_json(br#"{"a": [{"b": [null]}]}"#, &limits).unwrap_err();
+        assert_eq!(nested.code(), "RRS-E5006");
+        // A document of tiny values under the default limits stops at the count, not at the end of its bytes.
+        let defaults = ImportLimits::default();
+        let value_limit = defaults.max_json_values as usize;
+        let mut tiny_values = "[".to_string();
+        tiny_values.push_str(&"0,".repeat(value_limit));
+        tiny_values.push('0');
+        tiny_values.push(']');
+        let error = read(&tiny_values).unwrap_err();
+        assert_eq!(error.code(), "RRS-E5006");
+    }
+
+    #[test]
     fn size_limit_is_e5003_before_parsing() {
         let limits = ImportLimits {
             max_file_bytes: 4,
@@ -731,11 +839,5 @@ mod tests {
             }
             _ => bytes.insert(index, byte),
         }
-    }
-
-    // A 64-bit linear congruential generator (Knuth's MMIX constants): repeatable and good enough for test input.
-    fn next_random(seed: &mut u64) -> u64 {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        *seed >> 33
     }
 }

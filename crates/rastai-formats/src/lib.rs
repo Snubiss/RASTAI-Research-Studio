@@ -11,3 +11,7 @@ pub mod hashing;
 pub mod json;
 pub mod limits;
 pub mod semver;
+
+// Shared by the seeded tests in json/reader.rs and json/patch.rs.
+#[cfg(test)]
+mod test_random;
