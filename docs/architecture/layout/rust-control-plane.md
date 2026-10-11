@@ -2124,8 +2124,9 @@ crates/rastai-server/
       router.rs               build_router(): every route of contracts §3.3, plus rastai-gateway's /v1 routes
       listeners.rs            loopback TCP on 47820–47829 and daemon.sock; TCP_NODELAY on every connection; writes daemon.port
       gate.rs                 check_request_gate() (flows/platform.md 4.2): loopback Host, Origin, origin-bound sessions,
-                              the Sec-Fetch-Site rule (8.3a)
-      sessions.rs             one-time login codes, sessions bound to the Origin that redeemed them, idle expiry
+                              the Sec-Fetch-Site rule, the session request key (8.3a)
+      sessions.rs             one-time login codes, sessions bound to the Origin that redeemed them, the hash of each
+                              session's request key, idle expiry
       connect.rs              Connect protocol: unary and server-streaming envelopes, content-type selection
       connect_json.rs         hand-written proto JSON for the CommandService messages (section 11.3)
       command_endpoints.rs    CommandService.Execute and ListCommands
@@ -2435,9 +2436,11 @@ const LOOPBACK_HOSTS: &[&str] = &["127.0.0.1", "localhost", "[::1]"];   // any p
 const LOGIN_PATH: &str = "/api/login";
 const SAFE_METHODS_WITHOUT_ORIGIN: &[&str] = &["GET", "HEAD"];
 const SEC_FETCH_SITES_WITHOUT_ORIGIN: &[&str] = &["same-origin", "none"];
+const METHODS_WITHOUT_SESSION_KEY: &[&str] = &["GET", "HEAD"];        // static files and blobs only (ADR-0034 decision 10)
 
 pub struct RequestHead { pub method: String, pub path: String, pub host: String, pub origin: Option<String>,
                          pub sec_fetch_site: Option<String>, pub cookie_session_id: Option<String>,
+                         pub session_key: Option<String>,              // the Rastai-Session-Key header
                          pub bearer_token: Option<String> }
 pub enum Listener { LoopbackTcp, DaemonSocket { peer_uid: u32 } }
 
@@ -2460,15 +2463,32 @@ pub fn check_request_gate(request: &RequestHead, listener: &Listener, auth: &Aut
     }
 }
 
-/// A cookie request must come from the origin that redeemed the login code. Browsers send cookies to every port on
-/// 127.0.0.1, so without this a page on another loopback port could forward requests with the owner's cookie.
 fn check_session(request: &RequestHead, session_id: &str, auth: &AuthState) -> Result<Option<Principal>, Diagnostic> {
     let session = find_live_session(auth, session_id)?;              // RRS-C1002 when unknown or idle for 24 h
+    check_session_origin(request, &session)?;                         // RRS-C1004
+    if !METHODS_WITHOUT_SESSION_KEY.contains(&request.method.as_str()) {
+        check_session_key(request, &session)?;                        // RRS-C1002
+    }
+    Ok(Some(owner_principal()))
+}
+
+/// A cookie request must come from the origin that redeemed the login code. Browsers send cookies to every port on
+/// 127.0.0.1, so without this a page on another loopback port could forward requests with the owner's cookie.
+fn check_session_origin(request: &RequestHead, session: &Session) -> Result<(), Diagnostic> {
     match &request.origin {
-        Some(origin) if *origin == session.bound_origin => Ok(Some(owner_principal())),
+        Some(origin) if *origin == session.bound_origin => Ok(()),
         Some(_) => Err(diagnostic("RRS-C1004", &[])),               // another loopback port
-        None if allowed_without_origin(request) => Ok(Some(owner_principal())),
+        None if allowed_without_origin(request) => Ok(()),
         None => Err(diagnostic("RRS-C1004", &[])),
+    }
+}
+
+/// Origin and Sec-Fetch-Site are enforced only by browsers. A non-browser process on another loopback port that
+/// receives the cookie can forge both, but it never sees the key, which the web app keeps in memory only.
+fn check_session_key(request: &RequestHead, session: &Session) -> Result<(), Diagnostic> {
+    match &request.session_key {
+        Some(key) if hash_bytes(key.as_bytes()) == session.key_hash => Ok(()),
+        _ => Err(diagnostic("RRS-C1002", &[])),                      // missing or wrong key
     }
 }
 
@@ -2482,6 +2502,7 @@ fn allowed_without_origin(request: &RequestHead) -> bool {
 ```
 
 - **Sessions record their origin.** `POST /api/login` must carry Origin; `redeem_login_code` stores it in the session (`bound_origin`). Sessions live in memory only and expire after `SESSION_IDLE_EXPIRY_HOURS` (24); a restart signs everyone out.
+- **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `redeem_login_code` returns 32 random bytes in the login response body and keeps only their BLAKE3 hash (`key_hash`). Every cookie request other than `GET` or `HEAD` (`Execute`, `Subscribe`, `PUT /api/blobs`) must send the key as `Rastai-Session-Key`; a missing or wrong key is `RRS-C1002`. The cookie alone reads only static files and blobs. Bearer requests don't use the key.
 - **Bearer requests** may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed iframe) is refused.
 - **Cross-origin browser clients are refused in v1.** Two routes are designed for Phase 2 and not built: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand).
 - **`owner.token`** that group or others can read stops the start with `RRS-C1008` and the fix `chmod 600 <path>` (`auth_files.rs`); the daemon never rotates or rewrites it.
@@ -2549,7 +2570,7 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 
 | Test | Where | What |
 |---|---|---|
-| Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET with no Origin and `Sec-Fetch-Site: same-origin` passes, `same-site` → `RRS-C1004`; a cookie POST with no Origin → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards |
+| Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET with no Origin and `Sec-Fetch-Site: same-origin` passes, `same-site` → `RRS-C1004`; a cookie POST with no Origin → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards; a cookie POST with the right Origin and no `Rastai-Session-Key`, or a wrong one → `RRS-C1002`; a cookie GET of a blob with no key passes |
 | Blob headers | `tests/blob_headers.rs` | an uploaded HTML blob is served as an attachment with type `application/octet-stream` and the sandbox CSP; the same for SVG and an unknown type; `image/png` is inline but still carries `nosniff` and `Cross-Origin-Resource-Policy: same-origin` |
 | Fuzz | `fuzz/fuzz_targets/request_gate.rs`, `connect_json.rs` | nightly, 10 minutes each (contracts §12.5) |
 | Connect | `tests/connect_protocol.rs` | unary binary and JSON; stream envelopes and the end-of-stream trailer; JSON equals `fixtures/proto-golden/commands/*.json` |
