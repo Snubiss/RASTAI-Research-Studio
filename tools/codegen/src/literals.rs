@@ -24,6 +24,10 @@ pub fn json_string_literal(text: &str) -> String {
 }
 
 /// The word the catalog JSON uses for a severity. The JavaScript, Python and docs outputs keep it as written.
+///
+/// rastai-diag's `severity_name` gives the same words today, but it is crate-private and answers a different
+/// question (the label a rendered diagnostic shows). This is the catalog file's spelling, which catalog_source.rs
+/// reads back, so the codegen keeps its own three lines instead of widening rastai-diag's public API.
 pub fn severity_word(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "error",

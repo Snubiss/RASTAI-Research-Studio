@@ -206,7 +206,7 @@ A PR is done when all of these hold. Reviewers check the PR template's boxes (8.
 1. `just check` passes locally and every required CI job is green (§29). From M1-05 that includes `check-js` (`tsc --noEmit` over `jsconfig.json`, checkJs), prettier, ruff, `check-colors` and `check-no-typescript`; from M1-57 and M1-58, `check-names` and `check-schema-diff`.
 2. It adds a test that fails without the change. The one exception is a docs-only PR (spec, contracts prose, ADRs, this plan), which has no code to test.
 3. Wire and document contract changes (proto, document schemas, command rows and their argument types, catalog codes) were merged first, in their own PR. Any other new name (a table or column, a settings key, a module, a CLI verb) goes into contracts.md in the same PR that first uses it (ADR-0038).
-4. Every new user-facing error has a catalog code (`catalog_checks` and the source scan enforce it from M1-12).
+4. Every new user-facing error has a catalog code (`catalog_checks` enforces it from M1-12, and the source scan from M1-13).
 5. New external dependencies are in §27 and the allowlists (`check-deps`), each imported in its one wrapper file (contracts §2.5).
 6. No pickle, no runtime installs (`check-no-pickle`), no `unsafe` outside ADR-0033's one file (`check-unsafe`).
 7. House style: simple functions and plain data, constants at the top, readable names, small functions, a thin main (ADR-0023; clippy's `too_many_lines` at 60). Frontend code is plain JavaScript and JSX with short JSDoc types, never TypeScript syntax (ADR-0036).

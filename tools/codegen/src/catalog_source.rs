@@ -6,8 +6,8 @@
 //! A source that doesn't exist yet holds no entries: the catalog files arrive with M1-13 and the plugins with M4
 //! and M5, and the generated tables are simply empty until then.
 //!
-//! The rules between entries (well-formed codes, no duplicates, each code in its owner's range, nothing deleted)
-//! are checked by tests/catalog_checks.rs, not here, so this reader stays a reader.
+//! The rules between entries (well-formed codes, no duplicates, each code in its owner's range, nothing deleted,
+//! anchors that are slugs used once) are checked by tests/catalog_checks.rs, not here, so this reader stays a reader.
 
 use std::fs;
 use std::path::Path;
@@ -103,6 +103,22 @@ pub fn parse_error_file(bytes: &[u8], source_file: &str) -> Result<Vec<ErrorReco
         records.push(error_record(entry, index, source_file)?);
     }
     Ok(records)
+}
+
+/// Reads only the `code` of each entry in one error file's bytes, ignoring every other field. The merge-base check
+/// reads the base branch's files with it: those files follow the entry fields of their own day, so reading them
+/// with today's strict `parse_error_file` would fail the first PR that changes the fields.
+pub fn read_error_codes(bytes: &[u8], source_file: &str) -> Result<Vec<String>, CodegenError> {
+    let entries = read_entries(bytes, source_file)?;
+    let mut codes = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let place = EntryPlace { index, source_file };
+        match entry.get("code") {
+            Some(Value::String(code)) => codes.push(code.clone()),
+            _ => return Err(entry_error(&place, "field `code` must be a string".to_string())),
+        }
+    }
+    Ok(codes)
 }
 
 /// Reads the term entries of one file's bytes.
@@ -393,6 +409,23 @@ mod tests {
     fn an_unknown_severity_is_refused() {
         let entry = DISK_FULL_ENTRY.replace(r#""severity": "error""#, r#""severity": "fatal""#);
         assert!(problem_of(&format!("[{DISK_FULL_ENTRY}, {entry}]")).contains("entry 1: field `severity` must be"));
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn codes_read_whatever_the_other_fields_are() {
+        let old_style_entry = r#"{"code": "RRS-E0001", "text": "a field this reader has never heard of"}"#;
+        let codes = read_error_codes(
+            format!("[{DISK_FULL_ENTRY}, {old_style_entry}]").as_bytes(),
+            SOURCE_FILE,
+        )
+        .unwrap();
+        assert_eq!(codes, ["RRS-S3001", "RRS-E0001"]);
+        let error = read_error_codes(br#"[{"title": "no code"}]"#, SOURCE_FILE).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("{SOURCE_FILE}: entry 0: field `code` must be a string")
+        );
     }
 
     #[test]

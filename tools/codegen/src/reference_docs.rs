@@ -68,7 +68,7 @@ fn render_prefix_section(row: &CatalogPrefix, entries: &[&ErrorRecord]) -> Strin
 fn render_entry(record: &ErrorRecord) -> String {
     let mut text = String::from("\n");
     if !record.docs_anchor.is_empty() {
-        text.push_str(&format!("<a id=\"{}\"></a>\n\n", escape_html(&record.docs_anchor)));
+        text.push_str(&format!("<a id=\"{}\"></a>\n\n", escape_attribute(&record.docs_anchor)));
     }
     text.push_str(&format!("### {}: {}\n\n", record.code, escape_html(&record.title)));
     text.push_str(&format!("- **Severity:** {}\n", severity_word(record.severity)));
@@ -103,6 +103,13 @@ fn escape_html(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('\n', " ")
+}
+
+/// Text inside a double-quoted HTML attribute: the HTML characters and the quote itself. catalog_checks already
+/// refuses an anchor that isn't a plain slug, but the page is written before the tests run, so it must stay
+/// well-formed whatever the source says.
+fn escape_attribute(text: &str) -> String {
+    escape_html(text).replace('"', "&quot;")
 }
 
 #[cfg(test)]
@@ -164,6 +171,18 @@ Source: `catalog/errors/RRS-S.json`.
 ";
         assert!(text.contains(expected), "{text}");
         assert_eq!(text.matches(EMPTY_PREFIX_LINE).count(), CATALOG_PREFIXES.len() - 1);
+    }
+
+    #[test]
+    fn a_quote_in_an_anchor_cannot_break_the_attribute() {
+        let mut entry = record("RRS-S3001", false);
+        entry.docs_anchor = "disk\" onclick=\"x".to_string();
+        let catalog = CatalogSource {
+            errors: vec![entry],
+            terms: Vec::new(),
+        };
+        let text = render_errors_reference(&catalog);
+        assert!(text.contains("<a id=\"disk&quot; onclick=&quot;x\"></a>"), "{text}");
     }
 
     #[test]
