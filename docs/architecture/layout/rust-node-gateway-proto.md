@@ -270,7 +270,8 @@ crates/rastai-transport/
     grpc_local.rs           a tiny tonic service over a Unix socket, unary and streaming
     transfer_resume.rs      interrupt a transfer mid-file, resume from offset, hash matches
     ssh_loopback.rs         real OpenSSH against a test sshd (ignored unless RASTAI_TEST_SSH is set)
-    http_client.rs          against a local axum test server: chunked streaming, timeouts, TLS refusal of bad certs
+    http_client.rs          plain HTTP over a Unix socket and loopback against a raw HTTP/1.1 test server: round trip,
+                            chunked streaming, timeouts (M1-41); TLS refusal of bad certs (M2-14)
   fuzz/
     fuzz_targets/sse_reader.rs   arbitrary bytes in arbitrary chunk sizes never panic; the events equal a one-chunk parse (nightly, 10 minutes)
 ```
@@ -324,7 +325,8 @@ pub async fn upload_over_ssh(target_host: &str, local_path: &Path, remote_path: 
 // http_client.rs
 pub const EGRESS_REPORT_INTERVAL_SECONDS: u64 = 5;   // the UI's egress badge expects a refresh at least this often
 
-pub enum HttpTarget { Https { host: String, port: u16 }, LoopbackHttp { port: u16 } }
+pub enum HttpTarget { Https { host: String, port: u16 }, LoopbackHttp { port: u16 }, LocalSocket { socket_path: PathBuf } }
+// LocalSocket is HTTP/1.1 over a local socket: daemon.sock for the CLI and the MCP bridge (M1-41). Https arrives with M2-14.
 /// Who is sending data off the machine and why. Every Https request carries one; the owner of the
 /// channel (the daemon's bus or the node's WatchLive) turns each report into an ephemeral egress.active event.
 pub struct EgressTag { pub purpose: String, pub subject_id: String, pub reports: tokio::sync::mpsc::Sender<EgressReport> }
@@ -406,7 +408,7 @@ ssh -N -T
 |---|---|---|
 | tokio | everywhere | sockets, child processes, timers |
 | tonic | `grpc_channel.rs` | channels and servers over local sockets |
-| tower | `grpc_channel.rs` | `service_fn` connector that tonic's `Endpoint::connect_with_connector` takes |
+| tower | `grpc_channel.rs` | `service_fn` connector that tonic's `Endpoint::connect_with_connector` takes. Not imported yet: tonic 0.14 has its own `unix:` endpoint, which M1-41's `connect_grpc_channel` uses after checking the socket's folder |
 | hyper, hyper-util | `http_client.rs` only | HTTP/1.1 client |
 | rustls, tokio-rustls, webpki-roots | `http_client.rs` only | TLS for HTTPS (never in-house crypto, §24). The same file serves the SHA-256 and HMAC-SHA256 helpers from the rustls crypto provider (HF file checks, llama-server builds, and SigV4 for the archive's S3 target in M11); no extra crate |
 | OpenSSH binary | `ssh.rs` | remote access (foundation, §27); found through settings `nodes.ssh_binary` |
@@ -1766,6 +1768,7 @@ Numbers only; titles are in contracts 10.3. A file may raise a code only if it i
 
 | Place | Codes |
 |---|---|
+| `rastai-transport` `local_socket.rs`, `peer.rs`, `grpc_channel.rs`, `http_client.rs` (local sockets and plain HTTP) | `RRS-N2004` to `RRS-N2009` |
 | `rastai-transport` `transfer.rs`, `http_client.rs` | `RRS-N3002`, `RRS-N3003`, `RRS-N3008`, `RRS-N3012` |
 | `rastai-sandbox` | `RRS-R1001` to `RRS-R1013` (cap, engine, API version, pull, start, time cap, pause, RAM, over-cap request, egress network, socket permission, memory cap, engine failure) |
 | `rastai-gateway` | `RRS-G0001`, `G0002`, `G0004` to `G0007`, `G0009`, `G0010`, `G1001` to `G1007`, `G2001` to `G2004`, `G3004`, `G3006`, `G4001` |
