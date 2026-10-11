@@ -242,6 +242,7 @@ dependencies = [
 name = "rastai-codegen"
 version = "0.1.0"
 dependencies = [
+ "rastai-core",
  "rastai-diag",
  "rastai-formats",
  "serde_json",

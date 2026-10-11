@@ -9,7 +9,7 @@ publish.workspace = true
 
 # Dev tooling only, never shipped (layout: rust-control-plane.md section 4.9). Its outputs are checked in, and
 # `just codegen-check` fails when a fresh run would change them. rastai-names-codegen joins as one more bin here
-# (M1-57), and rastai-core becomes a dependency once its command table exists (M1-21).
+# (M1-57).
 [[bin]]
 name = "rastai-catalog-codegen"
 path = "src/bin/rastai_catalog_codegen.rs"
@@ -24,6 +24,10 @@ path = "src/bin/rastai_formats_codegen.rs"
 rastai-formats = { path = "../../crates/rastai-formats" }
 # Severity, so the generator and the tables it writes name the same three levels.
 rastai-diag = { path = "../../crates/rastai-diag" }
+# The command naming rules: the typed wrappers in commands.js are named by `javascript_wrapper_name`, the one
+# implementation of that rule (layout rust-control-plane.md 10.3). The command rows come from its `COMMANDS` once
+# they carry their argument and result types (M1-22).
+rastai-core = { path = "../../crates/rastai-core" }
 serde_json = { workspace = true }
 
 [lints]
