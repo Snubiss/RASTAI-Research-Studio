@@ -15,7 +15,9 @@
 //! died while writing it. Bit rot in its `body_length` looks the same, though, and would make a torn-tail cut drop
 //! every whole frame after it. The writer makes one write per frame, so a crash tears at most the last frame: when a
 //! whole, CRC-valid, version-1 frame with a later sequence lies in the `LATER_FRAME_SEARCH_BYTES` after the
-//! overrunning frame's header, the length was damaged and the frame is corrupt.
+//! overrunning frame's header, the length was damaged and the frame is corrupt. The search checks at most
+//! `LATER_FRAME_CRC_BUDGET_BYTES` of candidate bodies; once that runs out it gives up and the frame counts as the
+//! torn tail, so crafted or unlucky bytes can't make one read slow.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -25,16 +27,23 @@ use rastai_proto::events::v1::EventRecord;
 
 use crate::error::{StoreError, event_log_io_error};
 use crate::event_log::frame::{
-    EVENT_LOG_HEADER, FIRST_SEQUENCE, FRAME_HEADER_BYTES, body_matches_header, decode_frame_body, decode_frame_header,
+    EVENT_LOG_HEADER, FIRST_SEQUENCE, FRAME_HEADER_BYTES, FrameHeader, body_matches_header, decode_frame_body,
+    decode_frame_header,
 };
 
 /// How much of the file the zero-tail check reads at a time.
 const ZERO_SCAN_CHUNK_BYTES: usize = 64 * 1024;
 /// How far past an overrunning frame's header the reader looks for a whole later frame (see the top of this file).
 /// A record carries hashes, not data, so a real frame is a few KiB: 1 MiB holds the damaged frame's true body and
-/// the frame after it many times over, and it bounds the memory and time a damaged length can cost. A later frame
-/// that doesn't lie wholly inside it isn't seen, and the overrunning frame is then cut off as the torn tail.
+/// the frame after it many times over, and it bounds the memory a damaged length can cost. A later frame that
+/// doesn't lie wholly inside it isn't seen, and the overrunning frame is then cut off as the torn tail.
 const LATER_FRAME_SEARCH_BYTES: usize = 1024 * 1024;
+/// How many body bytes one search may run through CRC-32 in all. The window alone doesn't bound the time: every
+/// byte offset is a candidate, and each candidate whose length fits costs a CRC over its body, so bytes crafted to
+/// fit at every offset would cost about 1 MiB times 1 MiB (minutes per read, repeated on every tailer poll). With
+/// this budget the work is linear, milliseconds at most. A real search spends a few KiB of it, because random
+/// lengths rarely fit; when it runs out the overrunning frame counts as the torn tail.
+const LATER_FRAME_CRC_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 
 /// What one `read_next_frame` call found.
 // The record is held by value, as the layout's signature has it (rust-control-plane.md 6.2): one FrameRead exists
@@ -198,7 +207,8 @@ fn classify_overrunning_frame(
 }
 
 /// True when a whole later frame lies inside the `LATER_FRAME_SEARCH_BYTES` from `search_start`. Every byte offset
-/// is tried, because the damaged length says nothing about where the next frame really starts.
+/// is tried, because the damaged length says nothing about where the next frame really starts. False as well when
+/// the candidates use up `LATER_FRAME_CRC_BUDGET_BYTES` before one is found.
 fn whole_later_frame_follows(
     reader: &mut EventLogReader,
     search_start: u64,
@@ -210,27 +220,41 @@ fn whole_later_frame_follows(
     let bytes_read = read_at(reader, search_start, &mut window)?;
     window.truncate(bytes_read);
 
+    let mut crc_budget_left = LATER_FRAME_CRC_BUDGET_BYTES;
     let mut candidate_start = 0;
     while candidate_start + FRAME_HEADER_BYTES <= window.len() {
-        if is_whole_later_frame(&window[candidate_start..], reader.next_sequence) {
-            return Ok(true);
+        let candidate = &window[candidate_start..];
+        if let Some(body_length) = body_length_if_it_fits(candidate) {
+            if body_length > crc_budget_left {
+                return Ok(false);
+            }
+            crc_budget_left -= body_length;
+            if is_whole_later_frame(candidate, body_length, reader.next_sequence) {
+                return Ok(true);
+            }
         }
         candidate_start += 1;
     }
     Ok(false)
 }
 
-/// True when `bytes` start with a whole frame: a body that fits in `bytes` and has the header's CRC-32, holding a
-/// version-1 record whose sequence is `next_sequence` or later (after the last record read).
-fn is_whole_later_frame(bytes: &[u8], next_sequence: u64) -> bool {
-    let mut header_bytes = [0u8; FRAME_HEADER_BYTES];
-    header_bytes.copy_from_slice(&bytes[..FRAME_HEADER_BYTES]);
-    let header = decode_frame_header(&header_bytes);
+/// The body length the frame header at the start of `bytes` declares, when that body lies wholly inside `bytes`;
+/// `None` when it doesn't (then the candidate costs no CRC).
+fn body_length_if_it_fits(bytes: &[u8]) -> Option<usize> {
+    let header = frame_header_at(bytes);
     let body_end = FRAME_HEADER_BYTES as u64 + u64::from(header.body_length);
     if body_end > bytes.len() as u64 {
-        return false;
+        return None;
     }
-    let body = &bytes[FRAME_HEADER_BYTES..body_end as usize];
+    Some(header.body_length as usize)
+}
+
+/// True when `bytes` start with a whole frame of `body_length` (which `body_length_if_it_fits` found fits): a body
+/// with the header's CRC-32, holding a version-1 record whose sequence is `next_sequence` or later. Only a later
+/// sequence shows the writer got past this frame; a copy of a frame the reader has already passed shows nothing.
+fn is_whole_later_frame(bytes: &[u8], body_length: usize, next_sequence: u64) -> bool {
+    let header = frame_header_at(bytes);
+    let body = &bytes[FRAME_HEADER_BYTES..FRAME_HEADER_BYTES + body_length];
     if !body_matches_header(&header, body) {
         return false;
     }
@@ -238,6 +262,13 @@ fn is_whole_later_frame(bytes: &[u8], next_sequence: u64) -> bool {
         Some(record) => record.sequence >= next_sequence,
         None => false,
     }
+}
+
+/// The frame header in the first `FRAME_HEADER_BYTES` of `bytes` (the caller makes sure there are that many).
+fn frame_header_at(bytes: &[u8]) -> FrameHeader {
+    let mut header_bytes = [0u8; FRAME_HEADER_BYTES];
+    header_bytes.copy_from_slice(&bytes[..FRAME_HEADER_BYTES]);
+    decode_frame_header(&header_bytes)
 }
 
 /// True when every byte from `start` to `file_length` is zero.
