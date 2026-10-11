@@ -4,7 +4,7 @@
 
 **Changes of 2026-10-11 (owner-approved):** `schemas/names.json`, `check-names` and `check-schema-diff` move into M1 (sections 2.8 and 4.9); the theme token group is `typography` everywhere (contracts §5.2 now says so; the open question is gone); the core event-type table, `ALIASES` and the CLI mode words live in `rastai-core` so the codegen can read them (contracts v1.2 §15.1).
 
-**M1-01 alignments with the plan (2026-10-11):** `archive_cursors` arrives with M11's migration, not `0001` (plan M1-23); `tutorial.rs` and the `tutorial.*` commands are Phase 2 (plan §10 row 45); the `archive` settings section joins `SettingsDocument` in M11-E01; the settings precedence test uses `daemon.port`, a registered key (there is no `gateway.port`).
+**M1-01 alignments with the plan (2026-10-11):** `archive_cursors` arrives with M11's migration, not `0001` (plan M1-23); `tutorial.rs` and the `tutorial.*` commands are Phase 2, and `assistant.skill@1` is unsupported until then (plan §10 row 45); the `archive` settings section joins `SettingsDocument` in M11-E01; the settings precedence test uses `daemon.port`, a registered key (there is no `gateway.port`).
 
 **Changes in v1.1:** the new `rastai-archive` crate (section 14, M11); `archive_cursors`, `runs.archive_state` and the `vault_changes` outbox in `rastai-store`; settings live only in files (no `settings` table); `unsafe` for one `statvfs` call (ADR-0033); `miniz_oxide` behind `zip/inflate.rs` and a fuzz target for every in-house parser of untrusted input; plain JavaScript codegen output (ADR-0036); `stability` on commands and event types; origin-bound sessions in the request gate (ADR-0034); 31 plugin capabilities; the one layer-placement planner and per-op golden files; (L2) tags.
 
@@ -2967,10 +2967,11 @@ pub const FIRST_PARTY_CAPABILITIES: &[FirstPartyCapability] = &[
 |---|---|---|---|
 | `ui.icon_set@1` | `icon_sets` | unsupported until M8 | reads each set through `read_document` (`rastai.icon_set/1`) and serves its files under the plugin's assets path; the UI swaps icons by id |
 | `ui.locale@1` | `locales` | unsupported; Phase 2 (prototype strings are English; catalog text is keyed) | registers the locale's string tables; `ui.locale` picks one |
+| `assistant.skill@1` | `assistant_skills` | unsupported; Phase 2 with the tutorials (plan §10 row 45) | hands the skills to the UI through `plugin.list`; nothing runs a skill without the user |
 | `ui.macro@1` | `macros` | supported from M8 (M8-E05) | lists each macro in the palette; running one runs its command calls in order through `execute_command`, each journaled, each as the plugin principal |
 | `inference.chat_template@1` | `chat_templates` | supported from M8 (files only) | reads each template file and hands the matching models' overrides to the gateway and the nodes as `TokenizationOverride`s; two plugins matching one model means neither is used (`RRS-G1007`) |
 
-- **Experimental rows** (`data.source@1`, `inference.tokenizer@1`, `inference.adapter@1`, `assistant.skill@1`, `compute.target@1`) load only with `plugins.experimental_apis` (`RRS-P1003` otherwise), and registry plugins can't use them.
+- **Experimental rows** (`data.source@1`, `inference.tokenizer@1`, `inference.adapter@1`, `compute.target@1`) load only with `plugins.experimental_apis` (`RRS-P1003` otherwise), and registry plugins can't use them.
 - `events.handler@1` is what the Evaluation plugin requires for auto-run (`eval.checkpoint.evaluate` on `checkpoint.saved`, training-evaluation flow 10.1) and for pinned conversations (`eval.suite.add_conversation` on `conversation.changed`, inference flow 9); without it the first-party manifest would be refused with `RRS-P0006`.
 
 A major version is added to `majors` when an extension point changes incompatibly; the host keeps serving the previous major for 12 months after plugin API 1.0 (§13).
