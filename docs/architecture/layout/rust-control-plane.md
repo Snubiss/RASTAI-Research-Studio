@@ -536,7 +536,7 @@ error[RRS-E2004]: Input ranges overlap
 |---|---|---|
 | Unit | bottom of `path.rs`, `catalog.rs`, `render_text.rs` | path round trip; a missing placeholder value stays visible as `{name}`; snippet and caret at line 1, at the last line, with tabs and multi-byte characters |
 | Snapshots | `tests/render_snapshots.rs`, `fixtures/diagnostics/` (new) | plain, color-stripped and Basic output for one case per severity and path shape |
-| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); docs anchors are kebab-case slugs used once; term ids unique (all M1-12); placeholders in call sites exist in the entry (M1-13); every `fix_command_id` exists in the core table (M1-22) or a first-party manifest (when the first one lands) |
+| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); `catalog_ranges.rs` equals the contracts §10.1 table (prefixes, areas, ranges); docs anchors are kebab-case slugs used once; term ids unique (all M1-12); placeholders in call sites exist in the entry (M1-13); every `fix_command_id` exists in the core table (M1-22) or a first-party manifest (when the first one lands) |
 | Append-only | `tools/codegen/tests/catalog_checks.rs` (the `#[ignore]`d merge-base test, run by `just codegen-check`) | a code present at the merge base can be marked `retired` but never deleted or renumbered |
 
 ### 3.6 Ported from the spike
@@ -1131,7 +1131,8 @@ tools/codegen/
     write_if_changed.rs       write a file only when its bytes differ, so timestamps stay stable
   tests/
     catalog_checks.rs         the catalog rules of 3.5 (well formed, unique, owner's file and range, never deleted
-                              since the merge base); the merge-base test is #[ignore]d and run by `just codegen-check`
+                              since the merge base); catalog_ranges.rs equals the contracts §10.1 table; the
+                              merge-base test is #[ignore]d and run by `just codegen-check`
     names_registry.rs         a sample tree yields the expected names.json; output is sorted and stable; a dropped
                               column or a renamed command shows in the diff
     outputs_check.rs          the generated JS passes `just check-js` (tsc --noEmit in checkJs mode), the generated JS and

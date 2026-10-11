@@ -3,6 +3,10 @@
 //! that is no longer raised is marked `retired` instead, so its number is never reused). Every docs anchor is a
 //! lowercase kebab-case slug, used once among the errors and once among the terms, and every term id is unique.
 //!
+//! The owners' ranges in src/catalog_ranges.rs are a hand copy of the contracts 10.1 table, so one test reads that
+//! table and compares the two: a prefix, an area or a range that only one of them has fails it, and neither can
+//! drift from the other unnoticed.
+//!
 //! Two rules of layout 2.6 join later, with their inputs: placeholders used at Rust call sites (M1-13, with the
 //! source scan) and `fix_command_id` naming a real command (M1-22, with the first rows of the command table).
 //!
@@ -16,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::process::Command;
 
-use rastai_codegen::catalog_ranges::{find_prefix, find_range, split_code};
+use rastai_codegen::catalog_ranges::{CATALOG_PREFIXES, CatalogPrefix, CodeRange, find_prefix, find_range, split_code};
 use rastai_codegen::catalog_source::{ErrorRecord, TermRecord, read_catalog, read_error_codes};
 use rastai_codegen::repo_root::find_repo_root;
 use rastai_diag::diagnostic::Severity;
@@ -24,6 +28,73 @@ use rastai_diag::diagnostic::Severity;
 /// The branch a pull request merges into; CI passes the PR's base, as for check-schema-diff (contracts 12.6).
 const BASE_REF_VARIABLE: &str = "RASTAI_BASE_REF";
 const DEFAULT_BASE_REF: &str = "origin/main";
+/// The RRS-E file the samples below use; every catalog rule test needs one owner's file.
+const CORE_E_FILE: &str = "catalog/errors/RRS-E.json";
+
+/// The table src/catalog_ranges.rs copies: the first table after this heading in contracts.md.
+const CONTRACTS_FILE: &str = "docs/architecture/contracts.md";
+const RANGES_HEADING: &str = "### 10.1 Ranges";
+/// The table's columns are Prefix, Area, Owner and Ranges; its first two lines are the header and the divider.
+const PREFIX_COLUMN: usize = 0;
+const AREA_COLUMN: usize = 1;
+const RANGES_COLUMN: usize = 3;
+const TABLE_HEADER_LINES: usize = 2;
+/// A Ranges cell reads "0001–0999 syntax · 1000–1999 structure": ranges apart by a middle dot, ends by an en dash.
+const RANGE_SEPARATOR: &str = " · ";
+const RANGE_DASH: char = '–';
+/// A range's area in contracts may end in a note in brackets ("compiler (0600–0699 Eject and ONNX)"), which
+/// catalog_ranges.rs keeps as a comment or leaves out.
+const AREA_NOTE_START: &str = " (";
+
+/// A small contracts 10.1 and the catalog_ranges.rs rows that match it, for the tests that break one of the two.
+const SAMPLE_CONTRACTS: &str = "## 10. Error Catalog
+
+### 10.1 Ranges
+
+| Prefix | Area | Owner | Ranges |
+|---|---|---|---|
+| `RRS-E` | Formats and validation | `rastai-formats` | 0001–0999 syntax · 1000–1999 structure |
+| `RRS-U` | UI client and desktop | `apps/web` | 0001–0099 connection and session · 1000–1999 rendering (WebGL2 unavailable, etc.) |
+
+Rules:
+- Every user-facing error has a code.
+";
+const SAMPLE_PREFIXES: &[CatalogPrefix] = &[
+    CatalogPrefix {
+        prefix: "RRS-E",
+        area: "Formats and validation",
+        source_file: "catalog/errors/RRS-E.json",
+        ranges: &[
+            CodeRange {
+                first: 1,
+                last: 999,
+                area: "syntax",
+            },
+            CodeRange {
+                first: 1000,
+                last: 1999,
+                area: "structure",
+            },
+        ],
+    },
+    CatalogPrefix {
+        prefix: "RRS-U",
+        area: "UI client and desktop",
+        source_file: "catalog/errors/RRS-U.json",
+        ranges: &[
+            CodeRange {
+                first: 1,
+                last: 99,
+                area: "connection and session",
+            },
+            CodeRange {
+                first: 1000,
+                last: 1999,
+                area: "rendering",
+            },
+        ],
+    },
+];
 
 // ---- The rules ----
 
@@ -302,8 +373,6 @@ fn sample(code: &str, source_file: &str) -> ErrorRecord {
     }
 }
 
-const CORE_E_FILE: &str = "catalog/errors/RRS-E.json";
-
 #[test]
 fn malformed_codes_are_caught() {
     let errors = [
@@ -340,7 +409,7 @@ fn codes_outside_their_owner_are_caught() {
     let errors = [
         sample("RRS-E7999", CORE_E_FILE),
         sample("RRS-E8000", CORE_E_FILE),
-        sample("RRS-C0500", "catalog/errors/RRS-C.json"),
+        sample("RRS-C0999", "catalog/errors/RRS-C.json"),
         sample("RRS-E0000", CORE_E_FILE),
         sample("RRS-Z0001", "catalog/errors/RRS-Z.json"),
         sample("RRS-S0001", CORE_E_FILE),
@@ -351,7 +420,7 @@ fn codes_outside_their_owner_are_caught() {
         codes_outside_their_owner_range(&errors),
         [
             "RRS-E8000 (catalog/errors/RRS-E.json): 8000 is outside every RRS-E range (contracts 10.1)",
-            "RRS-C0500 (catalog/errors/RRS-C.json): 0500 is outside every RRS-C range (contracts 10.1)",
+            "RRS-C0999 (catalog/errors/RRS-C.json): 0999 is outside every RRS-C range (contracts 10.1)",
             "RRS-E0000 (catalog/errors/RRS-E.json): 0000 is outside every RRS-E range (contracts 10.1)",
             "RRS-Z0001 (catalog/errors/RRS-Z.json): no owner holds the prefix RRS-Z (contracts 10.1)",
             "RRS-S0001 (catalog/errors/RRS-E.json): RRS-S codes belong in catalog/errors/RRS-S.json",
@@ -461,4 +530,259 @@ fn error_files_are_recognised_by_path() {
     assert!(!is_error_file("catalog/terms/terms.json"));
     assert!(!is_error_file("plugins/psychology/catalog/terms.json"));
     assert!(!is_error_file("plugins/psychology/rastai-plugin.json"));
+}
+
+// ---- catalog_ranges.rs equals contracts 10.1 ----
+
+/// One prefix's row, read from the contracts 10.1 table or from catalog_ranges.rs, so the two compare directly.
+#[derive(Debug, Clone)]
+struct RangesRow {
+    prefix: String,
+    area: String,
+    ranges: Vec<RangeEntry>,
+}
+
+/// One range of a row, both ends included.
+#[derive(Debug, Clone)]
+struct RangeEntry {
+    first: u32,
+    last: u32,
+    area: String,
+}
+
+/// The rows of the contracts 10.1 table: the first run of table lines after the heading, less the header and divider.
+/// Empty when the heading is missing.
+fn contracts_ranges_rows(contracts_text: &str) -> Vec<RangesRow> {
+    let Some((_, after_heading)) = contracts_text.split_once(RANGES_HEADING) else {
+        return Vec::new();
+    };
+    let mut table_lines = Vec::new();
+    for line in after_heading.lines() {
+        if line.starts_with('|') {
+            table_lines.push(line);
+        } else if !table_lines.is_empty() {
+            break; // the table ended
+        }
+    }
+    let mut rows = Vec::new();
+    for line in table_lines.iter().skip(TABLE_HEADER_LINES) {
+        rows.push(parse_ranges_row(line));
+    }
+    rows
+}
+
+/// One table line: "| `RRS-E` | Formats and validation | `rastai-formats` | 0001–0999 syntax · ... |".
+fn parse_ranges_row(line: &str) -> RangesRow {
+    let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
+    assert!(
+        cells.len() > RANGES_COLUMN,
+        "a contracts 10.1 row has too few cells: {line}"
+    );
+    let mut ranges = Vec::new();
+    for range_text in cells[RANGES_COLUMN].split(RANGE_SEPARATOR) {
+        ranges.push(parse_range(range_text));
+    }
+    RangesRow {
+        prefix: cells[PREFIX_COLUMN].trim_matches('`').to_string(),
+        area: cells[AREA_COLUMN].to_string(),
+        ranges,
+    }
+}
+
+/// One range: "0001–0999 syntax" is 1 to 999, about "syntax".
+fn parse_range(range_text: &str) -> RangeEntry {
+    let malformed = format!("a contracts 10.1 range is not \"0001–0999 area\": {range_text:?}");
+    let (ends, area) = range_text.split_once(' ').expect(&malformed);
+    let (first, last) = ends.split_once(RANGE_DASH).expect(&malformed);
+    RangeEntry {
+        first: first.parse().expect(&malformed),
+        last: last.parse().expect(&malformed),
+        area: area.to_string(),
+    }
+}
+
+/// catalog_ranges.rs in the same shape as the contracts rows.
+fn code_ranges_rows(prefixes: &[CatalogPrefix]) -> Vec<RangesRow> {
+    let mut rows = Vec::new();
+    for prefix_row in prefixes {
+        let mut ranges = Vec::new();
+        for code_range in prefix_row.ranges {
+            ranges.push(RangeEntry {
+                first: code_range.first,
+                last: code_range.last,
+                area: code_range.area.to_string(),
+            });
+        }
+        rows.push(RangesRow {
+            prefix: prefix_row.prefix.to_string(),
+            area: prefix_row.area.to_string(),
+            ranges,
+        });
+    }
+    rows
+}
+
+/// Where the two tables differ: a prefix in only one of them, or a prefix whose rows differ.
+fn ranges_table_differences(contracts_rows: &[RangesRow], code_rows: &[RangesRow]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for contracts_row in contracts_rows {
+        match code_rows.iter().find(|row| row.prefix == contracts_row.prefix) {
+            Some(code_row) => problems.extend(row_differences(contracts_row, code_row)),
+            None => problems.push(format!(
+                "{}: in contracts 10.1, missing from catalog_ranges.rs",
+                contracts_row.prefix
+            )),
+        }
+    }
+    for code_row in code_rows {
+        if !contracts_rows.iter().any(|row| row.prefix == code_row.prefix) {
+            problems.push(format!(
+                "{}: in catalog_ranges.rs, missing from contracts 10.1",
+                code_row.prefix
+            ));
+        }
+    }
+    problems
+}
+
+/// Where one prefix's two rows differ: its area, a range only one of them has, or a range's area.
+fn row_differences(contracts_row: &RangesRow, code_row: &RangesRow) -> Vec<String> {
+    let prefix = &contracts_row.prefix;
+    let mut problems = Vec::new();
+    if contracts_row.area != code_row.area {
+        problems.push(format!(
+            "{prefix}: area {:?} in contracts 10.1, {:?} in catalog_ranges.rs",
+            contracts_row.area, code_row.area
+        ));
+    }
+    for contracts_range in &contracts_row.ranges {
+        let ends = format!("{prefix} {:04}–{:04}", contracts_range.first, contracts_range.last);
+        match find_same_range(&code_row.ranges, contracts_range) {
+            None => problems.push(format!("{ends}: in contracts 10.1, missing from catalog_ranges.rs")),
+            Some(code_range) if !range_areas_match(&contracts_range.area, &code_range.area) => {
+                problems.push(format!(
+                    "{ends}: area {:?} in contracts 10.1, {:?} in catalog_ranges.rs",
+                    contracts_range.area, code_range.area
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    for code_range in &code_row.ranges {
+        if find_same_range(&contracts_row.ranges, code_range).is_none() {
+            problems.push(format!(
+                "{prefix} {:04}–{:04}: in catalog_ranges.rs, missing from contracts 10.1",
+                code_range.first, code_range.last
+            ));
+        }
+    }
+    problems
+}
+
+/// The range with the same two ends, if the list has one.
+fn find_same_range<'a>(ranges: &'a [RangeEntry], wanted: &RangeEntry) -> Option<&'a RangeEntry> {
+    ranges
+        .iter()
+        .find(|candidate| candidate.first == wanted.first && candidate.last == wanted.last)
+}
+
+/// The areas match when they are equal, or when contracts adds only a note in brackets after the same words.
+fn range_areas_match(contracts_area: &str, code_area: &str) -> bool {
+    match contracts_area.strip_prefix(code_area) {
+        Some(rest) => rest.is_empty() || rest.starts_with(AREA_NOTE_START),
+        None => false,
+    }
+}
+
+#[test]
+fn catalog_ranges_equal_the_contracts_table() {
+    let contracts_path = find_repo_root().unwrap().join(CONTRACTS_FILE);
+    let contracts_text = std::fs::read_to_string(&contracts_path).expect("contracts.md reads");
+    let contracts_rows = contracts_ranges_rows(&contracts_text);
+    assert!(
+        !contracts_rows.is_empty(),
+        "no table after {RANGES_HEADING:?} in {CONTRACTS_FILE}"
+    );
+    let code_rows = code_ranges_rows(CATALOG_PREFIXES);
+    assert_eq!(
+        ranges_table_differences(&contracts_rows, &code_rows),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn matching_sample_tables_have_no_differences() {
+    let contracts_rows = contracts_ranges_rows(SAMPLE_CONTRACTS);
+    assert_eq!(contracts_rows.len(), 2, "{contracts_rows:#?}");
+    // RRS-U 1000–1999 also shows that a note in brackets after the same area words is no difference.
+    assert_eq!(
+        ranges_table_differences(&contracts_rows, &code_ranges_rows(SAMPLE_PREFIXES)),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_range_in_only_one_table_is_caught() {
+    let code_rows = code_ranges_rows(SAMPLE_PREFIXES);
+    let wider_contracts = SAMPLE_CONTRACTS.replace("1000–1999 structure", "1000–1999 structure · 2000–2999 meaning");
+    assert_eq!(
+        ranges_table_differences(&contracts_ranges_rows(&wider_contracts), &code_rows),
+        ["RRS-E 2000–2999: in contracts 10.1, missing from catalog_ranges.rs"]
+    );
+    let mut wider_code_rows = code_rows.clone();
+    wider_code_rows[1].ranges.push(RangeEntry {
+        first: 100,
+        last: 199,
+        area: "desktop shell".to_string(),
+    });
+    assert_eq!(
+        ranges_table_differences(&contracts_ranges_rows(SAMPLE_CONTRACTS), &wider_code_rows),
+        ["RRS-U 0100–0199: in catalog_ranges.rs, missing from contracts 10.1"]
+    );
+}
+
+#[test]
+fn a_moved_range_end_is_caught_on_both_sides() {
+    let moved_contracts = SAMPLE_CONTRACTS.replace("0001–0099 connection", "0001–0199 connection");
+    assert_eq!(
+        ranges_table_differences(
+            &contracts_ranges_rows(&moved_contracts),
+            &code_ranges_rows(SAMPLE_PREFIXES)
+        ),
+        [
+            "RRS-U 0001–0199: in contracts 10.1, missing from catalog_ranges.rs",
+            "RRS-U 0001–0099: in catalog_ranges.rs, missing from contracts 10.1",
+        ]
+    );
+}
+
+#[test]
+fn a_prefix_or_an_area_in_only_one_table_is_caught() {
+    let code_rows = code_ranges_rows(SAMPLE_PREFIXES);
+    let mut fewer_contracts = String::new();
+    for line in SAMPLE_CONTRACTS.lines() {
+        if !line.starts_with("| `RRS-U`") {
+            fewer_contracts.push_str(line);
+            fewer_contracts.push('\n');
+        }
+    }
+    assert_eq!(
+        ranges_table_differences(&contracts_ranges_rows(&fewer_contracts), &code_rows),
+        ["RRS-U: in catalog_ranges.rs, missing from contracts 10.1"]
+    );
+    let renamed_contracts = SAMPLE_CONTRACTS
+        .replace("| Formats and validation |", "| Formats |")
+        .replace("1000–1999 structure", "1000–1999 layout");
+    assert_eq!(
+        ranges_table_differences(&contracts_ranges_rows(&renamed_contracts), &code_rows),
+        [
+            "RRS-E: area \"Formats\" in contracts 10.1, \"Formats and validation\" in catalog_ranges.rs",
+            "RRS-E 1000–1999: area \"layout\" in contracts 10.1, \"structure\" in catalog_ranges.rs",
+        ]
+    );
+    assert_eq!(
+        ranges_table_differences(&[], &code_rows).len(),
+        code_rows.len(),
+        "a missing table reports every prefix"
+    );
 }

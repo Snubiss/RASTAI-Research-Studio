@@ -2,7 +2,8 @@
 //! contracts 10.1. The catalog checks (tests/catalog_checks.rs) refuse a code outside its owner's ranges, and
 //! docs/reference/errors.md uses the areas as headings.
 //!
-//! When contracts 10.1 gains a range, this table gains it in the same PR.
+//! When contracts 10.1 gains a range, this table gains it in the same PR: a catalog check reads the contracts table
+//! and fails while the two differ.
 
 /// The code format: "RRS-", one capital letter, four digits ("RRS-E1003"), contracts 10.
 const CODE_START: &str = "RRS-";
@@ -313,7 +314,7 @@ mod tests {
             "dispatch, arguments and settings files"
         );
         assert_eq!(find_range(commands, 400).unwrap().area, "event stream");
-        assert_eq!(find_range(commands, 500), None);
+        assert_eq!(find_range(commands, 999), None);
         assert_eq!(find_range(commands, 0), None);
         assert_eq!(find_prefix("RRS-Z"), None);
     }
