@@ -211,7 +211,8 @@ fn check_core_area(command_id: &str, area: &str) -> Result<(), Diagnostic> {
     ))
 }
 
-/// `[a-z][a-z0-9]*` words joined by single underscores: `add_conversation`, `top_k2`; not `_x`, `x_`, `a__b`.
+/// Starts with a letter; `[a-z0-9]+` words joined by single underscores: `add_conversation`, `top_k2`, `a1_2b`;
+/// not `_x`, `x_`, `a__b`, `1a`.
 fn is_snake_case_segment(segment: &str) -> bool {
     let starts_with_letter = segment.bytes().next().is_some_and(|first| first.is_ascii_lowercase());
     starts_with_letter
@@ -350,8 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_plugin_id_is_named_in_the_refusal() {
-        // The refusal names the plugin id, not the command id: "acme_.run" is only wrong because "acme_" is.
+    fn a_malformed_plugin_id_is_refused_before_the_namespace_check() {
+        // "acme_.run" is only wrong because "acme_" is. "acme.run" is a well-formed id outside "acme_"'s namespace,
+        // so without the plugin id check first it would get the namespace code (RRS-P0004) instead. The message's
+        // placeholders are filled once the compiled catalog exists (M1-12, M1-13); until then the code is what can
+        // be asserted.
         let refusal = check_command_id("acme_.run", "acme_").unwrap_err();
         assert_eq!(refusal.code, CODE_VALUE_NOT_ALLOWED);
         let refusal = check_command_id("acme.run", "acme_").unwrap_err();

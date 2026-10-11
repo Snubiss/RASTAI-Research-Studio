@@ -9,6 +9,8 @@
 
 use std::path::Path;
 
+use rastai_core::commands::naming::javascript_wrapper_name;
+
 use crate::command_source::CommandDescription;
 use crate::error::CodegenError;
 use crate::javascript_types::jsdoc_text;
@@ -68,7 +70,8 @@ fn type_import_lines(commands: &[CommandDescription]) -> String {
     text
 }
 
-/// One wrapper, as in contracts 12.4: its doc line says the title and the stability.
+/// One wrapper, as in contracts 12.4: its doc line says the title and the stability. Its name comes from
+/// rastai-core's `javascript_wrapper_name`, the one place the camelCase rule lives (layout 10.3).
 fn render_wrapper(command: &CommandDescription) -> String {
     let title = command.title.trim_end_matches('.');
     format!(
@@ -85,32 +88,9 @@ export function {}(executor, args) {{
         jsdoc_text(title),
         jsdoc_text(&command.stability),
         command.arguments_type,
-        wrapper_function_name(&command.command_id),
+        javascript_wrapper_name(&command.command_id),
         json_string_literal(&command.command_id),
     )
-}
-
-/// The camelCase of a command id's segments and words: `eval.suite.add_conversation` is
-/// `evalSuiteAddConversation` (contracts 6.1). Command ids are lowercase snake_case segments, so splitting on `.`
-/// and `_` and capitalizing every word after the first is the whole rule.
-pub fn wrapper_function_name(command_id: &str) -> String {
-    let mut name = String::new();
-    for (index, word) in command_id.split(['.', '_']).filter(|word| !word.is_empty()).enumerate() {
-        if index == 0 {
-            name.push_str(word);
-        } else {
-            name.push_str(&capitalized(word));
-        }
-    }
-    name
-}
-
-fn capitalized(word: &str) -> String {
-    let mut characters = word.chars();
-    match characters.next() {
-        Some(first) => first.to_uppercase().chain(characters).collect(),
-        None => String::new(),
-    }
 }
 
 #[cfg(test)]
@@ -130,14 +110,15 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_names_are_the_camel_case_of_the_segments() {
-        assert_eq!(wrapper_function_name("model.load"), "modelLoad");
-        assert_eq!(
-            wrapper_function_name("eval.suite.add_conversation"),
-            "evalSuiteAddConversation"
+    fn a_wrapper_is_named_by_the_core_naming_rule() {
+        let text =
+            render_javascript_commands(&[command("eval.suite.add_conversation", "EvalSuiteAddConversationArgs")]);
+        let name = javascript_wrapper_name("eval.suite.add_conversation");
+        assert_eq!(name, "evalSuiteAddConversation");
+        assert!(
+            text.contains(&format!("export function {name}(executor, args)")),
+            "{text}"
         );
-        assert_eq!(wrapper_function_name("token.login_code.create"), "tokenLoginCodeCreate");
-        assert_eq!(wrapper_function_name("system.status"), "systemStatus");
     }
 
     #[test]
