@@ -18,7 +18,7 @@
  * @property {string} plugin_id The plugin's id.
  * @property {string} version Its installed version.
  * @property {string} state Its plugin state, such as enabled.
- * @property {string} source Where the host found it: preinstalled, installed or dev.
+ * @property {"preinstalled" | "installed" | "dev"} source Where the host found it: preinstalled, installed or dev.
  * @property {string[]} granted_permissions The permissions the user granted.
  * @property {any} manifest Its rastai-plugin.json manifest, with the permissions it requests.
  * @property {object[]} [diagnostics] Why it is incompatible or failed; empty when it loaded.

@@ -67,6 +67,7 @@ flowchart TD
   PY["rastai-formats-python"] --> FMT
   CG["rastai-codegen (dev only)"] --> CORE
   CG --> FMT
+  CG --> PROTO
 ```
 
 Arrows mean "may depend on" (contracts §2.1, §2.4). `rastai-server` is the composition root and also reaches the lower crates directly; those edges are left out. Every crate depends on `rastai-diag`; only the `rastai-formats` edge is drawn. `rastai-archive` also uses `rastai-core`, `rastai-formats` and `rastai-proto` (edges left out). The store never imports the archive (contracts §2.4 rule 7): the archive reads through the store's reader API and writes its cursors through the store's writer thread.
@@ -1103,8 +1104,8 @@ A dev-only crate (`publish = false`) with three binaries. It never ships. Genera
 
 ```
 tools/codegen/
-  Cargo.toml                  depends on rastai-formats, rastai-core, rastai-diag, serde_json (cargo metadata is run as a
-                              process by the names bin; no crate for it)
+  Cargo.toml                  depends on rastai-formats, rastai-core, rastai-proto, rastai-diag, serde_json (cargo
+                              metadata is run as a process by the names bin; no crate for it)
   src/
     lib.rs                    pub mod lines only
     bin/
@@ -1220,7 +1221,7 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 ### 4.10 Boundary rules
 
 - **Bytes in, typed data out.** Never opens a path. File access is only through a `FileSource` the caller opened. Never touches the network, SQLite or the environment.
-- Never depends on tokio, `rastai-core`, `rastai-proto` or any other rastai crate except `rastai-diag`.
+- Never depends on tokio, `rastai-core`, `rastai-proto` or any other rastai crate except `rastai-diag`. The one exception is a dev-dependency: `tests/commands_described.rs` reads `rastai-core`'s `COMMANDS` to check that every row has its types here (4.11). Only that integration test uses it; the library, its WASM and Python builds never link `rastai-core`.
 - Every document type is defined here once. JSDoc typedefs, Python dataclasses and JSON Schema are generated. Nobody else declares a document or command-argument struct (contracts §2.4 rule 3). Plugin command types come from the plugin's `types.json`, read by `read_plugin_types`.
 - **Content hashes are computed only here** (any build). JavaScript and Python never hash documents themselves, because canonical JSON number formatting must match exactly.
 - **One owner per check** (contracts §2.4 rule 10): the safetensors header check, GGUF byte encoding, BLAKE3 and document validation live here; Python and the browser call this code through the wheel and WASM and never re-implement it.

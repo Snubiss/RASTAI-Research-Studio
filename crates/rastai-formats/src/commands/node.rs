@@ -8,20 +8,22 @@ use serde_json::Value;
 
 use crate::commands::job::JobSummary;
 use crate::commands::{command_type, positional};
-use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, field, list_of};
+use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of};
 
 const LIST_COMMAND_ID: &str = "node.list";
 const STATUS_COMMAND_ID: &str = "node.status";
 const NODE_SUMMARY_TYPE: &str = "NodeSummary";
 /// The telemetry of the node's last heartbeat; `node.heartbeat`'s payload is this message (contracts 7.3).
 const NODE_TELEMETRY_MESSAGE: &str = "rastai.common.v1.NodeTelemetry";
+/// How the daemon reaches a node (contracts 6.5, the `nodes` table of 8.2): the embedded node, or over SSH.
+const NODE_TRANSPORTS: &[&str] = &["local", "ssh"];
 
 /// One node, as the `nodes` table holds it (contracts 8.2).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeSummary {
     pub node_id: String,
     pub name: String,
-    /// `local` for the embedded node, `ssh` for a paired one.
+    /// One of `NODE_TRANSPORTS`: `local` for the embedded node, `ssh` for a paired one.
     pub transport: String,
     /// Empty for the embedded node; `user@host` for an SSH node.
     #[serde(default)]
@@ -66,7 +68,7 @@ pub fn describe_node_summary() -> TypeDescription {
         field("name", FieldKind::String, REQUIRED, "The node's name."),
         field(
             "transport",
-            FieldKind::String,
+            enum_of(NODE_TRANSPORTS),
             REQUIRED,
             "local for the embedded node, ssh for a paired one.",
         ),

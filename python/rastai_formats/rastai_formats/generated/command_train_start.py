@@ -10,7 +10,7 @@ Neither validates: rastai-formats validates documents (through the wheel) before
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -82,9 +82,9 @@ class TrainingPlan:
     # The recipe id.
     recipe: str
     # full, lora or qlora.
-    method: str
+    method: Literal["full", "lora", "qlora"]
     # bf16, fp16 or fp32.
-    dtype: str
+    dtype: Literal["bf16", "fp16", "fp32"]
     # The GPUs on the node; empty for a CPU run.
     gpu_indices: list[int]
     # Samples per forward pass.

@@ -28,6 +28,11 @@
         },
         "source": {
           "description": "Where the host found it: preinstalled, installed or dev.",
+          "enum": [
+            "preinstalled",
+            "installed",
+            "dev"
+          ],
           "type": "string"
         },
         "state": {

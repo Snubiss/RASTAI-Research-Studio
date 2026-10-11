@@ -368,6 +368,38 @@ mod tests {
         SettingsLayer { source, values }
     }
 
+    /// The word `settings.get` writes for a layer. The match lists every variant, so a new layer fails to compile
+    /// here until rastai-formats' `SettingKeySource.source` words are checked against it.
+    fn source_layer_word(source: &SettingsSource) -> &'static str {
+        match source {
+            SettingsSource::Default => "default",
+            SettingsSource::User => "user",
+            SettingsSource::Project(_) => "project",
+            SettingsSource::Environment => "environment",
+            SettingsSource::Flag => "flag",
+        }
+    }
+
+    // rastai-formats describes `SettingKeySource.source` with its own copy of the layer words, because it can't read
+    // this crate; this test keeps the two lists the same, lowest layer first.
+    #[test]
+    fn the_described_source_words_are_the_layers() {
+        let every_source = [
+            SettingsSource::Default,
+            SettingsSource::User,
+            SettingsSource::Project(String::new()),
+            SettingsSource::Environment,
+            SettingsSource::Flag,
+        ];
+        let layer_words: Vec<&str> = every_source.iter().map(source_layer_word).collect();
+        let key_source = rastai_formats::commands::settings::describe_setting_key_source();
+        let source = key_source.fields.iter().find(|field| field.name == "source").unwrap();
+        let rastai_formats::describe::types::FieldKind::Enum(described) = &source.kind else {
+            panic!("SettingKeySource.source is not an enum: {:?}", source.kind);
+        };
+        assert_eq!(described, &layer_words);
+    }
+
     #[test]
     fn plain_text_and_json_values() {
         assert_eq!(parse_setting_value("8899"), json!(8899));

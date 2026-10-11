@@ -999,6 +999,53 @@ fn the_node_types_match_their_descriptions() {
     assert_description_matches(&detail, "NodeStatusResult");
 }
 
+// The closed sets of contracts 6.5 are enum fields, so layer 2, the schemas and the generated types all refuse a
+// value outside them; a free-text field would let `method: "adapter"` through.
+#[test]
+fn the_closed_sets_refuse_other_values() {
+    let plan = TrainingPlan {
+        recipe: "classification".to_string(),
+        method: "full".to_string(),
+        dtype: "fp32".to_string(),
+        ..TrainingPlan::default()
+    };
+    assert_value_refused(&plan, "TrainingPlan", "method", "adapter");
+    assert_value_refused(&plan, "TrainingPlan", "dtype", "int8");
+    let plugin = PluginSummary {
+        source: "dev".to_string(),
+        manifest: json!({}),
+        ..PluginSummary::default()
+    };
+    assert_value_refused(&plugin, "PluginSummary", "source", "downloaded");
+    assert_value_refused(&filled_node(), "NodeSummary", "transport", "quic");
+}
+
+/// Writes `value`, replaces one field with `other_text`, and expects layer 2 to report exactly that field.
+fn assert_value_refused<T: Serialize>(value: &T, type_name: &str, field_name: &str, other_text: &str) {
+    let all_types = describe_all_types();
+    let description = find_description(&all_types, type_name).unwrap();
+    let check = StructureCheck {
+        all_types: &all_types,
+        report_unknown_fields: true,
+    };
+    let mut written = serde_json::to_value(value).unwrap();
+    assert_eq!(
+        find_mismatches(&written, description, &check),
+        vec![],
+        "{type_name}: the allowed value should pass"
+    );
+    written[field_name] = json!(other_text);
+    let pointers: Vec<String> = find_mismatches(&written, description, &check)
+        .into_iter()
+        .map(|mismatch| mismatch.pointer)
+        .collect();
+    assert_eq!(
+        pointers,
+        vec![join_pointer("", field_name)],
+        "{type_name}.{field_name}: {other_text} should be refused"
+    );
+}
+
 // The few optional fields that are left out when empty, because the empty text or null isn't a value their
 // description allows: they must still read back, and what serde writes must still pass layer 2.
 #[test]

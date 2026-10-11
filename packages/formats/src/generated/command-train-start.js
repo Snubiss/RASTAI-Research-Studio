@@ -21,8 +21,8 @@
  * How the daemon decided to train: recipe, method, dtype, GPUs, batch sizes and the estimates.
  * @typedef {object} TrainingPlan
  * @property {string} recipe The recipe id.
- * @property {string} method full, lora or qlora.
- * @property {string} dtype bf16, fp16 or fp32.
+ * @property {"full" | "lora" | "qlora"} method full, lora or qlora.
+ * @property {"bf16" | "fp16" | "fp32"} dtype bf16, fp16 or fp32.
  * @property {number[]} gpu_indices The GPUs on the node; empty for a CPU run.
  * @property {number} micro_batch Samples per forward pass.
  * @property {number} gradient_accumulation Micro-batches per optimizer step.
