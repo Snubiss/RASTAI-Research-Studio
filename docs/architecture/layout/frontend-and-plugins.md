@@ -1,6 +1,6 @@
 # Frontend and Plugins: Code Layout
 
-**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names (`docs/architecture/contracts.md` v1.1). v1.1 applies the owner decisions of 2026-10-10: plain JavaScript instead of TypeScript (ADR-0036), the theme token contract and the locked security UI, the `CommandExecutor` shape and the client's credential option, no domain logic in `apps/web`, custom frontends (2.11), origin-bound sessions (ADR-0034), direct core commands for Psychology's interactive controls, and blind A/B votes as a project document. Its "New names" section is gone: those names now live in contracts.md.
+**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names (`docs/architecture/contracts.md` v1.2). v1.1 applies the owner decisions of 2026-10-10: plain JavaScript instead of TypeScript (ADR-0036), the theme token contract and the locked security UI, the `CommandExecutor` shape and the client's credential option, no domain logic in `apps/web`, custom frontends (2.11), origin-bound sessions (ADR-0034), direct core commands for Psychology's interactive controls, and blind A/B votes as a project document. Its "New names" section is gone: those names now live in contracts.md.
 
 **Covers:**
 - `apps/web` (the React app) and `apps/desktop` (the Tauri 2 shell);
@@ -14,7 +14,7 @@
 **Not covered here:** the generated packages (`@rastai/proto`, `@rastai/formats`, `@rastai/catalog`) beyond how they're used; `apps/viewer`; the daemon's plugin host in `rastai-server`; the Python internals of `rastai_psychology` and `rastai_eval` (analysis jobs, metric math). Those live in the other layout docs.
 
 **Conventions:**
-- Every shared name is from contracts.md v1.1, the only list of names. A name this doc needs that isn't there gets added to contracts first, in its own PR. Names private to one package (a file, a local function, a test file) are this doc's.
+- Every shared name is from contracts.md v1.2, the only list of names. A wire, document or command shape this doc needs goes into contracts first, in its own PR; any other new name goes into contracts in the same PR as the code (ADR-0038; `check-names` enforces it). Names private to one package (a file, a local function, a test file) are this doc's.
 - "(spike)" marks a measured result. "(L2)" marks something built only after the core loop reaches L2. "(M8)", "(M11)" mark the milestone that first builds it.
 - Every frontend code sample is plain JavaScript or JSX with short JSDoc (1.1). There is no TypeScript syntax anywhere in this doc or in the code it describes.
 
@@ -53,7 +53,7 @@
 | `packages/canvas` | `@rastai/canvas` | browser, iframes, viewer | none | none | 4 (attribution graph), 6 (Designer) |
 | `packages/viz` | `@rastai/viz` | browser, iframes, viewer | `@rastai/canvas` (its `gl` module only) | none | 4 |
 | `apps/web` | `@rastai/web` | browser, Tauri webview | every package above + `@rastai/psychology-ui`, `@rastai/eval-ui` | react, react-dom | 1 |
-| `apps/desktop` | `@rastai/desktop` + crate in `src-tauri/` | desktop shell | none (spawns `rastai`, loads a URL) | tauri, tauri-build, Tauri updater plugin, serde, serde_json | 1 (window), week 13 (packaging) |
+| `apps/desktop` | `@rastai/desktop` + crate `rastai-desktop` in `src-tauri/` | desktop shell | none (spawns `rastai`, loads a URL) | tauri, tauri-build, Tauri updater plugin, serde, serde_json | 1 (window), week 13 (packaging) |
 | `plugins/psychology/ui` | `@rastai/psychology-ui` | browser | `@rastai/plugin`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz` | react | 4 |
 | `plugins/evaluation/ui` | `@rastai/eval-ui` | browser | `@rastai/plugin`, `@rastai/ui`, `@rastai/viz` | react | 5 |
 | `python/rastai_plugin` | `rastai_plugin` | worker jobs, plugin modules | `rastai_proto`, `rastai_formats` | grpcio | 1 (registry), grows to 8 |
@@ -587,7 +587,7 @@ The web app is one client of the commands API among several. Because `apps/web` 
 - **Cross-origin browser clients are refused in v1** (ADR-0034). A page on any other origin, another loopback port included, gets `RRS-C1004`, even though the browser sends it the cookie.
 - **Bearer requests may omit Origin**; if they send one, the Origin rule applies (contracts §3.2). A token is scoped (`token.create`), revocable (`token.revoke`) and never shown again after creation.
 - **Typed calls in JavaScript** use the generated wrappers against any `CommandExecutor`: `modelLoad(client, args)` in a script is the same function a plugin panel calls with its `PluginHost`.
-- **Stability:** every command and event type is `preview` until Phase 2 (`CommandDescriptor.stability`, `EventTypeDescriptor.stability`). `buf breaking` checks the protobuf messages, but it can't see inside `arguments_json` and `result_json`, which are strings to protobuf; a schema-diff check over `schemas/commands/` (`check-schema-diff`) comes with the stable commands API 1.0 subset in Phase 2. Until then, a client should pin the daemon version it was tested with (`GET /api/health`).
+- **Stability:** every command and event type is `preview` until Phase 2 (`CommandDescriptor.stability`, `EventTypeDescriptor.stability`). `buf breaking` checks the protobuf messages, but it can't see inside `arguments_json` and `result_json`, which are strings to protobuf; `check-schema-diff` (M1-58, ADR-0038) diffs `schemas/commands/` and `schemas/events/` against the base branch: every change needs a contracts.md update, and a breaking change to a `stable` item fails CI. Every item stays `preview` until Phase 2, so until then a client should pin the daemon version it was tested with (`GET /api/health`).
 - **Proof that it works:** M1-49's three-surfaces test (`tests/e2e/three_surfaces/`) runs one action through UI, CLI and MCP and grows each milestone; M10-E02 adds an API-only run of the core loop.
 
 **Live-stream rules for any client** (the web app follows the same rules, 2.2)
@@ -602,7 +602,7 @@ The web app is one client of the commands API among several. Because `apps/web` 
 - Alternative UIs hosted by the daemon on its own origin, so they get the same-origin session like `apps/web`.
 - An origin allowlist with pairing, and CORS only on demand.
 - `token.pair` for non-browser clients, instead of copying a token by hand.
-- The stable commands API 1.0 subset, with schema-diff CI.
+- The stable commands API 1.0 subset (the first `stable` commands; `check-schema-diff` already runs from M1).
 - Built packages published to npm, with `PacketStore` and token decoding moved into a shared package.
 - A reference terminal UI run in CI.
 
@@ -943,7 +943,7 @@ packages/ui/
  * @property {string} name
  * @property {"light" | "dark"} base
  * @property {Object<string, string>} colors     role key -> "#rrggbb"; the keys are fixed (contracts §5.6)
- * @property {TypographyTokens} typography      the rastai.theme/1 key is `typography`, not `type` (`type` is the document header field)
+ * @property {TypographyTokens} typography      the rastai.theme/1 key is `typography` (the header's `type` field is a different thing)
  * @property {number[]} spacingPx                 the active density's scale
  * @property {{ small: number, medium: number, large: number }} radiusPx
  * @property {{ fastMs: number, slowMs: number, easing: string }} motion
@@ -989,7 +989,7 @@ export function applyThemeTokens(root, tokens) {}
 
 /**
  * @param {ThemeTokens} tokens
- * @returns {CanvasColors}   plain RGBA arrays (0 to 1) per canvas role, plus the label font from the type tokens
+ * @returns {CanvasColors}   plain RGBA arrays (0 to 1) per canvas role, plus the label font from the typography tokens
  */
 export function canvasColors(tokens) {}
 
@@ -1117,7 +1117,7 @@ packages/canvas/
       port-shader.js           SDF circles for input and output ports
       group-shader.js          expanded-block frames drawn behind their children
     text/
-      glyph-atlas.js           ported; createGlyphAtlas(gl, font): family, weight and size come from the theme's type
+      glyph-atlas.js           ported; createGlyphAtlas(gl, font): family, weight and size come from the theme's typography tokens
                                tokens (CanvasColors.labelFont); adds on-demand Unicode glyphs, proportional advances,
                                device pixel ratio, rebuild when full or when the font changes
       label-layout.js          label to glyph instances; ellipsis to fit the node width; skipped below the size cutoff
@@ -1212,7 +1212,7 @@ export const LABEL_MIN_SCREEN_HEIGHT_PX = 5;  // smaller labels are skipped: unr
  * @property {number[]} label
  * @property {number[]} port
  * @property {Object<string, number[]>} nodeKinds   node kind -> fill, from the series_* roles
- * @property {{ family: string, weight: number, sizePx: number }} labelFont   from the type tokens
+ * @property {{ family: string, weight: number, sizePx: number }} labelFont   from the typography tokens
  */
 
 // graph-renderer.js
@@ -2290,7 +2290,7 @@ apps/desktop/
   splash/
     index.html                  static "Starting Rastai" page and the startup error view (Tauri's local frontend)
   src-tauri/
-    Cargo.toml                  member of the root Rust workspace
+    Cargo.toml                  package `rastai-desktop` (contracts §2.1); member of the root Rust workspace
     build.rs                    tauri_build::build()
     tauri.conf.json             identifier, bundle targets (appimage, deb), file associations, updater endpoint and key
     capabilities/default.json   grants nothing, to any window: the remote origin gets no Tauri IPC
@@ -3462,7 +3462,7 @@ UI fixtures (contracts §12.5): `fixtures/ui/graphs/`, `fixtures/ui/live-packets
 | 8 Plugins | iframe bridge; `IframePanel`; Plugins section (install, trust prompt, dev); `.jsx` templates; `plugin.new`, `plugin.codegen`, `dev`, `test`, `lint`, `pack`; `rastai_plugin.testing`; `crates/rastai-plugin` skeleton; macros; assistant skills (`assistant-skills.js`). Theme plugins end to end with the accessibility check and the picker, follow-OS high-contrast themes, the font assets path, icon sets (`rastai.icon_set/1`), per-panel `theme_override` (or Phase 2) |
 | 9 Remote | Remote section (pairing, transfers, headless help); SSH traffic in the egress badge (purpose `remote_node`) |
 | M11 Long-term storage | Settings > Storage > Archive (`ArchivePage.jsx`), pruned-run stubs with Restore, the egress badge during sync (M11-E06) |
-| Phase 2 | the unsupported user stylesheet with the security UI in closed shadow roots; daemon-hosted alternative UIs; `token.pair`; an origin allowlist with CORS (on demand); the stable commands API 1.0 subset with `check-schema-diff`; npm packages with `PacketStore` and token decoding in a shared package; a reference TUI in CI; proto-JSON for `EventService` if M9 didn't need it |
+| Phase 2 | the unsupported user stylesheet with the security UI in closed shadow roots; daemon-hosted alternative UIs; `token.pair`; an origin allowlist with CORS (on demand); the stable commands API 1.0 subset (`check-schema-diff` runs from M1); npm packages with `PacketStore` and token decoding in a shared package; a reference TUI in CI; proto-JSON for `EventService` if M9 didn't need it |
 
 The theming work of N1–N7 is about 3.5 size-days in M1. Writing JSDoc instead of TypeScript adds about 8 size-days across the UI milestones (ADR-0036).
 

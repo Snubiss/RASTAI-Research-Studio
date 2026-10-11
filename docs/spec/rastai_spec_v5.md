@@ -59,6 +59,12 @@ v4 (`rastai_spec_v4.md`) is kept for history.
 20. **MySQL as a long-term archive, plus a MySQL data reader** (ADR-0035). SQLite stays the live store on every machine. A user-run MySQL or MariaDB server is an optional long-term archive that each daemon replicates to, one way and idempotently (§19). A MySQL dataset reader imports query results as dataset snapshots, and runs and metrics are exported through the archive's tables and views (§14). MySQL and MariaDB are never bundled or distributed.
 21. **Theming and custom-frontend groundwork now (M1).** A fixed token contract with `--rr-*` CSS variables, theme-aware renderers, and a locked security UI no theme can change (§7). Other frontends work through the generated client and the commands API; cross-origin browser clients are refused in v1, with two Phase 2 routes (§13).
 22. **Plain JavaScript instead of TypeScript** (ADR-0036). The owner reviews all code, and TypeScript isn't their strength. Hand-written frontend, plugin-UI and SDK code is JavaScript ES modules with React and JSX (`.js` and `.jsx`), with short JSDoc types checked by the TypeScript compiler in `checkJs` mode as a dev-only check. Nobody writes TypeScript syntax (§16).
+23. **Names and command schemas are enforced by CI, and work is closed only after independent verification (2026-10-11, ADR-0038).** Owner-approved, final:
+    - `check-schema-diff` moves from Phase 2 into M1. A change to a generated command or event schema needs a contracts.md update in the same PR, and a breaking change to a `stable` item fails CI (§20).
+    - `check-names` compares a generated names registry (`schemas/names.json`) with contracts.md in both directions. A name in code but not in contracts fails; a name in contracts but not in code passes only with its milestone mark, such as "(M4)" (§29).
+    - Build agents get contracts.md, the generated schemas and the owning layout section in every task prompt, use only registered names, and every PR gets a separate reviewer agent with a naming and schema lens (§29).
+    - The names contracts v1.1 invented are accepted, so contracts.md §15 is no longer provisional. Small contract gaps stay with the tasks that build them (§37).
+    - A task or issue is closed only after independent verification: CI green, plus a reviewer agent that is not the author confirming each acceptance criterion, with the evidence posted as the closing comment (§5).
 
 **Open**
 - Nothing blocking.
@@ -157,6 +163,11 @@ Every feature is rated on four levels:
 - The core loop is at L2: chat → see inside → steer or branch → train → verify.
 - It runs on Linux NVIDIA, Linux AMD and a paired SSH box.
 
+**A task or issue is closed only after independent verification (§0.23):**
+- CI is green, with `just check` including `check-names` and `check-schema-diff`.
+- A reviewer agent that is not the author confirms each acceptance criterion against the code and the command output.
+- That evidence is posted as the closing comment. The author's own claim does not close anything.
+
 ## 6. First Run
 This is the target experience. In the prototype the steps work at L1 for the owner; the novice polish comes in Phase 2.
 - **0–3 min:** the installer detects NVIDIA, AMD or CPU (and, later, Apple). It creates the pinned Python environment and fetches Gemma 3 1B-it plus SAE weights for 3 layers (Gemma Scope 2) in the background, showing the model license. Other layers download on demand.
@@ -174,7 +185,7 @@ This is the target experience. In the prototype the steps work at L1 for the own
 - **Command palette** (Ctrl/Cmd-K) over the command layer, showing each command's shortcut and "copy as CLI / Python / MCP".
 - **Design system:** one in-house package (`packages/ui`) used by first-party sections and plugins alike.
 - **Theming tokens (M1):**
-  - A theme is a `rastai.theme/1` document with fixed token keys: color roles, type (font family, weight, line height), density, motion, focus ring and elevation.
+  - A theme is a `rastai.theme/1` document with fixed token keys: color roles, typography (font family, weight, line height), density, motion, focus ring and elevation.
   - The tokens become `--rr-*` CSS variables. Those variables are the public styling surface for sections and plugins.
   - The canvas and viz renderers take the same tokens: `canvasColors(tokens)` for the graph renderer, and `setColors()` on `GraphRenderer` and every viz class, so a theme switch never recreates a WebGL context. The glyph atlas takes its font from the tokens.
   - No hard-coded colors in canvas, viz or sections; a CI check fails on them.
@@ -477,7 +488,7 @@ An in-house RL engine on the in-house trainer, gateway and sandbox manager.
   - an origin allowlist with pairing and CORS, only on demand;
   - `token.pair` for non-browser clients;
   - JSON for `EventService` through a generated proto-JSON codec (M9 if needed, else Phase 2);
-  - a stable commands API 1.0 subset, with schema-diff CI;
+  - a stable commands API 1.0 subset (the schema-diff check itself runs from M1, §20);
   - built packages published to npm, with PacketStore and token decoding moved into a shared package;
   - a reference terminal UI run in CI.
 
@@ -682,7 +693,12 @@ SQLite stays the live store. A MySQL or MariaDB server is an optional long-term 
 - **Documents and command arguments:** the `rastai-formats` Rust types. JSON Schema, JavaScript types (`.d.ts` declarations or JSDoc `@typedef` modules) and Python types (plain `@dataclass` classes) are generated from them. Validation stays in Rust; Python reaches it through the PyO3 wheel.
   - The generator reads hand-written `describe_<type>()` tables next to each struct, checked against the struct by a test. Once more than about 20 document types make the tables a recurring review cost, switch to `schemars`.
 - Golden test messages are checked in and round-tripped in every language, and `buf breaking` runs in CI.
-- **Stability:** every command and event type carries `stability` (`preview`, `stable` or `deprecated`). All are `preview` until Phase 2. `buf breaking` can't see inside `arguments_json` and `result_json`, so a schema-diff check on `schemas/commands` is planned for the stable subset (§13).
+- **Stability:** every command and event type carries `stability` (`preview`, `stable` or `deprecated`). All are `preview` until Phase 2. `buf breaking` can't see inside `arguments_json` and `result_json`, so `check-schema-diff` covers them from M1 (below).
+- **`check-schema-diff` (M1, ADR-0038):** CI generates the command and event schemas (`schemas/commands/`, `schemas/events/`) and diffs them against the base branch.
+  - Any change to a generated schema needs a matching contracts.md update in the same PR.
+  - A breaking change to a command or event marked `stable` fails CI. Breaking means a removed or renamed field, a changed type, or a newly required field.
+  - `preview` items may break, but they still need the contracts update.
+- **`check-names` (M1, ADR-0038):** names are checked against contracts.md the same way (§29).
 
 **Protocols**
 - **Node protocol:** daemon ↔ node, over a Unix socket / named pipe locally, and SSH (later QUIC) remotely.
@@ -891,7 +907,8 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Foundation | `torchvision.io.decode_image` | PNG and JPEG decoding of untrusted images, only in `rastai_data/image_decode.py`. A hand-written decoder is weeks of parser risk | An in-house decoder behind the same function |
 | Foundation | uv | Python environments and lockfiles; packaging is a swamp | — |
 | Foundation | React | UI framework, used from plain JavaScript and JSX (§16) | — |
-| Foundation | Tauri 2 (with `tauri-build` and the Tauri updater plugin) | Desktop shell and its signed updates | The browser is already a full client |
+| Foundation | Tauri 2 (with `tauri-build`) | Desktop shell | The browser is already a full client |
+| Foundation | the Tauri updater plugin (`tauri-plugin-updater`) | Signed updates for the desktop shell; ships with the desktop shell (approved 2026-10-11) | The browser is already a full client |
 | Foundation | SQLite (rusqlite) | Embedded database, the live store on every machine | — |
 | Foundation | Docker / Podman engine, OpenSSH | Containers and remote access | — |
 | Security | blake3, ed25519-dalek, rustls, keyring (OS keychain bindings) | Crypto, identity, TLS, secrets | — |
@@ -909,10 +926,15 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Engine (optional) | HF `transformers` | Compat runtime for unsupported architectures; parity reference in tests | Add the architecture to ModelSpec |
 | Kernel (optional) | bitsandbytes | 4-bit kernels for QLoRA | In-house Triton kernels |
 | Dev tooling | buf, cargo-deny, cargo-fuzz, Playwright, maturin, wasm-bindgen-cli, dist, release-please, just | Build, test, release | — |
-| Dev tooling | pytest, vitest, `@vitest/browser`, vite, pnpm, axe-core, the Tauri CLI | Python and JavaScript tests, browser-mode renderer tests, accessibility checks, the frontend build, JavaScript workspaces, desktop packaging | — |
+| Dev tooling | pytest, vitest, vite, pnpm | Python and JavaScript tests, the frontend build, JavaScript workspaces | — |
+| Dev tooling | `@vitest/browser` | Runs the renderer tests (canvas, viz) in a real browser engine. Dev and test only, never shipped | Playwright component tests |
+| Dev tooling | axe-core | Automated accessibility checks in the Playwright and `@vitest/browser` tests (§7). Dev and test only, never shipped | A hand-written checklist test |
+| Dev tooling | the Tauri CLI | Builds and packages the desktop shell. Dev tooling only, never shipped | — |
 | Dev tooling | ruff, prettier | Python and JavaScript formatting and linting (M1) | — |
 | Dev tooling (checker only) | the `typescript` package | Runs `tsc --noEmit` in `checkJs` mode over `jsconfig.json` in `just check`, checking the JSDoc types in plain JavaScript. Never ships; nobody writes TypeScript (§0.22) | Drop the check; the code is plain JavaScript either way |
-| Dev tooling (CI services) | MySQL 8.4 and 9.7, MariaDB, MinIO | Archive and reader tests (M11); test targets only, never shipped | — |
+| Dev tooling (CI services) | MySQL 8.4 and 9.7, MariaDB | Archive and reader tests (M11); test targets only, never shipped | — |
+| Dev tooling (CI service, test-only) | MinIO | The S3-compatible target for the archive's blob tests (M11). A CI service only, never shipped, never a runtime dependency | A folder target plus a stub S3 server in the tests |
+| License entry (not code) | pillow (MIT-CMU / HPND) | A transitive package of `torchvision` (ADR-0037). It gets a named license entry in `deps/allowlist-python.json`, because the license may not match the allowlist's standard identifiers. No Rastai file imports it | — |
 | Data (not code) | Gemma Scope 2, Llama Scope SAE weights; Neuronpedia labels | Pretrained dictionaries and labels | Train our own with the SAE recipe |
 | Service (Phase 3) | Payment provider / merchant of record (e.g. Paddle or Stripe) | Payments and global tax are compliance-critical; never built in-house | Another provider |
 
@@ -932,7 +954,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | 5 | Chat, training and Psychology compete for an 8–16 GB GPU | Medium | High | VRAM leases, eviction, memory fractions, clear OOM diagnostics |
 | 6 | ROCm gaps (kernels, 4-bit support) | Medium | Medium | AMD GPU as a tier-1 CI target; QLoRA falls back to LoRA; capability matrix |
 | 7 | Blackwell (sm_120) gaps in external kernels | Medium | Medium | The 3090 as a fallback test GPU; minimal external kernels |
-| 8 | Schemas drift between Rust, Python and JavaScript | Medium | High | One owner per schema; codegen; `buf breaking`; golden messages in every language |
+| 8 | Schemas drift between Rust, Python and JavaScript | Medium | High | One owner per schema; codegen; `buf breaking`; golden messages in every language; `check-names` and `check-schema-diff` from M1 (ADR-0038) |
 | 9 | Durability bugs: orphaned workers, torn logs, full disks | Medium | High | Checksummed logs, process groups, quotas, kill -9 tests |
 | 10 | Security bugs in in-house protocols (gateway auth, MCP, node) | Medium | High | Threat model, fuzzing, scoped tokens, loopback only; never in-house crypto |
 | 11 | Version pins conflict (torch, bitsandbytes; vLLM after the prototype) across backends | Medium | Medium | Fewer dependencies now; one environment per backend; CI resolves every lockfile |
@@ -996,6 +1018,9 @@ tests/{parity,e2e,gpu,crash,loop}
 
 **CI**
 - Linters (clippy, ruff, prettier), the `checkJs` type check, `buf breaking`, schema snapshot checks, cargo-deny (licenses, advisories, one wrapper file per library).
+- **`check-schema-diff` and `check-names` (M1, ADR-0038),** both part of `just check`:
+  - `check-schema-diff` diffs the generated `schemas/commands/` and `schemas/events/` against the base branch. A change needs a contracts.md update in the same PR, and a breaking change to a `stable` item fails (§20).
+  - `check-names`: codegen emits `schemas/names.json` from the code, listing command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with contracts.md §15 plus the §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables, in both directions. A name in code but not in contracts fails. A name in contracts but not yet in code passes only if contracts marks it with its milestone (for example "(M4)"); without the mark it fails as stale.
 - A check that fails on hard-coded colors in canvas, viz and sections (§7).
 - CPU tests on Linux, plus CPU tests on macOS and Windows runners to keep tier 2 honest.
 - **A full CPU loop in under 10 minutes,** using TextCNN and tiny random-weight HF configs:
@@ -1004,8 +1029,9 @@ tests/{parity,e2e,gpu,crash,loop}
 - Model-family parity tests against the HF reference.
 - Playwright end-to-end tests against the web build.
 - kill -9 crash tests.
+- **Node-over-ssh test:** nightly (`nightly.yml`), not a required PR job.
 - **GPU tests:** nightly on a self-hosted runner on the owner's box (5080, 3090; AMD once the card is in), including the live-panel overhead budget and the DPO anchor drift test. Once the repo is public, the runner takes only scheduled and manual runs on `main`, under a separate runner user, with a read-only HF token for gated real-weight parity. Until then, by hand.
-- **Archive CI (M11):** MySQL 8.4 and 9.7, MariaDB and MinIO as CI services.
+- **Archive CI (M11):** MySQL 8.4 and 9.7, MariaDB and MinIO as CI services (test-only, never shipped).
 
 **Making AI coding agents productive**
 - A root `CLAUDE.md` holds the architecture map and the hard rules:
@@ -1013,7 +1039,9 @@ tests/{parity,e2e,gpu,crash,loop}
   - no pip installs at runtime;
   - no type defined twice;
   - in-house by default, and new dependencies need an entry in §27;
-  - every user-facing error gets a catalog code.
+  - every user-facing error gets a catalog code;
+  - names come only from contracts.md §15, and `just check` runs `check-names` and `check-schema-diff`;
+  - a task is done only after independent verification with evidence.
 - The `CLAUDE.md` also holds the owner's code style:
   - frontend code is plain JavaScript + React (`.js`, `.jsx`) with short JSDoc types; no TypeScript syntax anywhere hand-written;
   - constants at the top of each file;
@@ -1025,7 +1053,12 @@ tests/{parity,e2e,gpu,crash,loop}
 - A `CLAUDE.md` in each crate and package with its local rules.
 - Contract changes (proto, schemas, commands) land in their own PR first, before any code that uses them. `contracts.md` is the only list of shared names.
 - Two work lanes, one git worktree each; the plan is redone after M1 with measured velocity.
-- "Done" means `just check` passes and a test was added.
+- **Agent build protocol (ADR-0038):**
+  - Every build task's agent prompt includes contracts.md, the generated schemas and the owning layout section.
+  - The agent uses only registered names. A new wire, document or command shape lands in contracts first, in its own PR; any other new name is added to contracts in the same PR.
+  - Every PR gets a separate reviewer agent with a naming and schema lens, in addition to the style and tests lenses.
+  - `just check` runs `check-names` and `check-schema-diff`.
+- "Done" means `just check` passes and a test was added. A task is closed only after independent verification, with evidence in the closing comment (§5, §0.23).
 
 ## 30. ADRs to Write Now
 1. **Process layout:** one binary, an embedded local node, jobs in their own process groups.
@@ -1044,12 +1077,13 @@ tests/{parity,e2e,gpu,crash,loop}
 14. **Platform tiers:** Linux NVIDIA + AMD + CPU at tier 1; macOS and Windows at tier 2 with portability rules.
 15. **Plugins and licensing:** WASM tier deferred; Apache-2.0 + DCO (decided, §0.12); dependency license allowlist.
 
-ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five:
+ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five, and v5.4.1 adds one more (ADR-0038):
 - **ADR-0033:** `unsafe` allowed for one `statvfs` call in `rastai-store/src/disk_space.rs` only.
 - **ADR-0034:** sign-in with one-time login codes and an HttpOnly session cookie bound to its origin, the loopback Host rule, refusing a too-open `owner.token`, the reattach order; cross-origin browser clients refused in v1. Supersedes parts of ADR-0001, ADR-0006 and ADR-0007.
 - **ADR-0035:** the optional MySQL/MariaDB long-term archive. Supersedes ADR-0003 decision 6 in part (still no server for the live store, but an optional archive) and amends ADR-0002 decision 7 (a rebuild may read pruned runs from the archive).
 - **ADR-0036:** frontend language: plain JavaScript + React with JSDoc checked by `checkJs`. Supersedes ADR-0023's TypeScript section and, in part, ADR-0019 decision 5 ("a renderer is a TS class"); other ADRs get language-name fixes as notes since acceptance.
 - **ADR-0037:** borrowed decoders: `miniz_oxide` for DEFLATE and `torchvision.io.decode_image` for images, each behind one wrapper file; one implementation per in-house parser (Python calls the `rastai_formats` wheel for safetensors headers); a fuzz target for every remaining in-house parser of untrusted input. Supersedes ADR-0029 decision 1 in part.
+- **ADR-0038 (v5.4.1):** names and command schemas are enforced by CI. `check-schema-diff` and `check-names` run in M1 as part of `just check`; build agents get contracts.md, the generated schemas and the owning layout section; every PR has a separate reviewer agent with a naming and schema lens; a task is closed only after independent verification with evidence. Related to ADR-0004, ADR-0005 and ADR-0017; it moves the schema-diff check from Phase 2 into M1.
 
 ---
 
@@ -1064,7 +1098,8 @@ ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds fi
    - `rastai` daemon + embedded node;
    - installer + `rastai doctor`;
    - the plugin host and manifest (first-party sections load through it from day one);
-   - the web shell in plain JavaScript + React, with the theme token contract and the locked security UI (§7).
+   - the web shell in plain JavaScript + React, with the theme token contract and the locked security UI (§7);
+   - `check-names` and `check-schema-diff` in `just check` and CI (§29).
 2. **Unified runtime:** the ModelSpec compiler, Gemma 3 + Llama families with parity tests, the uv environments.
 3. **Inference:**
    - gateway + tokenization;
@@ -1106,7 +1141,7 @@ ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds fi
 
 **Phase 2: Harden, open the ecosystem, everyone-ready**
 - Basic mode and novice First Run polish, guided tutorials, accessibility pass (the L3 work).
-- Custom frontends (§13): daemon-hosted alternative UIs, `token.pair`, the stable commands API 1.0 subset with schema-diff CI, npm packages, a reference terminal UI, and an origin allowlist with CORS only on demand. Per-panel theme overrides if not done in M8, and the unsupported user stylesheet.
+- Custom frontends (§13): daemon-hosted alternative UIs, `token.pair`, the stable commands API 1.0 subset (schema-diff CI already runs since M1), npm packages, a reference terminal UI, and an origin allowlist with CORS only on demand. Per-panel theme overrides if not done in M8, and the unsupported user stylesheet.
 - Plugin API 1.0 extracted from the prototype's first-party code; compatibility CI; the git-index registry; Sigstore signing; the revocation list.
 - Publish `rastai-formats` and the SDKs to crates.io, PyPI and npm; schemas at stable URLs; HF library registration; `<rastai-viewer>` embeds.
 - iroh pairing codes and QR; chunked, deduplicated transfers; the offline bundle.
@@ -1131,8 +1166,9 @@ The weeks are estimates; the exit criteria decide when a milestone is done.
 - *Exit:* a report with the numbers, draft ADRs, TextCNN ported off torchtext and `.pt`.
 
 **Weeks 3–4: Skeleton**
-- Contracts v1.1 first: every other task waits for it.
+- Contracts v1.2 first (M1-01): every other task waits for it.
 - The monorepo and CI, with ruff, prettier and the `checkJs` check.
+- `check-names` and `check-schema-diff` (about 2 size-days), so names and command schemas are guarded from the first command.
 - The daemon with SQLite and 3 commands, reachable over HTTP, the CLI and the in-house MCP.
 - The theme token contract (§7) and the client's credential option and command wrappers (§13).
 - Worker protocol v0 running TextCNN training.
@@ -1304,6 +1340,21 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4.1 (owner approvals of 2026-10-11; the status line stays v5.4)**
+- §0.23 and ADR-0038: names and command schemas are enforced by CI, and work is closed only after independent verification.
+- §20 / §29 / §31 / §32: `check-schema-diff` moves from Phase 2 into M1; the new `check-names` compares a generated `schemas/names.json` with contracts.md both ways (a name in contracts but not yet in code needs its milestone mark); both run in `just check`.
+- §29: the agent build protocol (contracts.md, generated schemas and the layout section in every task prompt; registered names only; a separate reviewer agent per PR with a naming and schema lens).
+- §5 / §29: the verification rule. A task is closed only after CI is green and a non-author reviewer agent confirms each acceptance criterion, with the evidence in the closing comment.
+- §27: `@vitest/browser`, axe-core, the Tauri CLI, the Tauri updater plugin (ships with the desktop shell), MinIO (test-only CI service, never shipped) and a named license entry for pillow (MIT-CMU / HPND) in `deps/allowlist-python.json`.
+- §29: the node-over-ssh test runs nightly (`nightly.yml`), not as a required PR job.
+- Contracts: the names v1.1 invented are accepted (contracts.md §15 is no longer provisional). The theme token group key `type` is renamed `typography`, because `type` collides with the document header field (§7).
+- Small contract gaps are left on purpose to the tasks that build them, each listed in its backlog task body:
+  - `GetSecretRequest` / `GetSecretResponse` fields and the env var that hands a job its secret (M5-E07, data import);
+  - the archive CI services env var (M11-E07);
+  - MySQL source error codes in the `RRS-D3xxx` range (M5-E07);
+  - the Designer layer-4 "parameters exceed dataset tokens" warning code (M6, live-stats epic);
+  - the `ConversationDeleteResult` archive-pending field (M11-E03).
+
 **v5.4 (owner decisions of 2026-10-10)**
 - §0.19–§0.22: four new decisions: the design-review defaults accepted, MySQL as a long-term archive plus a data reader, theming and custom-frontend groundwork, and plain JavaScript instead of TypeScript.
 - §16: the UI transport is Connect (protobuf over HTTP), not REST + SSE/WebSocket; the Tauri shell only runs `rastai open --print-url`; the web app holds no domain logic; the frontend language is plain JavaScript + React with JSDoc checked by `checkJs`.

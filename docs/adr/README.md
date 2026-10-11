@@ -6,8 +6,9 @@ Decisions already made for Rastai Research Studio. Build from them; don't re-lit
 - **0016–0023** record decisions made since: the spike's results, the owner's answers and spec v5.2–v5.3.
 - **0024–0032** record other spec decisions that an implementer would otherwise reopen.
 - **0033–0037** record the owner decisions of 2026-10-10 (spec v5.4, contracts v1.1): the one `unsafe` exception, sign-in, the long-term archive, the frontend language and the borrowed decoders.
+- **0038** records the owner decisions of 2026-10-11: CI-enforced names and command schemas, and independent verification before work is closed.
 
-Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the shared contracts (v1.1)](../architecture/contracts.md), then the layout and flow docs, these ADRs and the plan. [The spike results](../../spike/README.md) are the source for measured numbers. The ADRs use the contracts' names exactly; contracts.md is the only list of names.
+Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the shared contracts (v1.2)](../architecture/contracts.md), then the layout and flow docs, these ADRs and the plan. [The spike results](../../spike/README.md) are the source for measured numbers. The ADRs use the contracts' names exactly; contracts.md is the only list of names.
 
 ## Index
 
@@ -29,7 +30,7 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 | [0014](0014-platform-tiers.md) | Linux NVIDIA, AMD and CPU at tier 1; macOS and Windows at tier 2 with portability rules | Accepted, 2026-10-10 |
 | [0015](0015-plugins-and-licensing.md) | Plugins: one manifest, public API only, WASM deferred, plugins under any license | Accepted, 2026-10-10 |
 | [0016](0016-backend-language-rust.md) | The backend stays Rust after the Java bake-off | Accepted, 2026-10-10 |
-| [0017](0017-definition-of-done-l0-l3.md) | Definition of done: four levels, L0 to L3 | Accepted, 2026-10-10 |
+| [0017](0017-definition-of-done-l0-l3.md) | Definition of done: four levels, L0 to L3 | Accepted, 2026-10-10. Decision 5 amended by 0038 |
 | [0018](0018-license-apache-dco-trademark.md) | Apache-2.0, contributions under a DCO, and a trademark policy for the name | Accepted, 2026-10-10 |
 | [0019](0019-in-house-webgl2-canvas.md) | An in-house WebGL2 renderer for the Designer canvas and all visuals | Accepted, 2026-10-10. Decision 5 superseded in part by 0036 |
 | [0020](0020-evaluation-first-party-plugin.md) | Evaluation is a first-party plugin that tests models like code | Accepted, 2026-10-10 |
@@ -50,18 +51,19 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 | [0035](0035-mysql-long-term-archive.md) | An optional long-term archive in the owner's MySQL or MariaDB; SQLite stays the live store | Accepted, 2026-10-10. Supersedes 0003 decision 6 in part; amends 0002 decision 7 |
 | [0036](0036-frontend-plain-javascript.md) | The frontend is plain JavaScript + React, with short JSDoc types checked by `checkJs` | Accepted, 2026-10-10. Supersedes 0023's TypeScript section and 0019 decision 5 in part |
 | [0037](0037-borrowed-decoders-and-parser-fuzzing.md) | Borrowed decoders for DEFLATE and images; one implementation and a fuzz target for every in-house parser | Accepted, 2026-10-10. Supersedes 0029 decision 1 in part |
+| [0038](0038-naming-and-schema-enforcement.md) | Names and command schemas are enforced by CI (`check-names`, `check-schema-diff` in M1); work is closed only after independent verification | Accepted, 2026-10-11. Amends 0017 decision 5 (closing needs independent verification); moves the schema-diff check of 0005's note into M1 |
 
 ## By topic
 
 | Topic | ADRs |
 |---|---|
 | Processes, durability, storage | 0001, 0002, 0003, 0024, 0033, 0035 |
-| Contracts, formats and schemas | 0004, 0005, 0029, 0030, 0032, 0037 |
+| Contracts, formats and schemas | 0004, 0005, 0029, 0030, 0032, 0037, 0038 |
 | UI and security | 0006, 0007, 0019, 0034, 0036 |
 | Inference and runtimes | 0008, 0010, 0013, 0025, 0026, 0027 |
 | Training and evaluation | 0020, 0021, 0022, 0028 |
 | Platforms, environments, remote | 0009, 0011, 0014, 0031 |
-| Policy and process | 0012, 0015, 0016, 0017, 0018, 0023, 0036 |
+| Policy and process | 0012, 0015, 0016, 0017, 0018, 0023, 0036, 0038 |
 
 ## Notes since acceptance
 
@@ -73,14 +75,14 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
 | [0002](0002-durability-worker-event-logs.md) | Decision 7: a rebuild gains a step that pulls pruned runs from the archive; `settings` leaves the list of non-rebuildable tables (there is no settings table). Decision 1: a chain run's log has one writer, the chain driver; the daemon keeps `<data>/daemon/events.log` | amended by 0035; note |
 | [0003](0003-storage-sqlite-vault-blobs.md) | Decision 6: still no server for the live store, but an optional MySQL/MariaDB archive. Settings live only in files | superseded in part by 0035; note |
 | [0004](0004-schema-ownership.md) | The code example uses the control-plane layout's names. "TS" reads "JavaScript"; generated frontend types are `.d.ts` or JSDoc `@typedef` modules; protobuf-es target `js+dts`; the `schemars` rule (about 20 document types) | illustration; language |
-| [0005](0005-command-layer.md) | The dispatch example returns `Vec<Diagnostic>` and calls `parse_arguments(command_id, arguments_json)`. `COMMANDS: &[CommandRow]` with the generated `CommandDescriptor`; `stability` on commands and events; typed JavaScript wrappers over `CommandExecutor`; `acting_plugin_id`; no domain logic in `apps/web` | illustration; contracts v1.1 |
+| [0005](0005-command-layer.md) | The dispatch example returns `Vec<Diagnostic>` and calls `parse_arguments(command_id, arguments_json)`. `COMMANDS: &[CommandRow]` with the generated `CommandDescriptor`; `stability` on commands and events; typed JavaScript wrappers over `CommandExecutor`; `acting_plugin_id`; no domain logic in `apps/web`. `check-schema-diff` runs from M1, not Phase 2, over `schemas/commands/` and `schemas/events/` | illustration; contracts v1.1; 0038 |
 | [0006](0006-ui-transport-http-only.md) | Decision 4: the shell only runs `rastai open --print-url`; file associations arrive as a `#/open?path=` fragment. "TS package" reads "JavaScript package"; cross-origin browser clients refused in v1; `EventService` binary only | superseded in part by 0034; language |
 | [0007](0007-local-api-security.md) | Decisions 3 and 4: sign-in through `token.login_code.create`; sessions bound to the redeeming origin; the `Sec-Fetch-Site` rule; any loopback Host on any port; a too-open `owner.token` refuses the start with `RRS-C1008` | superseded in part by 0034 |
 | [0012](0012-build-in-house-policy.md) | Decision 9 settled: the §27 additions are approved, each behind one wrapper file; `typescript` is a dev-only checker. Managed vLLM comes after the prototype | owner decisions 1 and 8; vLLM |
 | [0013](0013-unified-model-runtime.md) | M2 closes on NVIDIA, AMD parity at M10; the self-hosted GPU runner; one golden fixture per op; placement planned only in Rust | owner decisions 11 and 12 |
 | [0014](0014-platform-tiers.md) | The `nightly-gpu.yml` runner and its rules; the AMD card before M10 | owner decisions 11 and 12 |
 | [0015](0015-plugins-and-licensing.md) | "TypeScript" reads "JavaScript"; `.jsx` plugin templates; the AppArmor profile and the namespace fallback (`RRS-P2005`, `RRS-P2001`); capabilities for every contribution key; locked security-UI tokens | language; contracts v1.1 |
-| [0017](0017-definition-of-done-l0-l3.md) | "(L2)" tags on the durability extras; AMD checked at M10; the growing three-surfaces test | contracts v1.1 |
+| [0017](0017-definition-of-done-l0-l3.md) | "(L2)" tags on the durability extras; AMD checked at M10; the growing three-surfaces test. Closing a task needs independent verification with evidence (CI green, a non-author reviewer agent, the closing comment), ADR-0038 | contracts v1.1; amended by 0038 |
 | [0019](0019-in-house-webgl2-canvas.md) | Decision 5: a renderer is a plain JavaScript class. Theme tokens: `canvasColors`, `setColors`, the glyph atlas font, `check-colors` | superseded in part by 0036; note |
 | [0020](0020-evaluation-first-party-plugin.md) | Registry names are namespaced (`eval.drift`, `eval.pass_at_k`). The judge trust bar (0.8 on 10 labels); votes in `evals/votes.rrsdata`; exit 2 covers cancelled and refused | illustration; owner decisions 9 and 15 |
 | [0021](0021-technique-coverage.md) | `placement{graph_node_id: gpu_index}`, planned only by `plan_layer_placement` in Rust | contracts v1.1 |
@@ -104,7 +106,7 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
   - Alternatives considered (a table: alternative, why not);
   - Links (spec sections, contracts sections, spike results, plan tasks, related ADRs).
 - **Length:** about one screen. Bullets and tables, plain English, no filler.
-- **Names:** use [contracts.md](../architecture/contracts.md) names exactly. A new shared name goes into contracts.md first, in its own PR. ADRs have no "New names" section.
+- **Names:** use [contracts.md](../architecture/contracts.md) names exactly. A new wire, document or command shape goes into contracts.md first, in its own PR; any other new shared name goes there in the same PR as the code that uses it (ADR-0038; `check-names` enforces it). ADRs have no "New names" section.
 - **Status values:**
   - `Proposed`;
   - `Accepted, <date>`;

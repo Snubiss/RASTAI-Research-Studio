@@ -1,6 +1,6 @@
 # ADR-0017: Definition of done: four levels, L0 to L3
 
-**Status:** Accepted, 2026-10-10
+**Status:** Accepted, 2026-10-10. Decision 5 amended by [ADR-0038](0038-naming-and-schema-enforcement.md), 2026-10-11.
 
 ## Context
 
@@ -34,6 +34,8 @@
 - *Names marked "(L2)" in contracts.md are designed now but built only after the core loop reaches L2: daily `VACUUM INTO` snapshots with salvage, the node self-update watchdog with rollback, plugin-data downgrade guards, crash-report rate limits, and plugin event deliveries beyond what Evaluation auto-run needs. The minimal durable path comes first: event logs, reattach, atomic writes. That is "durability first" applied, not a change to L1.*
 - *M1-49's three-surfaces test (`tests/e2e/three_surfaces/`) grows each milestone, and M10-E02 adds an API-only run of the core loop (contracts §2.4 rule 9).*
 - *The decisions are unchanged.*
+
+*Note (2026-10-11), ADR-0038: decision 5 sets when a PR is done. Closing the issue or task needs more: CI green, a reviewer agent that is not the author confirming each acceptance criterion, and that evidence as the closing comment. A merged PR no longer closes its issue (plan 3.3, 3.6).*
 
 **Checked by:** a CI test that runs every registered command with `dry_run` and fails on an un-coded error (this is the L0 floor for the whole app); the plan's level table, reviewed at each milestone exit.
 

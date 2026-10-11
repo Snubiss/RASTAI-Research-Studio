@@ -1,13 +1,20 @@
 # Rastai Research Studio: Implementation Plan
 
-**Status:** v1.3, 2026-10-10. Pre-build. The steps from today (spike done) to the prototype exit (spec §5, §31, §32), and the long-term storage milestone after it. v1.1 applied the cross-doc review (section 10 rows 23–37, ADR-0034, M3-E11, M4-E12, M5-E04 storage and lineage, `node-over-ssh`). v1.2 applied the second review (rows 2, 5, 29, 30, 32, 35 and 37, the threat model, M5-E15, tier-2 test runners, more feature rows). v1.3 applies the owner decisions of 2026-10-10 (contracts v1.1 "Changes", spec v5.4, ADR-0033 to ADR-0037):
+**Status:** v1.4, 2026-10-11. Pre-build. The steps from today (spike done) to the prototype exit (spec §5, §31, §32), and the long-term storage milestone after it.
+
+v1.4 applies the owner decisions of 2026-10-11 (ADR-0038, contracts v1.2):
+- **Names and schemas are enforced in M1** (about 2 size-days): M1-57 (`check-names`, the generated `schemas/names.json` against contracts) and M1-58 (`check-schema-diff`, moved from Phase 2). They land early, so the exit gate moves by one lane-day (3.4).
+- **Agent build protocol** (3.5) and **verification before closing** (3.6): an issue closes only with green CI, a reviewer agent that isn't the author confirming every acceptance criterion, and that evidence as the closing comment. The definition of done (3.3) and the PR template lines (8.5) carry both.
+- **Owner approvals:** the §27 additions in M1-02 (`@vitest/browser`, axe-core, the Tauri CLI, the Tauri updater plugin, MinIO as a test-only CI service, the named pillow license entry); `node-over-ssh` stays nightly (8.7); the contracts v1.1 names are accepted; the theme token group is `typography`; five small contract gaps are left to the tasks that build them, each named in its backlog issue (3.2).
+
+Earlier versions: v1.1 applied the cross-doc review (section 10 rows 23–37, ADR-0034, M3-E11, M4-E12, M5-E04 storage and lineage, `node-over-ssh`). v1.2 applied the second review (rows 2, 5, 29, 30, 32, 35 and 37, the threat model, M5-E15, tier-2 test runners, more feature rows). v1.3 applied the owner decisions of 2026-10-10 (contracts v1.1 "Changes", spec v5.4, ADR-0033 to ADR-0037):
 - **M1-01 blocks every other task**, and after it contracts.md is the only list of names: section 11 no longer lists names, and section 10's rows all have answers (contracts §16). M1-01a lands the theming and frontend-contract docs right after it.
 - **Plain JavaScript frontend** (ADR-0036): every task says JavaScript and JSX, `jsconfig.json` with `checkJs` replaces `tsconfig`, and the `typescript` package is a dev-time checker only. JSDoc costs about 8 size-days across the UI tasks and epics (3.4).
 - **Theming "do now"** (owner decision 20, about 3.5 size-days): the token contract, `setColors` on renderers, locked security UI, `stability`, origin-bound sessions, the credential option and `CommandExecutor`. The "later" items are in M8-E06 and the Phase 2 list (6.10).
 - **Long-term archive** (ADR-0035): half a day in M1-01, half a day in M3-E02 (the outbox), 2 days in M5-E07 (the MySQL dataset reader) and a new milestone, M11 Long-term storage (21 days), which doesn't gate M10.
 - **Schedule:** two lanes and a re-plan after M1 with measured velocity (M2-23); M2 closes on NVIDIA and the AMD parity gate moves to M10 (M2-11); the GPU runner policy (8.8); no managed vLLM in the prototype; `miniz_oxide` replaces the in-house DEFLATE (M2-22) and torchvision decodes images (M6-E07); the Rust safetensors header check moves into M1 (M1-34); (L2) hardening collected in M10-E04; the M4 latency budget test; CUDA IPC sharing behind a measurement gate (M5-E16).
 
-**Built on:** spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike results (`spike/README.md`), the shared names in contracts v1.1 (`docs/architecture/contracts.md`), the four layout docs (`docs/architecture/layout/`), the four flow docs (`docs/architecture/flows/`) and ADRs 0001–0037. Every name in this plan comes from contracts.md; a name it lacks is added there first, in its own PR.
+**Built on:** spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike results (`spike/README.md`), the shared names in contracts v1.2 (`docs/architecture/contracts.md`), the four layout docs (`docs/architecture/layout/`), the four flow docs (`docs/architecture/flows/`) and ADRs 0001–0038. Every name in this plan comes from contracts.md; a name it lacks is added there as 3.3 rule 3 says, and from M1-57 `check-names` enforces it.
 
 **Companion file:** [`backlog.json`](backlog.json) holds one GitHub issue per M1 and M2 task and one per later epic. It is generated from the same data as the tables below, so the two can't disagree. M1-07 turns it into GitHub issues. Ids never change, because GitHub issues map to them (`github-issues.json`); a moved task keeps its id and changes its milestone.
 
@@ -33,7 +40,7 @@
 ### 1.1 Today
 
 - **The spike is done** (§0.13). The unified-runtime bet holds: in-house Gemma 3 1B is bit-identical to HF in fp32 with eager attention; the live panel costs +16–31% at CUDA-graph speed; the gateway tokenizer and llama.cpp agree on 49,035 tokens; Teach it takes about 10 s; the WebGL2 canvas holds the refresh cap at 50,000 nodes; the backend stays Rust.
-- **The design is written:** spec v5.4, contracts v1.1, four layout docs, four flow docs, 37 ADRs. The owner decided every open design-review question on 2026-10-10; M1-01 and M1-01a land those docs as the first two PRs.
+- **The design is written:** spec v5.4, contracts v1.2, four layout docs, four flow docs, 38 ADRs. The owner decided every open design-review question on 2026-10-10, and approved the names and schema enforcement (ADR-0038) on 2026-10-11; M1-01 and M1-01a land those docs as the first two PRs.
 - **The repo has one scaffold commit:** README, LICENSE, DCO, CONTRIBUTING, CLAUDE.md, the PR template and two issue templates. No product code, no CI, no GitHub settings yet.
 
 Spike items this plan carries:
@@ -72,7 +79,7 @@ M11 Long-term storage (§31 step 10) comes after the 90-day plan and is not part
 
 | Milestone | §31 step | §32 weeks | Goal | Work | Exit gate (the test that closes it) |
 |---|---|---|---|---|---|
-| M1 Foundation and skeleton | 1 | 3–4 | Monorepo, CI, contracts in code, the command layer over HTTP, CLI and MCP, durable storage, daemon with embedded node, worker protocol v0 running TextCNN, plugin host, the theme token contract and locked security UI, web shell in plain JavaScript, threat model v1 | 57 tasks, 78.5 size-days | kill -9 the daemon mid-run; it restarts and reattaches with no lost events (M1-48) |
+| M1 Foundation and skeleton | 1 | 3–4 | Monorepo, CI, contracts in code, the command layer over HTTP, CLI and MCP, durable storage, daemon with embedded node, worker protocol v0 running TextCNN, plugin host, the theme token contract and locked security UI, web shell in plain JavaScript, threat model v1, the names and schema checks | 59 tasks, 80.5 size-days | kill -9 the daemon mid-run; it restarts and reattaches with no lost events (M1-48) |
 | M2 Unified runtime | 2 | 5–6 | Re-plan with M1's velocity, ModelSpec compiler, Gemma 3 and Llama with parity, uv environments per backend, `rastai doctor`, model downloads including gated ones | 22 tasks, 28.5 size-days | both families pass parity in fp32 and bf16 on NVIDIA (M2-10); the AMD half moved to M10 (M2-11) |
 | M3 Inference | 3 | 7–8 | Gateway and tokenization, both runtimes, VRAM leases, the conversation tree and the archive outbox, `/v1` endpoints, the Inference section; then projects | 42.5 of 46.5 epic-days in the 90-day plan | Navi chats through `/v1` with token-ID logging and the runtime toggle working (M3-E07) |
 | M4 Psychology | 4 | 9–10 (thin slice) | Live lenses, SAEs, steering, replay; then branching, diff and the advanced views | 34.5 of 51.5 epic-days in the 90-day plan | slice: First Run minutes 3–7 on an 8 GB budget, the slider round trip under 50 ms p95; full: every `psychology.*` command at L1 |
@@ -146,7 +153,7 @@ flowchart TD
 
 | §32 weeks | Lane A | Lane B | Gate |
 |---|---|---|---|
-| 3–4 | M1: contracts v1.1, proto, diag, formats, core, server, CLI, Python worker, the theme token contract, the JavaScript web shell | M1: the §27 register, the frontend-contract docs, tooling, CI, store, transport, node, Python TextCNN stack, crash suite, threat model | M1 exit |
+| 3–4 | M1: contracts v1.2, proto, diag, formats, core, `check-schema-diff`, server, CLI, Python worker, the theme token contract, the JavaScript web shell | M1: the §27 register, the frontend-contract docs, tooling, CI, store, `check-names`, transport, node, Python TextCNN stack, crash suite, threat model | M1 exit |
 | 5–6 | M2: node environments, downloads, secrets, doctor, First Run checklist | M2: the re-plan with M1's velocity (M2-23), ModelSpec ops, runtime, Gemma 3 and Llama, parity on NVIDIA | M2 exit (NVIDIA) |
 | 7–8 | M3: gateway core, endpoints and chat, API adapters, Inference UI | M3: vault and its archive outbox, leases, Inspectable serving, llama-server, twins | M3 exit |
 | 9–10 | M4 slice: contracts, Basic lenses UI with `setColors` on the charts, replay and viewer | M4 slice: plugin modules, live readouts, steering with the latency budget | M4 slice gate |
@@ -176,37 +183,92 @@ git worktree add ../rastai-lane-b -b lane-b/M1-02-spec-27-register origin/main
 
 ### 3.2 Contracts first
 
-- **M1-01 is the contract for everything.** It lands contracts v1.1, the only list of shared names. Every later task uses those names; a name contracts.md lacks is added there in its own PR first.
+- **M1-01 is the contract for everything.** It lands contracts v1.2 (v1.1 plus the 2026-10-11 decisions), the only list of shared names. Every later task uses those names. A name contracts.md lacks is added there first: a wire, document or command shape (and a catalog code) in its own contract PR, any other name in the PR that first uses it (3.3 rule 3).
 - **Every milestone opens with a contract PR** (§29): proto, document schemas, command rows and their argument types, catalog codes. Contract tasks carry `type:contract`.
 - **New commands land as honest L0 stubs:** they exist in the registry, the CLI, MCP and the palette, and return their area's "not available yet" catalog code until the handler lands (ADR-0017). The L0 floor test (M1-27) keeps this true. Every command and event type is `stability: preview` until Phase 2.
+- **CI holds the contracts from M1** (ADR-0038). `check-names` (M1-57) fails a name in code that contracts.md doesn't list, and a name in contracts that isn't in code and has no milestone mark such as "(M4)". `check-schema-diff` (M1-58) fails a change to `schemas/commands/` or `schemas/events/` without a matching contracts.md change in the same PR, and a breaking change to a `stable` item. A PR that lands a name marked with its milestone removes the mark.
 - **A lane that needs an unplanned contract change** opens a small contract PR first; the other lane rebases after it merges.
+
+**Contract gaps left to the tasks that build them** (owner decision of 2026-10-11). Each is small and is an acceptance item in its task's backlog issue, so it can't be lost. Contracts §14 rows 19–23 hold the draft each task starts from; the task settles the names in contracts.md in its contract PR, before code uses them, and removes the milestone mark.
+
+| Gap | Owning task |
+|---|---|
+| `GetSecretRequest` and `GetSecretResponse` fields, and the environment variable that hands a job its secret | M5-E07 (data import; open question 15) |
+| MySQL source error codes in the `RRS-D3xxx` range | M5-E07 |
+| The message and fix text of the Designer's layer-4 warning "parameters exceed dataset tokens" (it uses `RRS-E3003`, contracts §10.3) | M6-E02 (live stats) |
+| `ConversationDeleteResult`'s archive-pending field | M11-E03 |
+| The test-only environment variables for the archive's CI service addresses | M11-E07 |
 
 ### 3.3 Definition of done per PR
 
-A PR is done when all of these hold. Reviewers check the PR template's boxes (8.5).
+A PR is done when all of these hold. Reviewers check the PR template's boxes (8.5). A merged PR doesn't close its issue; 3.6 does.
 
-1. `just check` passes locally and every required CI job is green (§29). From M1-05 that includes `check-js` (`tsc --noEmit` over `jsconfig.json`, checkJs), prettier, ruff, `check-colors` and `check-no-typescript`.
+1. `just check` passes locally and every required CI job is green (§29). From M1-05 that includes `check-js` (`tsc --noEmit` over `jsconfig.json`, checkJs), prettier, ruff, `check-colors` and `check-no-typescript`; from M1-57 and M1-58, `check-names` and `check-schema-diff`.
 2. It adds a test that fails without the change. The one exception is a docs-only PR (spec, contracts prose, ADRs, this plan), which has no code to test.
-3. Contract changes were merged first, in their own PR.
+3. Wire and document contract changes (proto, document schemas, command rows and their argument types, catalog codes) were merged first, in their own PR. Any other new name (a table or column, a settings key, a module, a CLI verb) goes into contracts.md in the same PR that first uses it (ADR-0038).
 4. Every new user-facing error has a catalog code (`catalog_checks` and the source scan enforce it from M1-12).
 5. New external dependencies are in §27 and the allowlists (`check-deps`), each imported in its one wrapper file (contracts §2.5).
 6. No pickle, no runtime installs (`check-no-pickle`), no `unsafe` outside ADR-0033's one file (`check-unsafe`).
 7. House style: simple functions and plain data, constants at the top, readable names, small functions, a thin main (ADR-0023; clippy's `too_many_lines` at 60). Frontend code is plain JavaScript and JSX with short JSDoc types, never TypeScript syntax (ADR-0036).
 8. Every commit is signed off (the `dco` job).
-9. It links its backlog issue (`Closes #n`) and, if it claims a level, names the feature and the tests that prove it (section 7).
+9. It links its backlog issue with `Refs #n`, never `Closes #n`, so the merge doesn't close the issue (3.6). If it claims a level, it names the feature and the tests that prove it (section 7).
 10. One topic, within two days of work. Bigger work is split before review; a task sized over two days ships as two PRs.
 11. A new in-house parser of untrusted input lands with its fuzz target in the same PR (ADR-0037).
+12. Every name it uses is registered in contracts.md (§15 and the §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables), or added there in this PR. It reuses a registered name rather than inventing a near-duplicate. A schema change carries its contracts update (`check-schema-diff`).
+13. A reviewer agent that is not the author reviewed it with the naming and schema, style and tests lenses (3.5), and every finding is fixed or answered in the PR.
+14. The issue closes only after independent verification (3.6): CI green, including `just check` with `check-names` and `check-schema-diff`; a reviewer agent that is not the author confirms each acceptance criterion against the code and command output; that evidence is the closing comment.
 
 ### 3.4 Sizes and the honest estimate
 
-- M1 is 78.5 size-days (40.75 on lane A, 37.75 on lane B). M2 is 28.5 (14.5 and 14).
+- M1 is 80.5 size-days (41.75 on lane A, 38.75 on lane B). M2 is 28.5 (14.5 and 14).
 - **What the decisions of 2026-10-10 added to M1 (5.5 size-days):** the archive names in M1-01 (0.5); the theming and frontend-contract work (3: M1-01a 1, M1-05 0.25, M1-09 0.25, M1-17 0.25, M1-26 0.25, M1-50 0.25, M1-51 0.5, M1-52 0.25); JSDoc instead of TypeScript (1.5: M1-50, M1-52, M1-53 and M1-54 0.25 each, M1-51 0.5); the Rust safetensors header check moved into M1 (0.5, M1-34). M2 lost M2-11 (moved to M10) and half of M2-22 (no in-house DEFLATE), and gained M2-23 (the re-plan) and 0.5 of JSDoc in M2-21.
+- **What the decisions of 2026-10-11 added to M1 (2 size-days):** M1-57 (`check-names`, 1) and M1-58 (`check-schema-diff`, 1), ADR-0038. They are placed as early as their inputs allow (lane-days 16.25–19), so the server, node, worker and UI tasks are checked from their first PR. That moves everything after them by one lane-day. Placed last, they would cost nothing on the schedule but leave most of M1 unchecked. The reviewer agent per PR (3.5) and the verification comment (3.6) add review time per PR, not size-days; M2-23 measures it.
 - **The theming "do now" work is 3.5 size-days:** the 3 in M1 above, plus 0.5 in the first renderer PRs (`setColors` on the viz classes in M4-E04 and on `GraphRenderer` in M6-E03, 0.25 each).
 - **JSDoc costs about 8 size-days** (ADR-0036): 1.5 in M1, 0.5 in M2-21, and 6 in the UI epics (M3-E09 1, M4-E04 0.75, M4-E06 0.5, M4-E10 1, M5-E06 0.5, M5-E12 1, M6-E03 0.75, M8-E04 0.5).
-- Simulating the two lanes with every dependency, at one size-day per lane per working day, with M2 tasks waiting for M1's exit gate: M1-01 merges at lane-day 2.5; M1's exit gate (M1-48, M1-49) lands at lane-day 38.25, all of M1 at 43.25 (M1-55 and M1-56 run on lane B beside the first M2 tasks), M2's NVIDIA parity gate (M2-10) at 54.25 and all of M2 at 55.25.
+- Simulating the two lanes with every dependency, at one size-day per lane per working day, with M2 tasks waiting for M1's exit gate: M1-01 merges at lane-day 2.5; M1's exit gate (M1-48, M1-49) lands at lane-day 39.25, all of M1 at 44.25 (M1-55 and M1-56 run on lane B beside the first M2 tasks), M2's NVIDIA parity gate (M2-10) at 55.25 and all of M2 at 56.25.
 - §32 gives M1 and M2 four weeks (20 working days). Meeting that needs about 2.7 size-days merged per lane per working day: agents write and self-test the PRs, and the owner reviews about five PRs a day.
-- The whole 90-day plan (M1, M2 and the `gate:90-day` epics of M3, M4, M5, M6 and M9) is 245.5 size-days. §32 gives it weeks 3–13: 55 working days on two lanes, 110 lane-days. That is about 2.2 size-days per lane per working day. All epics of M3 to M10 are 314 epic-days; M11 adds 21.
+- The whole 90-day plan (M1, M2 and the `gate:90-day` epics of M3, M4, M5, M6 and M9) is 247.5 size-days. §32 gives it weeks 3–13: 55 working days on two lanes, 110 lane-days. That is about 2.25 size-days per lane per working day. All epics of M3 to M10 are 314 epic-days; M11 adds 21.
 - If review can't keep that pace, the dates move, not the scope or the bar (§0.8). M2-23 replaces these estimates with M1's measured velocity, and M6-E06 does it again at week 13.
+
+### 3.5 Agent build protocol
+
+Agents write most of the code. They invent plausible names when the registry isn't in front of them, and drift from schemas they haven't read. Owner decision of 2026-10-11 (ADR-0038 decision 3):
+
+| Step | Who | What |
+|---|---|---|
+| 1. Brief | whoever starts the task (the owner or an orchestrating agent) | The build agent's prompt holds: the backlog issue body (goal, files, acceptance test); `docs/architecture/contracts.md`; the generated schemas the task touches (`schemas/commands/`, `schemas/events/`, `schemas/<type>/`) and `schemas/names.json`; the owning layout section. Add the flow sections and ADRs the issue cites. |
+| 2. Build | the build agent (the author) | Uses only registered names. A name it needs that contracts.md lacks goes into contracts in the same PR (3.3 rule 3); a wire or document change is its own contract PR first. Runs `just check` before opening the PR. |
+| 3. Review | a reviewer agent, never the author | Reads the diff with three lenses. **Naming and schema:** every new name is in contracts.md; nothing near-duplicates a registered name; each schema diff matches a contracts diff; milestone marks are removed for names that land. **Style:** 3.3 rule 7. **Tests:** rule 2 and the issue's acceptance test. Posts its findings as a PR review. |
+| 4. Approve and merge | the owner | The one required approval (8.4). |
+| 5. Verify and close | a reviewer agent that is not the author | 3.6. |
+
+- **Before M1-57 and M1-58 land,** the reviewer's naming lens does their job by hand against contracts.md.
+- **One agent never reviews its own work.** A reviewer may be the same model, but it runs as a separate agent with its own prompt (the diff, the issue, contracts.md and the layout section), not with the author's context.
+- **What is persisted:** nothing new. The brief is built from files that already exist (the issue body, contracts.md, `schemas/`, the layout doc). Review findings live on the PR and the verification evidence on the issue.
+
+### 3.6 Closing an issue: independent verification
+
+Owner rule of 2026-10-11: "Ensure work is checked before marking off tasks as completed" (ADR-0038 decision 4). An issue, task or epic, is closed only when all three hold:
+
+1. **CI is green** on the PR that finished it: every required job, including `just check` with `check-names` and `check-schema-diff` (once M1-57 and M1-58 have landed).
+2. **A reviewer agent that is not the author** confirms each acceptance criterion in the issue body, one by one, against the code and the command output (the test names, the run, the lines it printed). The PR description is the author's claim, not evidence.
+3. **The evidence is posted on the issue as the closing comment.** Then the verifier closes it.
+
+- **Merges never close issues.** PRs say `Refs #n` (3.3 rule 9), and M1-07's sync tool never closes anything.
+- **A criterion that can't be confirmed keeps the issue open.** That includes a failing, missing or claimed-only result. The verifier names it, and a follow-up PR fixes it.
+- **Docs-only tasks:** the review checklist in the acceptance test is the criterion list, checked item by item against the docs.
+- **A task shipped as two PRs** is verified after part 2. **An epic** closes when every task cut from it is closed and its exit test is verified the same way.
+- **GPU-gated criteria** (`needs:gpu`, `needs:amd`): the evidence is the linked `workflow_dispatch` run (8.8).
+
+The closing comment:
+
+```
+Verified by <reviewer agent>, not the author (<author>).
+CI: <link to the green run>; just check includes check-names and check-schema-diff.
+Acceptance:
+- [x] <criterion 1>: <test or command> -> <result line>, <file:line>
+- [x] <criterion 2>: <test or command> -> <result line>, <file:line>
+```
 
 ---
 
@@ -219,7 +281,7 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 ### 4.2 Entry criteria
 
 - The one-time GitHub setup of 8.1 is done by hand (repository, settings, branch protection), so the first PR is already protected.
-- The owner's decisions of 2026-10-10 are final. M1-01 lands them in contracts v1.1 and the docs that follow it; nothing else merges before M1-01.
+- The owner's decisions of 2026-10-10 and 2026-10-11 are final. M1-01 lands them in contracts v1.2 and the docs that follow it; nothing else merges before M1-01.
 - The §27 additions are approved (owner decision 1); M1-02 writes them into spec v5.4 before M1-04, M1-25 and M1-41 merge.
 
 ### 4.3 Exit criteria
@@ -238,6 +300,7 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 | 10 | Rust, the portable Python packages and the JavaScript packages build and pass their tests on CPU runners: Rust and Python on Linux, macOS and Windows, JavaScript on Linux and macOS | `test-rust-*`, `test-python-*`, `test-js`, `test-js-macos` jobs (M1-06) |
 | 11 | A theme switch (light, dark, `system`, compact density) restyles the shell without changing any `--rr-locked-*` variable; a session cookie works only from the origin that redeemed its login code | `theme.spec.js` (M1-54), `tests/gate.rs` (M1-26) |
 | 12 | No hand-written TypeScript and no color literal outside the token files | `check-no-typescript`, `check-colors` in `just check` (M1-05) |
+| 13 | Every name in code is registered in contracts.md, and every registered name is in code or carries its milestone mark; a command or event schema change without a contracts update fails, and so does a breaking change to a `stable` item | `check-names` (M1-57) and `check-schema-diff` (M1-58) in `just check` and the `checks` job, each with its fixture suite |
 
 ### 4.4 Levels at exit
 
@@ -260,7 +323,7 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 
 | ID | Task | Lane | Size | Depends on | Start–end (lane days) |
 |---|---|---|---|---|---|
-| M1-01 | Contracts v1.1: reconcile every doc's names into contracts.md (blocks every task) | A | L + 0.5 | none | 0–2.5 |
+| M1-01 | Contracts v1.2: reconcile every doc's names into contracts.md (blocks every task) | A | L + 0.5 | none | 0–2.5 |
 | M1-01a | Theming and frontend-contract docs (owner decisions 20 and 21) | B | M | M1-01 | 3.5–4.5 |
 | M1-02 | Spec v5.4: the §27 register and ADR-0033 | B | M | M1-01 | 2.5–3.5 |
 | M1-03 | Rust workspace root and `just check` | A | M | M1-01 | 2.5–3.5 |
@@ -278,57 +341,59 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 | M1-15 | rastai-formats descriptions and validation layers 1 and 2 | A | L | M1-14 | 11.75–13.75 |
 | M1-16 | rastai-formats-codegen: JSON Schema, JSDoc types, typed command wrappers, Python dataclasses | A | M | M1-15, M1-12 | 14.75–15.75 |
 | M1-17 | Step-1 document types, with the theme document (contract) | A | M + 0.25 | M1-16, M1-13 | 15.75–17 |
-| M1-18 | ModelSpec v1 for TextCNN, and the TextCNN template (contract) | B | M | M1-17 | 22.25–23.25 |
-| M1-19 | PyO3 wheel: rastai-formats-python and `rastai_formats` | B | M | M1-17 | 23.25–24.25 |
+| M1-18 | ModelSpec v1 for TextCNN, and the TextCNN template (contract) | B | M | M1-17 | 23.25–24.25 |
+| M1-19 | PyO3 wheel: rastai-formats-python and `rastai_formats` | B | M | M1-17 | 24.25–25.25 |
 | M1-20 | rastai-core: versions, paths, ids, principals, scopes, states | A | M | M1-09, M1-11 | 9.75–10.75 |
 | M1-21 | rastai-core: command registry, naming and settings resolution | A | M | M1-20, M1-15 | 13.75–14.75 |
 | M1-22 | Skeleton commands: registry rows and argument types (contract) | A | M | M1-21, M1-16, M1-13 | 17–18 |
 | M1-23 | rastai-store: databases and writer threads | B | L | M1-20 | 13.25–15.25 |
 | M1-24 | rastai-store: event-log frames, reader and writer | B | M | M1-09, M1-20, M1-14 | 12.25–13.25 |
 | M1-25 | rastai-store: indexer, blob store and free space | B | M | M1-23, M1-24, M1-02 | 15.25–16.25 |
-| M1-26 | rastai-server: startup, listeners, request gate and origin-bound sign-in | A | L + 0.25 | M1-23, M1-21, M1-13 | 18–20.25 |
-| M1-27 | rastai-server: the Execute path and the L0 floor | A | L | M1-26 | 20.25–22.25 |
-| M1-28 | rastai-server: event bus, Subscribe and run-log indexing | A | L | M1-27, M1-25, M1-10 | 22.25–24.25 |
-| M1-29 | rastai-mcp: JSON-RPC, the MCP server and the stdio bridge | B | M | M1-21, M1-41 | 17.25–18.25 |
-| M1-30 | rastai-server: the `/mcp` endpoint | B | S | M1-27, M1-29 | 30.75–31.25 |
-| M1-31 | rastai-cli: modes, generated verbs, follow and exit codes | A | L | M1-28, M1-29, M1-41 | 24.25–26.25 |
-| M1-32 | rastai-server: plugin host (discover, negotiate, register) | A | M | M1-27, M1-17 | 27.25–28.25 |
-| M1-33 | rastai-store: offline index rebuild | B | M | M1-25, M1-31 | 31.25–32.25 |
-| M1-34 | Safetensors: the one header check in rastai-formats, and the Python reader and writer that call it (spike port) | B | M + 0.5 | M1-14, M1-19, M1-13 | 24.25–25.75 |
-| M1-35 | rastai_models: the compiler and the TextCNN blocks | B | L | M1-18, M1-19, M1-34 | 25.75–27.75 |
+| M1-26 | rastai-server: startup, listeners, request gate and origin-bound sign-in | A | L + 0.25 | M1-23, M1-21, M1-13 | 19–21.25 |
+| M1-27 | rastai-server: the Execute path and the L0 floor | A | L | M1-26 | 21.25–23.25 |
+| M1-28 | rastai-server: event bus, Subscribe and run-log indexing | A | L | M1-27, M1-25, M1-10 | 23.25–25.25 |
+| M1-29 | rastai-mcp: JSON-RPC, the MCP server and the stdio bridge | B | M | M1-21, M1-41 | 18.25–19.25 |
+| M1-30 | rastai-server: the `/mcp` endpoint | B | S | M1-27, M1-29 | 31.75–32.25 |
+| M1-31 | rastai-cli: modes, generated verbs, follow and exit codes | A | L | M1-28, M1-29, M1-41 | 25.25–27.25 |
+| M1-32 | rastai-server: plugin host (discover, negotiate, register) | A | M | M1-27, M1-17 | 28.25–29.25 |
+| M1-33 | rastai-store: offline index rebuild | B | M | M1-25, M1-31 | 32.25–33.25 |
+| M1-34 | Safetensors: the one header check in rastai-formats, and the Python reader and writer that call it (spike port) | B | M + 0.5 | M1-14, M1-19, M1-13 | 25.25–26.75 |
+| M1-35 | rastai_models: the compiler and the TextCNN blocks | B | L | M1-18, M1-19, M1-34 | 26.75–28.75 |
 | M1-36 | rastai_data: readers, word vocabulary, splits and a resumable loader | B | M | M1-04 | 8.25–9.25 |
-| M1-37 | rastai_plugin: registry, base classes, module loader and host client | B | M | M1-10, M1-12, M1-19 | 27.75–28.75 |
-| M1-38 | rastai_train: loop, optimizer, checkpoints, resume and the classification recipe | B | L | M1-35, M1-36, M1-37 | 28.75–30.75 |
-| M1-39 | rastai_worker: the event-log writer and payload conversion | A | M | M1-09, M1-24 | 26.25–27.25 |
-| M1-40 | rastai_worker: process, WorkerService, host connection and control | A | L | M1-39, M1-37, M1-10 | 29.75–31.75 |
+| M1-37 | rastai_plugin: registry, base classes, module loader and host client | B | M | M1-10, M1-12, M1-19 | 28.75–29.75 |
+| M1-38 | rastai_train: loop, optimizer, checkpoints, resume and the classification recipe | B | L | M1-35, M1-36, M1-37 | 29.75–31.75 |
+| M1-39 | rastai_worker: the event-log writer and payload conversion | A | M | M1-09, M1-24 | 27.25–28.25 |
+| M1-40 | rastai_worker: process, WorkerService, host connection and control | A | L | M1-39, M1-37, M1-10 | 30.75–32.75 |
 | M1-41 | rastai-transport: local sockets, peer credentials, gRPC channels, local HTTP | B | M | M1-20, M1-08, M1-02 | 11.25–12.25 |
-| M1-42 | rastai-node: entry, identity, local handshake, hardware and telemetry | B | M | M1-41, M1-10 | 16.25–17.25 |
-| M1-43 | rastai-node: job supervisor, spawn, signals and exit causes | B | L | M1-42 | 18.25–20.25 |
-| M1-44 | rastai-node: event-log tailing and live streams | B | M | M1-43, M1-24 | 20.25–21.25 |
-| M1-45 | rastai-node: reattach after a restart, and immediate heartbeats | B | M | M1-44 | 21.25–22.25 |
-| M1-46 | rastai_worker: the TextCNN train job | B | M | M1-38, M1-40 | 32.25–33.25 |
-| M1-47 | Daemon and embedded node: links, NodeHub, scheduler, train.start and `job.*` | B | L | M1-28, M1-45, M1-46, M1-22 | 33.25–35.25 |
-| M1-48 | Kill -9 crash suite for the skeleton (M1 exit gate) | B | L | M1-47 | 35.25–37.25 |
-| M1-49 | Three surfaces end to end: HTTP, CLI and MCP | B | M | M1-31, M1-30, M1-47 | 37.25–38.25 |
-| M1-50 | `@rastai/client`: credentials, `CommandExecutor` and the generated JavaScript packages | A | M + 0.5 | M1-28, M1-16 | 28.25–29.75 |
-| M1-51 | `@rastai/ui`: theme tokens, the locked security UI, basics and the Basic/Advanced primitives | A | L + 1 | M1-50, M1-17 | 31.75–34.75 |
-| M1-52 | `@rastai/plugin`: host interface, registry and state tools | A | M + 0.5 | M1-51 | 34.75–36.25 |
-| M1-53 | apps/web shell, embedded in the daemon | A | L + 0.25 | M1-52, M1-32 | 36.25–38.5 |
-| M1-54 | apps/web: the generated palette, copy-as, Settings with Appearance, Plugins and Remote; Playwright | A | L + 0.25 | M1-53, M1-31 | 38.5–40.75 |
-| M1-55 | apps/desktop: the Tauri window and `rastai open` | B | M | M1-54, M1-31 | 41.25–42.25 |
-| M1-56 | Threat model v1 | B | M | M1-26, M1-29 | 42.25–43.25 |
+| M1-42 | rastai-node: entry, identity, local handshake, hardware and telemetry | B | M | M1-41, M1-10 | 17.25–18.25 |
+| M1-43 | rastai-node: job supervisor, spawn, signals and exit causes | B | L | M1-42 | 19.25–21.25 |
+| M1-44 | rastai-node: event-log tailing and live streams | B | M | M1-43, M1-24 | 21.25–22.25 |
+| M1-45 | rastai-node: reattach after a restart, and immediate heartbeats | B | M | M1-44 | 22.25–23.25 |
+| M1-46 | rastai_worker: the TextCNN train job | B | M | M1-38, M1-40 | 33.25–34.25 |
+| M1-47 | Daemon and embedded node: links, NodeHub, scheduler, train.start and `job.*` | B | L | M1-28, M1-45, M1-46, M1-22 | 34.25–36.25 |
+| M1-48 | Kill -9 crash suite for the skeleton (M1 exit gate) | B | L | M1-47 | 36.25–38.25 |
+| M1-49 | Three surfaces end to end: HTTP, CLI and MCP | B | M | M1-31, M1-30, M1-47 | 38.25–39.25 |
+| M1-50 | `@rastai/client`: credentials, `CommandExecutor` and the generated JavaScript packages | A | M + 0.5 | M1-28, M1-16 | 29.25–30.75 |
+| M1-51 | `@rastai/ui`: theme tokens, the locked security UI, basics and the Basic/Advanced primitives | A | L + 1 | M1-50, M1-17 | 32.75–35.75 |
+| M1-52 | `@rastai/plugin`: host interface, registry and state tools | A | M + 0.5 | M1-51 | 35.75–37.25 |
+| M1-53 | apps/web shell, embedded in the daemon | A | L + 0.25 | M1-52, M1-32 | 37.25–39.5 |
+| M1-54 | apps/web: the generated palette, copy-as, Settings with Appearance, Plugins and Remote; Playwright | A | L + 0.25 | M1-53, M1-31 | 39.5–41.75 |
+| M1-55 | apps/desktop: the Tauri window and `rastai open` | B | M | M1-54, M1-31 | 42.25–43.25 |
+| M1-56 | Threat model v1 | B | M | M1-26, M1-29 | 43.25–44.25 |
+| M1-57 | check-names: generated names registry and contracts comparison | B | M | M1-05, M1-13, M1-16, M1-21, M1-23 | 16.25–17.25 |
+| M1-58 | check-schema-diff: command and event schema diff against base | A | M | M1-05, M1-16, M1-22, M1-57 | 18–19 |
 
-"Start–end" is the simulated position in lane-days (3.4), not a date. **M1-01 blocks every task:** each task depends on it directly or through its listed dependencies, and nothing merges before it. M1-01a's contracts are built by M1-04, M1-05, M1-09, M1-16, M1-17, M1-26 and M1-50 to M1-56.
+"Start–end" is the simulated position in lane-days (3.4), not a date. **M1-01 blocks every task:** each task depends on it directly or through its listed dependencies, and nothing merges before it. M1-57 and M1-58 are placed as early as their inputs allow (3.4). M1-01a's contracts are built by M1-04, M1-05, M1-09, M1-16, M1-17, M1-26 and M1-50 to M1-56.
 
 ### 4.6 Dependencies
 
-The M1 graph has 57 tasks, so it is drawn in four figures. A task from another figure appears as a node marked "(other figure)".
+The M1 graph has 59 tasks, so it is drawn in four figures. A task from another figure appears as a node marked "(other figure)".
 
-**Figure 4.1: repo, contracts and formats**
+**Figure 4.1: repo, contracts, formats and the names and schema checks**
 
 ```mermaid
 flowchart TD
-  M1_01["M1-01 Contracts v1.1"]
+  M1_01["M1-01 Contracts v1.2"]
   M1_01a["M1-01a Theming and frontend contracts"]
   M1_02["M1-02 Spec v5.4, §27 register"]
   M1_03["M1-03 Rust workspace"]
@@ -348,6 +413,11 @@ flowchart TD
   M1_17["M1-17 Step-1 documents, theme"]
   M1_18["M1-18 ModelSpec TextCNN"]
   M1_19["M1-19 PyO3 wheel"]
+  M1_57["M1-57 check-names"]
+  M1_58["M1-58 check-schema-diff"]
+  M1_21["M1-21 (other figure)"]
+  M1_22["M1-22 (other figure)"]
+  M1_23["M1-23 (other figure)"]
   M1_01 --> M1_01a
   M1_01 --> M1_02
   M1_01 --> M1_03
@@ -376,13 +446,23 @@ flowchart TD
   M1_13 --> M1_17
   M1_17 --> M1_18
   M1_17 --> M1_19
+  M1_05 --> M1_57
+  M1_13 --> M1_57
+  M1_16 --> M1_57
+  M1_21 --> M1_57
+  M1_23 --> M1_57
+  M1_05 --> M1_58
+  M1_16 --> M1_58
+  M1_22 --> M1_58
+  M1_57 --> M1_58
 ```
 
-- **M1-01 comes first and alone.** It lands contracts v1.1, the only list of names, so every later task builds against settled names. M1-02 (spec v5.4) and M1-01a (theming and frontend contracts) follow on lane B while lane A starts the Rust workspace.
+- **M1-01 comes first and alone.** It lands contracts v1.2, the only list of names, so every later task builds against settled names. M1-02 (spec v5.4) and M1-01a (theming and frontend contracts) follow on lane B while lane A starts the Rust workspace.
 - The proto chain (M1-08 → M1-09 → M1-10) and the formats chain (M1-14 → M1-15 → M1-16 → M1-17) are the two contract spines. Generated code is checked in, and `check-generated` fails any PR that edits it by hand.
 - M1-13 (catalog v1) waits for M1-01 and the catalog generator: it writes the codes contracts §10.3 lists, with the collisions already settled in contracts §10.2.
+- **The names and schema checks land as soon as their inputs exist** (ADR-0038). `check-names` (M1-57, lane B) needs every source of `schemas/names.json`: the checks scaffold, the catalog, the formats codegen, the command table and settings defaults, and the store migrations. `check-schema-diff` (M1-58, lane A) needs the first command schemas (M1-22) and the event-type table M1-57 adds. Every server, node, worker and UI task after them is checked from its first PR.
 - **What is persisted:** generated files in the repo (`schemas/`, `packages/*/src/generated/`, `packages/proto/`, `python/*/generated/`, `crates/rastai-proto/src/generated/`). Generated JavaScript is `.js` with JSDoc `@typedef`s, or `.js` plus `.d.ts` from protobuf-es; neither is reviewed.
-- **Failure branches:** if a §27 wrapper misbehaves, the replacement path of its row applies behind the same file (for example, `disk_space.rs` keeps `df` as ADR-0033's documented fallback); nothing outside the wrapper changes.
+- **Failure branches:** if a §27 wrapper misbehaves, the replacement path of its row applies behind the same file (for example, `disk_space.rs` keeps `df` as ADR-0033's documented fallback); nothing outside the wrapper changes. If `check-names` finds names contracts v1.2 lacks or marks wrongly when it first runs, the fix is a contracts PR before M1-57 merges, never an allowlist inside the check.
 
 **Figure 4.2: core, store, server, MCP and CLI**
 
@@ -577,29 +657,29 @@ flowchart TD
 | 1 (days 0–5) | M1-01, M1-03, M1-11, M1-14 | waits for M1-01 (drafts M1-02 and M1-01a), then M1-02, M1-01a, M1-04 |
 | 2 (days 5–10) | M1-08, M1-09, M1-20 | M1-05, M1-06, M1-07, M1-36, M1-12 |
 | 3 (days 10–15) | M1-13, M1-15, M1-21, M1-16 | M1-10, M1-41, M1-24, M1-23 |
-| 4 (days 15–20) | M1-17, M1-22, M1-26 | M1-25, M1-42, M1-29, M1-43 |
-| 5 (days 20–25) | M1-27, M1-28, M1-31 | M1-44, M1-45, M1-18, M1-19, M1-34 |
-| 6 (days 25–30) | M1-39, M1-32, M1-50, M1-40 | M1-35, M1-37, M1-38 |
-| 7 (days 30–35) | M1-51, M1-52 | M1-30, M1-33, M1-46, M1-47 |
-| 8 (days 35–40) | M1-53, M1-54 | M1-48, M1-49; then M2 tasks (5.7) |
+| 4 (days 15–20) | M1-17, M1-22, M1-58, M1-26 | M1-25, M1-57, M1-42, M1-29, M1-43 |
+| 5 (days 20–25) | M1-27, M1-28 | M1-44, M1-45, M1-18, M1-19 |
+| 6 (days 25–30) | M1-31, M1-39, M1-32, M1-50 | M1-34, M1-35, M1-37, M1-38 |
+| 7 (days 30–35) | M1-40, M1-51 | M1-30, M1-33, M1-46, M1-47 |
+| 8 (days 35–40) | M1-52, M1-53, M1-54 | M1-48, M1-49; then M2 tasks (5.7) |
 | 9 (days 40–45) | M2 tasks (5.7) | M1-55, M1-56 between M2 tasks |
 
 A cell lists the tasks that lane starts in that lane-week (five lane-days). "Waiting" means the lane's next tasks are blocked; "M2 tasks" means the lane is already in the next milestone.
 
 ### 4.8 Task details
 
-#### M1-01 Contracts v1.1: reconcile every doc's names into contracts.md (blocks every task)
+#### M1-01 Contracts v1.2: reconcile every doc's names into contracts.md (blocks every task)
 Lane A · size L + 0.5 · type contract · depends on none
 
-- **Goal:** Land contracts v1.1 as the first PR, before anything else merges: after it, contracts.md is the only list of shared names. The PR folds every 'New names' section of the four layout docs, the four flow docs and plan section 11 into contracts §15 and removes those sections; gives each row of plan section 10 its answer (contracts §16), including the contradictions this wave found (votes, managed vLLM, the settings table, catalog collisions; rows 38–44); settles the catalog collisions (contracts §10.2) so M1-13 only writes files; and puts every doc that lost a conflict in line with a one-line pointer. It carries the owner decisions of 2026-10-10 that aren't frontend: ADR-0034 accepted (one-time login codes for an HttpOnly session cookie, the shell only runs `rastai open --print-url`, the loopback Host rule, a too-open `owner.token` refuses the start, `Register` before `Hello` on reattach), with the status lines of ADR-0001, ADR-0006 and ADR-0007; ADR-0033 and ADR-0037 cited by contracts §2.5 and §12.5; one owner per algorithm (contracts §2.4 rule 10); the user-namespace fallback (contracts §8.8); the (L2) tags; and the long-term archive names (0.5 day, ADR-0035): crate `rastai-archive`, the `archive.*` commands and events, settings section `archive`, keychain accounts `archive.mysql` and `archive.objects`, `source_id`, `archive_cursors`, `runs.archive_state`, the `vault_changes` outbox, the archive tables of contracts §8.7, `MysqlConnection` and the range `RRS-S5xxx`. The ADR index's 'Notes since acceptance' table records every language and path fix.
-- **Files:** `docs/architecture/contracts.md` (v1.1, with its 'Changes in v1.1' list); `docs/architecture/layout/*.md` (the 'New names' sections removed, a pointer on each superseded name, 'Contracts follow-ups' where a point is still open); `docs/architecture/flows/*.md` (the same); `docs/adr/0034-login-codes-loopback-host-owner-token.md`, `docs/adr/0035-mysql-long-term-archive.md` and `docs/adr/0037-borrowed-decoders-and-parser-fuzzing.md`; the status lines of `docs/adr/0001-process-layout.md`, `0002-durability-worker-event-logs.md`, `0003-storage-sqlite-vault-blobs.md`, `0006-ui-transport-http-only.md`, `0007-local-api-security.md` and `0029-strict-safetensors-contract.md`; `docs/adr/README.md` (index rows, the 'Notes since acceptance' table); `docs/architecture/README.md`; `docs/plan/implementation-plan.md` (sections 10 and 11) and `docs/plan/backlog.json`
-- **Test:** Docs-only PR, exempt from the test rule (plan 3.3). Review checklist in the PR: no layout or flow doc keeps a 'New names' section, and every name they use is in contracts.md or in contracts §15.11 as rejected with its replacement; every row of plan section 10 has one answer in contracts §16; the archive names of ADR-0035 are all in contracts; every superseded ADR decision points to the ADR that replaced it; no doc names a `settings` table, a managed vLLM engine in the prototype or `votes.jsonl`.
-- **Docs:** [Contracts](../architecture/contracts.md), [Contracts §16, plan §10 answers](../architecture/contracts.md), [Layout: Rust control plane §16 contracts follow-ups](../architecture/layout/rust-control-plane.md), [Layout: node, gateway, proto](../architecture/layout/rust-node-gateway-proto.md), [Layout: Python](../architecture/layout/python.md), [Layout: frontend and plugins](../architecture/layout/frontend-and-plugins.md), [ADR-0034 sign-in](../adr/0034-login-codes-loopback-host-owner-token.md), [ADR-0035 long-term archive](../adr/0035-mysql-long-term-archive.md), [ADR-0037 borrowed decoders](../adr/0037-borrowed-decoders-and-parser-fuzzing.md), [ADR index, Notes since acceptance](../adr/README.md)
+- **Goal:** Land contracts v1.2 (the v1.1 reconcile plus the 2026-10-11 decisions) as the first PR, before anything else merges: after it, contracts.md is the only list of shared names. The PR folds every 'New names' section of the four layout docs, the four flow docs and plan section 11 into contracts §15 and removes those sections; gives each row of plan section 10 its answer (contracts §16), including the contradictions this wave found (votes, managed vLLM, the settings table, catalog collisions; rows 38–44); settles the catalog collisions (contracts §10.2) so M1-13 only writes files; and puts every doc that lost a conflict in line with a one-line pointer. It carries the owner decisions of 2026-10-10 that aren't frontend: ADR-0034 accepted (one-time login codes for an HttpOnly session cookie, the shell only runs `rastai open --print-url`, the loopback Host rule, a too-open `owner.token` refuses the start, `Register` before `Hello` on reattach), with the status lines of ADR-0001, ADR-0006 and ADR-0007; ADR-0033 and ADR-0037 cited by contracts §2.5 and §12.5; one owner per algorithm (contracts §2.4 rule 10); the user-namespace fallback (contracts §8.8); the (L2) tags; and the long-term archive names (0.5 day, ADR-0035): crate `rastai-archive`, the `archive.*` commands and events, settings section `archive`, keychain accounts `archive.mysql` and `archive.objects`, `source_id`, `archive_cursors`, `runs.archive_state`, the `vault_changes` outbox, the archive tables of contracts §8.7, `MysqlConnection` and the range `RRS-S5xxx`. The ADR index's 'Notes since acceptance' table records every language and path fix. With the owner decisions of 2026-10-11 it lands contracts v1.2 and ADR-0038: §15 accepted, not provisional, and a milestone mark such as "(M4)" on every registered name that isn't built yet, so `check-names` passes the day M1-57 lands.
+- **Files:** `docs/architecture/contracts.md` (v1.2, with its 'Changes in v1.1' and v1.2 lists); `docs/adr/0038-naming-and-schema-enforcement.md`; `docs/architecture/layout/*.md` (the 'New names' sections removed, a pointer on each superseded name, 'Contracts follow-ups' where a point is still open); `docs/architecture/flows/*.md` (the same); `docs/adr/0034-login-codes-loopback-host-owner-token.md`, `docs/adr/0035-mysql-long-term-archive.md` and `docs/adr/0037-borrowed-decoders-and-parser-fuzzing.md`; the status lines of `docs/adr/0001-process-layout.md`, `0002-durability-worker-event-logs.md`, `0003-storage-sqlite-vault-blobs.md`, `0006-ui-transport-http-only.md`, `0007-local-api-security.md` and `0029-strict-safetensors-contract.md`; `docs/adr/README.md` (index rows, the 'Notes since acceptance' table); `docs/architecture/README.md`; `docs/plan/implementation-plan.md` (sections 10 and 11) and `docs/plan/backlog.json`
+- **Test:** Docs-only PR, exempt from the test rule (plan 3.3). Review checklist in the PR: no layout or flow doc keeps a 'New names' section, and every name they use is in contracts.md or in contracts §15.11 as rejected with its replacement; every row of plan section 10 has one answer in contracts §16; the archive names of ADR-0035 are all in contracts; every superseded ADR decision points to the ADR that replaced it; no doc names a `settings` table, a managed vLLM engine in the prototype or `votes.jsonl`; every registered name that isn't built yet carries its milestone mark, "(M1)" included.
+- **Docs:** [Contracts](../architecture/contracts.md), [ADR-0038 names and schema enforcement](../adr/0038-naming-and-schema-enforcement.md), [Contracts §16, plan §10 answers](../architecture/contracts.md), [Layout: Rust control plane §16 contracts follow-ups](../architecture/layout/rust-control-plane.md), [Layout: node, gateway, proto](../architecture/layout/rust-node-gateway-proto.md), [Layout: Python](../architecture/layout/python.md), [Layout: frontend and plugins](../architecture/layout/frontend-and-plugins.md), [ADR-0034 sign-in](../adr/0034-login-codes-loopback-host-owner-token.md), [ADR-0035 long-term archive](../adr/0035-mysql-long-term-archive.md), [ADR-0037 borrowed decoders](../adr/0037-borrowed-decoders-and-parser-fuzzing.md), [ADR index, Notes since acceptance](../adr/README.md)
 
 #### M1-01a Theming and frontend-contract docs (owner decisions 20 and 21)
 Lane B · size M · type contract · depends on M1-01
 
-- **Goal:** Right after M1-01, land the frontend contracts that M1's UI and gate tasks build. Frontend language (decision 21): ADR-0036 (plain JavaScript and React with short JSDoc types, checked by `tsc --noEmit` in checkJs mode at dev time only; supersedes ADR-0023's TypeScript section and ADR-0019 decision 5 in part), contracts §12.4, the frontend layout §1.1, and 'Note since acceptance' language fixes in ADR-0004, 0005 and 0006. Theming and custom frontends (decision 20, N1 to N7): the token contract (contracts §5.6: fixed color role keys, type, density, motion, focus ring and elevation tokens, `--rr-*` CSS variables as the public surface, the full `rastai.theme/1` row, `canvasColors`, `vizColors`, `setColors` on `GraphRenderer` and every viz class, the glyph atlas font from tokens, `check-colors`, `ui.theme` `system`, `ui.density`); capability rows for `icon_sets`, `locales`, `macros` and `chat_templates` (contracts §5.5); `stability` (`preview`, `stable`, `deprecated`) on commands and event types, all `preview` until Phase 2, with the note that `buf breaking` can't see inside `arguments_json` and `result_json` and that `check-schema-diff` is planned; sessions bound to the origin that redeemed the login code, cookie requests without Origin only for GET or HEAD with `Sec-Fetch-Site` `same-origin` or `none`, cross-origin browser clients refused in v1 with the two Phase 2 routes named (ADR-0034); the client's credential option and `CommandExecutor`, satisfied by `DaemonClient` and `PluginHost`, with typed wrappers generated against it; `apps/web` holds no domain logic (contracts §2.4 rule 9); the locked security-UI tokens and the threat-model row M1-56 must carry.
+- **Goal:** Right after M1-01, land the frontend contracts that M1's UI and gate tasks build. Frontend language (decision 21): ADR-0036 (plain JavaScript and React with short JSDoc types, checked by `tsc --noEmit` in checkJs mode at dev time only; supersedes ADR-0023's TypeScript section and ADR-0019 decision 5 in part), contracts §12.4, the frontend layout §1.1, and 'Note since acceptance' language fixes in ADR-0004, 0005 and 0006. Theming and custom frontends (decision 20, N1 to N7): the token contract (contracts §5.6: fixed color role keys, typography, density, motion, focus ring and elevation tokens, `--rr-*` CSS variables as the public surface, the full `rastai.theme/1` row, `canvasColors`, `vizColors`, `setColors` on `GraphRenderer` and every viz class, the glyph atlas font from tokens, `check-colors`, `ui.theme` `system`, `ui.density`); capability rows for `icon_sets`, `locales`, `macros` and `chat_templates` (contracts §5.5); `stability` (`preview`, `stable`, `deprecated`) on commands and event types, all `preview` until Phase 2, with the note that `buf breaking` can't see inside `arguments_json` and `result_json`, which `check-schema-diff` covers from M1-58 (ADR-0038); sessions bound to the origin that redeemed the login code, cookie requests without Origin only for GET or HEAD with `Sec-Fetch-Site` `same-origin` or `none`, cross-origin browser clients refused in v1 with the two Phase 2 routes named (ADR-0034); the client's credential option and `CommandExecutor`, satisfied by `DaemonClient` and `PluginHost`, with typed wrappers generated against it; `apps/web` holds no domain logic (contracts §2.4 rule 9); the locked security-UI tokens and the threat-model row M1-56 must carry.
 - **Files:** `docs/adr/0036-frontend-plain-javascript.md`; `docs/adr/0019-in-house-webgl2-canvas.md` and `0023-owner-code-style.md` (status lines); `docs/adr/0004-schema-ownership.md`, `0005-command-layer.md` and `0006-ui-transport-http-only.md` (notes since acceptance); `docs/adr/0034-login-codes-loopback-host-owner-token.md` (origin-bound sessions, the cross-origin refusal and its two future routes); `docs/architecture/contracts.md` (§2.3, §2.4 rules 9, 11 and 12, §4.2–4.3 `stability`, §5.5, §5.6, §12.4); `docs/architecture/layout/frontend-and-plugins.md` (§1.1, §2.10, §2.11); `docs/architecture/layout/rust-control-plane.md` (§4.2a theme document, §8.3a request gate); `docs/adr/README.md`
 - **Test:** Docs-only PR, exempt from the test rule (plan 3.3). Review checklist in the PR: every code sample in the frontend docs is plain JavaScript or JSX with short JSDoc and no TypeScript syntax; every color role key, CSS variable and locked token in the frontend layout is in contracts §5.6; every manifest contribution key has a capability row with a status; ADR-0034 states the origin binding, the `Sec-Fetch-Site` rule and the refusal of cross-origin browser clients; the theming tasks of plan 3.4 each name the contract they build.
 - **Docs:** [ADR-0036 frontend language](../adr/0036-frontend-plain-javascript.md), [ADR-0034 sign-in](../adr/0034-login-codes-loopback-host-owner-token.md), [Contracts §5.5–5.6, §12.4](../architecture/contracts.md), [Layout: frontend and plugins §1.1, §2.10, §2.11](../architecture/layout/frontend-and-plugins.md), [Layout: Rust control plane §4.2a, §8.3a](../architecture/layout/rust-control-plane.md)
@@ -607,9 +687,9 @@ Lane B · size M · type contract · depends on M1-01
 #### M1-02 Spec v5.4: the §27 register and ADR-0033
 Lane B · size M · type docs · depends on M1-01
 
-- **Goal:** Write spec v5.4 (owner decisions 1, 2, 5, 7, 17–19 and 21). The §27 register adds, each behind one wrapper file (contracts §2.5): hyper, hyper-util, tokio-rustls, webpki-roots and tower (foundation: HTTP); pyo3, wasm-bindgen and wasm-bindgen-cli (foundation: bindings); protobuf-es and the Python protobuf runtime (compatibility: protobuf row); keyring (security: OS keychain); pyarrow (compatibility: Parquet); `miniz_oxide` (compatibility: zip, behind `zip/inflate.rs`) and torchvision's `decode_image` under the PyTorch row (behind `rastai_data/image_decode.py`); onnx and onnxscript under the torch.onnx row; libc (foundation, one file); the MySQL clients `mysql_async` (feature `default-rustls-ring`) and PyMySQL, with MySQL and MariaDB never bundled; the OS tools setsid, kill, unshare, df, nvidia-smi and rocm-smi; dev tooling pytest, ruff, vitest, `@vitest/browser`, vite, pnpm, prettier, axe-core, Playwright and the Tauri CLI; the `typescript` package as a dev-time checker only (the "React + TypeScript" row splits into React, a foundation, and `typescript`, dev tooling); the Tauri updater plugin as its own row. It also brings §16 (Connect), §19 (settings in files), §20 (dataclasses), §25 (the in-house JSON-lines logger), §29 (first-party plugins in `plugins/`, the new crates and packages) and §31 step 10 (M11) in line with the docs. ADR-0033 allows `unsafe` in exactly one file, `crates/rastai-store/src/disk_space.rs` (one `statvfs` call), which the store and the node both call.
+- **Goal:** Write spec v5.4 (owner decisions 1, 2, 5, 7, 17–19 and 21). The §27 register adds, each behind one wrapper file (contracts §2.5): hyper, hyper-util, tokio-rustls, webpki-roots and tower (foundation: HTTP); pyo3, wasm-bindgen and wasm-bindgen-cli (foundation: bindings); protobuf-es and the Python protobuf runtime (compatibility: protobuf row); keyring (security: OS keychain); pyarrow (compatibility: Parquet); `miniz_oxide` (compatibility: zip, behind `zip/inflate.rs`) and torchvision's `decode_image` under the PyTorch row (behind `rastai_data/image_decode.py`); onnx and onnxscript under the torch.onnx row; libc (foundation, one file); the MySQL clients `mysql_async` (feature `default-rustls-ring`) and PyMySQL, with MySQL and MariaDB never bundled; the OS tools setsid, kill, unshare, df, nvidia-smi and rocm-smi; dev tooling pytest, ruff, vitest, `@vitest/browser`, vite, pnpm, prettier, axe-core, Playwright and the Tauri CLI; the `typescript` package as a dev-time checker only (the "React + TypeScript" row splits into React, a foundation, and `typescript`, dev tooling); the Tauri updater plugin as its own row (foundation; it ships with the desktop shell). Owner approvals of 2026-10-11 add or confirm: `@vitest/browser` and axe-core (dev and test tooling), the Tauri CLI (dev tooling), the Tauri updater plugin (foundation), MinIO (a test-only CI service for M11-E07, never bundled or shipped), and a named license entry for pillow (MIT-CMU/HPND; a transitive package of torchvision) in `deps/allowlist-python.json`, written when M1-04 creates that file. It also brings §16 (Connect), §19 (settings in files), §20 (dataclasses), §25 (the in-house JSON-lines logger), §29 (first-party plugins in `plugins/`, the new crates and packages) and §31 step 10 (M11) in line with the docs. ADR-0033 allows `unsafe` in exactly one file, `crates/rastai-store/src/disk_space.rs` (one `statvfs` call), which the store and the node both call.
 - **Files:** `docs/spec/rastai_spec_v5.md` (§16, §19, §20, §25, §27, §29, §31 and the status line); `docs/adr/0033-unsafe-statvfs.md`; `docs/adr/README.md`
-- **Test:** Docs-only PR, exempt from the test rule (plan 3.3). From M1-05 on, `check-deps` fails any build that uses a crate or package missing from these rows, and `deny.toml` `wrappers` with `check-imports` fail any import outside its wrapper file.
+- **Test:** Docs-only PR, exempt from the test rule (plan 3.3). From M1-05 on, `check-deps` fails any build that uses a crate or package missing from these rows, and `deny.toml` `wrappers` with `check-imports` fail any import outside its wrapper file. Review checklist: §27 has rows for `@vitest/browser`, axe-core, the Tauri CLI, the Tauri updater plugin and MinIO (test-only, never shipped), each with its category, and records the pillow license entry.
 - **Docs:** [Spec §27](../spec/rastai_spec_v5.md), [Contracts §2.5](../architecture/contracts.md), [ADR-0012 build-in-house policy](../adr/0012-build-in-house-policy.md), [ADR-0033 unsafe statvfs](../adr/0033-unsafe-statvfs.md), [ADR-0037 borrowed decoders](../adr/0037-borrowed-decoders-and-parser-fuzzing.md)
 
 #### M1-03 Rust workspace root and `just check`
@@ -623,7 +703,7 @@ Lane A · size M · type ci · depends on M1-01
 #### M1-04 Python and JavaScript workspaces and the cpu environment
 Lane B · size M · type ci · depends on M1-02, M1-03, M1-01a
 
-- **Goal:** The uv workspace root and the pnpm workspace root, so Python and JavaScript packages drop in the same way crates do. The JavaScript side is plain ES modules with JSX (ADR-0036): `jsconfig.base.json` with `checkJs` on, which each package's `jsconfig.json` extends; `just check-js` runs `tsc --noEmit` over it (the `typescript` package is a dev-time checker only and never ships); `.prettierrc.json` for prettier; ruff settings in `python/pyproject.toml` (owner decision 7). There is no `tsconfig` anywhere. Includes the `cpu` environment lock (torch CPU, grpcio, protobuf, tokenizers; pytest and ruff in the dev group) and the `just env-cpu` recipe, which runs the same `uv sync --frozen` command the node runs from M2-16, into `.dev/envs/cpu`. Until then, the embedded node uses that folder.
+- **Goal:** The uv workspace root and the pnpm workspace root, so Python and JavaScript packages drop in the same way crates do. The JavaScript side is plain ES modules with JSX (ADR-0036): `jsconfig.base.json` with `checkJs` on, which each package's `jsconfig.json` extends; `just check-js` runs `tsc --noEmit` over it (the `typescript` package is a dev-time checker only and never ships); `.prettierrc.json` for prettier; ruff settings in `python/pyproject.toml` (owner decision 7). There is no `tsconfig` anywhere. Includes the `cpu` environment lock (torch CPU, grpcio, protobuf, tokenizers; pytest and ruff in the dev group) and the `just env-cpu` recipe, which runs the same `uv sync --frozen` command the node runs from M2-16, into `.dev/envs/cpu`. Until then, the embedded node uses that folder. `deps/allowlist-python.json` starts with the named pillow license entry (MIT-CMU/HPND) that M1-02 records.
 - **Files:** `python/pyproject.toml, python/CLAUDE.md, python/conftest.py`; `python/envs/cpu/{pyproject.toml, uv.lock}, python/envs/README.md`; `deps/allowlist-python.json, deps/allowlist-npm.json`; `package.json, pnpm-workspace.yaml, pnpm-lock.yaml, jsconfig.base.json, .prettierrc.json`; `justfile`: test-python, test-js, check-js, env-cpu, wired into check
 - **Test:** A smoke pytest and a smoke vitest run inside `just check`; a scratch `.js` file with a JSDoc `@param {number}` called with a string fails `just check-js`, and ruff and prettier fail a badly formatted scratch file (both shown in the PR description); `just env-cpu` succeeds offline from the uv cache after one online run.
 - **Docs:** [Layout: Python §1.2, §11](../architecture/layout/python.md), [Layout: frontend §1.1 (JavaScript conventions)](../architecture/layout/frontend-and-plugins.md), [ADR-0036 frontend language](../adr/0036-frontend-plain-javascript.md), [ADR-0009 uv environments](../adr/0009-python-environments-uv.md)
@@ -647,7 +727,7 @@ Lane B · size M · type ci · depends on M1-05
 #### M1-07 GitHub sync tool: labels, milestones and issues from backlog.json
 Lane B · size S · type ci · depends on M1-04
 
-- **Goal:** `tools/github/sync_backlog.py` (stdlib plus the `gh` CLI) creates or updates the labels of plan 8.3, the milestones M1–M11 with their exit gates as descriptions, and one issue per backlog item. It is idempotent by the id prefix in the issue title, moves an issue whose item changed milestone (M2-11 is in M10), rewrites repo-relative links (`](docs/...`) to blob URLs on main, and never deletes. The same PR adds the two PR-template lines of plan 8.5.
+- **Goal:** `tools/github/sync_backlog.py` (stdlib plus the `gh` CLI) creates or updates the labels of plan 8.3, the milestones M1–M11 with their exit gates as descriptions, and one issue per backlog item. It is idempotent by the id prefix in the issue title, moves an issue whose item changed milestone (M2-11 is in M10), rewrites repo-relative links (`](docs/...`) to blob URLs on main, and never deletes or closes anything (issues close by verification, plan 3.6). The same PR adds the four PR-template lines of plan 8.5 and changes the template's issue hint from `Closes #123` to `Refs #123`.
 - **Files:** `tools/github/sync_backlog.py`; `tools/github/tests/test_sync_backlog.py`; `.github/pull_request_template.md`
 - **Test:** `--dry-run` on docs/plan/backlog.json prints the expected create and update plan (snapshot test); a second run against a fake `gh` that reports every item as existing plans no changes; an item whose milestone changed plans one milestone update.
 - **Docs:** [Backlog](../plan/backlog.json)
@@ -663,7 +743,7 @@ Lane A · size L · type contract · depends on M1-01, M1-03, M1-04
 #### M1-09 Proto `rastai.commands.v1` and `rastai.events.v1`, with `stability` (contract)
 Lane A · size M + 0.25 · type contract · depends on M1-08
 
-- **Goal:** The command and event wire: CommandService (Execute, ListCommands) with the v1.1 fields (`CommandDescriptor.arguments_schema_json`, `result_schema_json`, `stability`; `ExecuteRequest.acting_plugin_id`), EventService.Subscribe and ListEventTypes (`EventTypeDescriptor` with `stability`), EventRecord (one events.log frame body) and the payloads for the M1 event types (job, run, checkpoint, artifact, node, plugin, document, command, diagnostic, `run.tags_changed`, `pin.changed`). The `Stability` enum (`preview`, `stable`, `deprecated`; owner decision N3) is on every command and event type, and every one is `preview` until Phase 2. `buf breaking` guards the messages but can't see inside `arguments_json` and `result_json`; the `check-schema-diff` check over `schemas/commands/` comes with the stable commands API in Phase 2 (contracts §15.8). Later payloads are added by each milestone's contract PR.
+- **Goal:** The command and event wire: CommandService (Execute, ListCommands) with the v1.1 fields (`CommandDescriptor.arguments_schema_json`, `result_schema_json`, `stability`; `ExecuteRequest.acting_plugin_id`), EventService.Subscribe and ListEventTypes (`EventTypeDescriptor` with `stability`), EventRecord (one events.log frame body) and the payloads for the M1 event types (job, run, checkpoint, artifact, node, plugin, document, command, diagnostic, `run.tags_changed`, `pin.changed`). The `Stability` enum (`preview`, `stable`, `deprecated`; owner decision N3) is on every command and event type, and every one is `preview` until Phase 2. `buf breaking` guards the messages but can't see inside `arguments_json` and `result_json`; `check-schema-diff` over `schemas/commands/` and `schemas/events/` covers them from M1-58 (ADR-0038). Later payloads are added by each milestone's contract PR.
 - **Files:** `proto/rastai/commands/v1/command_service.proto`; `proto/rastai/events/v1/{event_service, event_record, payloads}.proto`; generated code in the three outputs; `fixtures/proto-golden/{commands, events}/`
 - **Test:** Goldens round-trip in three languages, including a `CommandDescriptor` and an `EventTypeDescriptor` with `stability` set; the `buf breaking` check runs from this PR on.
 - **Docs:** [Contracts §4.2–4.3, §7](../architecture/contracts.md), [Layout: node, gateway, proto §3.1](../architecture/layout/rust-node-gateway-proto.md), [Layout: Rust control plane §11](../architecture/layout/rust-control-plane.md), [Layout: frontend §2.11](../architecture/layout/frontend-and-plugins.md)
@@ -1044,6 +1124,22 @@ Lane B · size M · type docs · depends on M1-26, M1-29
 - **Test:** Docs-only PR, exempt from the test rule (plan 3.3). Review checklist in the PR: every boundary row names its attacker, its mitigations and a test or the epic that adds one; every test the document calls existing is green on main; every in-house parser that reads bytes from across a boundary has a fuzz target or a row saying which epic adds it; the theme and cross-origin rows exist.
 - **Docs:** [Spec §24](../spec/rastai_spec_v5.md), [Spec §28 risk 10](../spec/rastai_spec_v5.md), [Flows: platform §4](../architecture/flows/platform.md), [Layout: node, gateway, proto §4](../architecture/layout/rust-node-gateway-proto.md), [Contracts §5.6, §8.8, §12.5](../architecture/contracts.md), [ADR-0034 sign-in](../adr/0034-login-codes-loopback-host-owner-token.md), [ADR-0007 local API security](../adr/0007-local-api-security.md)
 
+#### M1-57 check-names: generated names registry and contracts comparison
+Lane B · size M · type ci · depends on M1-05, M1-13, M1-16, M1-21, M1-23
+
+- **Goal:** Make contracts.md an enforced registry, not a convention (ADR-0038 decision 2, owner decision of 2026-10-11). A third codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code, one sorted list per kind: command ids (`rastai-core` `COMMANDS` and the `commands[]` of each first-party manifest) and CLI verbs (`cli_words()` of each id, plus `CLI_MODE_WORDS` and `ALIASES` from `rastai-core`'s naming module), event types (the core event-type table `rastai-core/src/event_types.rs`, `EVENT_TYPES`, which this task adds with the M1 event types of M1-09), error codes (`catalog/`), `rastai.db` and `vault.db` tables and columns (the store's migration `.sql` files, read by `sql_names.rs`), settings keys (the `rastai.settings/1` type description, flattened to `<section>.<key>`), document schema ids (`describe_all_types()`), and crate, package and module names (the workspace manifests). `tools/checks/check-names` reads contracts §15 and the §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables with a plain Markdown table reader and compares both ways. A name in code but not in contracts fails as unregistered. A name in contracts but not in code passes only with its milestone mark, such as "(M4)"; without one it fails as stale. Each failure prints the file that holds the name. `just codegen` runs the names step last; `just check` and the `checks` job run `check-names`.
+- **Files:** `tools/codegen/src/bin/rastai_names_codegen.rs`; `tools/codegen/src/{names_registry, sql_names}.rs`; `tools/codegen/tests/names_registry.rs`; `crates/rastai-core/src/event_types.rs`; `schemas/names.json`; `tools/checks/check-names`; `tools/checks/tests/` (check-names fixtures); `crates/rastai-store/tests/index_migrations.rs` (the `PRAGMA table_info` comparison); justfile: the names step in `codegen`, `check-names`, wired into `check`
+- **Test:** The check-names fixture suite has one case per rule: a name only in code fails as unregistered; a name only in contracts fails as stale; the same name marked "(M4)" passes; a name in both passes. `names_registry.rs`: a sample tree gives the expected sorted `names.json`, and a renamed command or a dropped column shows in the diff. `index_migrations.rs`: the tables and columns `sql_names.rs` reads equal `PRAGMA table_info` after the real migrations. `check-generated` fails a hand-edited `names.json`. On this PR, `just check` runs `check-names` green against contracts v1.2.
+- **Docs:** [ADR-0038 names and schema enforcement](../adr/0038-naming-and-schema-enforcement.md), [Layout: Rust control plane §2.8, §4.9](../architecture/layout/rust-control-plane.md), [Contracts §2.1–2.3, §5.2, §6–§8, §10, §11, §12.6, §15](../architecture/contracts.md), [CONTRIBUTING.md](../../CONTRIBUTING.md)
+
+#### M1-58 check-schema-diff: command and event schema diff against base
+Lane A · size M · type ci · depends on M1-05, M1-16, M1-22, M1-57
+
+- **Goal:** Cover what `buf breaking` can't see inside `arguments_json` and `result_json`, from M1 instead of Phase 2 (ADR-0038 decision 1). `rastai-formats-codegen` gains `schemas/events/<event_type>.json` from the core event-type table (M1-57), with the payload's fields read from the `buf build` descriptor set by `descriptor_set.rs`; every command and event schema file carries `x-rastai-stability` and `x-rastai-since-version`. `tools/checks/check-schema-diff` compares `schemas/commands/` and `schemas/events/` with the same folders at the merge base of `RASTAI_BASE_REF` (default `origin/main`; CI passes the PR base), read with `git show`, so it needs no network; the `checks` job checks out with `fetch-depth: 0` (or fetches the base ref) so the merge base exists, and the check fails with a clear message when it doesn't. The rules: any added, changed or removed schema file needs a contracts.md change in the same PR whose changed lines name that command id or event type. For a `stable` item, and a `deprecated` one until it is retired, a removed or renamed field, a changed type, a newly required field, a removed file or a change away from `stable` fails, and so does a changed command `kind` or event class or a renamed command or event type. The same changes to a `preview` item pass with the contracts update. `just check` and the `checks` job run it.
+- **Files:** `tools/checks/check-schema-diff`; `tools/checks/tests/` (base and head schema fixture trees); `tools/codegen/src/{json_schema_files, descriptor_set}.rs`; `schemas/events/`; regenerated `schemas/commands/` (with `x-rastai-stability`); justfile: `check-schema-diff`, wired into `check`
+- **Test:** The check-schema-diff fixture suite has one case per rule: a schema change without a contracts diff fails, and passes once a contracts line names the command; a removed field, a changed type and a newly required field on a `stable` command each fail; the same three on a `preview` command pass with the contracts update; a `stable` event that loses a payload field fails; a change from `stable` to `preview` fails; a `stable` command whose `kind` changes fails. `schemas/events/` holds one file per M1 event type and `check-generated` is green. On this PR, `just check` runs `check-schema-diff` green.
+- **Docs:** [ADR-0038 names and schema enforcement](../adr/0038-naming-and-schema-enforcement.md), [Layout: Rust control plane §2.8, §4.9, §11.1](../architecture/layout/rust-control-plane.md), [Contracts §4.2–4.3, §6, §7.3, §12.6](../architecture/contracts.md), [ADR-0004 schema ownership](../adr/0004-schema-ownership.md)
+
 
 ---
 
@@ -1087,28 +1183,28 @@ The ModelSpec compiler becomes the Inspectable runtime for real models (§17, §
 
 | ID | Task | Lane | Size | Depends on | Start–end (lane days) |
 |---|---|---|---|---|---|
-| M2-01 | ModelSpec ops for decoder families (contract) | B | M | M1-18 | 40.25–41.25 |
-| M2-02 | rastai_models: observation points, forward context, kernels and traits | B | M | M2-01, M1-35 | 43.25–44.25 |
-| M2-03 | rastai_models: decoder blocks (spike port) | B | L | M2-02 | 44.25–46.25 |
-| M2-04 | rastai_models: KV caches, including the sliding ring buffer | B | M | M2-03 | 46.25–47.25 |
-| M2-05 | rastai_models: decoder graphs, strict loading and sharded weights | B | L | M2-03 | 47.25–49.25 |
-| M2-06 | Family base class and the Gemma 3 family | B | M | M2-05, M2-04 | 49.25–50.25 |
-| M2-07 | The Llama family | B | M | M2-06 | 50.25–51.25 |
-| M2-08 | The parity harness | B | M | M2-06 | 51.25–52.25 |
-| M2-09 | Gemma 3 and Llama parity in CI (fp32 and bf16) | B | M | M2-08, M2-07 | 52.25–53.25 |
-| M2-10 | Nightly GPU runner and real-weight parity on the 5080 and 3090 | B | M | M2-09, M2-15 | 53.25–54.25 |
-| M2-12 | Step-2 contracts: environments, hardware, secrets and model commands (contract) | A | M | M1-22, M1-10 | 40.75–41.75 |
-| M2-13 | rastai-formats: the safetensors reader and planner, and the model hash | B | M | M1-14, M1-34 | 38.75–39.75 |
-| M2-14 | rastai-transport: the HTTPS client | A | M | M1-41, M1-02 | 41.75–42.75 |
-| M2-15 | Locked environments for every backend | A | M | M1-04 | 42.75–43.75 |
-| M2-16 | rastai-node: uv environments | A | L | M2-12, M2-15 | 44.75–46.75 |
-| M2-17 | rastai-node: Hugging Face downloads | A | L | M2-14, M2-12 | 46.75–48.75 |
-| M2-18 | rastai-server: secrets, HF sign-in and the license check | A | M | M2-12 | 43.75–44.75 |
-| M2-19 | rastai-server: system and model handlers | A | L | M2-16, M2-17, M2-13, M2-18 | 48.75–50.75 |
-| M2-20 | `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint | A | L | M2-16, M2-05, M2-12, M2-22 | 50.75–52.75 |
-| M2-21 | Home: the First Run checklist | A | L + 0.5 | M2-19, M2-20, M2-18, M1-54 | 52.75–55.25 |
-| M2-22 | rastai-formats: the zip reader, with DEFLATE through miniz_oxide | B | S | M1-14 | 39.75–40.25 |
-| M2-23 | Re-plan with M1's measured velocity | B | S | M1-48, M1-49 | 38.25–38.75 |
+| M2-01 | ModelSpec ops for decoder families (contract) | B | M | M1-18 | 41.25–42.25 |
+| M2-02 | rastai_models: observation points, forward context, kernels and traits | B | M | M2-01, M1-35 | 44.25–45.25 |
+| M2-03 | rastai_models: decoder blocks (spike port) | B | L | M2-02 | 45.25–47.25 |
+| M2-04 | rastai_models: KV caches, including the sliding ring buffer | B | M | M2-03 | 47.25–48.25 |
+| M2-05 | rastai_models: decoder graphs, strict loading and sharded weights | B | L | M2-03 | 48.25–50.25 |
+| M2-06 | Family base class and the Gemma 3 family | B | M | M2-05, M2-04 | 50.25–51.25 |
+| M2-07 | The Llama family | B | M | M2-06 | 51.25–52.25 |
+| M2-08 | The parity harness | B | M | M2-06 | 52.25–53.25 |
+| M2-09 | Gemma 3 and Llama parity in CI (fp32 and bf16) | B | M | M2-08, M2-07 | 53.25–54.25 |
+| M2-10 | Nightly GPU runner and real-weight parity on the 5080 and 3090 | B | M | M2-09, M2-15 | 54.25–55.25 |
+| M2-12 | Step-2 contracts: environments, hardware, secrets and model commands (contract) | A | M | M1-22, M1-10 | 41.75–42.75 |
+| M2-13 | rastai-formats: the safetensors reader and planner, and the model hash | B | M | M1-14, M1-34 | 39.75–40.75 |
+| M2-14 | rastai-transport: the HTTPS client | A | M | M1-41, M1-02 | 42.75–43.75 |
+| M2-15 | Locked environments for every backend | A | M | M1-04 | 43.75–44.75 |
+| M2-16 | rastai-node: uv environments | A | L | M2-12, M2-15 | 45.75–47.75 |
+| M2-17 | rastai-node: Hugging Face downloads | A | L | M2-14, M2-12 | 47.75–49.75 |
+| M2-18 | rastai-server: secrets, HF sign-in and the license check | A | M | M2-12 | 44.75–45.75 |
+| M2-19 | rastai-server: system and model handlers | A | L | M2-16, M2-17, M2-13, M2-18 | 49.75–51.75 |
+| M2-20 | `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint | A | L | M2-16, M2-05, M2-12, M2-22 | 51.75–53.75 |
+| M2-21 | Home: the First Run checklist | A | L + 0.5 | M2-19, M2-20, M2-18, M1-54 | 53.75–56.25 |
+| M2-22 | rastai-formats: the zip reader, with DEFLATE through miniz_oxide | B | S | M1-14 | 40.75–41.25 |
+| M2-23 | Re-plan with M1's measured velocity | B | S | M1-48, M1-49 | 39.25–39.75 |
 
 M2-11 (AMD parity on a discrete RDNA3+ card) moved to M10 with its id kept; its row is in 6.8 and its details stay in 5.8. M2 tasks also wait for M1's exit gate (5.2), which the simulation applies.
 
@@ -1207,11 +1303,11 @@ Lane-days continue from M1's count, so M2 starts where each lane finishes its M1
 
 | Lane week | Lane A | Lane B |
 |---|---|---|
-| 8 (days 35–40) | M1 tasks (4.7) | M1-48 and M1-49, then M2-23, M2-13, M2-22 |
-| 9 (days 40–45) | M2-12, M2-14, M2-15, M2-18, M2-16 | M2-01, M1-55, M1-56, M2-02, M2-03 |
-| 10 (days 45–50) | M2-17, M2-19 | M2-04, M2-05, M2-06 |
-| 11 (days 50–55) | M2-20, M2-21 | M2-07, M2-08, M2-09, M2-10 |
-| 12 (days 55–60) | M2-21 ends at 55.25; free for M3 | free for M3 |
+| 8 (days 35–40) | M1 tasks (4.7) | M1-48 and M1-49, then M2-23, M2-13 |
+| 9 (days 40–45) | M2-12, M2-14, M2-15, M2-18 | M2-22, M2-01, M1-55, M1-56, M2-02 |
+| 10 (days 45–50) | M2-16, M2-17, M2-19 | M2-03, M2-04, M2-05 |
+| 11 (days 50–55) | M2-20, M2-21 | M2-06, M2-07, M2-08, M2-09, M2-10 |
+| 12 (days 55–60) | M2-21 ends at 56.25; free for M3 | M2-10 ends at 55.25; free for M3 |
 
 ### 5.8 Task details
 
@@ -1306,9 +1402,9 @@ Lane B · size M · type test · depends on M2-10, M2-16, M2-20 · needs:gpu, ne
 #### M2-12 Step-2 contracts: environments, hardware, secrets and model commands (contract)
 Lane A · size M · type contract · depends on M1-22, M1-10 · claims L0
 
-- **Goal:** Everything M2 code names, registered as honest L0 stubs: `environments.proto` (EnsureEnvironment with plugin fields, EnvironmentProgress, EnvironmentInfo), self-test fields on HardwareProfile, NodeHubService.GetSecret; commands system.hardware, system.env.list, system.env.install, system.doctor, system.bundle, secret.set, secret.delete, secret.list, hf.login, hf.license.check, model.list, model.inspect and model.download with ModelDownloadPlan (with `files` and `headers_only`) and EnvironmentInstallPlan; download event payloads.
+- **Goal:** Everything M2 code names, registered as honest L0 stubs: `environments.proto` (EnsureEnvironment with plugin fields, EnvironmentProgress, EnvironmentInfo), self-test fields on HardwareProfile, NodeHubService.GetSecret with the fields M2 uses (`GetSecretRequest` `purpose`, `job_id`; `GetSecretResponse` `value`, `expires_unix_ms`, `Diagnostic`; plan §12 question 15, contracts §14 row 19; M5-E07 adds the `mysql:<connection_name>` purpose and closes the gap); commands system.hardware, system.env.list, system.env.install, system.doctor, system.bundle, secret.set, secret.delete, secret.list, hf.login, hf.license.check, model.list, model.inspect and model.download with ModelDownloadPlan (with `files` and `headers_only`) and EnvironmentInstallPlan; download event payloads.
 - **Files:** `proto/rastai/node/v1/environments.proto, node_service.proto, node_hub_service.proto`; `proto/rastai/common/v1/hardware.proto`; `crates/rastai-formats/src/commands/{system, secret, hf, model}.rs, src/documents/plans.rs`; `crates/rastai-core/src/commands/table.rs` (rows); goldens and regenerated types
-- **Test:** Goldens round-trip; command_table and commands_described pass; the L0 floor covers every new row.
+- **Test:** Goldens round-trip, including a GetSecret golden with those fields; command_table and commands_described pass; the L0 floor covers every new row.
 - **Docs:** [Layout: node, gateway, proto §3.6](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §1](../architecture/flows/platform.md), [Contracts §6.4](../architecture/contracts.md)
 
 #### M2-13 rastai-formats: the safetensors reader and planner, and the model hash
@@ -1558,7 +1654,7 @@ M5-E15 builds the dispatcher behind the manifest field `contributes.event_handle
 | ID | Epic | Days | Depends on | Claims | Exit test |
 |---|---|---|---|---|---|
 | M9-E01 | Remote contracts (90-day, contract) | 2 | M2-12 | L0 | Goldens; the L0 floor covers the rows. |
-| M9-E02 | SSH pairing and the standalone node (90-day) | 5 | M9-E01, M2-16 | L1 | ssh_loopback.rs against an sshd container in CI; a changed host key is refused; a version mismatch goes to incompatible; `node-over-ssh` reruns `e2e-surfaces`, `test-crash` rows 1–3 (row 14 once M9-E03 lands) and `loop-cpu` (once M5-E06 lands) with `RASTAI_TEST_NODE=ssh`, green; the `handshake` fuzz target runs nightly; every daemon↔node row of the threat model (M1-56) names a passing test. |
+| M9-E02 | SSH pairing and the standalone node (90-day) | 5 | M9-E01, M2-16 | L1 | ssh_loopback.rs against an sshd container in CI; a changed host key is refused; a version mismatch goes to incompatible; a green nightly `node-over-ssh` run (`nightly.yml`, never a required PR job) reruns `e2e-surfaces`, `test-crash` rows 1–3 (row 14 once M9-E03 lands) and `loop-cpu` (once M5-E06 lands) with `RASTAI_TEST_NODE=ssh`, green; the `handshake` fuzz target runs nightly; every daemon↔node row of the threat model (M1-56) names a passing test. |
 | M9-E03 | Remote jobs survive network drops (90-day) | 4 | M9-E02 | L1 | tests/e2e/remote_network_drop.rs: kill the SSH child mid-run; the daemon reconnects and every sequence arrives once. |
 | M9-E04 | Resumable transfers and remote artifacts | 4 | M9-E02 | L1 | transfer_resume.rs; an offset mismatch → RRS-N3002; a hash mismatch deletes the partial. |
 | M9-E05 | Headless serve and the remote UI | 4 | M9-E03 | L1 | The UI works over a tunnel on a different local port; first remote run in under 15 minutes from pairing (§6), timed. |
@@ -1614,7 +1710,7 @@ Not in the prototype; listed so nobody builds them early or forgets them.
 | `token.pair` for non-browser clients | Phase 2 | owner decision 20 |
 | Alternative UIs hosted by the daemon on its own origin (same-origin sessions) | Phase 2 | owner decision 20, ADR-0034 |
 | An origin allowlist with pairing, and CORS only on demand | Phase 2 | owner decision 20, ADR-0034 |
-| The stable commands API 1.0 subset, with `check-schema-diff` over `schemas/commands/` in CI | Phase 2 | owner decision 20 |
+| The stable commands API 1.0 subset: the first commands and event types marked `stable` (`check-schema-diff` has run since M1-58 and refuses breaking changes to them from that day) | Phase 2 | owner decision 20, ADR-0038 |
 | Built packages published to npm; `PacketStore` and token decoding moved into a shared package | Phase 2 | owner decision 20 |
 | A reference terminal UI run in CI | Phase 2 | owner decision 20 |
 | Locales (`ui.locale@1`) | Phase 2 | contracts §5.5 |
@@ -1793,12 +1889,16 @@ The first contexts become available with M1-06; until then, protection without r
 
 ### 8.5 The PR template
 
-The existing checklist covers rules 1–8 of 3.3. M1-07 adds two lines:
+The existing checklist covers rules 1–8 of 3.3. M1-07 adds four lines and changes the template's issue hint from `Closes #123` to `Refs #123`:
 
 ```
-- [ ] Links its backlog issue (Closes #n) and stays within one task
+- [ ] Links its backlog issue (Refs #n, never Closes) and stays within one task
 - [ ] Level claimed: none / L0 / L1 / L2 for <feature>, proven by <tests> (and the row in docs/plan section 7.3 is updated)
+- [ ] Every new name is in contracts.md (in this PR, or in the contract PR that landed first), and schema changes carry their contracts update (check-names, check-schema-diff)
+- [ ] A reviewer agent that is not the author reviewed it (naming and schema, style, tests); every finding is fixed or answered
 ```
+
+After the merge, the issue stays open until the verification comment of 3.6 closes it.
 
 ### 8.6 DCO
 
@@ -1812,7 +1912,7 @@ Each job is one `just` recipe; the workflow files stay thin (contracts §1).
 
 | Job | Workflow | Runs on | Trigger | Added by | Required on `main` |
 |---|---|---|---|---|---|
-| `checks` (fmt, clippy, cargo-deny, `check-*` incl. `check-colors` and `check-no-typescript`, `check-js`, ruff, prettier, `proto-check`, `codegen-check`) | `ci.yml` | Linux | PR, push | M1-06; grows in M1-08, M1-12 | yes |
+| `checks` (fmt, clippy, cargo-deny, `check-*` incl. `check-colors`, `check-no-typescript`, `check-names` and `check-schema-diff`, `check-js`, ruff, prettier, `proto-check`, `codegen-check`) | `ci.yml` | Linux | PR, push | M1-06; grows in M1-08, M1-12, M1-57, M1-58 | yes |
 | `dco` | `ci.yml` | Linux | PR | M1-06 | yes |
 | `test-rust-linux`, `test-rust-macos`, `test-rust-windows` | `ci.yml` | three OS runners, CPU | PR, push | M1-06 | yes |
 | `test-python`, `test-js` | `ci.yml` | Linux | PR, push | M1-06 | yes |
@@ -1851,7 +1951,9 @@ The owner's box (5080, 3090, later the AMD card) runs the GPU jobs (§29). Owner
 
 - `backlog.json` is a JSON array; each item has `id`, `title`, `milestone`, `labels`, `depends_on` and a Markdown `body` (goal, files, acceptance test, dependencies, references).
 - M1-07's `tools/github/sync_backlog.py` creates or updates labels, milestones (M1–M11) and issues from it, matching issues by the id at the start of the title. It rewrites repo-relative links to blob URLs and never deletes. Ids never change; `github-issues.json` maps each id to its issue number.
+- **M1-57 and M1-58 are not yet on GitHub.** `github-issues.json` maps the 161 issues that existed before the 2026-10-11 decisions; these two tasks have no issue until the owner approves creating them. The M1-07 sync (or two issues made by hand) then adds their `M1-57` and `M1-58` entries (`number`, `url`). Until then, the verification of 3.6 for them is posted on their PRs.
 - When a milestone starts, its epics are cut into task items in `backlog.json` (same shape as M1 and M2) in a docs PR, and synced.
+- Every item's body ends with "Done when": the PR rules of 3.3 for a task, the tasks and exit test for an epic, and for both the verification of 3.6. Issues are closed only by that verification, never by a merge or by the sync tool.
 
 ---
 
@@ -1859,12 +1961,14 @@ The owner's box (5080, 3090, later the AMD card) runs the GPU jobs (§29). Owner
 
 | Risk | Effect on the plan | Mitigation |
 |---|---|---|
-| Review throughput (§28 risk 1) | at one size-day per lane-day, the 90-day content needs about 2.2× §32's calendar (3.4) | two lanes only (owner decision 10); small PRs; agents self-test; dates move, scope and bar don't; re-plan after M1 (M2-23) and at week 13 (M6-E06) |
+| Review throughput (§28 risk 1) | at one size-day per lane-day, the 90-day content needs about 2.25× §32's calendar (3.4) | two lanes only (owner decision 10); small PRs; agents self-test; dates move, scope and bar don't; re-plan after M1 (M2-23) and at week 13 (M6-E06) |
 | M1-01 blocks every task | lane B idles for 2.5 lane-days at the start | lane B drafts M1-02 and M1-01a in its worktree while M1-01 is in review; both merge right after it |
 | JSDoc instead of TypeScript | about 8 more size-days of UI code, and type errors a stricter checker would catch | short JSDoc, `check-js` in `just check`, the shared contract tables (executor, host) as tests; the cost is in the sizes (3.4) |
 | The AMD card doesn't arrive | M2-11 and M10-E01 stay open; the prototype can't exit (§5) | the owner buys a discrete RDNA3+ card before M10 (owner decision 11); the design stays AMD-ready (same `torch.cuda` API, ROCm llama.cpp builds); the iGPU is never forced (spike 05) |
 | Family parity bugs (§28 risk 2) | M2 slips; later families slip | the spike's precision rules ported as is; tiny configs in CI catch most bugs before GPU runs |
-| Docs disagree on names | agents build two versions of one thing | M1-01 makes contracts.md the only list of names; contract PRs first after that |
+| Docs disagree on names | agents build two versions of one thing | M1-01 makes contracts.md the only list of names; contract PRs first after that; `check-names` and `check-schema-diff` in CI from M1-57 and M1-58; the agent build protocol (3.5) |
+| The names and schema checks land early | the exit gate and everything after it move by one lane-day (3.4) | accepted by the owner: most M1 names are born after lane-day 19, and a check that lands last protects nothing in M1 |
+| A reviewer agent per PR and a verification comment per issue | more tokens and wall-clock per PR; issues stay open after merge until verified | the reviewer runs while the owner reviews; the verifier works from the issue's acceptance list, so the comment is short; M2-23 measures the cost |
 | L0 stubs bloat the registry | review time on unbuilt commands | stubs are one row and one types entry each; they land per milestone, not all at once |
 | Self-hosted runner on a public repo | a fork could run code on the owner's box | schedule and manual triggers on `main` only; a separate runner user with one read-only token (8.8) |
 | Ubuntu restricts unprivileged user namespaces | plugin modules can't be put in a network namespace | the `.deb`'s AppArmor profile (M6-E05); trusted first-party modules run with a warning, only third-party modules without network permission are refused (M4-E02) |
@@ -1932,7 +2036,7 @@ The layout and flow docs were written in parallel and disagreed in places. Every
 
 ## 11. Names
 
-Since M1-01, this plan keeps no list of names: contracts.md is the only one (owner decision; contracts §15). The names the earlier versions of this section proposed are in contracts §15.8 (paths, files, fixtures, ADR files, `docs/security/threat-model.md`) and §15.9 (workflows, CI jobs, `just` recipes, pytest markers, test files, runner labels, `rastai-bot`, branch names, environment variables). Plan-only strings stay here, because contracts §15.9 points to them: the milestone titles (8.2), the labels (8.3) and the task and epic ids (sections 4 to 6). Every other name in this file comes from contracts.md; a name it lacks is added there first, in its own PR.
+Since M1-01, this plan keeps no list of names: contracts.md is the only one (owner decision; contracts §15). The names the earlier versions of this section proposed are in contracts §15.8 (paths, files, fixtures, ADR files, `docs/security/threat-model.md`) and §15.9 (workflows, CI jobs, `just` recipes, pytest markers, test files, runner labels, `rastai-bot`, branch names, environment variables). Plan-only strings stay here, because contracts §15.9 points to them: the milestone titles (8.2), the labels (8.3) and the task and epic ids (sections 4 to 6). Every other name in this file comes from contracts.md; a name it lacks is added there as 3.3 rule 3 says. From M1-57, `check-names` enforces this for code (ADR-0038); the contracts v1.1 names are accepted, not provisional (owner decision of 2026-10-11).
 
 ---
 
@@ -1942,6 +2046,8 @@ Each has the default this plan uses until the owner decides. Row numbers are sta
 
 **Decided on 2026-10-10 and removed:** row 1 (§27 additions approved, M1-02), row 2 (ADR-0033 accepted), row 3 (two lanes, re-plan after M1 with measured velocity: M2-23), row 4 (M2 closes on NVIDIA; AMD parity in M10), row 5 (the self-hosted runner with the limits of 8.8), row 6 (ruff and prettier as dev tooling now, M1-04 and M1-05), row 9 (Llama 3.2 1B real-weight parity with a read-only `HF_READ_TOKEN`), row 11 (ADR-0034 accepted, with origin-bound sessions), row 13 (no managed vLLM in the prototype; section 10 row 39).
 
+**Decided on 2026-10-11:** the §27 additions in M1-02; `node-over-ssh` stays a nightly job in `nightly.yml` (8.7, section 10 row 44), with no question left open; the contracts v1.1 names are accepted; the theme token group is `typography`; the five contract gaps of 3.2 go to their tasks.
+
 | # | Question | Default |
 |---|---|---|
 | 7 | GitHub organization and repository name (§34) | `rastai-research/rastai`; M1-07 needs it for link rewriting. The backlog issues already exist in the repository `github-issues.json` names; M1-07 rewrites links for whichever repository is final. |
@@ -1949,3 +2055,4 @@ Each has the default this plan uses until the owner decides. Row numbers are sta
 | 10 | A machine account for agent PRs, so the owner's approval counts (8.1)? | Yes, `rastai-bot` with write access; commits stay under the owner's identity and sign-off. |
 | 12 | Section 10 row 23: a daemon kill mid-stream keeps the user's message but drops the half-streamed reply. Flush partial replies to `vault.db` every N tokens instead? | No for the prototype: one transaction per reply keeps the vault simple, and Regenerate is one click. Revisit if the owner loses long answers in practice. |
 | 14 | When does M11 run? It doesn't gate M10, and its three entry epics finish inside the 90 days. | After the 90 days, on whichever lane frees first once M9 is complete, so it never delays M10's epics. M11-E07 right after M11-E01. |
+| 15 | The owner left the `GetSecretRequest` and `GetSecretResponse` fields to M5-E07 (3.2, contracts §14 row 19), but M2-12 registers `NodeHubService.GetSecret` and M2-18 serves it for `hf_download` in M2. Who writes the fields? | M2-12 writes the fields M2 uses (the proto layout's default: `purpose` and `job_id`; `value`, `expires_unix_ms` and a `Diagnostic`) in its contract PR. M5-E07 adds the `mysql:<connection_name>` purpose and the environment variable that hands a job its secret, and closes the gap item. |

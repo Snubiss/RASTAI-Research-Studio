@@ -361,7 +361,7 @@ export async function sendEdit(host, documentId, operation) {
 | Fits per target | For each connected node and GPU set: memory ≤ VRAM − `compute.vram_reserve_bytes`. "Fits now" also subtracts pinned leases; evictable leases show as "fits if chat is unloaded" |
 | Time per target | Training FLOPs ÷ (GPUs × peak FLOPS × MFU). MFU comes from past run records on that GPU, else a default marked as a guess |
 | Layer placement | For two or more GPUs, the result carries the map from `plan_layer_placement` (A8). It is computed here only; Python applies it |
-| Data warning | For from-scratch objectives, parameters greater than dataset tokens gives a layer-4 warning (its catalog code is missing from contracts 10.3; [open question 13](#open-questions)) |
+| Data warning | For from-scratch objectives, parameters greater than dataset tokens gives a layer-4 warning (`RRS-E3003`, contracts 10.3; its message and fix text are settled by M6-E02, contracts §14 row 22) |
 | Shape errors | The layer-3 diagnostics, with graph node paths |
 
 **Versions and diff**
@@ -1597,6 +1597,8 @@ flowchart TD
 
 Each has a default that this file follows until the owner decides. As in contracts §14, decided rows are removed, not renumbered.
 
+**Decided on 2026-10-11 and removed:** 13 (the layer-4 data warning is `RRS-E3003`, settled by M6-E02).
+
 **Decided on 2026-10-10 and removed:** 1 (`onnx` and `onnxscript` are on the §27 allowlist, contracts 2.5), 2 (`weights[]` is a list, 5.2), 4 (ADR-0034 accepted), 5 (the egress proxy is built at plan §31 step 7 / M7-E02, 15.11), 7 (`.pt2` files are refused, 15.2), 8 (infra failures are excluded, never scored 0; `layout/python.md` §6.3 agrees), 10 (`lost →` the recorded terminal state, 9.1), 11 (one Rust planner, 2.4 rule 10), 12 (catalog collisions settled, 10.2).
 
 | # | Question | Default |
@@ -1604,5 +1606,4 @@ Each has a default that this file follows until the owner decides. As in contrac
 | 3 | **The HF reference for DeepSeek-V2-Lite real-weight parity** across two GPUs would need `accelerate`'s `device_map`, which isn't allowed. | Run the reference on CPU in bf16 on a few short prompts (about 32 GB of RAM), layer by layer if RAM is short. |
 | 6 | **The peek overhead budget** has no measurement yet. | Proposed at most 2% of rollout tokens per second; set the real number from `tests/gpu/test_gym_peek_overhead.py`. |
 | 9 | **Harbor tasks that ship only a Dockerfile.** The sandbox manager never builds images. | No builds in the prototype: import with `RRS-R0006` and the build command as the fix. Revisit with a "sandbox image" plugin that builds through the engine's build endpoint behind a trust prompt. |
-| 13 | **The live-stats data warning** (parameters greater than dataset tokens for a from-scratch objective, A3) has no catalog code in contracts 10.3. | Add one warning code in the `RRS-E3xxx` or layer-4 range in the next contracts PR; until then the warning shows its text without a code. |
 | 14 | **First-party plugins on a paired box** may hit the user-namespace limit (C1). Contracts 8.8 lets a "trusted, preinstalled" first-party module run without the network namespace, but a plugin pushed to a box as a blob isn't installed from `<install prefix>/share/rastai/plugins/`. | Treat a first-party plugin whose content hash matches the release manifest as trusted on the box too, with the same `RRS-P2005` warning. Confirm in the plugin-host ADR work. |

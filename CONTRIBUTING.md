@@ -12,8 +12,13 @@ git commit -s -m "Add the strict safetensors reader"
 
 ## How work lands
 
-- **Contracts first.** Changes to protobuf files, document schemas or the command catalog go in their own pull request, before any code that uses them.
-- **Done means:** `just check` passes and the change adds a test.
+- **Contracts first.** Proto messages, document schemas, command rows and their argument types go in their own pull request first, before any code that uses them. Any other new name goes into `contracts.md` in the same pull request as the code that uses it.
+- **Done means:** `just check` passes and the change adds a test. `just check` includes `check-names` and `check-schema-diff`.
+- **Names come only from the registry.** Every shared name (command id, event type, error code, table or column, settings key, document schema id, crate, package or module, CLI verb) is in `docs/architecture/contracts.md` §15 or its §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables. A new name goes into contracts as the previous bullet says. A name in contracts that isn't built yet carries its milestone, for example "(M4)". `check-names` fails on a name in code but not in contracts, and on one in contracts but not in code without its milestone mark.
+- **Schema changes need a contracts update.** `check-schema-diff` compares the generated command and event schemas with the base branch. Any change needs a matching contracts.md update in the same pull request, and a breaking change to a `stable` command or event fails CI. `preview` items may break, but still need the update.
+- **A separate reviewer checks every pull request.** Every pull request gets a separate reviewer agent (never the author) with a naming and schema lens, plus the style and tests lenses.
+- **Closing a task or issue needs independent verification.** CI is green, and a reviewer agent that is not the author confirms each acceptance criterion against the code and command output. Post that evidence as the closing comment. The author's own claim doesn't close anything. Pull requests link their issue with `Refs #n`, never `Closes #n`, so merging doesn't close it; the verifier closes it.
+- **Agents work from the contracts.** A build agent's task prompt includes contracts.md, the generated schemas and the owning layout section, and the agent uses only registered names.
 - **One topic per pull request.** Small pull requests get reviewed; large ones wait.
 - **Every user-facing error** gets a code in the diagnostics catalog.
 

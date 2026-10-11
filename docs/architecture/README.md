@@ -1,8 +1,8 @@
 # Rastai Research Studio: Design Docs
 
-**Status:** v1.1, 2026-10-10. Pre-build. Built on spec v5.4 and contracts.md v1.1. The entry point to the design: what to read, in what order, and where each kind of decision lives. Nothing here is new; every rule below points to the doc that owns it.
+**Status:** v1.2, 2026-10-11. Pre-build. Built on spec v5.4 and contracts.md v1.2. The entry point to the design: what to read, in what order, and where each kind of decision lives. Nothing here is new; every rule below points to the doc that owns it.
 
-The design is about 28,000 lines across 13 documents and 37 ADRs. Nobody needs all of it for one task. Read the core once (section 1), then only the layout and flow docs for the part you're building.
+The design is about 28,000 lines across 13 documents and 38 ADRs. Nobody needs all of it for one task. Read the core once (section 1), then only the layout and flow docs for the part you're building.
 
 ---
 
@@ -16,8 +16,8 @@ The design is about 28,000 lines across 13 documents and 37 ADRs. Nobody needs a
 | 2 | Spec `docs/spec/rastai_spec_v5.md` §0, §3, §5, then Part II (§16–§30) | What is decided, the core loop, the L0–L3 bar, the architecture, the §27 dependency allowlist, the §29 repo layout |
 | 3 | `spike/README.md` (verdict table and "Spec changes") | The measured numbers the design rests on: parity, live-panel cost, token parity, Teach it, canvas, Rust vs Java |
 | 4 | `contracts.md` §1–§3, §12 and §15–§16 | The repo tree, every component and its allowed imports, the processes and who talks to whom, the naming and code rules, the code-level names, and the answer to every plan §10 conflict |
-| 5 | `docs/adr/README.md`, then ADR-0023, 0036, 0012, 0004, 0001, 0002, 0013 | Code style, plain JavaScript for the frontend, in-house policy, schema ownership, process layout, durability, the unified runtime |
-| 6 | Plan `docs/plan/implementation-plan.md` §1–§3 and §10 | Milestones, the two-lane workflow, the definition of done per PR, and §10, the 44 cross-doc conflicts, each answered in contracts §16 |
+| 5 | `docs/adr/README.md`, then ADR-0023, 0036, 0012, 0004, 0038, 0001, 0002, 0013 | Code style, plain JavaScript for the frontend, in-house policy, schema ownership, CI-enforced names and schemas, process layout, durability, the unified runtime |
+| 6 | Plan `docs/plan/implementation-plan.md` §1–§3 (including §3.5, the agent build protocol, and §3.6, closing by independent verification) and §10 | Milestones, the two-lane workflow, the definition of done per PR, how agents are briefed and how work is closed, and §10, the 44 cross-doc conflicts, each answered in contracts §16 |
 
 **Per task:**
 
@@ -45,7 +45,7 @@ The design is about 28,000 lines across 13 documents and 37 ADRs. Nobody needs a
 | `flows/inference-psychology.md` | Chat turns through the gateway, runtime toggle and replay twins, API chats and proxy replay, model loading and VRAM leases, the decode step and live panel, replay and analyses, interventions and branching, remote models, conversation flags | You build Inference or Psychology |
 | `flows/training-evaluation.md` | Data import, recipe selection, a training run, checkpoints and preemption, chains, Teach it, Evaluation suites and metrics, auto-run and Elo, RLHF, model diff and SAE fit check, export, log import | You build Training or Evaluation |
 | `flows/designer-gym-remote.md` | A: HF import, compile and parity, edits and live stats, Eject, ONNX, `rastai.load()`, layer placement. B: harnesses, gym runs, rollouts, peek, step mode, sandboxes. C: SSH pairing, handshake, remote jobs, drops, transfers, headless, node update | You build the Designer, the Agent Gym or remote nodes |
-| `docs/adr/README.md` + ADR-0001–0037 | Why each architectural decision was made, alternatives rejected, the tests that check it; notes since acceptance | You're about to change or question a decision |
+| `docs/adr/README.md` + ADR-0001–0038 | Why each architectural decision was made, alternatives rejected, the tests that check it; notes since acceptance | You're about to change or question a decision |
 | `docs/plan/implementation-plan.md` | M1–M11 (M11, long-term storage, comes after the 90-day plan), tasks for M1 and M2, epics for M3–M11, the L0–L3 feature table, GitHub setup, schedule risks, conflicts (§10), open questions | You pick, size or review work |
 | `docs/plan/backlog.json` | One GitHub issue per M1/M2 task and per later epic, generated from the plan's tables | You open an issue (M1-07 syncs it to GitHub) |
 
@@ -61,7 +61,7 @@ Planned, not yet written: `docs/security/threat-model.md` (M1-56) and the genera
   - The **plan** turns layouts and flows into ordered, sized tasks with exit gates.
 - **ADRs record why.** A doc applies a decision; the ADR is where it is argued and checked. Accepted ADRs are never edited to change a decision (`docs/adr/README.md`).
 - **The spike is evidence.** Numbers marked "(spike)" come from `spike/results/`. Spike code is ported, never imported (contracts §1 port map).
-- **contracts.md v1.1 is the only list of shared names** (M1-01). Layout and flow docs keep no "New names" section; a name that is missing goes into contracts first, in its own PR.
+- **contracts.md v1.2 is the only list of shared names** (M1-01). Layout and flow docs keep no "New names" section. A missing wire, document or command shape goes into contracts first, in its own PR; any other missing name goes in the same PR as the code. From M1 `check-names` and `check-schema-diff` enforce this in CI (ADR-0038, contracts §12.6).
 - **Every layout and flow doc ends with "Open questions".** Each carries a default that the docs follow until the owner decides.
 
 **When two sources disagree:**
@@ -70,8 +70,8 @@ Planned, not yet written: `docs/security/threat-model.md` (M1-56) and the genera
 |---|---|
 | Scope: what the product does | The spec (v5.4 is in line with the docs). A doc that needs a spec edit raises an open question with a default; the owner makes the edit. |
 | A measured number | `spike/results/` |
-| A decision an ADR records | The ADR. ADR-0034 supersedes parts of ADR-0001, 0006 and 0007; ADR-0035 supersedes ADR-0003 decision 6 in part and amends ADR-0002 decision 7; ADR-0036 supersedes ADR-0023's TypeScript section and ADR-0019 decision 5 in part; ADR-0037 supersedes ADR-0029 decision 1 in part. |
-| A name, or anything listed in plan §10 | contracts.md v1.1 (§16 answers every plan §10 row) |
+| A decision an ADR records | The ADR. ADR-0034 supersedes parts of ADR-0001, 0006 and 0007; ADR-0035 supersedes ADR-0003 decision 6 in part and amends ADR-0002 decision 7; ADR-0036 supersedes ADR-0023's TypeScript section and ADR-0019 decision 5 in part; ADR-0037 supersedes ADR-0029 decision 1 in part; ADR-0038 puts `check-names` and `check-schema-diff` in M1 and adds the independent-verification rule. |
+| A name, or anything listed in plan §10 | contracts.md v1.2 (§16 answers every plan §10 row) |
 | Something inside one crate or package (file, function, constant) | That component's layout doc (plan §10 row 7). Catalog numbers are the exception: every one is listed in contracts §10.3 first (plan §10 row 8). |
 | Anything else | Nobody yet. Add a row to the end of plan §10 (rows are append-only) and follow its default. |
 
@@ -174,12 +174,12 @@ flowchart TD
 | Where does this spike file go? | contracts §1 port map; Python layout §13; each layout's "Ported from the spike" |
 | Where do its tests go, and which test proves it? | contracts §1 (`tests/`) and §12.5 (fixtures); each layout's "Tests"; plan §7.3 feature level table |
 | What do I build next, and how big is it? | Plan §2 and the task tables (§4.5, §5.5); `backlog.json` |
-| When is a feature done? | ADR-0017 (L0–L3); plan §3.3 (per PR) and §7 (per feature) |
+| When is a feature done? | ADR-0017 (L0–L3); plan §3.3 (per PR), §3.6 (closing an issue by independent verification) and §7 (per feature) |
 | Why was it decided this way? | The ADR index, by topic |
 
 ## 6. Changing the design
 
-- **A new shared name** goes into contracts.md first, in its own PR, before any doc or code uses it (spec §29).
+- **A new shared name** goes into contracts.md. A wire, document or command shape lands first, in its own contract PR (spec §29). Any other name goes in the same PR as the code that uses it. `check-names` and `check-schema-diff` enforce this from M1 (ADR-0038, contracts §12.6).
 - **A new decision** that someone would otherwise reopen gets an ADR (`docs/adr/README.md`, "Writing a new ADR"). An example or path fix in an accepted ADR is a "Note since acceptance", not a new decision.
 - **A conflict between docs** gets a row at the end of plan §10 with a default; once settled, contracts §16 records the answer and the docs that lose get a fix.
 - **A scope change** is a spec edit by the owner. Docs never change scope on their own; they raise an open question with a default.

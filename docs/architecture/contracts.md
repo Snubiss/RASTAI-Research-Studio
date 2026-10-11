@@ -1,16 +1,36 @@
 # Rastai Research Studio: Shared Contracts
 
-**Status:** v1.1, 2026-10-10. Pre-build. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the owner decisions of 2026-10-10. v1.1 is the M1-01 reconcile.
+**Status:** v1.2, 2026-10-11. Pre-build. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the owner decisions of 2026-10-10 and 2026-10-11. v1.1 was the M1-01 reconcile; v1.2 adds the naming and schema checks to M1 and records the owner approvals of 2026-10-11.
 
-This file holds the shared names for every other design doc: crates, packages, processes, protobuf services, documents, commands, events, tables, states, error codes, settings and the code-level names that cross a crate, package or process boundary. Layout docs, flow docs, ADRs and the implementation plan use these names exactly. **Since v1.1 this is the only list of names:** the layout and flow docs no longer keep "New names" sections. If a name you need isn't here, add it here first, in its own PR, before any doc or code uses it (spec §29: contracts land first).
+This file holds the shared names for every other design doc: crates, packages, processes, protobuf services, documents, commands, events, tables, states, error codes, settings and the code-level names that cross a crate, package or process boundary. Layout docs, flow docs, ADRs and the implementation plan use these names exactly. **Since v1.1 this is the only list of names:** the layout and flow docs no longer keep "New names" sections. If a name you need isn't here, add it here:
+- **A wire, document or command shape** (a proto message, a document field, a command's arguments or result, an event payload, a catalog error code) lands here first, in its own contract PR, before any code uses it (spec §29: contracts land first).
+- **Any other new name** (a function, a file, a constant, a table column) is added here in the same PR as the code that introduces it.
+
+**Since v1.2 CI enforces this** (12.6): `check-names` compares the names the code actually has (`schemas/names.json`, generated) with this file in both directions, and `check-schema-diff` refuses a change to a generated command or event schema that doesn't come with a change here.
 
 Conventions in this file:
 - `code` is a literal name, used exactly as written.
 - "Phase 2" or "Phase 3" marks something designed now and built later. Everything else is in the prototype.
 - **"(L2)"** marks a name designed now but built only after the core loop reaches L2 (ADR-0017). Build the minimal durable path first: event logs, reattach, atomic writes.
 - "(M8)", "(M11)" and so on mark a name first built in that milestone (plan §2).
+- **Milestone markers are read by `check-names`.** A name listed here but not yet in the code must carry one of these markers: `(M<n>)`, `(L2)`, `(Phase 2)` or `(Phase 3)`. A marker covers the name it follows, the table row it sits in, or the whole section when it is in the heading. An unmarked name that the code doesn't have fails as stale (12.6).
 - "(spike)" marks a decision that comes from a measured spike result.
 - Spec section numbers are written as §n.
+
+### Changes in v1.2
+
+Owner-approved on 2026-10-11.
+
+1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
+2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
+3. **Tables codegen reads live where codegen can reach them:** the core event-type table is `rastai_core::event_types::EVENT_TYPES` (file `rastai-core/src/event_types.rs`; it was internal to `rastai-server`), and the CLI's `ALIASES` and process-mode words are in `rastai-core`'s naming module. Table and column names come from the store's migration `.sql` files, read by `tools/codegen/src/sql_names.rs` (12.6), so `rastai-codegen` has no `rastai-store` dependency.
+4. **Agent build protocol** (12.6): every build task's agent prompt carries this file, the generated schemas and the owning layout section; agents use only registered names; every PR gets a separate reviewer agent with a naming and schema lens; `just check` runs `check-names` and `check-schema-diff`. A task closes only after independent verification (plan definition of done).
+5. **Section 15 is accepted.** The names v1.1 introduced are the owner's names, no longer provisional.
+6. **Open questions 19–23** record the small contract gaps deliberately left to the tasks that build them, each with its owning backlog task (section 14).
+7. **`node-over-ssh` runs nightly** in `nightly.yml`, not as a required PR job (15.9; confirms section 16 row 44).
+8. **Theme token group key is `typography` everywhere**; no `type` group remains in any document, token file or example (5.2, 5.6, 15.11).
+9. **Small fixes so `check-names` can read this file:** the desktop crate is named by its Cargo package, `rastai-desktop` (2.1, 15.1, 15.11); `apps/web` rows lead with `@rastai/web` (15.3); 8.2 and 8.3 list every column, and 8.3 gains the vault's `schema_migrations`; the `archive.objects` settings cell is valid markup (11.2).
+10. **§27 approvals noted where this file lists them** (2.5): `@vitest/browser`, axe-core and the Tauri CLI as dev tooling, the Tauri updater plugin as foundation, MinIO as a test-only CI service, and a named license entry for pillow (MIT-CMU/HPND) in `deps/allowlist-python.json`.
 
 ### Changes in v1.1
 
@@ -125,7 +145,9 @@ RASTAI/
     plugins/                 `rastai plugin new` templates (UIs are .jsx): panel, section, converter, recipe,
                              designer-node, lens, metric, reward, adapter, importer, exporter, theme
 
-  schemas/                   generated JSON Schemas, one per document type and version, plus schemas/commands/ (checked in)
+  schemas/                   generated, checked in: one JSON Schema per document type and version, index.json,
+                             commands/ (one per command's arguments and result), events/ (one per event type),
+                             names.json (the names registry the code really has; 12.6)
   catalog/
     errors/                  one JSON file per error prefix: RRS-E.json, RRS-P.json, ... (section 10); README.md maps retired numbers
     terms/                   plain-English term definitions (the glossary the UI shows)
@@ -137,9 +159,10 @@ RASTAI/
     crash/                   Rust crate rastai-crash-tests: the kill -9 matrix for daemon, node, jobs and the archiver
     loop/                    the full CPU loop in under 10 minutes (design -> train -> eval -> ONNX -> re-import)
   tools/                     dev tooling only, never shipped
-    codegen/                 Rust crate rastai-codegen (bins rastai-formats-codegen, rastai-catalog-codegen); also runs buf
+    codegen/                 Rust crate rastai-codegen (bins rastai-formats-codegen, rastai-catalog-codegen,
+                             rastai-names-codegen); also runs buf
     checks/                  check-deps, check-unsafe, check-no-pickle, check-imports, check-generated, check-dco,
-                             check-colors, check-no-typescript
+                             check-colors, check-no-typescript, check-names, check-schema-diff
     github/                  sync_backlog.py (labels, milestones and issues from docs/plan/backlog.json)
     fixtures/                render_chat_templates.py (regenerates chat-template goldens with HF transformers)
     bench/                   gateway-load/, tokenizer/
@@ -208,9 +231,9 @@ Decisions in this tree:
 | `rastai-archive` | Long-term archive (M11): one-way, idempotent replication of event records, index rows and blob metadata to MySQL or MariaDB; blob copies to archive targets; prune, restore, verify, purge (8.7) | daemon | `rastai-core`, `rastai-formats`, `rastai-proto`, `rastai-store`, `rastai-transport`, `rastai-diag` | mysql_async (`default-rustls-ring`, default features off), tokio |
 | `rastai-server` | Daemon: Connect HTTP API, request gate and sessions, scheduling and chain driver, plugin host, import/export, ModelSpec analysis (live stats, memory, the one layer-placement planner), data-policy check, NodeHubService, MCP endpoint, static web app | daemon | every crate above except `rastai-plugin` and the two binding crates | axum, tokio, tonic, prost, serde_json, keyring |
 | `rastai-cli` | The `rastai` binary: argument parsing (in-house), process modes, generated CLI verbs, offline `storage rebuild-index` | CLI, daemon, node | `rastai-server`, `rastai-node`, `rastai-mcp`, `rastai-store`, `rastai-core`, `rastai-transport`, `rastai-formats`, `rastai-proto`, `rastai-diag` | tokio, prost |
-| `rastai-codegen` (dev) | `tools/codegen/`: bins `rastai-formats-codegen` and `rastai-catalog-codegen` | dev only | `rastai-formats`, `rastai-core`, `rastai-diag` | serde_json |
+| `rastai-codegen` (dev) | `tools/codegen/`: bins `rastai-formats-codegen`, `rastai-catalog-codegen` and `rastai-names-codegen` (12.6) | dev only | `rastai-formats`, `rastai-core`, `rastai-diag` | serde_json |
 | `rastai-crash-tests` (dev) | `tests/crash/`: the kill -9 matrix | dev only | `rastai-store`, `rastai-core`, `rastai-proto`, `rastai-diag` | tokio |
-| `apps/desktop/src-tauri` | Tauri shell: window, file associations, updater; starts or finds the daemon by running `rastai open --print-url` | desktop shell | none (spawns `rastai`, loads a URL; no HTTP) | tauri, tauri-build, Tauri updater plugin, serde, serde_json |
+| `rastai-desktop` (`apps/desktop/src-tauri`) | Tauri shell: window, file associations, updater; starts or finds the daemon by running `rastai open --print-url` | desktop shell | none (spawns `rastai`, loads a URL; no HTTP) | tauri, tauri-build, Tauri updater plugin, serde, serde_json |
 
 ### 2.2 Python packages
 
@@ -361,11 +384,11 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | mysql_async (`default-rustls-ring`) | Compatibility: MySQL client (MIT OR Apache-2.0) | `rastai-archive` | `mysql.rs` |
 | wasm-bindgen | Foundation: bindings | `rastai-formats-wasm` | `bindings/wasm/src/lib.rs` |
 | pyo3 | Foundation: bindings | `rastai-formats-python` | `bindings/python/src/lib.rs` |
-| tauri, Tauri updater plugin | Foundation | `apps/desktop/src-tauri` | direct |
+| tauri, Tauri updater plugin (`tauri-plugin-updater`) | Foundation | `rastai-desktop` (`apps/desktop/src-tauri`) | direct |
 | PyTorch (`torch`) | Foundation | Python engines | direct |
 | `torch.onnx` with `onnx`, `onnxscript` | Foundation | `rastai_models` | `onnx_export.py` (export jobs only) |
 | `torch.distributed` | Foundation | `rastai_train`, `rastai_worker` | `rastai_train/distributed.py`, `rastai_worker/distributed.py` |
-| torchvision (`torchvision.io.decode_image`) | Foundation: PyTorch row | `rastai_data` | `image_decode.py` (brings pillow and numpy into each lock as transitive packages) |
+| torchvision (`torchvision.io.decode_image`) | Foundation: PyTorch row | `rastai_data` | `image_decode.py` (brings pillow and numpy into each lock as transitive packages; pillow has a named license entry, MIT-CMU/HPND, in `deps/allowlist-python.json`) |
 | HF `transformers` (optional) | Engine (optional) | `rastai_models`, tests | `compat/transformers_runtime.py`; `tests/parity/hf_reference.py` |
 | HF `tokenizers` (Python) | Compatibility | `rastai_data` | `tokenization.py` |
 | bitsandbytes (optional) | Kernel | `rastai_train` | `kernels/four_bit_linear.py` |
@@ -384,7 +407,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | pytest, ruff | Dev tooling | Python workspace | tests, lint and format |
 | buf, cargo-deny, cargo-fuzz, maturin, wasm-bindgen-cli, dist, release-please, just | Dev tooling | repo | build, codegen, release |
 
-**Never bundled:** MySQL server and MariaDB are GPL-2.0. Rastai never bundles or distributes them; the user runs their own. The clients are `mysql_async` and PyMySQL only: not sqlx (RUSTSEC-2023-0071 through `rsa`), not Oracle's connectors, not mysqlclient. MinIO is used only in CI.
+**Never bundled:** MySQL server and MariaDB are GPL-2.0. Rastai never bundles or distributes them; the user runs their own. The clients are `mysql_async` and PyMySQL only: not sqlx (RUSTSEC-2023-0071 through `rsa`), not Oracle's connectors, not mysqlclient. MinIO is a test-only CI service (the `mysql-archive` job's S3 target), never shipped.
 
 **Enforced owners:** `deny.toml` `wrappers` pins each single-owner crate to its owner (`tokenizers` and `minijinja` to `rastai-gateway`; `rusqlite` and `libc` to `rastai-store`; `pyo3` and `wasm-bindgen` to the binding crates; `keyring` to `rastai-server`; `blake3` and `miniz_oxide` to `rastai-formats`; `ed25519-dalek` to `rastai-node`; `mysql_async` to `rastai-archive`), and `check-imports` checks the file inside the owner.
 
@@ -530,7 +553,7 @@ All wire types live in `proto/rastai/<package>/v1/*.proto`, one file per service
   - `proto_json.rs` is hand-written, one encode and one decode function per message under this rule (nested messages included): `job_spec_to_json`, `job_spec_from_json`, and the same pair for `HardwareFingerprint` and `SamplingSettings`. prost has no proto3 JSON mapping and §27 lists no crate for one. This is the same approach as the daemon's Connect JSON codec (`rastai-server/src/http/connect_json.rs`, six messages). Both are checked against protobuf-es goldens in `fixtures/proto-golden/`.
 - Every failure carries a `rastai.common.v1.Diagnostic` with a catalog code. gRPC status is `OK` whenever the call itself ran; transport-level failures use gRPC status codes.
 - Field numbers are never reused; `buf breaking` runs in CI; golden messages live in `fixtures/proto-golden/`.
-- **What `buf breaking` can't see:** `arguments_json`, `result_json` and every other `_json` payload are strings to protobuf. A schema-diff check over `schemas/commands/` (`tools/checks/check-schema-diff`) is planned with the stable commands API 1.0 subset (Phase 2). Until then every command is `preview` (4.2).
+- **What `buf breaking` can't see:** `arguments_json`, `result_json` and every other `_json` payload are strings to protobuf, and it doesn't know an event type's name, class or stability. `tools/checks/check-schema-diff` covers that gap from M1 (12.6): it diffs the generated `schemas/commands/` and `schemas/events/` against the base branch, fails a breaking change to a `stable` or `deprecated` command or event type, and requires a change to this file for any change at all. Every command and event type stays `preview` until the stable commands API 1.0 subset (Phase 2), so in the prototype the check mostly enforces the contracts update.
 - **JSON for `EventService`** is not in the prototype. If a client that can't use protobuf needs the stream, a generated proto-JSON codec is added (M9 if needed, else Phase 2).
 
 ### 4.1 `rastai.common.v1`
@@ -548,7 +571,7 @@ All wire types live in `proto/rastai/<package>/v1/*.proto`, one file per service
 | `ProcessVram` | `pid`, `vram_bytes` |
 | `JobState`, `RunState`, `ModelState`, `LeaseState`, `NodeState`, `SandboxState`, `PluginState`, `EvalRunState` | enums mirroring section 9 |
 | `EventClass` | `DURABLE`, `EPHEMERAL` |
-| `Stability` | `PREVIEW`, `STABLE`, `DEPRECATED`. Every command and event type is `PREVIEW` until Phase 2 (owner decision N3). |
+| `Stability` | `PREVIEW`, `STABLE`, `DEPRECATED`. Every command and event type is `PREVIEW` until Phase 2 (owner decision N3). `check-schema-diff` reads it from the generated schemas (12.6). |
 | `RuntimeKind` | `INSPECTABLE`, `FAST`, `COMPAT`, `API` |
 | `LeaseClass` | `EVICTABLE`, `PINNED` |
 
@@ -830,7 +853,7 @@ Each op has one golden file `fixtures/ops/<op>.json`: input shapes and attribute
 
 ### 5.4 How the types are generated
 
-Each document type in `rastai-formats` is a plain Rust struct with serde derives plus one hand-written `describe_<type>() -> TypeDescription` function next to it (plain data: `FieldDescription` rows with field name, `FieldKind`, required, doc string, `secret`, `content`, `cli_position`; `secret` and `content` drive journal redaction, 5.1). A test fills a fixture and checks that the struct and its description list the same fields. The codegen binary (`rastai-formats-codegen`) walks the descriptions and writes `schemas/`, `schemas/commands/`, `packages/formats/src/generated/` (JSDoc `@typedef` modules), the typed command wrappers in `packages/client/src/generated/commands.js`, and `python/rastai_formats/generated/` (plain `@dataclass` classes). No proc macros of our own, no schema library. A field that holds a wire type is described as `FieldKind::Proto("<package>.<Message>")` and stored as protobuf JSON (section 4). `FieldKind` adds `Json`, `Enum` and `Proto` to the plain kinds.
+Each document type in `rastai-formats` is a plain Rust struct with serde derives plus one hand-written `describe_<type>() -> TypeDescription` function next to it (plain data: `FieldDescription` rows with field name, `FieldKind`, required, doc string, `secret`, `content`, `cli_position`; `secret` and `content` drive journal redaction, 5.1). A test fills a fixture and checks that the struct and its description list the same fields. The codegen binary (`rastai-formats-codegen`) walks the descriptions and writes `schemas/`, `schemas/commands/`, `schemas/events/` (from `rastai_core::event_types::EVENT_TYPES` and the payload fields in the `buf build` descriptor set, read by `tools/codegen/src/descriptor_set.rs`, 12.6), `packages/formats/src/generated/` (JSDoc `@typedef` modules), the typed command wrappers in `packages/client/src/generated/commands.js`, and `python/rastai_formats/generated/` (plain `@dataclass` classes). No proc macros of our own, no schema library. A field that holds a wire type is described as `FieldKind::Proto("<package>.<Message>")` and stored as protobuf JSON (section 4). `FieldKind` adds `Json`, `Enum` and `Proto` to the plain kinds.
 
 **When to switch to `schemars`** (owner decision 6): if more than about 20 document types make the hand-written tables a recurring review cost, the owner may allowlist `schemars` and remove it from `deny.toml`'s ban list. Until then the tables stay.
 
@@ -882,7 +905,7 @@ The theme contract every section, plugin UI, renderer and the static viewer foll
 | Data | `series_1` … `series_8`, `sequential_low`, `sequential_high`, `diverging_negative`, `diverging_zero`, `diverging_positive` |
 | Canvas | `canvas_background`, `canvas_grid`, `canvas_node`, `canvas_node_border`, `canvas_node_selected`, `canvas_edge`, `canvas_edge_active`, `canvas_label`, `canvas_port` |
 
-**Other tokens:** typography (font families, weights, sizes, line heights; the key is `typography`, because `type` is the shared header field), density (two spacing scales), radius, motion (two durations and an easing; `ui.reduced_motion` sets both durations to 0), focus ring (width and offset) and elevation (three shadow levels), as in the `rastai.theme/1` row of 5.2.
+**Other tokens:** typography (font families, weights, sizes, line heights; the key is `typography` everywhere: theme files, `ThemeTokens` and `builtInTheme` in `@rastai/ui`, plugin themes and examples. No token group is called `type`, because `type` is the shared header field), density (two spacing scales), radius, motion (two durations and an easing; `ui.reduced_motion` sets both durations to 0), focus ring (width and offset) and elevation (three shadow levels), as in the `rastai.theme/1` row of 5.2.
 
 **CSS variables are the public surface.** `applyThemeTokens(root, tokens)` sets them on the root element; components and plugin UIs read only these:
 - colors `--rr-color-<role>` (underscores become hyphens: `--rr-color-surface-raised`);
@@ -918,7 +941,7 @@ The theme contract every section, plugin UI, renderer and the static viewer foll
 - **Plugin commands** start with the plugin id: `psychology.replay.open`, `eval.test`. Plugin ids are `[a-z][a-z0-9_]*`, unique among installed plugins (`RRS-P0002`; `RRS-P0004` for a command outside the plugin's namespace).
 - **Generated surfaces:** CLI verb = the segments as words with `_` turned into `-` (`rastai eval suite add-conversation`), flags likewise; MCP tool name = dots replaced with `__` (`eval__suite__add_conversation`); palette entry = `title`; typed JS wrapper = camelCase of the segments (`evalSuiteAddConversation(executor, args)`, 12.4); typed Python call = `client.execute(command_id, arguments)`.
 - **Kinds:** `sync` returns the result (target under 2 s); `job` returns a `job_id` at once and reports through events; `stream` returns at once and streams ephemeral events for the result (generation).
-- **Stability:** every command carries `stability` (`preview`, `stable`, `deprecated`). All are `preview` until the stable commands API 1.0 subset in Phase 2. A retired command stays in `RETIRED_COMMANDS` and answers `RRS-C0007` with its replacement.
+- **Stability:** every command carries `stability` (`preview`, `stable`, `deprecated`). All are `preview` until the stable commands API 1.0 subset in Phase 2. From M1, `check-schema-diff` ties every change of a command's generated schema to a change in this file (12.6). A retired command stays in `RETIRED_COMMANDS` and answers `RRS-C0007` with its replacement.
 - **Undo** covers document edits only (§21). An undoable command records a forward and inverse JSON Patch on the document; `document.undo` / `document.redo` replay them.
 
 ### 6.2 Implementation shape
@@ -1284,7 +1307,7 @@ The daemon keeps the last 10,000 bus events in memory (`daemon.bus_buffer_events
 
 ### 7.3 Event types
 
-Names are `<area>.<what_happened>` in past tense or noun form. Every event type carries `stability` in its `EventTypeDescriptor` (4.3); all are `preview` until Phase 2. Durable events from a node are not logged by the node; they are also carried as state in every `Heartbeat`, so the daemon reconciles by snapshot after a disconnect.
+Names are `<area>.<what_happened>` in past tense or noun form. Every event type carries `stability` in its `EventTypeDescriptor` (4.3); all are `preview` until Phase 2. The core event types are one `const` table, `rastai_core::event_types::EVENT_TYPES` (file `rastai-core/src/event_types.rs`; rows of `EventTypeRow`: type, class, emitter, payload message, stability, since version). `rastai-server` serves `ListEventTypes` from it, and codegen writes `schemas/events/<event_type>.json` and the `event_types` list of `schemas/names.json` from it (12.6). Durable events from a node are not logged by the node; they are also carried as state in every `Heartbeat`, so the daemon reconciles by snapshot after a disconnect.
 
 | Event type | Class | Emitter | Main payload |
 |---|---|---|---|
@@ -1407,7 +1430,9 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 
 ### 8.2 `rastai.db` (SQLite, WAL, one writer thread)
 
-| Table | Key columns |
+Every table and every column is listed here and in 8.3, because `check-names` compares these two tables with the migrated databases (12.6).
+
+| Table | Columns |
 |---|---|
 | `schema_migrations` | `version`, `applied_unix_ms` |
 | `projects` | `project_id`, `path`, `name`, `opened_unix_ms` (no `data_policy`: a project's policy is a setting, read from its `settings.json`, 11.1) |
@@ -1462,8 +1487,9 @@ Every row comes from a durable event, so `rebuild-index` restores all of them:
 
 ### 8.3 `vault.db` (SQLite, WAL, one writer thread; SQLCipher in Phase 2 with the same schema)
 
-| Table | Key columns |
+| Table | Columns |
 |---|---|
+| `schema_migrations` | `version`, `applied_unix_ms` (the vault's own migrations) |
 | `conversations` | `conversation_id`, `project_id`, `title`, `model_ref`, `archived`, `starred`, `pinned`, `settings_json` (current sampling, runtime, lens and interventions), `created_unix_ms`, `updated_unix_ms` |
 | `messages` | `message_id`, `conversation_id`, `parent_id`, `role`, `parts_json`, `token_ids` (blob, little-endian u32; for assistant rows the full context, prompt then generated), `model_hash`, `chat_template_hash`, `settings_json` (`prompt_token_count`, `rewind_from{message_id, token_index}`, `lens`, `interventions`, `interventions_changed_mid_answer`, `runtime`, `engine`), `fidelity`, `finish_reason`, `created_unix_ms` |
 | `annotations` | `annotation_id`, `message_id`, `kind`, `body_json` |
@@ -2264,7 +2290,7 @@ Lowest to highest. A later layer overrides individual keys, not whole sections.
 | `compute` | `default_node` (`local`), `gpu_assignment{chat, training}`, `vram_reserve_bytes`, `sandbox_cap` (8) |
 | `nodes` | `heartbeat_seconds` (5), `missed_heartbeats_unreachable` (3), `ssh_binary` (`ssh`) |
 | `storage` | `data_dir`, `quota_bytes` (unset: no quota), `gc_interval_hours` (24), `free_space_margin_bytes` (5 GiB), `db_snapshot_days` (7, L2), `db_snapshot_hour` (3, L2) |
-| `archive` (M11) | `enabled` (false), `connection` (a `MysqlConnection`, 5.2), `objects{target (`folder`; `s3` later), folder_path, s3{endpoint, bucket, region, prefix}}`, `interval_seconds` (60), `prune_after_days` (unset: local pruning off), `include_conversations` (false; project layer only), `backoff_min_seconds` (5), `backoff_max_seconds` (300), `lag_warning_hours` (24) |
+| `archive` (M11) | `enabled` (false), `connection` (a `MysqlConnection`, 5.2), `objects{target, folder_path, s3{endpoint, bucket, region, prefix}}` (`target` is `folder`; `s3` later), `interval_seconds` (60), `prune_after_days` (unset: local pruning off), `include_conversations` (false; project layer only), `backoff_min_seconds` (5), `backoff_max_seconds` (300), `lag_warning_hours` (24) |
 | `hf` | `cache_dir` (HF default), `offline` (false) |
 | `plugins` | `dev_paths[]`, `experimental_apis` (false), `sources[]` (Phase 2) |
 | `privacy` | `data_policy` (`local-only`; a project sets its own in its `settings.json`; the first refusal's `RRS-C1009` fix sets it in one click), `crash_reports` (false: whether to show the review prompt after a crash; reports are written locally either way and never uploaded), `show_egress_badge` (true) |
@@ -2290,6 +2316,7 @@ These apply to every language and every API in the design docs. They restate the
 - **One error type per crate or package.** It maps to a catalog code at the edge.
 - **External libraries are imported in one wrapper module** per owning component (2.5).
 - **Formatting is automatic:** rustfmt and clippy for Rust, ruff for Python, prettier for JS, all inside `just check` (M1).
+- **Names come from this file.** Code uses only names registered here; `just check` runs `check-names` and `check-schema-diff` (12.6).
 
 ### 12.2 Rust
 
@@ -2449,6 +2476,58 @@ export function modelLoad(executor, args) {
 | Python (no fuzzing dependency) | seeded mutation tests marked `fuzz`: `rastai_eval` `yaml_subset.py`, the run-log readers (TensorBoard, W&B, Trackio, spool), `rastai_data` CSV and JSONL readers |
 | JavaScript (no fuzzing dependency) | seeded mutation tests in vitest: `packages/ui/src/markdown/parse-markdown.js` (renders model output), the bridge host's message validation in `packages/plugin` (untrusted plugin iframes; `RRS-P4101`–`P4103`) |
 
+### 12.6 Contract checks and the agent build protocol
+
+Two M1 checks keep the code and this file in step (owner, 2026-10-11). Both run in `just check` and in the `checks` job of `ci.yml`.
+
+**`schemas/names.json`** is the list of names the code really has. `rastai-names-codegen` writes it during `just codegen`; it is checked in, and `check-generated` fails if it is out of date. Each key is read from one source:
+
+| Key | Read from |
+|---|---|
+| `command_ids` | `rastai_core::commands::COMMANDS` and the `commands[]` of each first-party manifest (`plugins/*/rastai-plugin.json`) |
+| `cli_verbs` | `cli_words` of every command id, plus `CLI_MODE_WORDS` and `ALIASES` (both in `rastai-core`'s naming module) |
+| `event_types` | `rastai_core::event_types::EVENT_TYPES` (7.3) and the event types each first-party manifest declares (`plugins/*/rastai-plugin.json`) |
+| `error_codes` | `catalog/errors/*.json` and `plugins/*/catalog/` |
+| `tables` | the store's migration files (`rastai-store/src/index/migrations/*.sql`, `vault/migrations/*.sql`), read by `tools/codegen/src/sql_names.rs`; `rastai-store/tests/index_migrations.rs` checks the reader against `PRAGMA table_info` after the real migrations |
+| `settings_keys` | the `rastai.settings/1` type description, flattened to `<section>.<key>` (nested objects stop at the key: `training.lora`) |
+| `document_schema_ids` | `rastai_formats::describe::describe_all_types()`, document types only (command argument and result types are covered by `command_ids`) |
+| `crates`, `js_packages`, `python_packages` | `cargo metadata --no-deps --format-version 1`; the `name` of each `package.json` in the pnpm workspace; the import packages (folders with `__init__.py`) directly under `python/` and `plugins/*/python/` (the "module names" of the owner's rule are these Python import packages) |
+
+```json
+{
+  "format_version": 1,
+  "command_ids": ["model.load", "eval.test"],
+  "cli_verbs": ["model load", "eval test", "serve", "doctor"],
+  "event_types": ["job.state_changed"],
+  "error_codes": ["RRS-E1003"],
+  "tables": { "rastai.db": { "runs": ["run_id", "state"] }, "vault.db": { "conversations": ["conversation_id"] } },
+  "settings_keys": ["ui.theme"],
+  "document_schema_ids": ["rastai.model/1"],
+  "crates": ["rastai-core"],
+  "js_packages": ["@rastai/client"],
+  "python_packages": ["rastai_worker"]
+}
+```
+
+**`check-names`** (`tools/checks/check-names`, `just check-names`):
+- **Where it reads this file.** Backticked names in fixed places: the first name in the first column of 2.1–2.3 (crates and packages), the schema-id column of 5.2 (ids of the form `rastai.<type>/<n>` only), the first column of the 6.4 tables, the first column of 7.3, the two table-and-columns tables of 8.2 and 8.3 (the first column is the table, the second its columns), the first column of 10.3, the section and key names of 11.2, and section 15. In a list cell, only backticked names outside parentheses and before the first `:`, `;` or full stop (outside backticks and parentheses) count (`archive_state` counts, its values `local`, `archived` don't; the notes after a column list don't), and `lora{rank 16, alpha 32}` counts as `lora`, so `settings_keys` stops at that depth too. A heading or table that moves so the parser can't find it fails the check, so the parser and this file change together.
+- **Code → contracts.** Every name in `names.json` must appear in its place here. A CLI verb matches when it is the words of a registered command id (6.1) or is listed under `CLI_MODE_WORDS` or `ALIASES` in 15.1. A miss fails with the name, its key and the section to add it to.
+- **Contracts → code.** Every name in those places must be in `names.json`, unless a milestone marker covers it (`(M<n>)`, `(L2)`, `(Phase 2)`, `(Phase 3)`; conventions at the top). An unmarked missing name fails as stale: remove it, or mark it with the milestone that builds it. The PR that lands a marked name removes its marker (the reviewer's naming lens checks it); a `(L2)`, `(Phase 2)` or `(Phase 3)` tag that describes scope, not build state, may stay on a name that is already in code. In section 15 this direction covers the crate and package names in the first column of 15.1–15.3; the code-level names there (functions, types, files) aren't in `names.json`, and the reviewer agent checks them.
+- **Renames** show up as one stale name and one unknown name; the PR fixes both here and adds the old name to 15.11 when any doc used it.
+- **Landing.** M1-01 adds the marker to every name not yet in code, taking each milestone from the backlog task that builds it ((M1) included). If `check-names` finds a missing or wrong marker when M1-57 first runs, the fix is a contracts PR before M1-57 merges (plan 4.6), never an allowlist in the check. From then the rule holds on every PR.
+
+**`check-schema-diff`** (`tools/checks/check-schema-diff`, `just check-schema-diff`):
+- **What it compares.** `schemas/commands/` and `schemas/events/` against the merge base with the PR's base branch (`origin/main` when run locally). Each command schema carries `x-rastai-stability` and `x-rastai-since-version`. Each event file `schemas/events/<event_type>.json` holds `event_type`, `event_class`, `emitter`, `payload_type`, `x-rastai-stability`, `x-rastai-since-version` and the payload's fields (name, number, type, `repeated` or `optional`) from the `buf build` descriptor set (read by `tools/codegen/src/descriptor_set.rs`).
+- **Any change needs a contracts change.** An added, removed or changed schema file requires that this file changes in the same PR on a line that names the command id, the event type, or its argument, result or payload type. Otherwise the check fails.
+- **Breaking changes.** A removed or renamed field, a changed field type, a newly required field, a removed or renamed command or event type, a changed command `kind` or event class, and a stability downgrade are breaking. Breaking a `stable` or `deprecated` item fails. A `preview` item may break, with the contracts change.
+
+**Agent build protocol** (owner, 2026-10-11):
+1. **Context.** Every build task's agent prompt includes this file, the generated schemas the task touches (`schemas/commands/`, `schemas/events/`, `schemas/names.json`, the document schemas) and the owning layout section named in the task body.
+2. **Registered names only.** Agents use only names registered here. A new name follows the two rules at the top of this file: a contract PR first for wire, document and command shapes; the same PR for any other name. Never a name that exists only in code.
+3. **Checks before review.** `just check`, including `check-names` and `check-schema-diff`, passes before a PR asks for review.
+4. **A separate reviewer agent on every PR**, never the author, with three lenses: naming and schema (every new name is here and in `names.json`, every schema diff matches a contracts change, no hand-written twin of a generated type, 2.4 rule 3), style (section 12) and tests.
+5. **Closing.** A task or issue closes only after independent verification: CI green (`just check`, including both checks) and a reviewer agent that isn't the author confirming each acceptance criterion against the code and command output, with that evidence posted as the closing comment (plan definition of done; `CONTRIBUTING.md`).
+
 ---
 
 ## 13. Glossary
@@ -2536,6 +2615,8 @@ export function modelLoad(executor, args) {
 | **Theme token** | A named design value (color role, font, spacing, motion, focus ring, elevation) exposed as a `--rr-*` CSS variable (5.6). |
 | **Locked token** | A `--rr-locked-*` color for security UI (egress badge, trust prompt, permission list, signed-out screen, severities) that no theme can change. |
 | **Stability** | `preview`, `stable` or `deprecated` on a command or event type; everything is `preview` until Phase 2. |
+| **Names registry** | `schemas/names.json`: the names the code really has, generated by `rastai-names-codegen` and compared with this file by `check-names` (12.6). |
+| **Milestone marker** | `(M<n>)`, `(L2)`, `(Phase 2)` or `(Phase 3)` after a name, in its row or in its heading: the name is designed but not built yet, so `check-names` doesn't expect it in the code. |
 | **CommandExecutor** | The JS object shape with `execute(commandId, args, options)` that `DaemonClient` and `PluginHost` both satisfy; typed command wrappers take it. |
 | **Origin-bound session** | A session cookie valid only for requests from the origin that redeemed its login code. |
 | **JSDoc** | Type comments in plain JavaScript (`@typedef`, `@param`, `@returns`), checked at dev time by `tsc --noEmit` in checkJs mode. |
@@ -2563,11 +2644,23 @@ Each has the default to use until the owner decides. Docs and code follow the de
 | 17 | **Archive rows with no project** (daemon-level runs, the command journal) under the data policy. | Follow the user-level `privacy.data_policy`; with the default `local-only` they stay local until the owner changes it (8.7). |
 | 18 | **MariaDB version in the archive CI matrix** (M11-E07). | The current MariaDB LTS (11.4) beside MySQL 8.4 and 9.7, plus MinIO for the S3 target. |
 
+**Gaps left to the tasks that build them** (owner, 2026-10-11). Each is small and is settled in its owning task's contract PR, not now. Each owning task lists its gap in its backlog body so it isn't lost. Until then `check-names` needs the milestone marker on any draft name below.
+
+| # | Gap | Owning task | Until the task settles it |
+|---|---|---|---|
+| 19 | **`GetSecretRequest` and `GetSecretResponse` fields, and the environment variable that hands a job its secret.** | M5-E07 (data import) | The draft in 4.9 (`purpose`, `job_id` → `value`, `expires_unix_ms`, `Diagnostic`) and `RASTAI_SOURCE_SECRET` (15.9). M2-12 writes the fields M2 uses (`purpose`, `job_id` → `value`, `expires_unix_ms`, `Diagnostic`) for `hf_download` (plan §12 question 15). M5-E07 adds the `mysql:<connection_name>` purpose and `RASTAI_SOURCE_SECRET`, and closes the gap. |
+| 20 | **The environment variables that give the archive tests their CI services** (MySQL 8.4 and 9.7, MariaDB, MinIO). | M11-E07 | The draft `RASTAI_TEST_MYSQL_URL`, `RASTAI_TEST_MARIADB_URL`, `RASTAI_TEST_S3_URL` (15.9); the archive tests skip when they are unset. |
+| 21 | **MySQL source error codes** beyond those already assigned. | M5-E07 | `RRS-D3005`–`D3009` (10.3); new MySQL source failures take the next free numbers in `RRS-D3xxx`. |
+| 22 | **The Designer's layer-4 warning "parameters exceed dataset tokens"** (from-scratch objectives): confirm that layer 4 emits `RRS-E3003` and settle its message and fix text. | M6-E02 (live stats) | `RRS-E3003` (10.3) is the draft; the designer-gym-remote flow's open question 13 is stale. |
+| 23 | **`ConversationDeleteResult` has no field that says "queued for the archive"** (6.5). | M11-E03 | The archive copy is listed in `removed[]` as an item of kind `archive` once its outbox row commits; `archive.status` counts it in `pending_outbox_rows`. |
+
 ---
 
 ## 15. Names Folded In From the Layout and Flow Docs
 
-The layout and flow docs, and plan §11, proposed these names in "New names" sections, which are now gone (M1-01). Each name is owned by the component in its row; the layout doc for that component explains it. A name not listed here or in sections 1–13 doesn't exist yet.
+**Status: accepted** (owner, 2026-10-11). The names v1.1 introduced here are the project's names, not provisional ones.
+
+The layout and flow docs, and plan §11, proposed these names in "New names" sections, which are now gone (M1-01). Each name is owned by the component in its row; the layout doc for that component explains it. A name not listed here or in sections 1–13 doesn't exist yet. `check-names` compares this section and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11 with the generated `schemas/names.json` in both directions; a name here that the code doesn't have yet needs a milestone marker (12.6).
 
 ### 15.1 Rust names by crate
 
@@ -2575,7 +2668,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 |---|---|
 | `rastai-diag` | `Diagnostic`, `Severity`, `DiagnosticPath`, `format_path`, `parse_path` (the 4.1 path grammar); `RuntimeCatalog`, `PluginCatalogEntry`, `add_plugin_catalog`, `plugin_diagnostic` (third-party `PLG-` codes); `render_text`, `render_basic`, `render_json`; `init_logger`, `log_info` (the JSON-lines logger) |
 | `rastai-formats` | byte access: `ByteSource`, `SliceSource`, `FileSource`, `ByteSink`, `VecSink`, `FileSink`. Four-layer API: `ImportLimits`, `ReadOutcome`, `read_document`, `Document`, `EnvironmentFacts`, `check_environment`, `write_document`. Types: `DatasetSpec`, `ConverterDocument`, `ThemeDocument`, `EvalResult`, `ModelDiffReport`, `SaeFitCheckReport`, `MysqlConnection`, `InterventionSet`, `SteeringPreset`, `ConversationMessage`; `check_connection_tls` (the one TLS rule for `MysqlConnection`, used by the MySQL reader through the wheel, by `rastai-archive` and by the `archive.configure` handler). Descriptions: `TypeDescription`, `FieldDescription`, `FieldKind` (`Json`, `Enum`, `Proto` plus the plain kinds), the `secret` and `content` flags (5.1), `cli_position` (`x-rastai-cli-position` in `types.json`). Commands: `parse_arguments`, `describe_arguments`, `describe_result`, `json_schema_for`, `read_plugin_types`, `HandlerEventArgs`. Byte formats: `plan_safetensors`, `read_safetensors_header`, `check_safetensors_header`, `plan_gguf`, `encode_gguf_tensor`, `read_gguf_header`, `GgufHeader`, `GgufTensorInfo`, `gguf_tensor_bytes`, `write_zip_stored`, `ZipSource`, `copy_zip_entry`, `write_small_zip`, `zip/inflate.rs`, `crc32.rs`. Hashing: `hash_bytes`, `StreamHasher` (`new_stream_hasher`, `update_stream_hasher`, `finish_stream_hasher`), `content_hash_of_value`, `model_hash`. Undo: `apply_patch`, `diff_values`, `JsonPatchOperation`. Wheel: module `rastai_formats._native`, exception `FormatsValidationError` (carries diagnostics JSON). |
-| `rastai-core` | `CommandRow`, `CommandRegistry`, `CommandFilter`, `CommandOutput`, `descriptor_from_row`, `find_command`, `list_commands`, `RETIRED_COMMANDS`, `RetiredCommand`; naming: `cli_words`, `command_id_from_cli_words`, `flag_name`, `mcp_tool_name`, `command_id_from_mcp_tool_name`, `check_command_id`; `Principal`, `Scope` (with `Scope::Plugin(String)`); proto JSON: `job_spec_to_json`, `job_spec_from_json` and the same pair for `HardwareFingerprint` and `SamplingSettings`; settings: `NodeSettings`, `node_settings`, `GatewaySettings`, `gateway_settings`; paths: `PathEnvironment`, `DataPaths`, `read_path_environment`, `resolve_paths`, `hf_cache_dir`, `chat_template_override_path`, `hf_lock_path`, `daemon_key_path`, `node_key_path`, `node_socket_path`, `node_hub_socket_path`, `worker_host_socket_path`, `job_socket_path`, `remote_node_socket_path`; ids and randomness: `new_id(prefix)` (8.6), `random_bytes(count)` (from `/dev/urandom`); versions: `APP_VERSION`, `PLUGIN_API_VERSION`, `NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`, `API_PACKAGES` |
+| `rastai-core` | `CommandRow`, `CommandRegistry`, `CommandFilter`, `CommandOutput`, `descriptor_from_row`, `find_command`, `list_commands`, `RETIRED_COMMANDS`, `RetiredCommand`; naming: `cli_words`, `command_id_from_cli_words`, `flag_name`, `mcp_tool_name`, `command_id_from_mcp_tool_name`, `check_command_id`, `ALIASES` (`doctor` → `system.doctor`, `rerun` → `run.rerun`) and `CLI_MODE_WORDS` (`open`, `serve`, `node serve`, `node init`, `node check-update` (L2), `tunnel`, `mcp`, `validate`, `version`, `storage rebuild-index`, `help`): the CLI's fixed words, moved here in v1.2 so codegen can read them; `rastai-cli`'s `modes.rs` uses them; event types (`event_types.rs`): `EVENT_TYPES`, `EventTypeRow` (the core event-type table, moved here from `rastai-server` in v1.2, 7.3); `Principal`, `Scope` (with `Scope::Plugin(String)`); proto JSON: `job_spec_to_json`, `job_spec_from_json` and the same pair for `HardwareFingerprint` and `SamplingSettings`; settings: `NodeSettings`, `node_settings`, `GatewaySettings`, `gateway_settings`; paths: `PathEnvironment`, `DataPaths`, `read_path_environment`, `resolve_paths`, `hf_cache_dir`, `chat_template_override_path`, `hf_lock_path`, `daemon_key_path`, `node_key_path`, `node_socket_path`, `node_hub_socket_path`, `worker_host_socket_path`, `job_socket_path`, `remote_node_socket_path`; ids and randomness: `new_id(prefix)` (8.6), `random_bytes(count)` (from `/dev/urandom`); versions: `APP_VERSION`, `PLUGIN_API_VERSION`, `NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`, `API_PACKAGES` |
 | `rastai-store` | `Store`, `open_store`, `IndexWrite`, `VaultWrite`, `write_index`, `write_vault`, `queue_vault_write`, `VaultCommit`, `wait_for_commit`, `ReaderPool`, `open_index_reader`, `open_vault_reader`, `IndexReaderGuard`, `VaultReaderGuard`; `HandlerCall`, `list_pending_handler_calls`, `vault_writes_for_records`; `EventLogWriter`, `EventLogReader`, `SyncPolicy`, `append_raw_frame`, `read_next_frame`, `apply_event_record` (the one indexing path, also for restored frames), `rebuild_index`, `RebuildOptions`, `RebuildReport`; `take_daemon_lock`, `free_bytes`, `check_free_space`, `write_config_file`; `delete_gateway_log_older_than(cutoff_unix_ms)` (retention, local only, writes no outbox row, 8.3); archive path (M3-E02 for the outbox switch, M11 for the rest): `set_vault_change_recording`, `RawFrame`, `RawFrameRead`, `read_next_raw_frame`, `frame_bytes_from_body`, `list_archive_cursors`, `list_journal_rows_after`, `list_vault_changes_after`, `list_prune_candidates`, `IndexWrite::SetArchiveCursor`, `IndexWrite::MarkRunsArchived`, `IndexWrite::ResetArchiveCursors`, `VaultWrite::DeleteConversation`, `VaultWrite::RestoreConversation`, `VaultWrite::TrimVaultChanges`; `WRITER_BATCH_MAX` (256, equal to `INDEX_BATCH_RECORDS`); (L2) `backups.rs` snapshots and salvage |
 | `rastai-transport` | `LocalListener`, `LocalStream`, `bind_local_socket`, `PeerIdentity`, `NodeTarget`, `NodeConnection`, `open_node_connection`, `SshSession`, `SshOptions`, `SshForwards`, `RemoteOutput`, `run_remote_command`, `upload_over_ssh`, `start_ssh_forwarding`, `HttpTarget`, `HttpRequest`, `HttpResponse`, `HttpStream`, `EgressReport` (every outbound HTTPS request carries an egress tag, else `RRS-N3008`), `SseEvent`, `SseReader`, `PartialFile`, `TRANSFER_CHUNK_BYTES`; `sha256_digest`, `hmac_sha256` (in `http_client.rs`, from the rustls crypto provider: HF file checks, llama-server builds, SigV4 later; 2.5) |
 | `rastai-sandbox` | `DockerEngine`, `SandboxManager`, `SandboxTable`, `SandboxRecord`, `SandboxReservation`, `reserve_sandboxes`, `release_reservation`, `remove_job_sandboxes`, `adopt_existing_containers`, `stop_egress_network`; files `manager.rs`, `container_spec.rs`, `deadlines.rs`, `orphan_sweep.rs`, `egress_proxy.rs` (the HTTP CONNECT proxy on network `rastai-egress-<run_id>`, M7-E02), `engine_http.rs` |
@@ -2584,9 +2677,10 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `rastai-node` | `NodeOptions`, `NodeMode`, `NodeState`, `JobTable`, `JobRecord`, `WorkerLink`, `RunEventPositions`, `LiveHub`, `LeaseTable`, `LeaseDecision`, `decide_lease`, `ModelTable`, `FastEngine`, `NodeIdentity` (`load_or_create_identity`, `sign_challenge`, `verify_challenge`; also used for `daemon.key`), `LlamaServerLaunch`, `LlamaServerProcess`, `FastQueue`, `EngineBuild`, `EnvironmentChoice`, `JobPermissions`, `HubConnection`, `JobEventLogSink`; files `identity.rs`, `fast_runtime.rs`, `downloads.rs`, `transfers.rs`, `gym_tools.rs`, `hf_upload.rs`, `plugin_modules.rs`, `spawn.rs`, `signals.rs`, `hardware.rs`, `telemetry.rs`, `environments.rs`, `self_update.rs` |
 | `rastai-archive` (M11) | `ArchiveError`, `ArchiveTarget` (`Folder`, later `S3`), `build_upsert` (all write SQL, in `upsert.rs`), `sync_archive`, `prune_archived_runs`, `restore_from_archive`, `verify_archive`, `purge_archive`, `run_archive_migrations`, `ArchiveSettings`, `archive_settings`, `ArchiveCredentials`, `SyncScope`, `ProjectRule`, `ArchiveState`, `ArchiveStatus`, `SyncReport`, `PrunePlan`, `plan_prune`, `RestoreRequest`, `PurgeSelection`, `AdminCredentials`; files `mysql.rs` (the only `mysql_async` import), `objects/folder.rs`, `objects/s3.rs` and `sigv4.rs` (later) |
 | `rastai-server` | `Server`, `run_daemon`, `DaemonOptions`, `CommandContext` (`context.server.gateway`), `execute_command`, `check_arguments`, `record_daemon_event`, `submit_job`, `NodeLink`, `NodeTransport`; request gate: `check_request_gate`, `RequestHead`, `Listener`, `AuthState`, `sessions.rs` (login codes, origin-bound sessions, idle expiry), `auth_files.rs`; chains: `record_chain_event`, `resume_chains`, `ChainStep`, `ChainAction`, `next_chain_action`, `start_next_chain_step`; policy: `check_data_policy`, `PolicyTarget` (with `PolicyTarget::ArchiveDatabase`), `policy_target_for_route` (`policy.rs`); plugin host: `HostCapability`, `FirstPartyCapability`, `HOST_CAPABILITIES`, `FIRST_PARTY_CAPABILITIES`, `negotiate_capabilities`, `NegotiationResult`, `LoadedPlugin`, `PluginSource`, `match_event_handlers`, `deliver_handler_calls`, `deliver_pending_handler_calls`; `VaultLogSink`; ModelSpec analysis: `DesignStats`, `compute_design_stats`, `estimate_memory_bytes`, `check_fits`, `estimate_time_seconds`, `TrainingMemoryEstimate`, `estimate_training_memory`, `largest_micro_batch`, `plan_layer_placement`, `PlacementUnit`, `GpuBudget`, `LayerPlacement`; files `commands/handlers/chat.rs`, `gateway_glue/routing.rs`, `nodes/node_links.rs`, `nodes/pairing.rs`, `scheduler/chains.rs`, `scheduler/launch.rs`, `scheduler/placement.rs` (which node and GPUs a job gets; not layer placement), `modelspec_analysis/memory.rs`, `modelspec_analysis/layer_placement.rs`, `storage_tasks.rs`, `crash_reports.rs`, `http/connect.rs`, `http/connect_json.rs`, `secrets.rs` |
-| `rastai-cli` | `Mode` (with `Tunnel`, `NodeInit`), `ALIASES`, `EXIT_OK` … `EXIT_ERRORED`, `modes.rs`, `output.rs`; global flags `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`; `rastai open --replace-older-daemon` (stop an older daemon with `system.shutdown`, take the database copies, start this version) |
+| `rastai-cli` | `Mode` (with `Tunnel`, `NodeInit`; its words and `ALIASES` come from `rastai-core`), `EXIT_OK` … `EXIT_ERRORED`, `modes.rs`, `output.rs`; global flags `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`; `rastai open --replace-older-daemon` (stop an older daemon with `system.shutdown`, take the database copies, start this version) |
 | `rastai-plugin` | `Provider`, `serve_provider`, `read_manifest`, `PluginSdkError` |
-| `apps/desktop/src-tauri` | binary `rastai-desktop`, `allow_navigation`, `open_second_window`, `DesktopError`; flags `--disable-dmabuf`, `--devtools`, `--open-url <url>` (debug builds only) |
+| `rastai-codegen` (dev) | bins `rastai-formats-codegen`, `rastai-catalog-codegen`, `rastai-names-codegen` (writes `schemas/names.json`, 12.6); schema keywords `x-rastai-stability`, `x-rastai-since-version` (in `schemas/commands/` and `schemas/events/`) beside `x-rastai-cli-position` |
+| `rastai-desktop` (`apps/desktop/src-tauri`) | package and binary `rastai-desktop`, `allow_navigation`, `open_second_window`, `DesktopError`; flags `--disable-dmabuf`, `--devtools`, `--open-url <url>` (debug builds only) |
 
 ### 15.2 Python names by package
 
@@ -2613,7 +2707,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `@rastai/canvas` | `GraphRenderer` (`setColors`), `createGraphRenderer`, `GraphScene`, `CanvasColors`, `createGlyphAtlas`, `layoutLayered`, `attachInteraction`, `MAX_GRAPH_NODES` (50,000, measured) |
 | `@rastai/viz` | `LineChart`, `BarChart`, `Heatmap`, `Histogram`, `Scatter2d`, `DataFlowView`, `VectorSpaceView` (each with `setColors`), `TableData`, `VizColors` |
 | first-party UIs | `psychologyUi`, `evalUi`, `PacketStore`, `summarizeVerify`; `MAX_TOKENS_PER_STORE` (8192) |
-| `apps/web` | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js`; `DRAFT_MAX_AGE_DAYS` (30) |
+| `@rastai/web` (`apps/web`) | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js`; `DRAFT_MAX_AGE_DAYS` (30) |
 
 ### 15.4 Desktop shell, CLI and HTTP details
 
@@ -2666,7 +2760,8 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `python/conftest.py`, `tests/conftest.py` | shared pytest fixtures |
 | `cache_folder` files (node-local) | `anchors/<base_model_hash12>-<anchor_set_hash12>-<template_hash12>.safetensors`, `drift/<model_hash12>-<prompt_set_hash12>.safetensors`, `tokenized/<dataset_hash12>-<template_hash12>.safetensors`, `images/<dataset_hash12>-<side>.safetensors` |
 | `tools/codegen/rewrite_python_imports`, `tools/fixtures/render_chat_templates.py`, `tools/bench/gateway-load/`, `tools/bench/tokenizer/` | dev tooling, never shipped |
-| `tools/checks/check-colors`, `tools/checks/check-no-typescript`, `tools/checks/check-unsafe`, `tools/checks/check-no-pickle`, `tools/checks/check-dco`, `tools/checks/check-schema-diff` (Phase 2) | CI checks |
+| `tools/checks/check-colors`, `tools/checks/check-no-typescript`, `tools/checks/check-unsafe`, `tools/checks/check-no-pickle`, `tools/checks/check-dco`, `tools/checks/check-names`, `tools/checks/check-schema-diff` | CI checks (the last two in M1, 12.6) |
+| `schemas/names.json`, `schemas/events/<event_type>.json` | generated by codegen, checked in (12.6) |
 | `tools/github/sync_backlog.py` | syncs labels, milestones and issues from `backlog.json` (M1-07) |
 | `tools/release/apparmor/rastai` | the AppArmor profile granting `userns` (8.8) |
 | `.dev/envs/cpu` | (dev only, git-ignored) the M1 stopgap environment until M2-16 |
@@ -2686,12 +2781,12 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 
 | Name | Kind | Meaning |
 |---|---|---|
-| `.github/workflows/ci.yml` | CI | pull requests and pushes to main: jobs `checks`, `dco`, `test-rust-linux`, `test-rust-macos`, `test-rust-windows`, `test-python`, `test-python-macos`, `test-python-windows`, `test-js`, `test-js-macos` |
-| `.github/workflows/nightly.yml` | CI | schedule, main only: fuzz targets (10 minutes each), `node-over-ssh` (the local suites against `rastai node serve` in an sshd container) |
+| `.github/workflows/ci.yml` | CI | pull requests and pushes to main: jobs `checks` (runs `just check`, including `check-names` and `check-schema-diff` against the PR's base branch), `dco`, `test-rust-linux`, `test-rust-macos`, `test-rust-windows`, `test-python`, `test-python-macos`, `test-python-windows`, `test-js`, `test-js-macos` |
+| `.github/workflows/nightly.yml` | CI | schedule, main only: fuzz targets (10 minutes each), `node-over-ssh` (the local suites against `rastai node serve` in an sshd container; nightly only, never a required PR job, owner 2026-10-11) |
 | `.github/workflows/nightly-gpu.yml` | CI | schedule and manual triggers on main only, on the self-hosted runner (labels `gpu-nvidia`; `gpu-amd` from M10), run as a separate OS user `rastai-runner`; secret `HF_READ_TOKEN` (read-only) for gated real-weight parity once the repo is public |
 | `.github/workflows/release.yml` | CI | packaging and signing |
 | `mysql-archive` (M11-E07) | CI job | the archive and the MySQL reader against MySQL 8.4 and 9.7, MariaDB and MinIO |
-| `just check`, `build`, `test-rust`, `fmt-check`, `lint`, `deny`, `test-python`, `test-python-portable`, `test-js`, `check-js`, `env-cpu`, `env-locks`, `parity`, `test-gpu`, `e2e-surfaces`, `e2e-web`, `dev-web`, `serve-dev`, `test-archive`, `test-crash`, `test-templates`, `loop-cpu`, `codegen`, `codegen-check`, `proto-check`, `wasm`, `wheel`, `check-deps`, `web-embed`, `release-linux`, `fuzz <crate> <target> [seconds]` | `just` recipes | `check-js` runs `tsc --noEmit` over `jsconfig.json`; `test-python-portable` runs the pure-compute packages with `-m 'not posix_only'`; `test-crash` runs the kill -9 matrix (`tests/crash/`); `test-templates` checks the `rastai plugin new` templates; `loop-cpu` runs `tests/loop/` (the full CPU loop under 10 minutes); `codegen` regenerates every generated folder and `codegen-check` fails if that changes anything; `proto-check` runs buf lint and `buf breaking`; `wasm` and `wheel` build the two `rastai-formats` bindings; `web-embed` builds `apps/web` for embedding in the binary; `release-linux` builds the AppImage and `.deb` |
+| `just check`, `check-names`, `check-schema-diff`, `build`, `test-rust`, `fmt-check`, `lint`, `deny`, `test-python`, `test-python-portable`, `test-js`, `check-js`, `env-cpu`, `env-locks`, `parity`, `test-gpu`, `e2e-surfaces`, `e2e-web`, `dev-web`, `serve-dev`, `test-archive`, `test-crash`, `test-templates`, `loop-cpu`, `codegen`, `codegen-check`, `proto-check`, `wasm`, `wheel`, `check-deps`, `web-embed`, `release-linux`, `fuzz <crate> <target> [seconds]` | `just` recipes | `check` is the gate every PR passes (format, lint, tests, codegen and repo checks, `check-names` and `check-schema-diff` included; 12.6); `check-js` runs `tsc --noEmit` over `jsconfig.json`; `test-python-portable` runs the pure-compute packages with `-m 'not posix_only'`; `test-crash` runs the kill -9 matrix (`tests/crash/`); `test-templates` checks the `rastai plugin new` templates; `loop-cpu` runs `tests/loop/` (the full CPU loop under 10 minutes); `codegen` regenerates every generated folder and `codegen-check` fails if that changes anything; `proto-check` runs buf lint and `buf breaking`; `wasm` and `wheel` build the two `rastai-formats` bindings; `web-embed` builds `apps/web` for embedding in the binary; `release-linux` builds the AppImage and `.deb` |
 | `gpu`, `posix_only`, `fuzz` | pytest markers | GPU-only; needs Unix sockets, flock or `setsid` (skipped on Windows); seeded mutation tests |
 | `tests/e2e/three_surfaces/` | test | M1-49: one action through UI, CLI and MCP; grows each milestone |
 | `tests/e2e/reconnect.spec.js`, `tests/e2e/training-view.spec.js`, `tests/e2e/psychology-latency.spec.js` | tests | resync and Regenerate after a daemon kill; M4-E12; the M4 p95 < 50 ms round trip |
@@ -2784,8 +2879,9 @@ Each lives at the top of the file that owns it, with a comment saying why.
 | `rastai.theme/1` with only `name`, `colors`, `spacing_px`, `font_sizes_px`, `radius_px` | frontend | the full row in 5.2 and 5.6 |
 | A managed sandbox network allowlist only in Phase 2 (node §12 Q3) | node layout | the in-house egress proxy at §31 step 7 (M7-E02) |
 | `rotate` a too-open `owner.token` | control-plane `auth_files.rs` draft | refuse to start, `RRS-C1008` |
-| `type{}` as the theme token group key | contracts v1.1 draft §5.2 | `typography{}`, because it collided with the shared header's `type` (5.2, 5.6); the `--rr-font-*` and `--rr-line-height-*` variables don't change |
+| `type{}` as the theme token group key, and "type" as the token group's name anywhere | contracts v1.1 draft §5.2, plan M1-01a | `typography{}` everywhere (owner, 2026-10-11), because it collided with the shared header's `type` (5.2, 5.6); the `--rr-font-*` and `--rr-line-height-*` variables don't change |
 | `data_policy` in `project.json`; `projects.data_policy` in `rastai.db` | contracts v1.1 draft, platform 10.1 | `privacy.data_policy` in the project's `settings.json` only (11.1) |
+| `apps/desktop/src-tauri` as the crate's name | contracts v1.1 §2.1, 15.1 | the Cargo package `rastai-desktop` (the binary's name), so `check-names` can match it |
 | `RRS-D3001` for every MySQL source failure; `RRS-D1003` for a non-PNG/JPEG image | training-evaluation, Python drafts | `RRS-D3005`–`D3009`; `RRS-D1001` (format), `RRS-D1002` (more than 1% failed), `RRS-D1004` (too large); `RRS-D1003` stays "Python converter raised" |
 | `InterventionHook` in `rastai_models` | contracts v1.1 draft | `rastai_lens/interventions.py` |
 
