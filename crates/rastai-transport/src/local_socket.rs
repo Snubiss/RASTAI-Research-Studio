@@ -3,8 +3,8 @@
 //! `NotSupportedOnThisPlatform` (RRS-N2009) on Windows.
 //!
 //! The socket's folder is the security boundary (contracts 3.2, 8.1): `bind_local_socket` creates it with mode 0700
-//! and refuses one that another user owns or that group or others can use, so a folder planted in the shared /tmp
-//! can't catch the sockets. `connect_local_socket` checks the same folder before it connects, and both ends check
+//! and refuses one that another user owns, that group or others can use, or that is not a folder (a symbolic link
+//! or a file), so a folder planted in the shared /tmp can't catch the sockets. `connect_local_socket` checks the same folder before it connects, and both ends check
 //! that the peer is the same user.
 
 use std::path::Path;
@@ -54,7 +54,9 @@ pub enum LocalStream {
 #[cfg(unix)]
 pub fn bind_local_socket(socket_path: &Path) -> Result<LocalListener, TransportError> {
     let folder = socket_folder(socket_path)?;
-    create_socket_folder(folder, socket_path)?;
+    if !path_entry_exists(folder).map_err(|error| not_created(socket_path, error))? {
+        create_socket_folder(folder, socket_path)?;
+    }
     check_socket_folder(folder)?;
     remove_stale_socket(socket_path)?;
     let listener = tokio::net::UnixListener::bind(socket_path).map_err(|error| not_created(socket_path, error))?;
@@ -105,14 +107,30 @@ pub async fn connect_local_socket(_socket_path: &Path) -> Result<LocalStream, Tr
 
 /// The client's half of the folder rule, before it connects: only this user can have bound a socket in a 0700
 /// folder this user owns, so the server is ours. The gRPC channel calls it too. A missing folder only means
-/// nothing was ever bound there, so it is "not reachable" (RRS-N2004), not "insecure".
+/// nothing was ever bound there, so it is "not reachable" (RRS-N2004), not "insecure". A symbolic link in its place,
+/// even a dangling one, is something someone put there, so it is "insecure" (RRS-N2005).
 #[cfg(unix)]
 pub(crate) fn check_folder_before_connecting(socket_path: &Path) -> Result<(), TransportError> {
     let folder = socket_folder(socket_path)?;
-    if !folder.exists() {
+    let folder_exists = path_entry_exists(folder).map_err(|error| TransportError::SocketFolderInsecure {
+        folder: folder.to_path_buf(),
+        reason: format!("can't be read: {error}"),
+    })?;
+    if !folder_exists {
         return Err(not_reachable(socket_path, "its folder doesn't exist"));
     }
     check_socket_folder(folder)
+}
+
+/// Whether anything is at `path` itself: a symbolic link counts, even one whose target is missing. `Path::exists`
+/// follows links, so a dangling link would look like "nothing there".
+#[cfg(unix)]
+fn path_entry_exists(path: &Path) -> Result<bool, std::io::Error> {
+    match fs::symlink_metadata(path) {
+        Ok(_metadata) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Checks the folder a socket lives in without creating it: a folder, owned by this user, mode 0700.
@@ -160,7 +178,7 @@ struct FolderFacts {
 #[cfg(unix)]
 fn folder_problem(facts: &FolderFacts, own_user_id: u32) -> Option<String> {
     if !facts.is_folder {
-        return Some("it isn't a folder (a symbolic link or a file)".to_string());
+        return Some("it is not a folder (a symbolic link or a file)".to_string());
     }
     if facts.owner_user_id != own_user_id {
         return Some(format!(
@@ -177,8 +195,9 @@ fn folder_problem(facts: &FolderFacts, own_user_id: u32) -> Option<String> {
     None
 }
 
-/// Creates the folder, and any missing folder above it, with mode 0700. One that already exists is left as it is
-/// for the check that follows: we never loosen or "repair" a folder someone else may have made.
+/// Creates the missing folder, and any missing folder above it, with mode 0700. `bind_local_socket` calls it only
+/// when nothing is at the folder's path; whatever is there is left as it is for the check that follows: we never
+/// loosen or "repair" a folder someone else may have made.
 #[cfg(unix)]
 fn create_socket_folder(folder: &Path, socket_path: &Path) -> Result<(), TransportError> {
     let mut builder = fs::DirBuilder::new();

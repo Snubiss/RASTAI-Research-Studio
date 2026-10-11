@@ -169,8 +169,9 @@ fn host_header(target: &HttpTarget) -> String {
     }
 }
 
-/// The hyper request: method, path, Host, the caller's headers, the body. A bad method, path or header is a bug in
-/// the caller, reported as RRS-N2008 with the part that is wrong.
+/// The hyper request: method, path, Host, the caller's headers, the body. A Host the caller gives replaces ours,
+/// since two Host headers make a request every HTTP/1.1 server must refuse. A bad method, path or header is a bug
+/// in the caller, reported as RRS-N2008 with the part that is wrong.
 fn build_http_request(request: &HttpRequest, host: &str) -> Result<Request<RequestBody>, TransportError> {
     let mut http_request = Request::new(RequestBody::new(request.body.clone()));
     *http_request.method_mut() = Method::from_bytes(request.method.as_bytes())
@@ -184,7 +185,12 @@ fn build_http_request(request: &HttpRequest, host: &str) -> Result<Request<Reque
     for (name, value) in &request.headers {
         let header_name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| connection_failed(format!("invalid header name {name:?}")))?;
-        headers.append(header_name, header_value(value)?);
+        let value = header_value(value)?;
+        if header_name == HOST {
+            headers.insert(header_name, value);
+        } else {
+            headers.append(header_name, value);
+        }
     }
     Ok(http_request)
 }
@@ -301,6 +307,24 @@ mod tests {
         assert_eq!(built.headers()["host"], "127.0.0.1:8080");
         assert_eq!(built.headers()["content-type"], "application/json");
         assert_eq!(built.body().size_hint().exact(), Some(2));
+    }
+
+    #[test]
+    fn a_host_header_from_the_caller_replaces_ours() {
+        let headers = vec![("Host".to_string(), "localhost:47820".to_string())];
+        let built = build_http_request(&request("GET", "/", headers), "127.0.0.1:8080").unwrap();
+        let hosts: Vec<_> = built.headers().get_all(HOST).iter().collect();
+        assert_eq!(hosts, vec!["localhost:47820"]);
+    }
+
+    #[test]
+    fn repeated_headers_other_than_host_are_all_kept() {
+        let headers = vec![
+            ("Accept".to_string(), "text/plain".to_string()),
+            ("Accept".to_string(), "application/json".to_string()),
+        ];
+        let built = build_http_request(&request("GET", "/", headers), "127.0.0.1:8080").unwrap();
+        assert_eq!(built.headers().get_all("accept").iter().count(), 2);
     }
 
     #[test]

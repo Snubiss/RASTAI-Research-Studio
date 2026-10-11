@@ -27,6 +27,8 @@ mod on_unix {
     const SOCKET_FILE: &str = "test.sock";
     const TEST_FOLDER_PREFIX: &str = "rtl";
     const GREETING: &[u8] = b"hello over a local socket";
+    /// Where a symbolic link put in place of the socket folder points.
+    const LINK_TARGET_FOLDER: &str = "elsewhere";
 
     fn socket_path_in(test_folder: &Path) -> PathBuf {
         crate::common::socket_path_in(test_folder, SOCKET_FILE)
@@ -114,6 +116,56 @@ mod on_unix {
         // The folder is refused, never "repaired": its mode is what it was.
         let folder_mode = fs::metadata(&socket_folder).unwrap().permissions().mode() & 0o777;
         assert_eq!(folder_mode, 0o755);
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_symbolic_link_to_a_private_folder_is_refused_on_both_ends() {
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let socket_path = socket_path_in(&test_folder);
+        // The link's target is a folder of ours at 0700, so only the link itself can make it insecure.
+        let link_target = test_folder.join(LINK_TARGET_FOLDER);
+        fs::create_dir(&link_target).unwrap();
+        fs::set_permissions(&link_target, fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink(&link_target, test_folder.join(SOCKET_FOLDER)).unwrap();
+
+        let bind_refusal = bind_local_socket(&socket_path).map(|_| ());
+        let connect_refusal = connect_local_socket(&socket_path).await.map(|_| ());
+
+        assert_eq!(bind_refusal.map_err(|error| error.code()), Err("RRS-N2005"));
+        assert_eq!(connect_refusal.map_err(|error| error.code()), Err("RRS-N2005"));
+        assert!(!link_target.join(SOCKET_FILE).exists());
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_dangling_symbolic_link_as_the_socket_folder_is_insecure_not_unreachable() {
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let socket_path = socket_path_in(&test_folder);
+        // A link to a folder that doesn't exist yet: whoever creates the target later would hold our sockets.
+        std::os::unix::fs::symlink(test_folder.join(LINK_TARGET_FOLDER), test_folder.join(SOCKET_FOLDER)).unwrap();
+
+        let connect_refusal = connect_local_socket(&socket_path).await.map(|_| ());
+        let bind_refusal = bind_local_socket(&socket_path).map(|_| ());
+
+        assert_eq!(connect_refusal.map_err(|error| error.code()), Err("RRS-N2005"));
+        assert_eq!(bind_refusal.map_err(|error| error.code()), Err("RRS-N2005"));
+        // Binding never followed the link to create its target.
+        assert!(!test_folder.join(LINK_TARGET_FOLDER).exists());
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_file_in_place_of_the_socket_folder_is_refused_as_not_a_folder() {
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let socket_path = socket_path_in(&test_folder);
+        fs::write(test_folder.join(SOCKET_FOLDER), b"not a folder").unwrap();
+
+        let bind_refusal = bind_local_socket(&socket_path).map(|_| ());
+        let connect_refusal = connect_local_socket(&socket_path).await.map(|_| ());
+
+        assert_eq!(bind_refusal.map_err(|error| error.code()), Err("RRS-N2005"));
+        assert_eq!(connect_refusal.map_err(|error| error.code()), Err("RRS-N2005"));
         fs::remove_dir_all(&test_folder).unwrap();
     }
 
