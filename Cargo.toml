@@ -10,6 +10,7 @@ resolver = "3"
 # Cargo refuses a member folder that doesn't exist yet, which is why the list starts short.
 members = [
   "crates/rastai-diag",
+  "crates/rastai-formats",
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
 exclude = [
@@ -36,8 +37,9 @@ axum = { version = "=0.8.9", default-features = false }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
+blake3 = "=1.8.7"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
-# prost, tonic, hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc, blake3, miniz_oxide,
+# prost, tonic, hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc, miniz_oxide,
 # ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build, tauri-plugin-updater,
 # mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 

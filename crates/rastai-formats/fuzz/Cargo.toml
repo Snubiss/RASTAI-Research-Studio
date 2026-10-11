@@ -1,0 +1,29 @@
+# The cargo-fuzz crate for rastai-formats (contracts 12.5, ADR-0037): one target per in-house parser of untrusted
+# input. It is its own workspace (the root Cargo.toml excludes this folder) because it builds only on the nightly
+# toolchain `just fuzz` pins. Run a target with: just fuzz rastai-formats json_reader 60
+[package]
+name = "rastai-formats-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly, like every external crate (root Cargo.toml); a dev dependency of the fuzz crates only.
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.rastai-formats]
+path = ".."
+
+# An independent workspace for the fuzz targets.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "json_reader"
+path = "fuzz_targets/json_reader.rs"
+test = false
+doc = false
+bench = false
