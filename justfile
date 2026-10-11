@@ -53,13 +53,13 @@ build:
 test-rust:
     cargo test --workspace --locked
 
-# Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml extends it for
-# the repo checks), JavaScript, JSON, CSS and YAML by prettier (.prettierrc.json, .prettierignore). All three use
-# 120 columns.
+# Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml and
+# tools/github/pyproject.toml extend it), JavaScript, JSON, CSS and YAML by prettier (.prettierrc.json,
+# .prettierignore). All three use 120 columns.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
-    "{{cpu_environment}}/bin/ruff" format --check python tools/checks
+    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/github
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -71,7 +71,7 @@ wasm:
 # clippy and ruff check; every warning fails.
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    "{{cpu_environment}}/bin/ruff" check python tools/checks
+    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/github
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one
@@ -86,12 +86,13 @@ env-js:
     pnpm install --frozen-lockfile
 
 # Settings and markers are in python/pyproject.toml; python/conftest.py skips gpu tests without a device and
-# posix_only tests on Windows. tools/checks/tests runs every repo check on passing and failing fixture trees, with
-# its own settings in tools/checks/pyproject.toml.
-# pytest over python/ and tools/checks/tests in the cpu environment.
+# posix_only tests on Windows. tools/checks/tests runs every repo check on passing and failing fixture trees, and
+# tools/github/tests runs the backlog sync against a fake gh; each has its own settings in its pyproject.toml.
+# pytest over python/, tools/checks/tests and tools/github/tests in the cpu environment.
 test-python: env-cpu
     cd python && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/checks && "{{cpu_environment}}/bin/python" -m pytest
+    cd tools/github && "{{cpu_environment}}/bin/python" -m pytest
 
 # The test files are listed in vitest.config.js.
 # vitest over the whole JavaScript workspace.

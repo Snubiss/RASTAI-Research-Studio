@@ -1,0 +1,173 @@
+Repository: Snubiss/RASTAI-Research-Studio (dry run: nothing is written)
+create label area:archive (#1d76db)
+update label size:XL: color #ffffff -> #c5def5
+create label needs:amd (#d93f0b)
+update milestone "M3 Inference": description
+create milestone "M11 Long-term storage"
+create issue M1-01a: Theming and frontend-contract docs (owner decisions 20 and 21)
+create issue M1-02: Spec v5.4: the §27 register and ADR-0033
+update issue M1-03 (#3): labels +size:M +gate:90-day -size:XL
+create issue M1-04: Python and JavaScript workspaces and the cpu environment
+create issue M1-05: Repo checks: deps, unsafe, pickle, imports, colors, no TypeScript, generated code, DCO
+create issue M1-06: CI workflows for pull requests and nightly runs
+update issue M1-07 (#7): body
+create issue M1-08: Proto toolchain and `rastai.common.v1` (contract)
+create issue M1-09: Proto `rastai.commands.v1` and `rastai.events.v1`, with `stability` (contract)
+create issue M1-10: Proto `node.v1` and `worker.v1` skeleton RPCs (contract)
+create issue M1-11: rastai-diag: Diagnostic, renderers and the JSON-lines logger
+create issue M1-12: rastai-codegen and the catalog code generator
+create issue M1-13: Catalog v1: the codes of contracts §10.3 (contract)
+create issue M1-14: rastai-formats JSON core: strict reader, canonical JSON, hashing, semver
+create issue M1-15: rastai-formats descriptions and validation layers 1 and 2
+create issue M1-16: rastai-formats-codegen: JSON Schema, JSDoc types, typed command wrappers, Python dataclasses
+create issue M1-17: Step-1 document types, with the theme document (contract)
+create issue M1-18: ModelSpec v1 for TextCNN, and the TextCNN template (contract)
+create issue M1-19: PyO3 wheel: rastai-formats-python and `rastai_formats`
+create issue M1-20: rastai-core: versions, paths, ids, principals, scopes, states
+create issue M1-21: rastai-core: command registry, naming and settings resolution
+create issue M1-22: Skeleton commands: registry rows and argument types (contract)
+create issue M1-23: rastai-store: databases and writer threads
+create issue M1-24: rastai-store: event-log frames, reader and writer
+create issue M1-25: rastai-store: indexer, blob store and free space
+create issue M1-26: rastai-server: startup, listeners, request gate and origin-bound sign-in
+create issue M1-27: rastai-server: the Execute path and the L0 floor
+create issue M1-28: rastai-server: event bus, Subscribe and run-log indexing
+create issue M1-29: rastai-mcp: JSON-RPC, the MCP server and the stdio bridge
+create issue M1-30: rastai-server: the `/mcp` endpoint
+create issue M1-31: rastai-cli: modes, generated verbs, follow and exit codes
+create issue M1-32: rastai-server: plugin host (discover, negotiate, register)
+create issue M1-33: rastai-store: offline index rebuild
+create issue M1-34: Safetensors: the one header check in rastai-formats, and the Python reader and writer that call it (spike port)
+create issue M1-35: rastai_models: the compiler and the TextCNN blocks
+create issue M1-36: rastai_data: readers, word vocabulary, splits and a resumable loader
+create issue M1-37: rastai_plugin: registry, base classes, module loader and host client
+create issue M1-38: rastai_train: loop, optimizer, checkpoints, resume and the classification recipe
+create issue M1-39: rastai_worker: the event-log writer and payload conversion
+create issue M1-40: rastai_worker: process, WorkerService, host connection and control
+create issue M1-41: rastai-transport: local sockets, peer credentials, gRPC channels, local HTTP
+create issue M1-42: rastai-node: entry, identity, local handshake, hardware and telemetry
+create issue M1-43: rastai-node: job supervisor, spawn, signals and exit causes
+create issue M1-44: rastai-node: event-log tailing and live streams
+create issue M1-45: rastai-node: reattach after a restart, and immediate heartbeats
+create issue M1-46: rastai_worker: the TextCNN train job
+create issue M1-47: Daemon and embedded node: links, NodeHub, scheduler, train.start and `job.*`
+create issue M1-48: Kill -9 crash suite for the skeleton (M1 exit gate)
+create issue M1-49: Three surfaces end to end: HTTP, CLI and MCP
+create issue M1-50: `@rastai/client`: credentials, `CommandExecutor` and the generated JavaScript packages
+create issue M1-51: `@rastai/ui`: theme tokens, the locked security UI, basics and the Basic/Advanced primitives
+create issue M1-52: `@rastai/plugin`: host interface, registry and state tools
+create issue M1-53: apps/web shell, embedded in the daemon
+create issue M1-54: apps/web: the generated palette, copy-as, Settings with Appearance, Plugins and Remote; Playwright
+create issue M1-55: apps/desktop: the Tauri window and `rastai open`
+create issue M1-56: Threat model v1
+create issue M1-57: check-names: generated names registry and contracts comparison
+create issue M1-58: check-schema-diff: command and event schema diff against base
+create issue M2-01: ModelSpec ops for decoder families (contract)
+create issue M2-02: rastai_models: observation points, forward context, kernels and traits
+create issue M2-03: rastai_models: decoder blocks (spike port)
+create issue M2-04: rastai_models: KV caches, including the sliding ring buffer
+create issue M2-05: rastai_models: decoder graphs, strict loading and sharded weights
+create issue M2-06: Family base class and the Gemma 3 family
+create issue M2-07: The Llama family
+create issue M2-08: The parity harness
+create issue M2-09: Gemma 3 and Llama parity in CI (fp32 and bf16)
+create issue M2-10: Nightly GPU runner and real-weight parity on the 5080 and 3090
+update issue M2-11 (#67): milestone "M2 Unified runtime" -> "M10 Prototype exit"
+create issue M2-12: Step-2 contracts: environments, hardware, secrets and model commands (contract)
+create issue M2-13: rastai-formats: the safetensors reader and planner, and the model hash
+create issue M2-14: rastai-transport: the HTTPS client
+create issue M2-15: Locked environments for every backend
+create issue M2-16: rastai-node: uv environments
+create issue M2-17: rastai-node: Hugging Face downloads
+create issue M2-18: rastai-server: secrets, HF sign-in and the license check
+create issue M2-19: rastai-server: system and model handlers
+create issue M2-20: `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint
+create issue M2-21: Home: the First Run checklist
+create issue M2-22: rastai-formats: the zip reader, with DEFLATE through miniz_oxide
+create issue M2-23: Re-plan with M1's measured velocity
+create issue M3-E01: Inference contracts
+create issue M3-E02: Vault, conversation tree and imports
+create issue M3-E03: Node: VRAM leases, model table and generation routing
+create issue M3-E04: Inspectable serving: static decode, sessions and CUDA graphs
+create issue M3-E05: Fast runtime: the managed llama-server
+create issue M3-E06: Gateway core: tokenizer, chat templates, prompts and logging
+create issue M3-E07: Endpoints and chat: /v1, `chat.*` and model.load
+create issue M3-E08: Third-party API adapters
+create issue M3-E09: Inference section UI
+create issue M3-E10: Replay twins, tool calls and nightly checks
+create issue M3-E11: Projects: create, open, lock resolution, export and import
+create issue M4-E01: Psychology contracts
+create issue M4-E02: Plugin modules and first-party packaging
+create issue M4-E03: Live readouts in the decode step
+create issue M4-E04: Psychology UI: the Basic lenses
+create issue M4-E05: The steering slider
+create issue M4-E06: Replay and the web viewer
+create issue M4-E07: Branching and Prefer this branch
+create issue M4-E08: Model diff and the SAE fit check
+create issue M4-E09: Steering presets: save, serve, distill
+create issue M4-E10: Advanced views I: projections, probes and 3D flow
+create issue M4-E11: Advanced views II: attribution graphs and observe()
+create issue M4-E12: Training view
+create issue M5-E01: Training and Evaluation contracts
+create issue M5-E02: Node gateway and training-data tokenization
+create issue M5-E03: Teach it training: LoRA, answer-only loss and anchors
+create issue M5-E04: Chains, run management, storage and lineage
+create issue M5-E05: Evaluation plugin v0
+create issue M5-E06: The loop end to end: Teach it and Verify
+create issue M5-E07: Data import, checks and converters
+create issue M5-E08: The RLHF chain: reward model, PPO, GRPO and GSPO
+create issue M5-E09: Recipes III: pretraining, SAE training, QLoRA, multi-GPU, sweeps
+create issue M5-E10: The sandbox manager
+create issue M5-E11: Evaluation complete
+create issue M5-E12: Training UI and experiment tracking
+create issue M5-E13: Export and provenance
+create issue M5-E14: Preemption-safe resume
+create issue M5-E15: Plugin event handlers
+create issue M5-E16: Read-only CUDA IPC sharing of the frozen base
+create issue M6-E01: Designer contracts
+create issue M6-E02: ModelSpec analysis: live stats
+create issue M6-E03: Thin Designer: canvas editing and the TextCNN template
+create issue M6-E04: Import, compile, train and ONNX export from the UI
+create issue M6-E05: Linux packaging and updates
+create issue M6-E06: The months-4+ plan and level audit
+create issue M6-E07: Dense families II: Qwen, Mistral, GPT-2, BERT, ViT
+create issue M6-E08: Mixture of experts
+create issue M6-E09: MLA and layer placement across GPUs
+create issue M6-E10: ALiBi and attention residuals
+create issue M6-E11: Templates, composition and hierarchy
+create issue M6-E12: Round trips: Eject, ONNX import, torch.export, rastai.load, compat runtime
+create issue M7-E01: Agent Gym contracts
+create issue M7-E02: Harness editor, MCP import/export and network allowlists
+create issue M7-E03: The multi-turn RL engine
+create issue M7-E04: Live peek and step mode
+create issue M7-E05: Harbor import and agent scoring
+create issue M7-E06: Gym UI, traces in Psychology, crash safety
+create issue M8-E01: Plugin SDK contracts
+create issue M8-E02: Install pipeline and trust
+create issue M8-E03: The iframe bridge
+create issue M8-E04: SDK tooling and templates
+create issue M8-E05: Plugins section, macros and the Rust provider SDK
+create issue M8-E06: Theme plugins, high-contrast themes and icon sets
+create issue M9-E01: Remote contracts
+create issue M9-E02: SSH pairing and the standalone node
+create issue M9-E03: Remote jobs survive network drops
+create issue M9-E04: Resumable transfers and remote artifacts
+create issue M9-E05: Headless serve and the remote UI
+create issue M9-E06: Updates for the daemon and nodes
+create issue M9-E07: Remote inference, Psychology and preemption
+create issue M10-E01: AMD tier 1
+create issue M10-E02: The core loop at L2
+create issue M10-E03: Level audit and the three-platform run
+create issue M10-E04: (L2) hardening after the core loop reaches L2
+create issue M11-E01: Long-term storage contracts and the archive schema
+create issue M11-E02: rastai-archive: sync for run and daemon logs
+create issue M11-E03: Vault sync opt-in and delete propagation
+create issue M11-E04: Blob targets: folder, then S3
+create issue M11-E05: Prune, restore, rebuild and kill -9 rows 20–24
+create issue M11-E06: Settings > Storage > Archive
+create issue M11-E07: CI with MySQL 8.4 and 9.7, MariaDB and MinIO
+update issue map M1-01 -> #1
+update issue map M1-03 -> #3
+update issue map M1-07 -> #7
+update issue map M2-11 -> #67
+Plan: 2 labels to create, 1 label to update, 1 milestone to update, 1 milestone to create, 159 issues to create, 3 issues to update, 4 issue map entries to update.

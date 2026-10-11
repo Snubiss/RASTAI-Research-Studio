@@ -1,0 +1,11 @@
+# Not a package: the settings for the GitHub sync tool in this folder (contracts 15.8, plan 8.9).
+# ruff uses the same rules as python/ (owner decision 7). pytest runs tests/ with the same options as python/, plus
+# this folder and tests/ on the import path, so a test can import sync_backlog and the fake gh.
+
+[tool.ruff]
+extend = "../../python/pyproject.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = ["--strict-markers", "--import-mode=importlib"]
