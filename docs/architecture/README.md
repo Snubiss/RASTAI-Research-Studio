@@ -180,6 +180,7 @@ flowchart TD
 ## 6. Changing the design
 
 - **A new shared name** goes into contracts.md. A wire, document or command shape lands first, in its own contract PR (spec §29). Any other name goes in the same PR as the code that uses it. `check-names` and `check-schema-diff` enforce this from M1 (ADR-0038, contracts §12.6).
+- **A name registered before its code exists** carries the milestone that builds it, such as "(M4)" (contracts conventions). The PR that lands the name removes its marker.
 - **A new decision** that someone would otherwise reopen gets an ADR (`docs/adr/README.md`, "Writing a new ADR"). An example or path fix in an accepted ADR is a "Note since acceptance", not a new decision.
 - **A conflict between docs** gets a row at the end of plan §10 with a default; once settled, contracts §16 records the answer and the docs that lose get a fix.
 - **A scope change** is a spec edit by the owner. Docs never change scope on their own; they raise an open question with a default.

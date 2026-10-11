@@ -841,7 +841,7 @@ Lane A · size M · type task · depends on M1-20, M1-15
 
 - **Goal:** The registry as a plain table plus functions (no macros): `CommandRow` rows turned into the generated `CommandDescriptor`, plugin add and remove, scope checks, the naming rules for CLI words (`_` → `-`), flags, MCP tool names and typed JavaScript wrapper names, and settings resolution across the five layers. Settings come only from files and the environment; there is no settings table (spec v5.4 §19, contracts §11.1).
 - **Files:** `crates/rastai-core/src/commands/{descriptor, table, registry, naming, output}.rs`; `src/{settings, settings_defaults}.rs`; `tests/{command_table, naming_round_trip, settings_precedence}.rs`; `fixtures/command-golden/copy-as.json` (seed)
-- **Test:** Naming round trip for every id; settings precedence per key (`RASTAI_GATEWAY__PORT=8899` sets gateway.port); `ui.theme` resolves to `system` with no file; a bad `--set` gives a diagnostic.
+- **Test:** Naming round trip for every id; settings precedence per key (`RASTAI_DAEMON__PORT=8899` sets daemon.port); `ui.theme` resolves to `system` with no file; a bad `--set` gives a diagnostic.
 - **Docs:** [Layout: Rust control plane §5, §10](../architecture/layout/rust-control-plane.md), [Contracts §6.1–6.3, §11](../architecture/contracts.md), [ADR-0005 command layer](../adr/0005-command-layer.md)
 
 #### M1-22 Skeleton commands: registry rows and argument types (contract)
@@ -1783,7 +1783,7 @@ The live record. Every row starts at "none" today; PRs update the "Now" column. 
 | Accessibility: a table behind every chart, keyboard token timeline, reduced motion | Platform | none | M4 | M4 | | `accessibility.spec.js` (M4-E04; reduced motion in the 3D views with M4-E10); the full WCAG 2.2 AA pass is L3, Phase 2 |
 | Egress badge and project data policy | Settings | none | M3 | M3 | | `RRS-C1009` refusal with its one-click fix (M3-E08); badge on and off in `chat.spec.js` (M3-E09) |
 | Crash reports, opt-in | Settings | none | M6 | M6 | | one redacted local report per crash, the prompt only when opted in, nothing uploaded (M6-E05; platform flow §11 tests); the rate limit is (L2) |
-| Tutorials and assistant skills | Platform | none | Phase 2 | Phase 2 | | spec §7 and §31 Phase 2 (guided tutorials are L3 work); no layout doc designs them yet |
+| Tutorials and assistant skills | Platform | none | Phase 2 | Phase 2 | | spec §7 and §31 Phase 2 (guided tutorials are L3 work); the frontend layout's 8.4 designs them for then (section 10 row 45) |
 | Environments and `rastai doctor` | Home | none | M2 | M2 | | `environments.rs`, wrong-matmul test, row 5 |
 | Model download, gated sign-in | Inference, Home | none | M2 | M2 | | `downloads.rs`, row 4, `first-run.spec.js` |
 | Inspectable runtime: Gemma 3, Llama | Inference | none | M2 | M3 | M10 | parity suite, `navi_chat.rs` |
@@ -1982,7 +1982,7 @@ The owner's box (5080, 3090, later the AMD card) runs the GPU jobs (§29). Owner
 The layout and flow docs were written in parallel and disagreed in places. Every row now has an answer: the owner accepted the defaults on 2026-10-10, and contracts §16 records each answer and where it lives in contracts.md. M1-01 lands them and fixes the docs that lost.
 
 - **Row numbers are stable.** Other docs cite them ("plan §10 row 5"), so rows are only added at the end, never renumbered.
-- **Rows 23–37** came from the cross-doc review after v1 of this plan; **rows 38–44** from the owner decisions of 2026-10-10 and this plan's v1.3.
+- **Rows 23–37** came from the cross-doc review after v1 of this plan; **rows 38–44** from the owner decisions of 2026-10-10 and this plan's v1.3; **row 45** from M1-01's milestone markers (2026-10-11). Its answer is the default until the owner decides otherwise.
 - **A new disagreement** gets a row at the end with a default, then a fix in the docs that lose, and its name in contracts.md if it is one.
 
 | # | Conflict | Where | Answer |
@@ -2031,6 +2031,7 @@ The layout and flow docs were written in parallel and disagreed in places. Every
 | 42 | When the Rust safetensors header check lands: step 2 vs before the Python reader | control-plane §4.13 (step 2) vs Python §2.9 (the wheel's `check_safetensors_header` must exist in M1) | M1: M1-34 ports the header check into `rastai-formats` and exposes it through the wheel; M2-13 keeps the `ByteSource` reader, the writer's planner and `model_hash` (one owner per algorithm, contracts §2.4 rule 10) |
 | 43 | Sessions across a daemon restart | frontend v1 §19 Q5 (they survive) vs platform 4.1 (dropped) | sessions live in daemon memory; a restart signs everyone out (`RRS-U0003`); the desktop shell reruns `rastai open --print-url` (contracts §16) |
 | 44 | `node-over-ssh`: a required PR job in `ci.yml` vs a nightly job | plan v1.2 8.7 vs contracts §15.9 | `nightly.yml`, on schedule and `main` only (contracts); M9-E02's exit names a green nightly run, and the PR-level `ssh-loopback` and `remote-network-drop` jobs stay required |
+| 45 | Tutorials and assistant skills: in the prototype from step 2 (tutorials) and step 8 (skills) vs Phase 2 | frontend layout 8.4, 8.9 and 17, control-plane layout 4 (`tutorial.rs` at step 1) vs ADR-0017 decision 3 (tutorials are L3 work), spec §7, this plan's section 7 level table, and no backlog task | Phase 2. `tutorial.list`, `tutorial.check` and `rastai.tutorial/1` stay registered in contracts, marked "(Phase 2)"; the layouts keep the design and point here. The owner can bring them into the prototype with a task of their own |
 
 ---
 

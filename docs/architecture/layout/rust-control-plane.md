@@ -4,6 +4,8 @@
 
 **Changes of 2026-10-11 (owner-approved):** `schemas/names.json`, `check-names` and `check-schema-diff` move into M1 (sections 2.8 and 4.9); the theme token group is `typography` everywhere (contracts §5.2 now says so; the open question is gone); the core event-type table, `ALIASES` and the CLI mode words live in `rastai-core` so the codegen can read them (contracts v1.2 §15.1).
 
+**M1-01 alignments with the plan (2026-10-11):** `archive_cursors` arrives with M11's migration, not `0001` (plan M1-23); `tutorial.rs` and the `tutorial.*` commands are Phase 2 (plan §10 row 45); the `archive` settings section joins `SettingsDocument` in M11-E01; the settings precedence test uses `daemon.port`, a registered key (there is no `gateway.port`).
+
 **Changes in v1.1:** the new `rastai-archive` crate (section 14, M11); `archive_cursors`, `runs.archive_state` and the `vault_changes` outbox in `rastai-store`; settings live only in files (no `settings` table); `unsafe` for one `statvfs` call (ADR-0033); `miniz_oxide` behind `zip/inflate.rs` and a fuzz target for every in-house parser of untrusted input; plain JavaScript codegen output (ADR-0036); `stability` on commands and event types; origin-bound sessions in the request gate (ADR-0034); 31 plugin capabilities; the one layer-placement planner and per-op golden files; (L2) tags.
 
 This doc covers:
@@ -338,7 +340,7 @@ schemas/
   rastai.model_diff/1.json         step 4 (Psychology model diff report)
   rastai.sae_fit_check/1.json      step 4 (Psychology SAE fit check report)
   rastai.theme/1.json              step 1, M1 (the full token row, contracts §5.6); theme plugins use it from M8
-  rastai.tutorial/1.json           step 1 (built-in tutorials)
+  rastai.tutorial/1.json           Phase 2 (built-in tutorials; plan §10 row 45)
   rastai.icon_set/1.json           M8 (icon-set plugins)
   commands/
     rastai.command.model.load/1.json      arguments and result of each core command (two `$defs`: arguments, result),
@@ -592,11 +594,12 @@ crates/rastai-formats/
       steering_preset.rs      SteeringPreset and InterventionSet (the shared type, defined once here)
       layout.rs               WorkspaceLayout
       keybindings.rs          Keybindings
-      settings.rs             SettingsDocument (the keys of contracts §11.2, `archive` included); the only settings store is
+      settings.rs             SettingsDocument (the keys of contracts §11.2; the `archive` section joins in M11-E01 and
+                              `eval.judge_min_*` in M5-E01, as their contracts markers say); the only settings store is
                               the files, written atomically by rastai-store's write_config_file
       converter.rs            ConverterDocument (rastai.converter/1): column mapping, templates, filters (step 5)
       theme.rs                ThemeDocument (rastai.theme/1): the full token row of contracts §5.6 (step 1, M1; 4.2a)
-      tutorial.rs             Tutorial (rastai.tutorial/1): steps, checks, show-me commands (step 1)
+      tutorial.rs             Tutorial (rastai.tutorial/1): steps, checks, show-me commands (Phase 2, plan §10 row 45)
       eval_result.rs          EvalResult (rastai.eval_result/1): answers, token ids, scores, pass flags, judge hashes (step 5)
       model_diff.rs           ModelDiffReport (rastai.model_diff/1): feature, lens and routing shifts, eval deltas (step 4)
       sae_fit_check.rs        SaeFitCheckReport (rastai.sae_fit_check/1): reconstruction quality per layer (step 4)
@@ -608,7 +611,7 @@ crates/rastai-formats/
                               archive.rs (M11), artifact.rs, project.rs, file.rs, document.rs, workspace.rs, command.rs,
                               job.rs, model.rs, chat.rs, conversation.rs, adapter.rs, gateway.rs, train.rs (train, teach,
                               rlhf, sweep), recipe.rs, run.rs, checkpoint.rs, design.rs, harness.rs, gym.rs, sandbox.rs,
-                              plugin.rs, node.rs, transfer.rs, dataset.rs, converter.rs, tutorial.rs
+                              plugin.rs, node.rs, transfer.rs, dataset.rs, converter.rs, tutorial.rs (Phase 2)
     validate/
       mod.rs                  read_document(): layers 1 to 3 plus migration, in one pass
       syntax.rs               layer 1: run json::reader, turn its errors into RRS-E0xxx with line and column
@@ -1218,7 +1221,7 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 | Part | First needed (§31) | Why then |
 |---|---|---|
 | `json/`, `hashing.rs`, `crc32.rs`, `header.rs`, `describe/`, `validate/` layers 1–2, `run_record.rs`, `resume.rs`, `settings.rs`, `project.rs`, `lock.rs`, `plugin_manifest.rs`, `semver.rs`, `commands/` for the skeleton commands, the PyO3 build, `rastai-codegen` with the JavaScript outputs, `schemas/names.json`, `schemas/events/`, `check-names` and `check-schema-diff` (2.8) | 1 | the daemon, plugin host and worker protocol v0 (weeks 3–4); `crc32.rs` because event-log frames need it |
-| `theme.rs` (the full token row, value checks), `tutorial.rs` | 1 (M1, owner decision N1) | the token contract lands with the first UI commit |
+| `theme.rs` (the full token row, value checks) | 1 (M1, owner decision N1) | the token contract lands with the first UI commit |
 | `model.rs` with the TextCNN ops, `model_shapes.rs` for them, their `fixtures/ops/` goldens | 1 | worker v0 trains TextCNN from a ModelSpec |
 | `safetensors/`, `model_hash`, the Gemma and Llama ops, `zip/reader.rs` and `zip/inflate.rs` | 2 | unified runtime, `model.inspect`; zip in M2-22 (plan §10 row 16) |
 | `conversation.rs`, conversation importers, `gguf/reader.rs` | 3 | the conversation tree, `conversation.import`; Fast-model lease sizing |
@@ -1229,6 +1232,7 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 | `harness.rs`, MCP importers and exporters | 7 | Agent Gym |
 | `plugin_types.rs`, full manifest contributions, the theme accessibility check in `meaning/theme.rs`, `rastai.icon_set/1` | 8 | plugin SDK, theme and icon-set plugins |
 | crates.io release, schemas served at stable URLs | Phase 2 | §31 |
+| `tutorial.rs` and the `tutorial.*` commands | Phase 2 | tutorials are L3 work (ADR-0017 decision 3; plan §10 row 45) |
 
 ---
 
@@ -1492,7 +1496,7 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 | Unit | bottom of `ids.rs`, `crockford.rs`, `time.rs`, `scopes.rs`, `states.rs` | ids sort by creation time and round-trip through base32; RFC 3339 for leap years and epoch edges; every transition in contracts §9 allowed and a sample of illegal ones refused |
 | Command table | `tests/command_table.rs` | ids follow contracts §6.1 and sit in a core area; no duplicates; scope, kind and section valid; `since_version` set; every row `Stability::Preview` until Phase 2 chooses the stable subset (`check-schema-diff` guards a row from then on, 2.8) |
 | Naming | `tests/naming_round_trip.rs` | every id survives `cli_words` → `command_id_from_cli_words` and `mcp_tool_name` → back; the CLI and MCP columns of `fixtures/command-golden/copy-as.json` (frontend doc) match |
-| Settings | `tests/settings_precedence.rs` | a later layer overrides single keys, not whole sections; `RASTAI_GATEWAY__PORT=8899` sets `gateway.port`; bad `--set` text gives a diagnostic |
+| Settings | `tests/settings_precedence.rs` | a later layer overrides single keys, not whole sections; `RASTAI_DAEMON__PORT=8899` sets `daemon.port`; bad `--set` text gives a diagnostic |
 | Wire | `tests/wire_round_trip.rs` | the rastai-diag `Diagnostic` and `CommandRow` list the proto messages' fields (`CommandRow` minus the five registration fields); `fixtures/proto-golden/common/Diagnostic.binpb` round-trips |
 | Proto JSON | `tests/proto_json_golden.rs` | `JobSpec`, `HardwareFingerprint` and `SamplingSettings` encode to the protobuf-es JSON in `fixtures/proto-golden/` (64-bit integers as strings, enums as names) and decode back; a wrong kind gives `RRS-E1002` at the given path |
 | Paths | bottom of `paths.rs` | `RASTAI_HOME` puts all five roots under one folder; XDG fallbacks; HF cache order |
@@ -1532,9 +1536,10 @@ crates/rastai-store/
     config_files.rs           write_config_file(): temp file, fsync, rename, fsync the folder (contracts §11.1)
     backups.rs                (L2) daily VACUUM INTO snapshots into <data>/backups/ and the vault salvage
     index/
-      migrations/0001_initial.sql   every rastai.db table of contracts §8.2 (no settings table), including log_cursors,
-                                    plugin_event_deliveries, archive_cursors and runs.archive_state (default 'local'),
-                                    so M11 needs no migration of live data
+      migrations/0001_initial.sql   every rastai.db table of contracts §8.2 (no settings table) except archive_cursors,
+                                    including log_cursors, plugin_event_deliveries and runs.archive_state (default
+                                    'local'); M11's migration only adds the empty archive_cursors table, so it moves no
+                                    live data (plan M1-23)
       writes.rs               IndexWrite enum and apply_index_write(): one match arm per variant
       reads.rs                IndexReader, IndexReaderGuard and open_index_reader()
       runs.rs                 rows and functions for runs (with archive_state), jobs, run_metrics, run_tags, checkpoints
