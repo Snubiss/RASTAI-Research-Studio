@@ -19,7 +19,7 @@ Conventions in this file:
 
 ### Changes in v1.2
 
-Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR. Item 15 is the catalog and content-hash contract that M1-14 builds on, for the owner's review in its PR.
+Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR. Item 15 is the catalog and content-hash contract that M1-14 builds on, for the owner's review in its PR. Item 16 is M1-09's command and event wire, for the owner's review in its PR.
 
 1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
 2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
@@ -36,6 +36,7 @@ Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass
 13. **Review fixes (PR #164).** `sandbox.list`, `sandbox.kill` and `sandbox.cleanup` are (M5): M5-E10 builds them and M5-E01 registers them, so M7-E01 no longer claims `sandbox.*` (6.4). `checkpoint.resumed` is (M5) with `train.preempted`, because `train.resume` and M5-E14 are M5 (7.3). Row 45 reaches every tutorial and assistant-skill name: the `assistant_skills` key, `assistant.skill@1` (now unsupported until Phase 2, refused with `RRS-P1002`), `core.assistant`, `assistant-skills.js` and `templates/tutorials/` carry "(Phase 2)" (§1, 5.2, 5.5, 15.3, 15.6, 15.8), and its reasoning cites ADR-0017 and spec §31 rather than spec §7. The plugin permission names of spec §24 and ADR-0015 decision 5 get their own table beside the scopes (6.3). A marker in a list cell's notes covers nothing (conventions, 12.6). `gateway.port` is recorded as replaced by `daemon.port` (15.11). Round 2: `gpu` is marked sensitive with `weights.read` and `conversations.read`, reading spec §24's "(sensitive)" as covering its whole line (6.3).
 14. **Frontend-contract check (M1-01a).** The session key of ADR-0034 decision 10 (3.2) reaches the client: the cookie credential is `{kind: "cookie", sessionKey}`, and `exchangeLoginCode` returns the key (12.4, 15.3). `POST /api/login` answers `{"session_key": "<64 lowercase hex>"}`, and the daemon keeps only the BLAKE3 hash of that hex text (3.3, 15.4). The `Credential` and `ConnectOptions` typedefs that carry it are registered (15.3). The layout and flow docs follow: the request gate checks the key (control-plane 8.3a, platform flow 4.1–4.2), a reload signs the window out and the desktop shell signs in again (frontend 2.1, 8.3, 9.3). Open question 24 asks how a second window gets the key; until it is settled, docs follow its default, the opener's `postMessage` (14; frontend 8.4). `TypographyTokens`, `ThemeOptions` and `Renderer`, already in the frontend layout's `@rastai/ui` API, are registered (15.3).
 15. **Codes and hash rules for the JSON core (M1-14).** Three codes whose titles are true for the errors that use them, where M1-14's first draft borrowed codes that misled the user: `RRS-E1006` (a value can't be written as JSON; a bug), `RRS-E5006` (JSON has more values than the import limit; a value costs memory whatever its size in the text, so the reader caps the count as well as the bytes) and `RRS-S3005` (a write failed for a reason other than a full disk, which keeps `RRS-S3002`) (10.3). The content hash's canonical JSON is now written out exactly, with its two differences from RFC 8785 (5.1).
+16. **The command and event wire (M1-09).** `rastai.commands.v1` and `rastai.events.v1` are fixed field by field, for the owner's review in its PR (4.2, 4.3). New wire names: `CommandKind` as an enum, `ListCommandsResponse.commands`, `EventPayload` (the one `oneof` of payloads that `EventRecord` and `BusEvent` share, 7.1, 7.2), `ListEventTypesRequest` (empty) and `ListEventTypesResponse.event_types`, the M1 payload messages with `ArtifactParent` and `LogStream`. `node.heartbeat`'s payload is `NodeTelemetry` itself. State changes say `from_state` and `to_state` (`from` is a Python keyword). `checkpoint.saved` gains `checkpoint_id`, so `rebuild-index` restores the checkpoint's id and its `checkpoint_of` row (7.3, 8.2). Rust gets no tonic code for these two Connect services; tonic arrives with `NodeService` (M1-10). A oneof comes last in its message and maps are written in key order, so the goldens are byte-identical in all three languages (4.3).
 
 ### Changes in v1.1
 
@@ -600,7 +601,10 @@ Files `diagnostic.proto`, `blob.proto`, `hardware.proto`, `resources.proto` and 
 | `ExecuteRequest` | `command_id`, `arguments_json`, `project_id`, `idempotency_key`, `dry_run`, `acting_plugin_id` (set only by a UI plugin host; narrows the principal to that plugin's grant and journals it as `plugin:<plugin_id>`) |
 | `ExecuteResponse` | `ok`, `result_json`, `job_id` (set for job commands), `repeated Diagnostic diagnostics`, `journal_id` |
 | `CommandDescriptor` | `command_id`, `title`, `summary`, `section`, `scope`, `undoable`, `kind` (SYNC/JOB/STREAM), `stability` (`Stability`), `arguments_type`, `result_type`, `arguments_schema_json` (JSON Schema of the arguments: palette forms, CLI flags, MCP `inputSchema`), `result_schema_json` (MCP `outputSchema`), `default_shortcut`, `basic` (shown in Basic mode), `plugin_id`, `experimental` (gated behind `plugins.experimental_apis`), `since_version` |
-| `ListCommandsRequest` / `Response` | optional `section` filter / `repeated CommandDescriptor` |
+| `ListCommandsRequest` / `Response` | `section` (a filter; empty lists every section) / `repeated CommandDescriptor commands` |
+| `CommandKind` | `SYNC`, `JOB`, `STREAM` (values `COMMAND_KIND_SYNC` …, 4.1's prefix rule) |
+
+File `command_service.proto`. Golden messages: `fixtures/proto-golden/commands/`, plus `without_stability/CommandDescriptor` (a descriptor from a daemon that predates `stability`: it decodes as `STABILITY_UNSPECIFIED`, which readers treat as `PREVIEW`). **Rust gets no tonic code for `CommandService` or `EventService`:** the daemon serves both as Connect with prost alone (control-plane layout 8.4, 11.3), so `buf.gen.yaml` leaves them out of the tonic plugin; Python and JavaScript get their usual service stubs and descriptors.
 
 The principal is never in the request. The daemon derives it from the cookie, token, socket peer or plugin job token. `acting_plugin_id` can only remove rights.
 
@@ -615,8 +619,36 @@ The principal is never in the request. The daemon derives it from the cookie, to
 |---|---|
 | `EventRecord` | one event-log record (section 7.1) |
 | `BusEvent` | the daemon's fan-out envelope to UIs (section 7.2) |
-| `EventTypeDescriptor` | `event_type`, `event_class`, `payload_type`, `emitter`, `stability`, `since_version`, `plugin_id` |
-| payloads | one message per event type in section 7.3 (`JobStateChanged`, `RunMetrics`, `CheckpointSaved`, `ChatToken`, `LivePacket`, `GatewayRequestLogged`, `EgressActive`, ...), plus `PluginEventPayload{plugin_id, schema, payload_json}` for plugin-defined events |
+| `EventPayload` | `oneof payload`: one field per event type, named after it with the dot as an underscore (`job_state_changed`), plus `plugin_event` (`PluginEventPayload`). `EventRecord.payload` and `BusEvent.payload` are both this message, so a new event type is added once and the daemon passes a logged payload to the bus as is. A new payload takes the next free field number |
+| `EventTypeDescriptor` | `event_type`, `event_class`, `payload_type` (the payload message's full name: `rastai.events.v1.JobStateChanged`, `rastai.common.v1.NodeTelemetry`, `rastai.events.v1.PluginEventPayload`), `emitter`, `stability`, `since_version`, `plugin_id` |
+| `ListEventTypesRequest` / `Response` | no fields yet (an empty request, so fields can be added without a breaking change; node layout 3.3) / `repeated EventTypeDescriptor event_types` |
+| payloads | one message per event type in section 7.3 (`JobStateChanged`, `RunMetrics`, `CheckpointSaved`, `ChatToken`, `LivePacket`, `GatewayRequestLogged`, `EgressActive`, ...), plus `PluginEventPayload{plugin_id, schema, payload_json}` for plugin-defined events. The M1 payloads are in the table below; each later milestone's contract PR adds its own |
+
+Files `event_service.proto`, `event_record.proto` and `payloads.proto`. Golden messages: `fixtures/proto-golden/events/`, plus `without_stability/EventTypeDescriptor`. The ids of an event's subject are on the envelope (`EventRecord.run_id` and `job_id`, `BusEvent.subject_id`); a payload repeats an id only where it is listed below. A state change names its two states `from_state` and `to_state`, never `from` and `to`, because `from` is a Python keyword.
+
+**M1 payloads** (`payloads.proto`):
+
+| Event type | Payload message | Fields |
+|---|---|---|
+| `job.state_changed` | `JobStateChanged` | `job_id`, `from_state`, `to_state` (`JobState`), `reason` (e.g. `preempted`), `optional int32 exit_code` (set only once the process exited, since 0 is a real code), `Diagnostic diagnostic` |
+| `job.progress` | `JobProgress` | `float fraction` (0 to 1), `message`. Also a `LiveEvent` payload (4.9) |
+| `job.log_line` | `JobLogLine` | `stream` (`LogStream`: `LOG_STREAM_STDOUT`, `LOG_STREAM_STDERR`), `text` (one line without its ending). Also a `LiveEvent` payload (4.9) |
+| `run.state_changed` | `RunStateChanged` | `reason` (e.g. `stopped`), then `oneof state { RunState run_state; EvalRunState eval_run_state }`: a training-style run moves through 9.5, an eval run through 9.6 |
+| `run.metrics` | `RunMetrics` | `uint64 step`, `map<string, double> values` (metric names in 15.7) |
+| `run.tags_changed` | `RunTagsChanged` | `run_id`, `repeated string tags` (the whole set after the change) |
+| `checkpoint.saved` | `CheckpointSaved` | `checkpoint_id` (chosen by the worker, so `rebuild-index` restores the same id and its `checkpoint_of` row, 8.2), `uint64 step`, `folder` (relative to the run folder), `map<string, string> file_hashes` (file name → `blake3:<hex>`), `is_best` |
+| `artifact.created` | `ArtifactCreated` | `artifact_id`, `kind` (15.7), `content_hash`, `uint64 size_bytes`, `home_node_id`, `repeated ArtifactParent parents` |
+| (part of `artifact.created`) | `ArtifactParent` | `id` (the lineage row's `from_id`), `relation` (8.2) |
+| `pin.changed` | `PinChanged` | `subject_kind` (`run`, `checkpoint`, `artifact`), `subject_id`, `pinned` |
+| `node.heartbeat` | `rastai.common.v1.NodeTelemetry` | the telemetry sample as it is (4.1); no message of its own |
+| `node.state_changed` | `NodeStateChanged` | `node_id`, `from_state`, `to_state` (`NodeState`) |
+| `document.changed` | `DocumentChanged` | `document_id`, `content_hash`, `uint64 undo_position` (`undo_steps.position`) |
+| `command.finished` | `CommandFinished` | `journal_id`, `command_id`, `principal` (`<kind>:<id>`, 6.3), `ok`, `code` (the first error's catalog code; empty when `ok`) |
+| `plugin.state_changed` | `PluginStateChanged` | `plugin_id`, `from_state`, `to_state` (`PluginState`), `Diagnostic diagnostic` |
+| `diagnostic.reported` | `DiagnosticReported` | `Diagnostic diagnostic`, `subject_id` |
+| a plugin's event type | `PluginEventPayload` | `plugin_id`, `schema` (the payload's type name in the plugin's `types.json`), `payload_json` |
+
+**A oneof comes last in its message, field numbers included.** prost writes a oneof after the message's other fields; buf, Python and protobuf-es write in field-number order. Only with the oneof last do all three give the same bytes, which the goldens require (`RunStateChanged`). Map entries are written in key order: Python and buf sort them, and `buf.gen.yaml` gives prost `BTreeMap` (`btree_map`).
 
 ### 4.4 `rastai.node.v1`
 
@@ -1324,7 +1356,7 @@ Types live in `rastai-formats/src/commands/`; this table lists the fields other 
 | `emitted_unix_ms` | int64 | writer's clock |
 | `event_type` | string | name from 7.3 |
 | `event_class` | EventClass | always DURABLE in a log |
-| `payload` | oneof | the typed payload, or `PluginEventPayload` |
+| `payload` | `EventPayload` | the typed payload, or `PluginEventPayload` (one `oneof`, 4.3) |
 | `blobs` | repeated BlobRef | large data lives in the blob store; events carry the hash |
 
 **Ack:** the daemon stores `runs.acked_sequence` (run logs) or `log_cursors.acked_sequence` (its own log) in `rastai.db` after it indexes a record, in batches of `INDEX_BATCH_RECORDS` (256) or `INDEX_BATCH_MS` (100). After any reconnect it calls `WatchRunEvents(run_id, after_sequence = acked_sequence)`.
@@ -1338,27 +1370,27 @@ Types live in `rastai-formats/src/commands/`; this table lists the fields other 
 | `subject_id` | run, job, node, conversation, document or plugin id |
 | `source` | `daemon`, `node:<node_id>`, `job:<job_id>`, `plugin:<plugin_id>` |
 | `emitted_unix_ms` | |
-| `payload` | same payload messages as the log |
+| `payload` | `EventPayload`, the same message as the log's (4.3) |
 
 The daemon keeps the last 10,000 bus events in memory (`daemon.bus_buffer_events`). A client that reconnects with an `after_bus_sequence` still in the buffer gets the gap replayed. Otherwise it gets `RRS-C0401` and refetches state with the `*.list` / `*.get` commands.
 
 ### 7.3 Event types
 
-Names are `<area>.<what_happened>` in past tense or noun form. Every event type carries `stability` in its `EventTypeDescriptor` (4.3); all are `preview` until Phase 2. The core event types are one `const` table, `rastai_core::event_types::EVENT_TYPES` (file `rastai-core/src/event_types.rs`; rows of `EventTypeRow`: type, class, emitter, payload message, stability, since version). `rastai-server` serves `ListEventTypes` from it, and codegen writes `schemas/events/<event_type>.json` and the `event_types` list of `schemas/names.json` from it (12.6). Durable events from a node are not logged by the node; they are also carried as state in every `Heartbeat`, so the daemon reconciles by snapshot after a disconnect.
+Names are `<area>.<what_happened>` in past tense or noun form. Every event type carries `stability` in its `EventTypeDescriptor` (4.3); all are `preview` until Phase 2. The core event types are one `const` table, `rastai_core::event_types::EVENT_TYPES` (file `rastai-core/src/event_types.rs`; rows of `EventTypeRow`: type, class, emitter, payload message, stability, since version). `rastai-server` serves `ListEventTypes` from it, and codegen writes `schemas/events/<event_type>.json` and the `event_types` list of `schemas/names.json` from it (12.6). Durable events from a node are not logged by the node; they are also carried as state in every `Heartbeat`, so the daemon reconciles by snapshot after a disconnect. The payload messages of the (M1) rows, field by field, are in 4.3; each later milestone's contract PR fixes its own.
 
 | Event type | Class | Emitter | Main payload |
 |---|---|---|---|
-| `job.state_changed` (M1) | durable | node | job_id, from, to, reason, exit_code, Diagnostic |
+| `job.state_changed` (M1) | durable | node | job_id, from_state, to_state, reason, exit_code, Diagnostic |
 | `job.progress` (M1) | ephemeral | worker | fraction, message |
 | `job.log_line` (M1) | ephemeral | node | stream (stdout/stderr), text |
-| `run.state_changed` (M1) | durable | worker, chain driver | run state (9.5 / 9.6), reason |
+| `run.state_changed` (M1) | durable | worker, chain driver | reason, run state (9.5) or eval run state (9.6) |
 | `run.metrics` (M1) | durable | worker | step, `values{name: f64}` (names in 15.7) |
 | `run.tags_changed` (M1) | durable | daemon | run_id, tags |
 | `run.imported` (M5) | durable | worker (`data_import`, mode `run_logs`) | source kind, source id, imported run id, config and metrics blob refs |
 | `run.deleted` (M5) | durable | daemon | run_id (the archive's tombstone) |
 | `chain.step_started` (M5) | durable | daemon chain driver | chain run id, step index and name, child run id |
 | `chain.step_finished` (M5) | durable | daemon chain driver | step index, child outcome, gate result |
-| `checkpoint.saved` (M1) | durable | worker | step, folder, file hashes, is_best |
+| `checkpoint.saved` (M1) | durable | worker | checkpoint_id, step, folder, file hashes, is_best |
 | `checkpoint.resumed` (M5) | durable | worker | step, from checkpoint |
 | `train.preempted` (M5) | durable | worker | signal, checkpoint step |
 | `artifact.created` (M1) | durable | worker, daemon | artifact_id, kind, content_hash, size_bytes, home_node_id, parents[]{id, relation} (one `lineage` row each, 8.2) |
@@ -1366,8 +1398,8 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 | `pin.changed` (M1) | durable | daemon | subject kind and id, pinned |
 | `model.state_changed` (M3) | durable | node | model_ref, runtime, state, gpu_indices, lease_id |
 | `lease.state_changed` (M3) | durable | node | lease, from, to |
-| `node.heartbeat` (M1) | ephemeral | node | telemetry (GPU util, VRAM, temps, RAM, disk) |
-| `node.state_changed` (M1) | durable | daemon | node_id, from, to |
+| `node.heartbeat` (M1) | ephemeral | node | `NodeTelemetry` (GPU util, VRAM, temps, RAM, disk) |
+| `node.state_changed` (M1) | durable | daemon | node_id, from_state, to_state |
 | `sandbox.state_changed` (M5) | durable | node | sandbox_id, run_id, from, to |
 | `transfer.progress` (M9) | ephemeral | node | transfer_id, bytes_done, bytes_total |
 | `transfer.finished` (M9) | durable | node | transfer_id, hash, ok, Diagnostic |
@@ -1388,7 +1420,7 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 | `design.stats_updated` (M6) | ephemeral | daemon | document_id, params, FLOPs/token, memory, fits[] |
 | `document.changed` (M1) | durable | daemon | document_id, content_hash, undo position |
 | `command.finished` (M1) | durable | daemon | journal_id, command_id, principal, ok, code |
-| `plugin.state_changed` (M1) | durable | daemon | plugin_id, from, to, Diagnostic |
+| `plugin.state_changed` (M1) | durable | daemon | plugin_id, from_state, to_state, Diagnostic |
 | `diagnostic.reported` (M1) | durable | any | Diagnostic, subject_id |
 | `archive.status_changed` (M11) | durable | daemon | from, to (`off`, `ok`, `lagging`, `unreachable`, `misconfigured`), Diagnostic |
 | `archive.synced` (M11) | durable | daemon | stream, acked position, rows and objects written |
@@ -2807,6 +2839,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `tools/codegen/pyproject.toml`, `tools/codegen/tests/` | the Python codegen tools' ruff and pytest settings (ruff extends `python/pyproject.toml`); `test_rewrite_python_imports.py` |
 | `crates/rastai-proto/src/generated/`, `python/rastai_proto/rastai_proto/`, `packages/proto/src/generated/`, `packages/proto/src/index.js` | the three folders `buf generate` writes from `buf.gen.yaml` and `check-generated` compares; `@rastai/proto`'s hand-written entry, one re-export line per `.proto` file |
 | `fixtures/proto-golden/<package>/<MessageName>.json`, `.binpb`, `fixtures/proto-golden/README.md` | one filled golden per message: protobuf JSON with proto field names, and its binary form from `buf convert`; read by `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py` and `packages/proto/src/golden.test.js` |
+| `fixtures/proto-golden/commands/without_stability/`, `fixtures/proto-golden/events/without_stability/` | a `CommandDescriptor` and an `EventTypeDescriptor` without `stability`, as a daemon that predates the field sends them; the three golden tests check that they decode as `STABILITY_UNSPECIFIED` (read as `PREVIEW`) and round-trip (node layout 3.5) |
 | `tools/checks/check-deps`, `tools/checks/check-imports`, `tools/checks/check-generated`, `tools/checks/check-colors`, `tools/checks/check-no-typescript`, `tools/checks/check-unsafe`, `tools/checks/check-no-pickle`, `tools/checks/check-dco`, `tools/checks/check-names`, `tools/checks/check-schema-diff` | CI checks (the last two in M1, 12.6) |
 | `tools/checks/repo_files.py`, `tools/checks/pyproject.toml`, `tools/checks/tests/` | the checks' shared helpers (tree walk, `--root`, the report format, the JavaScript and Rust string and comment splitters); their ruff and pytest settings (ruff extends `python/pyproject.toml`); one test file per check, each running it on passing and failing fixture trees, and `test_repo_files.py` for the shared splitters |
 | `schemas/names.json`, `schemas/events/<event_type>.json` | generated by codegen, checked in (12.6) |

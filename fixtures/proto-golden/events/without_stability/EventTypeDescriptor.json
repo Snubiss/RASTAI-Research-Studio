@@ -1,0 +1,7 @@
+{
+  "event_type": "job.state_changed",
+  "event_class": "EVENT_CLASS_DURABLE",
+  "payload_type": "rastai.events.v1.JobStateChanged",
+  "emitter": "node",
+  "since_version": "0.1.0"
+}

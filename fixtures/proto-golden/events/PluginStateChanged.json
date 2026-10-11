@@ -1,0 +1,14 @@
+{
+  "plugin_id": "psychology",
+  "from_state": "PLUGIN_STATE_ENABLED",
+  "to_state": "PLUGIN_STATE_INCOMPATIBLE",
+  "diagnostic": {
+    "code": "RRS-P1001",
+    "severity": "SEVERITY_ERROR",
+    "message": "Plugin's engines range excludes this plugin API.",
+    "path": "rastai-plugin.json#/engines/rastai",
+    "fix_text": "Install a version of the plugin that supports this app.",
+    "fix_command_id": "plugin.install",
+    "fix_arguments_json": "{\"plugin_id\":\"psychology\"}"
+  }
+}

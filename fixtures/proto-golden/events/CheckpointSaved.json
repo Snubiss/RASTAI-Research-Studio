@@ -1,0 +1,10 @@
+{
+  "checkpoint_id": "ckpt_01JA2B3C4D5E6F7G8H9J0K1M2T",
+  "step": "1000",
+  "folder": "checkpoints/step_00001000",
+  "file_hashes": {
+    "model.safetensors": "blake3:af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    "trainer_state.json": "blake3:7e1f3a2b9c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7"
+  },
+  "is_best": true
+}

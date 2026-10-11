@@ -1,0 +1,19 @@
+{
+  "command_id": "psychology.replay.open",
+  "title": "Open replay",
+  "summary": "Recompute a conversation's full view from its token IDs.",
+  "section": "psychology",
+  "scope": "psychology",
+  "undoable": true,
+  "kind": "COMMAND_KIND_JOB",
+  "stability": "STABILITY_PREVIEW",
+  "arguments_type": "PsychologyReplayOpenArgs",
+  "result_type": "PsychologyReplayOpenResult",
+  "arguments_schema_json": "{\"type\":\"object\",\"properties\":{\"message_id\":{\"type\":\"string\"}}}",
+  "result_schema_json": "{\"type\":\"object\",\"properties\":{\"replay_id\":{\"type\":\"string\"}}}",
+  "default_shortcut": "Mod+Shift+R",
+  "basic": true,
+  "plugin_id": "psychology",
+  "experimental": true,
+  "since_version": "0.1.0"
+}

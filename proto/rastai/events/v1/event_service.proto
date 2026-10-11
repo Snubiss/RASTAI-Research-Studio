@@ -1,0 +1,69 @@
+// EventService: the daemon's live event stream to UIs, the CLI and scripts (contracts 4.3 and 7.2), and the list
+// of event types it can carry. The stream is binary protobuf only in the prototype (control-plane layout 11.3).
+syntax = "proto3";
+
+package rastai.events.v1;
+
+import "rastai/common/v1/states.proto";
+import "rastai/events/v1/payloads.proto";
+
+service EventService {
+  // Every bus event that matches the filters, from after_bus_sequence on, until the client disconnects.
+  // A client that resumes from a sequence no longer in the daemon's buffer gets RRS-C0401 and refetches state
+  // with the *.list and *.get commands.
+  rpc Subscribe(SubscribeRequest) returns (stream BusEvent);
+  // The event-type registry: the core types and those of enabled plugins, each with its stability.
+  rpc ListEventTypes(ListEventTypesRequest) returns (ListEventTypesResponse);
+}
+
+message SubscribeRequest {
+  // Resume after this bus sequence, the last one the client saw; 0 for a new stream, which starts with the next event.
+  uint64 after_bus_sequence = 1;
+  // Only these event types; empty means every type.
+  repeated string event_types = 2;
+  // Only events about these subjects; empty means every subject.
+  repeated string subject_ids = 3;
+}
+
+// One event on the daemon's bus (contracts 7.2): a logged record or an ephemeral event, with the same payload.
+message BusEvent {
+  // Daemon-wide and increasing. The first one after a daemon start is the start time in ms x 1,000, so sequences
+  // keep increasing across restarts without being stored.
+  uint64 bus_sequence = 1;
+  string event_type = 2;
+  rastai.common.v1.EventClass event_class = 3;
+  // The run, job, node, conversation, document or plugin the event is about.
+  string subject_id = 4;
+  // Who emitted it: "daemon", "node:<node_id>", "job:<job_id>" or "plugin:<plugin_id>".
+  string source = 5;
+  int64 emitted_unix_ms = 6;
+  EventPayload payload = 7;
+}
+
+// One event type as clients see it, from the core table (rastai_core::event_types::EVENT_TYPES) or a plugin's
+// manifest. buf breaking can't see an event type's name, class or stability; check-schema-diff reads them from
+// schemas/events/ instead (contracts 12.6).
+message EventTypeDescriptor {
+  // For example "job.state_changed".
+  string event_type = 1;
+  rastai.common.v1.EventClass event_class = 2;
+  // The payload message's full protobuf name, for example "rastai.events.v1.JobStateChanged";
+  // "rastai.events.v1.PluginEventPayload" for a plugin's event type.
+  string payload_type = 3;
+  // Which process emits it: "daemon", "node", "worker" or "any" (contracts 7.3).
+  string emitter = 4;
+  // Every event type is STABILITY_PREVIEW until Phase 2 (owner decision N3). A descriptor from an older daemon
+  // that lacks the field decodes as STABILITY_UNSPECIFIED, which readers treat as preview.
+  rastai.common.v1.Stability stability = 5;
+  // The version that added it, for clients that talk to more than one daemon version.
+  string since_version = 6;
+  // The plugin that declared it; empty for a core event type.
+  string plugin_id = 7;
+}
+
+// ListEventTypes takes no arguments yet; the empty request lets fields be added without a breaking change.
+message ListEventTypesRequest {}
+
+message ListEventTypesResponse {
+  repeated EventTypeDescriptor event_types = 1;
+}

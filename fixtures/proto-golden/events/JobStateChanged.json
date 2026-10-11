@@ -1,0 +1,16 @@
+{
+  "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "from_state": "JOB_STATE_RUNNING",
+  "to_state": "JOB_STATE_FAILED",
+  "reason": "out_of_memory",
+  "exit_code": 137,
+  "diagnostic": {
+    "code": "RRS-J1002",
+    "severity": "SEVERITY_ERROR",
+    "message": "Job killed by the kernel's out-of-memory killer.",
+    "path": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2S/stderr.log:2048:1",
+    "fix_text": "Lower the micro-batch size, then resume the run.",
+    "fix_command_id": "train.resume",
+    "fix_arguments_json": "{\"run_id\":\"run_01JA2B3C4D5E6F7G8H9J0K1M2S\"}"
+  }
+}

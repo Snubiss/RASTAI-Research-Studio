@@ -1,0 +1,10 @@
+{
+  "command_id": "model.load",
+  "title": "Load model",
+  "summary": "Load a model onto a GPU so chat and analysis can use it.",
+  "section": "inference",
+  "scope": "inference.manage",
+  "kind": "COMMAND_KIND_JOB",
+  "arguments_type": "ModelLoadArgs",
+  "since_version": "0.1.0"
+}

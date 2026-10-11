@@ -1,0 +1,30 @@
+// EventRecord: the body of one events.log frame (contracts 7.1). A run's log, the daemon's own log and the
+// archive's event_records.body all hold these bytes, and a restore years later decodes them with the schema of the
+// day, so field numbers here are frozen even more firmly than elsewhere (layout rust-node-gateway-proto.md 3.3).
+// The frame around it (length, CRC-32, body) is rastai-store's, not protobuf's.
+syntax = "proto3";
+
+package rastai.events.v1;
+
+import "rastai/common/v1/blob.proto";
+import "rastai/common/v1/states.proto";
+import "rastai/events/v1/payloads.proto";
+
+message EventRecord {
+  // The record layout's version: 1. A reader refuses a version it doesn't know rather than guess.
+  uint32 format_version = 1;
+  // 1, 2, 3 ... per log, with no gaps; a gap is RRS-S2003. The daemon acknowledges records by this number.
+  uint64 sequence = 2;
+  // The run and job the record belongs to; both empty in the daemon's own log.
+  string run_id = 3;
+  string job_id = 4;
+  // The writer's clock.
+  int64 emitted_unix_ms = 5;
+  // A name from contracts 7.3, for example "checkpoint.saved", or a plugin's event type.
+  string event_type = 6;
+  // Always EVENT_CLASS_DURABLE: only durable events are written to a log.
+  rastai.common.v1.EventClass event_class = 7;
+  EventPayload payload = 8;
+  // Large data lives in the blob store; the record carries only references to it.
+  repeated rastai.common.v1.BlobRef blobs = 9;
+}

@@ -10,3 +10,15 @@ pub mod common {
         include!("generated/rastai.common.v1.rs");
     }
 }
+
+pub mod commands {
+    pub mod v1 {
+        include!("generated/rastai.commands.v1.rs");
+    }
+}
+
+pub mod events {
+    pub mod v1 {
+        include!("generated/rastai.events.v1.rs");
+    }
+}

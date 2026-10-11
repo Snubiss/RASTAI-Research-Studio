@@ -1,0 +1,200 @@
+// Event payloads: one message per event type of contracts 7.3, plus PluginEventPayload for plugin-defined events.
+// EventPayload is the one list of them. EventRecord (a run log frame) and BusEvent (the daemon's stream to UIs)
+// both carry it, so a new event type is added here once and the daemon passes a logged payload to the bus as is.
+// This file holds the M1 event types; each later milestone's contract PR adds its own payloads at the end.
+//
+// The ids of the event's subject (run, job, node) are on the envelope (EventRecord.run_id and job_id,
+// BusEvent.subject_id). A payload repeats an id only where contracts 7.3 lists it, because the index rebuild reads
+// it from there (contracts 8.2 rebuild rule).
+syntax = "proto3";
+
+package rastai.events.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+import "rastai/common/v1/hardware.proto";
+import "rastai/common/v1/states.proto";
+
+// Exactly one payload per event. The field name is the event type with its dot as an underscore.
+// Numbers are never reused (layout rust-node-gateway-proto.md 3.3): a new payload takes the next free number.
+message EventPayload {
+  oneof payload {
+    JobStateChanged job_state_changed = 1;
+    JobProgress job_progress = 2;
+    JobLogLine job_log_line = 3;
+    RunStateChanged run_state_changed = 4;
+    RunMetrics run_metrics = 5;
+    RunTagsChanged run_tags_changed = 6;
+    CheckpointSaved checkpoint_saved = 7;
+    ArtifactCreated artifact_created = 8;
+    PinChanged pin_changed = 9;
+    // node.heartbeat carries the node's telemetry sample as it is; it needs no message of its own.
+    rastai.common.v1.NodeTelemetry node_heartbeat = 10;
+    NodeStateChanged node_state_changed = 11;
+    DocumentChanged document_changed = 12;
+    CommandFinished command_finished = 13;
+    PluginStateChanged plugin_state_changed = 14;
+    DiagnosticReported diagnostic_reported = 15;
+    // Any event type a plugin declares in its manifest.
+    PluginEventPayload plugin_event = 16;
+  }
+}
+
+// job.state_changed (durable, from the node). The transitions are contracts 9.1.
+// The states are from_state and to_state, not from and to, because `from` is a Python keyword.
+message JobStateChanged {
+  string job_id = 1;
+  rastai.common.v1.JobState from_state = 2;
+  rastai.common.v1.JobState to_state = 3;
+  // Why, when the state alone doesn't say: "preempted" for a cancelled job that was preempted (contracts 9.1).
+  string reason = 4;
+  // The process's exit code; set only once the process has exited, because 0 is a real exit code.
+  optional int32 exit_code = 5;
+  // What went wrong, for a failed job; unset otherwise.
+  rastai.common.v1.Diagnostic diagnostic = 6;
+}
+
+// job.progress (ephemeral, from the worker). Also a LiveEvent payload on the node's WatchLive stream.
+message JobProgress {
+  // How far along the job is, from 0 to 1.
+  float fraction = 1;
+  // What the job is doing now, for example "tokenizing 3 of 8 files".
+  string message = 2;
+}
+
+// Which output stream of a job's process a log line came from.
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
+}
+
+// job.log_line (ephemeral, from the node). Also a LiveEvent payload on the node's WatchLive stream.
+message JobLogLine {
+  LogStream stream = 1;
+  // One line, without its line ending.
+  string text = 2;
+}
+
+// run.state_changed (durable, from the worker or the chain driver). A training-style run moves through RunState
+// (contracts 9.5) and an eval run through EvalRunState (9.6), so the new state is one of the two.
+// The oneof comes last, field numbers included: prost writes a oneof after a message's other fields and the other
+// encoders write in field-number order, so only this order gives the same bytes in all three languages.
+message RunStateChanged {
+  // Why, when the state alone doesn't say: "stopped" for a run completed by train.stop (contracts 9.5).
+  string reason = 1;
+  oneof state {
+    rastai.common.v1.RunState run_state = 2;
+    rastai.common.v1.EvalRunState eval_run_state = 3;
+  }
+}
+
+// run.metrics (durable, from the worker): the metric values of one step. Metric names are in contracts 15.7.
+message RunMetrics {
+  uint64 step = 1;
+  // Metric name -> value, for example "train.loss" -> 2.31.
+  map<string, double> values = 2;
+}
+
+// run.tags_changed (durable, from the daemon).
+message RunTagsChanged {
+  string run_id = 1;
+  // The run's whole tag set after the change, not the difference, so the last record alone gives the tags.
+  repeated string tags = 2;
+}
+
+// checkpoint.saved (durable, from the worker), written once every file of the checkpoint is on disk.
+message CheckpointSaved {
+  // The checkpoint's id ("ckpt_..."), chosen by the worker, so the index rebuild gives it the same id again.
+  string checkpoint_id = 1;
+  uint64 step = 2;
+  // The checkpoint's folder, relative to the run folder.
+  string folder = 3;
+  // File name in the folder -> "blake3:<64 hex>" of its bytes.
+  map<string, string> file_hashes = 4;
+  // This is now the run's best checkpoint by its selection metric.
+  bool is_best = 5;
+}
+
+// artifact.created (durable, from the worker or the daemon). Each parent becomes one lineage row (contracts 8.2).
+message ArtifactCreated {
+  // The artifact's id ("art_..."), chosen by its writer, so the index rebuild gives it the same id again.
+  string artifact_id = 1;
+  // The artifact kind, for example "dataset_snapshot" (contracts 15.7).
+  string kind = 2;
+  // "blake3:<64 hex>".
+  string content_hash = 3;
+  uint64 size_bytes = 4;
+  // The node that holds the bytes.
+  string home_node_id = 5;
+  repeated ArtifactParent parents = 6;
+}
+
+// One thing an artifact was made from, and how.
+message ArtifactParent {
+  // The input's id, which becomes the lineage row's from_id (the artifact is its to_id).
+  string id = 1;
+  // The lineage relation, for example "exported_as" (contracts 8.2).
+  string relation = 2;
+}
+
+// pin.changed (durable, from the daemon). A pinned item is never removed by retention or garbage collection.
+message PinChanged {
+  // What was pinned: "run", "checkpoint" or "artifact".
+  string subject_kind = 1;
+  string subject_id = 2;
+  bool pinned = 3;
+}
+
+// node.state_changed (durable, from the daemon). The transitions are contracts 9.2.
+message NodeStateChanged {
+  string node_id = 1;
+  rastai.common.v1.NodeState from_state = 2;
+  rastai.common.v1.NodeState to_state = 3;
+}
+
+// document.changed (durable, from the daemon), after every applied edit, undo or redo.
+message DocumentChanged {
+  string document_id = 1;
+  // "blake3:<64 hex>" of the document's canonical JSON after the change (contracts 5.1).
+  string content_hash = 2;
+  // The document's position in its undo history after the change (undo_steps.position, contracts 8.2).
+  uint64 undo_position = 3;
+}
+
+// command.finished (durable, from the daemon): the journal entry of one Execute call, as it ended.
+message CommandFinished {
+  string journal_id = 1;
+  string command_id = 2;
+  // Who ran it, as the journal records it: "<kind>:<id>", the kind being owner, token, plugin or node
+  // (contracts 6.3), for example "plugin:<plugin_id>".
+  string principal = 3;
+  bool ok = 4;
+  // The catalog code of the first error; empty when ok is true.
+  string code = 5;
+}
+
+// plugin.state_changed (durable, from the daemon). The transitions are contracts 9.7.
+message PluginStateChanged {
+  string plugin_id = 1;
+  rastai.common.v1.PluginState from_state = 2;
+  rastai.common.v1.PluginState to_state = 3;
+  // Why the plugin became incompatible or failed; unset otherwise.
+  rastai.common.v1.Diagnostic diagnostic = 4;
+}
+
+// diagnostic.reported (durable, from any process): a problem worth keeping that belongs to no command's response,
+// for example a corrupt record found while indexing.
+message DiagnosticReported {
+  rastai.common.v1.Diagnostic diagnostic = 1;
+  // The run, job, node, conversation, document or plugin it is about; empty when it is about none.
+  string subject_id = 2;
+}
+
+// The payload of an event type a plugin declares. Protobuf can't know a plugin's fields, so they cross as JSON,
+// checked against the schema the plugin's manifest names, like any other _json payload (contracts 4).
+message PluginEventPayload {
+  string plugin_id = 1;
+  // The name of the payload's type in the plugin's types.json.
+  string schema = 2;
+  string payload_json = 3;
+}

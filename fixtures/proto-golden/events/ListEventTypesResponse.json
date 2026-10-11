@@ -1,0 +1,13 @@
+{
+  "event_types": [
+    {
+      "event_type": "psychology.sae_fit_finished",
+      "event_class": "EVENT_CLASS_DURABLE",
+      "payload_type": "rastai.events.v1.PluginEventPayload",
+      "emitter": "worker",
+      "stability": "STABILITY_PREVIEW",
+      "since_version": "0.1.0",
+      "plugin_id": "psychology"
+    }
+  ]
+}
