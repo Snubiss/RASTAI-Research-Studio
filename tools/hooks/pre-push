@@ -25,9 +25,11 @@ refuse_push() {
 # In a linked worktree git runs the hook with GIT_DIR pointing at this repository, and a `git -c` on the push
 # arrives as GIT_CONFIG_PARAMETERS. `just check` runs tests that make and commit to scratch repositories; with these
 # set, their git commands would act on this repository instead. Git finds the repository from the working folder
-# without them (it runs the hook from the top of the working tree).
+# without them (it runs the hook from the top of the working tree). The tests drop them too, because `git rebase -x`
+# sets them the same way and no hook runs there.
 forget_git_environment() {
-    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_CONFIG_PARAMETERS
+    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+    unset GIT_PREFIX GIT_CONFIG_PARAMETERS
 }
 
 # Git writes an all-zero object name for the local side of a branch or tag deletion.
