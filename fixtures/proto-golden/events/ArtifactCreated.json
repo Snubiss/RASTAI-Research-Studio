@@ -1,0 +1,13 @@
+{
+  "artifact_id": "art_01JA2B3C4D5E6F7G8H9J0K1M2V",
+  "kind": "gguf",
+  "content_hash": "blake3:0c6f8e1d2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
+  "size_bytes": "812646400",
+  "home_node_id": "node_7XQ2M4K8P0R6T1V3W5Y9Z2B4C6D8F0H2J4K6M8N0P2R4T6V8",
+  "parents": [
+    {
+      "id": "ckpt_01JA2B3C4D5E6F7G8H9J0K1M2T",
+      "relation": "exported_as"
+    }
+  ]
+}

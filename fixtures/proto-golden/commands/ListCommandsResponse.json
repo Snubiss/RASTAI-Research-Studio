@@ -1,0 +1,23 @@
+{
+  "commands": [
+    {
+      "command_id": "eval.test",
+      "title": "Run tests",
+      "summary": "Run an evaluation suite against a model or checkpoint.",
+      "section": "eval",
+      "scope": "eval",
+      "undoable": true,
+      "kind": "COMMAND_KIND_JOB",
+      "stability": "STABILITY_PREVIEW",
+      "arguments_type": "EvalTestArgs",
+      "result_type": "EvalTestResult",
+      "arguments_schema_json": "{\"type\":\"object\",\"properties\":{\"baseline_model\":{\"type\":\"string\"}}}",
+      "result_schema_json": "{\"type\":\"object\",\"properties\":{\"eval_run_id\":{\"type\":\"string\"}}}",
+      "default_shortcut": "Mod+Shift+T",
+      "basic": true,
+      "plugin_id": "eval",
+      "experimental": true,
+      "since_version": "0.1.0"
+    }
+  ]
+}

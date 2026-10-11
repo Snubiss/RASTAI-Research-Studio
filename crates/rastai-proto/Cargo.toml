@@ -9,7 +9,8 @@ publish.workspace = true
 
 # Everything under src/generated/ is written by `just codegen` (buf with protoc-gen-prost and protoc-gen-tonic) and
 # checked in, so there is no build.rs and building never needs buf or protoc (layout rust-node-gateway-proto.md 3.4).
-# tonic joins with the first service (M1-09); rastai.common.v1 has messages and enums only.
+# tonic joins with the first gRPC service, NodeService (M1-10). CommandService and EventService are Connect services
+# that rastai-server serves with prost alone, so buf.gen.yaml generates no tonic code for them.
 [dependencies]
 prost = { workspace = true }
 

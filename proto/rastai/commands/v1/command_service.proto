@@ -1,0 +1,107 @@
+// CommandService: every action in Rastai is a command, run through this one service (contracts 4.2 and 6).
+// The UI, the CLI, MCP clients and scripts all call Execute; ListCommands is the registry they build menus,
+// palettes, CLI verbs and MCP tools from. Arguments and results cross the wire as JSON text that rastai-formats
+// validates at both ends, so protobuf never re-declares a command's types (contracts 4). buf breaking can't see
+// inside that JSON; check-schema-diff covers it from M1-58 (contracts 12.6).
+syntax = "proto3";
+
+package rastai.commands.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+import "rastai/common/v1/states.proto";
+
+service CommandService {
+  // Runs one command. The call itself succeeds whenever it ran; a refused or failed command comes back as
+  // ok = false with its diagnostics, not as a gRPC error (contracts 4).
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // The command registry: core commands and the commands of enabled plugins.
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
+}
+
+// How a command delivers its result (contracts 6.2).
+enum CommandKind {
+  COMMAND_KIND_UNSPECIFIED = 0;
+  // Runs to completion inside the call; the result is in ExecuteResponse.result_json.
+  COMMAND_KIND_SYNC = 1;
+  // Starts a job and returns its job_id at once; progress and the outcome arrive as events.
+  COMMAND_KIND_JOB = 2;
+  // Returns at once; its output arrives as ephemeral events on EventService.Subscribe (chat tokens, for example).
+  COMMAND_KIND_STREAM = 3;
+}
+
+// The principal is never in the request: the daemon derives it from the cookie, token, socket peer or plugin job
+// token (contracts 6.3), so a caller can't claim rights it doesn't have.
+message ExecuteRequest {
+  // A registered command id, for example "model.load" (contracts 6.1).
+  string command_id = 1;
+  // The command's arguments as JSON, checked against its arguments type by rastai-formats.
+  string arguments_json = 2;
+  // The project the command acts in; empty for commands outside any project.
+  string project_id = 3;
+  // A retry with the same key, principal and command within 24 hours returns the first call's response instead of
+  // running the command again, so a retried train.start never starts two runs (platform flow 3.1). Empty for none.
+  string idempotency_key = 4;
+  // Check the arguments and permissions and report what would happen, without doing it.
+  bool dry_run = 5;
+  // Set only by a UI plugin host. It narrows the caller's rights to that plugin's grant and is journaled as
+  // plugin:<plugin_id>; it can only remove rights, never add them.
+  string acting_plugin_id = 6;
+}
+
+message ExecuteResponse {
+  bool ok = 1;
+  // The result as JSON, in the command's result type; empty when ok is false.
+  string result_json = 2;
+  // Set for a job command: the job the call started.
+  string job_id = 3;
+  // Errors when ok is false; warnings and info may come with a success too.
+  repeated rastai.common.v1.Diagnostic diagnostics = 4;
+  // The journal entry that records this call.
+  string journal_id = 5;
+}
+
+// One command as the UI, the CLI and MCP see it. The daemon builds it from the registry row
+// (descriptor_from_row); a plugin command gets plugin_id and the four type fields when it is registered.
+message CommandDescriptor {
+  string command_id = 1;
+  // Short title for menus and the palette, for example "Load model".
+  string title = 2;
+  // One sentence on what the command does.
+  string summary = 3;
+  // The section of the app the command belongs to, for example "inference".
+  string section = 4;
+  // The permission scope a caller needs, for example "inference.manage" (contracts 6.3).
+  string scope = 5;
+  // The command can be undone with the undo stack.
+  bool undoable = 6;
+  CommandKind kind = 7;
+  // Every command is STABILITY_PREVIEW until Phase 2 (owner decision N3). A descriptor from an older daemon that
+  // lacks the field decodes as STABILITY_UNSPECIFIED, which readers treat as preview.
+  rastai.common.v1.Stability stability = 8;
+  // The names of the arguments and result types, for example "ModelLoadArgs" (contracts 6.5).
+  string arguments_type = 9;
+  string result_type = 10;
+  // JSON Schema of the arguments: palette forms, CLI flags and the MCP tool's inputSchema.
+  string arguments_schema_json = 11;
+  // JSON Schema of the result: the MCP tool's outputSchema.
+  string result_schema_json = 12;
+  // The keyboard shortcut it has before the user changes it, for example "Mod+Shift+L"; empty for none.
+  string default_shortcut = 13;
+  // Shown in Basic mode, not only in Advanced mode.
+  bool basic = 14;
+  // The plugin that registered the command; empty for a core command.
+  string plugin_id = 15;
+  // Hidden unless plugins.experimental_apis is on.
+  bool experimental = 16;
+  // The app version that added the command, for clients that talk to more than one daemon version.
+  string since_version = 17;
+}
+
+message ListCommandsRequest {
+  // Only the commands of this section; empty lists every section.
+  string section = 1;
+}
+
+message ListCommandsResponse {
+  repeated CommandDescriptor commands = 1;
+}

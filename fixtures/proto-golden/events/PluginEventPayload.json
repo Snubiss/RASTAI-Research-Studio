@@ -1,0 +1,5 @@
+{
+  "plugin_id": "psychology",
+  "schema": "SaeFitProgress",
+  "payload_json": "{\"layer\":12,\"features_done\":4096}"
+}

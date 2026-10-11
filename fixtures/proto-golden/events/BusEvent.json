@@ -1,0 +1,16 @@
+{
+  "bus_sequence": "1791700000123007",
+  "event_type": "run.metrics",
+  "event_class": "EVENT_CLASS_DURABLE",
+  "subject_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2S",
+  "source": "job:job_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "emitted_unix_ms": "1791700000456",
+  "payload": {
+    "run_metrics": {
+      "step": "120",
+      "values": {
+        "train.loss": 2.3125
+      }
+    }
+  }
+}

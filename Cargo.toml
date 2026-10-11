@@ -43,7 +43,7 @@ blake3 = "=1.8.7"
 # matches what protoc-gen-prost 0.5.0 generates for (prost 0.14, the justfile header pins the plugin).
 prost = "=0.14.4"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
-# tonic (with the first service, M1-09), hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc,
+# tonic (with the first gRPC service, M1-10), hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc,
 # miniz_oxide, ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build,
 # tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 

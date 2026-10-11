@@ -1,0 +1,8 @@
+{
+  "command_id": "model.load",
+  "arguments_json": "{\"model_ref\":\"hf:google/gemma-3-1b-it@main\",\"runtime\":\"inspectable\"}",
+  "project_id": "prj_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "idempotency_key": "cli-5f0c2a9e-load",
+  "dry_run": true,
+  "acting_plugin_id": "psychology"
+}

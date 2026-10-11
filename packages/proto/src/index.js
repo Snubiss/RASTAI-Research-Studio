@@ -8,3 +8,7 @@ export * from "./generated/rastai/common/v1/diagnostic_pb.js";
 export * from "./generated/rastai/common/v1/hardware_pb.js";
 export * from "./generated/rastai/common/v1/resources_pb.js";
 export * from "./generated/rastai/common/v1/states_pb.js";
+export * from "./generated/rastai/commands/v1/command_service_pb.js";
+export * from "./generated/rastai/events/v1/event_record_pb.js";
+export * from "./generated/rastai/events/v1/event_service_pb.js";
+export * from "./generated/rastai/events/v1/payloads_pb.js";

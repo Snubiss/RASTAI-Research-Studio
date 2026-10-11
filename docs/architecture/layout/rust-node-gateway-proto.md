@@ -111,7 +111,8 @@ proto/rastai/
     event_record.proto        EventRecord (one events.log frame body, contracts §7.1; also the bytes the archive stores, 3.3)
     payloads.proto            one message per event type in contracts §7.3 (JobStateChanged, JobProgress,
                               JobLogLine, RunStateChanged, RunMetrics, CheckpointSaved, ...,
-                              GatewayRequestLogged, EgressActive, the archive.* events of M11), plus PluginEventPayload
+                              GatewayRequestLogged, EgressActive, the archive.* events of M11), plus PluginEventPayload;
+                              EventPayload, the one oneof over them that EventRecord and BusEvent share (contracts 4.3)
   node/v1/
     node_service.proto        NodeService: the RPC list only, plus the small per-RPC request messages
                               (HandshakeRequest/Response, GetHardwareRequest/Response, HandleCommandRequest, ...)
@@ -190,6 +191,7 @@ Contracts §4 defines the services and the main messages, and 4.9 fixes the fiel
 - Times are `int64 *_unix_ms`, sizes `uint64 *_bytes`, hashes `string` `blake3:<hex>`, documents `string *_json` (contracts §4).
 - **No proto message re-declares a `rastai-formats` type** (§20). A document type that crosses the wire is a `*_json` string, validated at both ends. `InterventionSet` is the case that matters here: `GenerateRequest.interventions_json` and `SetInterventionsRequest.interventions_json`, never a message.
 - Field numbers are never reused; removed fields become `reserved`.
+- **A oneof comes last in its message, field numbers included.** prost writes a oneof after the other fields, while buf, Python and protobuf-es write in field-number order; only this order gives byte-identical goldens (contracts 4.3). Maps are written in key order: `buf.gen.yaml` gives prost `BTreeMap` (`btree_map`), and Python and buf sort map keys.
 - **`stability` is data, not a proto option.** `buf breaking` checks field numbers and types. It can't see `arguments_json`, `result_json` or any other `_json` payload (contracts 4). `check-schema-diff` (M1-58, ADR-0038) diffs `schemas/commands/` and `schemas/events/` against the base branch: every change needs a contracts.md update, and a breaking change to a `stable` item fails CI. Every item stays `PREVIEW` until the Phase 2 stable subset, so until then every `CommandDescriptor` and `EventTypeDescriptor` says `PREVIEW`, and no wire rule depends on the other two values.
 - **`EventRecord` is read for years.** The archive keeps raw `EventRecord` bytes in `event_records.body` (contracts 8.7), and a restore decodes them with the schema of the day. Its field numbers are frozen like any other, and when a field is added the golden test keeps decoding the older `.binpb` files beside the new one.
 
@@ -197,7 +199,7 @@ Contracts §4 defines the services and the main messages, and 4.9 fixes the fiel
 
 | Output | Folder | Tool (dev tooling, §27) | Notes |
 |---|---|---|---|
-| Rust | `crates/rastai-proto/src/generated/rastai.<package>.v1.rs` | buf with the prost and tonic plugins | `crates/rastai-proto/src/lib.rs` is the one hand-written file: a module tree that `include!`s each generated file. No `build.rs`, so building never needs `protoc`. |
+| Rust | `crates/rastai-proto/src/generated/rastai.<package>.v1.rs` | buf with the prost and tonic plugins | `crates/rastai-proto/src/lib.rs` is the one hand-written file: a module tree that `include!`s each generated file. No `build.rs`, so building never needs `protoc`. The tonic plugin skips `CommandService` and `EventService`: the daemon serves them as Connect with prost alone (control-plane layout 8.4, 11.3), so tonic arrives with the first gRPC service, `NodeService` (M1-10). |
 | Python | `python/rastai_proto/rastai_proto/<package>/v1/*_pb2.py`, `*_pb2_grpc.py` | buf with the protobuf and grpcio plugins | protoc writes `from rastai.common.v1 import ...`, which would collide with the public `rastai` SDK package. `tools/codegen/rewrite_python_imports` rewrites `rastai.` to `rastai_proto.` in generated imports. It has its own test. |
 | JavaScript | `packages/proto/src/generated/rastai/<package>/v1/*_pb.js` and `*_pb.d.ts` | buf with protoc-gen-es, `target=js+dts` | protobuf-es v2 emits service descriptors that connect-es uses directly from JavaScript. The `.d.ts` files are generated, never edited and not part of review; `tools/checks/check-no-typescript` allows them only in generated folders (ADR-0036). Nobody writes TypeScript. |
 
@@ -211,7 +213,7 @@ The typed command wrappers in `@rastai/client` are not made by buf. Arguments ar
 |---|---|---|
 | Lint and breaking | CI step `just proto-check` | `buf lint`; `buf breaking --against` the main branch |
 | Golden messages | `fixtures/proto-golden/<package>/<MessageName>.binpb` and `.json` | one filled instance per message; round-tripped in `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py`, `packages/proto/src/golden.test.js`; binary bytes must match exactly across the three |
-| Unset stability | `CommandDescriptor` and `EventTypeDescriptor` goldens without the field | decode as `PREVIEW` in Rust, JS and Python |
+| Unset stability | `fixtures/proto-golden/{commands,events}/without_stability/`: a `CommandDescriptor` and an `EventTypeDescriptor` without the field | decode as `STABILITY_UNSPECIFIED`, the zero value every reader treats as `PREVIEW` (3.2), and round-trip unchanged, in Rust, JS and Python; the filled goldens decode as `STABILITY_PREVIEW` |
 | Import rewrite | `tools/codegen/tests/` | a generated file with nested imports rewrites correctly and imports cleanly |
 | Generated-code freshness | `tools/checks/check-generated` | regenerate, diff, fail on change |
 

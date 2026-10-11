@@ -1,0 +1,12 @@
+{
+  "diagnostic": {
+    "code": "RRS-T2001",
+    "severity": "SEVERITY_ERROR",
+    "message": "Checkpoint write failed: disk full; run paused.",
+    "path": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2S/checkpoints/step_00001000",
+    "fix_text": "Free disk space, then resume the run.",
+    "fix_command_id": "storage.gc",
+    "fix_arguments_json": "{\"dry_run\":false}"
+  },
+  "subject_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2S"
+}
