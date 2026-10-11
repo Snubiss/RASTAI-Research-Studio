@@ -838,7 +838,7 @@ class BatchLoader:
     def next_batch(self) -> list | None: ...   # the next batch's examples in epoch order; None once at each epoch's end. The recipe builds its Batch from them
     def position(self) -> dict: ...     # {shuffle_seed, epoch, position}: the loader's part of resume.json's dataloader field; the trainer adds dataset_hash and split
 
-# word_vocabulary.py: TextCNN's vocabulary without torchtext. Ids 0 and 1 are UNKNOWN_WORD and PADDING_WORD.
+# word_vocabulary.py: TextCNN's vocabulary without torchtext. UNKNOWN_ID (0) and PADDING_ID (1) are reserved.
 @dataclass
 class WordVocabulary:
     words: list[str]                  # words[id]; ids_by_word is built from it, so a saved word list restores it
@@ -847,7 +847,7 @@ def build_word_vocabulary(texts: Iterable[str], max_size: int) -> WordVocabulary
 def encode_text(vocabulary: WordVocabulary, text: str) -> list[int]: ...            # unknown words → UNKNOWN_ID (0)
 
 # readers/: rows as dicts, or DataError (RRS-D1001 unreadable content, RRS-D3001 missing file); never another exception
-def read_jsonl_rows(path: Path) -> Iterator[dict]: ...    # one object per line; repeated keys, NaN and Infinity refused
+def read_jsonl_rows(path: Path) -> Iterator[dict]: ...    # one object per line; repeated keys, NaN, Infinity, numbers too big for a float and lone surrogates refused
 def read_csv_rows(path: Path, has_header: bool | None = None) -> Iterator[dict]: ...   # None sniffs the header; the delimiter is always sniffed
 
 @dataclass

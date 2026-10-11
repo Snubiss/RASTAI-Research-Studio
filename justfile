@@ -71,13 +71,14 @@ test-rust:
     cargo test --workspace --locked
 
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
-# tools/codegen/pyproject.toml and tools/github/pyproject.toml extend it), JavaScript, JSON, CSS and YAML by prettier
-# (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is left as its generator wrote it:
-# rustfmt doesn't follow include!, ruff skips the generated Python (python/pyproject.toml) and prettier src/generated/.
+# tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml and tools/github/pyproject.toml extend it), JavaScript,
+# JSON, CSS and YAML by prettier (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is
+# left as its generator wrote it: rustfmt doesn't follow include!, ruff skips the generated Python
+# (python/pyproject.toml) and prettier src/generated/.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
-    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/github
+    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/fixtures tools/github
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -89,7 +90,7 @@ wasm:
 # clippy and ruff check; every warning fails.
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/github
+    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/fixtures tools/github
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one
@@ -105,13 +106,16 @@ env-js:
 
 # Settings and markers are in python/pyproject.toml; python/conftest.py skips gpu tests without a device and
 # posix_only tests on Windows. tools/checks/tests runs every repo check on passing and failing fixture trees,
-# tools/codegen/tests runs buf's Python plugin on a small request, and tools/github/tests runs the backlog sync
-# against a fake gh; each has its own settings in its pyproject.toml.
-# pytest over python/, tools/checks/tests, tools/codegen/tests and tools/github/tests in the cpu environment.
+# tools/codegen/tests runs buf's Python plugin on a small request, tools/fixtures/tests checks that the fixture
+# generators write the committed bytes, and tools/github/tests runs the backlog sync against a fake gh; each has its
+# own settings in its pyproject.toml.
+# pytest over python/, tools/checks/tests, tools/codegen/tests, tools/fixtures/tests and tools/github/tests in the cpu
+# environment.
 test-python: env-cpu
     cd python && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/checks && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/codegen && "{{cpu_environment}}/bin/python" -m pytest
+    cd tools/fixtures && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/github && "{{cpu_environment}}/bin/python" -m pytest
 
 # The test files are listed in vitest.config.js.

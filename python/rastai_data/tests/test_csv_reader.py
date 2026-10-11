@@ -54,6 +54,14 @@ def test_a_first_row_of_numbers_is_data(tmp_path):
     assert list(read_csv_rows(path)) == [{"column_1": "1", "column_2": "2"}, {"column_1": "3", "column_2": "4"}]
 
 
+def test_a_header_only_file_has_no_rows(tmp_path):
+    assert list(read_csv_rows(write_text(tmp_path, "id,text,label\n"))) == []
+
+
+def test_a_single_row_of_numbers_is_data(tmp_path):
+    assert list(read_csv_rows(write_text(tmp_path, "1,2\n"))) == [{"column_1": "1", "column_2": "2"}]
+
+
 def test_has_header_overrides_the_sniffing(tmp_path):
     path = write_text(tmp_path, "rain all day,weather\nlate goal,sports\nfoggy morning,weather\n")
     rows = list(read_csv_rows(path, has_header=True))
@@ -68,7 +76,7 @@ def test_a_one_column_file_with_commas_in_its_text_stays_one_column(tmp_path):
 
 
 def test_blank_lines_crlf_and_a_byte_order_mark_are_accepted(tmp_path):
-    path = write_text(tmp_path, "﻿text,label\r\nsun,weather\r\n\r\ngoal,sports\r\n")
+    path = write_text(tmp_path, "\ufefftext,label\r\nsun,weather\r\n\r\ngoal,sports\r\n")
     assert list(read_csv_rows(path)) == [{"text": "sun", "label": "weather"}, {"text": "goal", "label": "sports"}]
 
 

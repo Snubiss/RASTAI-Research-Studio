@@ -138,8 +138,10 @@ def looks_like_header(sample_rows: list[list[str]]) -> bool:
 
     Names are non-empty, short, unique and not numbers, and none of them shows up again further down its own
     column (a label column repeats its values; a header's "label" doesn't reappear as a label).
+    A file of one such row is a header with no data rows: an exported empty table ("id,text,label") is far more
+    common than a dataset of one row, and has_header=False reads it as data when it is one.
     """
-    if len(sample_rows) < 2:
+    if not sample_rows:
         return False
     first_row = sample_rows[0]
     if len(set(first_row)) != len(first_row):

@@ -5,6 +5,7 @@ is the fuzz target: it damages the fixture files in fixed, repeatable ways and r
 names the seed of the mutation, so it can be replayed with mutate_file(fixture, seed).
 """
 
+import math
 import random
 import time
 from pathlib import Path
@@ -99,6 +100,31 @@ def read_rows_or_data_error(reader, path: Path, seed: str) -> list[dict] | DataE
         pytest.fail(f"{seed}: {reader.__name__} raised {type(error).__name__}: {error}")
 
 
+def holds_only_text_and_finite_numbers(row: dict) -> bool:
+    """Whether every string and key can be written as UTF-8 and every float is finite.
+
+    A row that passes is safe for the steps after the reader: assign_split encodes the row key as UTF-8, and the
+    Rust JSON core refuses non-finite numbers. Counting rows alone would miss a reader that lets "\\ud800" or
+    1e999 through.
+    """
+    values_to_visit = [row]
+    while values_to_visit:
+        current = values_to_visit.pop()
+        if isinstance(current, dict):
+            values_to_visit.extend(current.keys())
+            values_to_visit.extend(current.values())
+        elif isinstance(current, list):
+            values_to_visit.extend(current)
+        elif isinstance(current, str):
+            try:
+                current.encode("utf-8")
+            except UnicodeEncodeError:
+                return False
+        elif isinstance(current, float) and not math.isfinite(current):
+            return False
+    return True
+
+
 @pytest.mark.fuzz
 @pytest.mark.parametrize("fixture_name, reader", FIXTURE_READERS)
 def test_mutated_fixtures_give_rows_or_data_error(fixtures_folder, tmp_path, fixture_name, reader):
@@ -117,6 +143,7 @@ def test_mutated_fixtures_give_rows_or_data_error(fixtures_folder, tmp_path, fix
             outcomes["data_error"] += 1
         else:
             assert all(isinstance(row, dict) for row in outcome), seed
+            assert all(holds_only_text_and_finite_numbers(row) for row in outcome), seed
             outcomes["rows"] += 1
     # Both outcomes happen, so the mutations neither break every file nor leave every file readable.
     assert outcomes["rows"] > 0 and outcomes["data_error"] > 0, outcomes

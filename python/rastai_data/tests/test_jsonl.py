@@ -71,6 +71,39 @@ def test_non_finite_numbers_are_refused(tmp_path, constant):
     assert error.code == RRS_D1001
 
 
+@pytest.mark.parametrize("number", [b"1e999", b"-1e400", b"1" + b"0" * 400, b"-" + b"9" * 400])
+def test_numbers_too_big_for_a_float_are_refused(tmp_path, number):
+    error = read_error(write_bytes(tmp_path, b'{"a": ' + number + b"}\n"))
+    assert error.code == RRS_D1001
+    assert "too big for a 64-bit float" in error.message
+
+
+def test_large_numbers_a_float_can_hold_are_kept(tmp_path):
+    path = write_bytes(tmp_path, b'{"big": 1.5e308, "small": -1e-320, "integer": 18446744073709551616}\n')
+    assert list(read_jsonl_rows(path)) == [{"big": 1.5e308, "small": -1e-320, "integer": 2**64}]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        b'{"id": "\\ud800"}',
+        b'{"id": "\\udc00"}',
+        b'{"id": "a\\ude00\\ud83d"}',
+        b'{"\\ud800": "key"}',
+        b'{"nested": [{"deep": ["\\udbff"]}]}',
+    ],
+)
+def test_a_lone_surrogate_is_refused(tmp_path, line):
+    error = read_error(write_bytes(tmp_path, line + b"\n"))
+    assert error.code == RRS_D1001
+    assert "surrogate" in error.message
+
+
+def test_a_surrogate_pair_is_one_character_and_accepted(tmp_path):
+    path = write_bytes(tmp_path, b'{"id": "\\ud83d\\ude00", "\\ud83d\\ude00": "key"}\n')
+    assert list(read_jsonl_rows(path)) == [{"id": "\U0001f600", "\U0001f600": "key"}]
+
+
 def test_deep_nesting_is_refused_not_a_recursion_error(tmp_path):
     error = read_error(write_bytes(tmp_path, b'{"a": ' + b"[" * 100_000 + b"]" * 100_000 + b"}\n"))
     assert error.code == RRS_D1001
