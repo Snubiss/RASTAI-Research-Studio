@@ -1805,7 +1805,7 @@ pub struct RebuildReport { pub runs: u64, pub records: u64, pub artifacts: u64, 
                            pub pruned_run_stubs: u64,    // stubs from archive.pruned; the daemon fills them (13.2)
                            pub diagnostics: Vec<Diagnostic> }
 pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError>  // caller holds daemon.lock
-pub fn take_daemon_lock(paths: &DataPaths) -> Result<DaemonLock, StoreError>           // RRS-S0001 when held
+pub fn take_daemon_lock(paths: &DataPaths) -> Result<DaemonLock, StoreError>           // RRS-S0001 when held; RRS-S0007 for a runtime folder or lock file another user could reach
 pub fn free_bytes(path: &Path) -> Result<u64, StoreError>                              // f_bavail × f_frsize (ADR-0033)
 pub fn check_free_space(path: &Path, needed_bytes: u64, margin_bytes: u64) -> Result<(), StoreError>  // RRS-S3001
 pub fn write_config_file(path: &Path, bytes: &[u8]) -> Result<(), StoreError>         // settings, keybindings, layouts

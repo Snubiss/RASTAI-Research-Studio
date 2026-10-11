@@ -7,13 +7,17 @@ use crate::index::reads::IndexReader;
 use crate::sqlite::{SqliteTransaction, execute, query_rows, read_unsigned, text_value, unsigned_value};
 
 // The ack only moves forward: a late or repeated write for an older sequence leaves the cursor where it is.
+// The indexer (M1-25) is the first caller of set_log_cursor; until it lands only the test below uses the two.
+#[cfg_attr(not(test), allow(dead_code))]
 const SET_LOG_CURSOR: &str = "INSERT INTO log_cursors (log_name, acked_sequence) VALUES (?1, ?2)
     ON CONFLICT (log_name) DO UPDATE SET acked_sequence = MAX(log_cursors.acked_sequence, excluded.acked_sequence)";
 const SELECT_LOG_CURSOR: &str = "SELECT acked_sequence FROM log_cursors WHERE log_name = ?1";
 
 /// Records that every record of `log_name` up to `acked_sequence` is indexed. The indexer (M1-25) calls it inside
-/// the transaction of `IndexWrite::ApplyDaemonEvents`.
-pub fn set_log_cursor(
+/// the transaction of `IndexWrite::ApplyDaemonEvents`. Crate-private, like every function that runs SQL: it takes
+/// the writer's transaction, which no other crate can hold.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn set_log_cursor(
     transaction: &SqliteTransaction<'_>,
     log_name: &str,
     acked_sequence: u64,
