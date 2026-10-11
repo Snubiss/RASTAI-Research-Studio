@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use rastai_proto::common::v1::{EventClass, RunState};
 use rastai_proto::events::v1::event_payload::Payload;
@@ -39,6 +40,13 @@ const MODEL_FILE_HASH: &str = "blake3:af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9ad
 const CORRUPTED_RECORD_INDEX: usize = 1;
 /// The record sequence_gap.log leaves out: the third, so the log jumps from 2 to 4.
 const MISSING_RECORD_INDEX: usize = 2;
+/// The crafted tail of `a_crafted_tail_cannot_make_the_later_frame_search_slow`: this 4-byte pattern, repeated over
+/// the reader's 1 MiB search window, makes a frame length that fits (and so costs a CRC-32) at most byte offsets.
+const CRAFTED_TAIL_PATTERN: [u8; 4] = [0x00, 0x00, 0x08, 0x00];
+const CRAFTED_TAIL_BYTES: usize = 1024 * 1024;
+/// A generous bound for one read of that tail. With the reader's CRC budget it takes milliseconds, even unoptimized;
+/// without it, minutes.
+const CRAFTED_TAIL_SECONDS_ALLOWED: u64 = 10;
 
 // ---- The recipes ----
 
@@ -378,6 +386,24 @@ fn a_header_the_writer_never_finished_is_restarted() {
     assert_eq!(std::fs::read(&path).unwrap(), log_of(&frames_of(&good_records()[..1])));
 }
 
+#[test]
+fn a_zero_filled_file_header_is_restarted() {
+    // A power cut before the header's block reached the disk can leave zeros where `RRSEVLG1` should be: a torn tail
+    // at offset 0, not a file that isn't an event log (flows/platform.md 6.2).
+    let scratch = ScratchFolder::new("zero_header");
+    let path = scratch.file("events.log");
+    std::fs::write(&path, [0u8; 16]).unwrap();
+    let (records, outcome, _) = read_until_not_a_record(&path);
+    assert!(records.is_empty());
+    assert_eq!(outcome, Ok(FrameRead::Incomplete { valid_bytes: 0 }));
+
+    let mut writer = open_event_log_for_append(&path).unwrap();
+    assert_eq!(truncated_tail_bytes(&writer), 16);
+    let mut first = good_records()[0].clone();
+    assert_eq!(append_event(&mut writer, &mut first, SyncPolicy::Now).unwrap(), 1);
+    assert_eq!(std::fs::read(&path).unwrap(), log_of(&frames_of(&good_records()[..1])));
+}
+
 // ---- The reader's edge cases ----
 
 #[test]
@@ -460,6 +486,60 @@ fn a_damaged_length_on_the_last_frame_is_a_torn_tail() {
     let writer = open_event_log_for_append(&path).unwrap();
     assert_eq!(truncated_tail_bytes(&writer), ends[3] - ends[2]);
     assert_eq!(std::fs::metadata(&path).unwrap().len(), ends[2]);
+}
+
+#[test]
+fn an_earlier_frame_after_a_damaged_last_length_is_not_proof() {
+    // Only a frame with a later sequence shows the writer got past the overrunning frame. A whole, checksum-valid copy
+    // of frame 1 after it shows nothing, so the damaged last frame is still the torn tail.
+    let records = good_records();
+    let ends = frame_ends(&records);
+    let mut bytes = good_log();
+    bytes[ends[2] as usize + 3] ^= 0x80;
+    bytes.extend_from_slice(&frames_of(&records)[0]);
+    let scratch = ScratchFolder::new("earlier_frame_after_damaged_length");
+    let path = scratch.file("events.log");
+    std::fs::write(&path, &bytes).unwrap();
+    let (read_records, outcome, _) = read_until_not_a_record(&path);
+    assert_eq!(read_records, records[..3].to_vec());
+    assert_eq!(outcome, Ok(FrameRead::Incomplete { valid_bytes: ends[2] }));
+}
+
+#[test]
+fn a_crafted_tail_cannot_make_the_later_frame_search_slow() {
+    // A first frame that claims almost 4 GiB, then bytes whose every 4-byte step reads as a length that fits the
+    // search window. Each such candidate costs a CRC over its body, so without a budget one read is quadratic.
+    let mut bytes = EVENT_LOG_HEADER.to_vec();
+    bytes.extend_from_slice(&0xFFFF_FFF0u32.to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 4]);
+    while bytes.len() < EVENT_LOG_HEADER.len() + FRAME_HEADER_BYTES + CRAFTED_TAIL_BYTES {
+        bytes.extend_from_slice(&CRAFTED_TAIL_PATTERN);
+    }
+    let scratch = ScratchFolder::new("crafted_tail");
+    let path = scratch.file("events.log");
+    std::fs::write(&path, &bytes).unwrap();
+    let allowed = Duration::from_secs(CRAFTED_TAIL_SECONDS_ALLOWED);
+    let header_end = EVENT_LOG_HEADER.len() as u64;
+
+    let started = Instant::now();
+    let mut reader = open_event_log(&path).unwrap();
+    assert_eq!(
+        read_next_frame(&mut reader),
+        Ok(FrameRead::Incomplete {
+            valid_bytes: header_end
+        })
+    );
+    assert!(started.elapsed() < allowed, "one read took {:?}", started.elapsed());
+
+    let started = Instant::now();
+    let writer = open_event_log_for_append(&path).unwrap();
+    assert!(
+        started.elapsed() < allowed,
+        "opening for append took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(truncated_tail_bytes(&writer), bytes.len() as u64 - header_end);
+    assert_eq!(std::fs::read(&path).unwrap(), EVENT_LOG_HEADER.to_vec());
 }
 
 #[test]
