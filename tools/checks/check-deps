@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""check-deps: every external dependency is on the spec §27 allowlist (contracts 2.5, layout rust-control-plane 2.4).
+
+Three allowlists, three package managers:
+- Rust: each workspace member's direct crates against [workspace.metadata.rastai.allowlist] in Cargo.toml, read
+  through `cargo metadata`. A crate must be listed, the member must be one of its users, and a dev-only crate may
+  only sit in [dev-dependencies]. cargo-deny (`just deny`) checks licenses, advisories and single owners.
+- Python: every package in every uv lock named by deps/allowlist-python.json, at the listed version, with a license
+  that passes the file's `licenses`.
+- npm: every direct dependency of every pnpm importer against deps/allowlist-npm.json, at the listed version, and
+  the license of every installed package in pnpm-lock.yaml (transitive ones too, ADR-0012 decision 5).
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+from repo_files import REPO_ROOT, report
+
+CARGO_METADATA_COMMAND = ["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"]
+# "users": ["*"] means every member crate may use it.
+EVERY_MEMBER = "*"
+# Allowlist category of crates that may only be dev-dependencies.
+DEV_CATEGORY = "dev"
+# cargo metadata's dependency kinds and the Cargo.toml section each one is written in.
+CARGO_SECTIONS = {None: "dependencies", "dev": "dev-dependencies", "build": "build-dependencies"}
+
+PYTHON_ALLOWLIST = "deps/allowlist-python.json"
+NPM_ALLOWLIST = "deps/allowlist-npm.json"
+# uv lock sources that are our own projects (the environment itself, workspace packages), not downloads.
+LOCAL_PYTHON_SOURCES = {"virtual", "editable", "directory"}
+
+# The sections of a pnpm importer that list its direct dependencies.
+NPM_DEPENDENCY_GROUPS = {"dependencies", "devDependencies", "optionalDependencies", "packageManagerDependencies"}
+# Versions of workspace packages linked from inside the repository, not downloaded.
+LOCAL_NPM_VERSION_PREFIXES = ("link:", "workspace:", "file:")
+# Where pnpm installs every package of the lock: node_modules/.pnpm/<id>/node_modules/<name>/.
+PNPM_STORE_FOLDER = "node_modules/.pnpm"
+NPM_MANIFEST = "package.json"
+# The indentation pnpm-lock.yaml uses (2 spaces per level) for a dependency group, a dependency name and its
+# `version:` line inside an importer, and for a package id under `packages:`.
+GROUP_INDENT = 4
+DEPENDENCY_INDENT = 6
+VERSION_INDENT = 8
+PACKAGE_INDENT = 2
+
+# An SPDX license expression's parts: parentheses, operators and license ids.
+LICENSE_TOKEN = re.compile(r"\(|\)|[^\s()]+")
+
+
+def main() -> int:
+    root, cargo_metadata_file = parse_arguments()
+    problems = check_cargo(read_cargo_metadata(root, cargo_metadata_file))
+    problems += check_python(root)
+    problems += check_npm(root)
+    return report("check-deps", problems, "every dependency is on its allowlist")
+
+
+def parse_arguments() -> tuple[Path, Path | None]:
+    parser = argparse.ArgumentParser(description="Fails on a dependency, version or license the allowlists lack.")
+    parser.add_argument("--root", type=Path, default=REPO_ROOT, help="the tree to check (default: this repository)")
+    parser.add_argument("--cargo-metadata", type=Path, help="read `cargo metadata` output from this file instead")
+    arguments = parser.parse_args()
+    return arguments.root, arguments.cargo_metadata
+
+
+# ---- Rust ----
+
+
+def read_cargo_metadata(root: Path, cargo_metadata_file: Path | None) -> dict:
+    if cargo_metadata_file is not None:
+        return json.loads(cargo_metadata_file.read_text())
+    result = subprocess.run(CARGO_METADATA_COMMAND, cwd=root, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"check-deps: `{' '.join(CARGO_METADATA_COMMAND)}` failed: {result.stderr.strip()}")
+        sys.exit(2)
+    return json.loads(result.stdout)
+
+
+def check_cargo(metadata: dict) -> list[str]:
+    allowlist = metadata.get("metadata", {}).get("rastai", {}).get("allowlist")
+    if not allowlist:
+        return ["Cargo.toml: [workspace.metadata.rastai.allowlist] is missing"]
+    member_ids = set(metadata["workspace_members"])
+    problems = []
+    for package in metadata["packages"]:
+        if package["id"] in member_ids:
+            for dependency in package["dependencies"]:
+                problems.extend(check_crate_dependency(package["name"], dependency, allowlist))
+    return problems
+
+
+def check_crate_dependency(member: str, dependency: dict, allowlist: dict) -> list[str]:
+    if dependency["source"] is None:
+        return []  # a path dependency: one of our own crates
+    name = dependency["name"]
+    entry = allowlist.get(name)
+    if entry is None:
+        return [f"{member}: depends on `{name}`, which isn't in [workspace.metadata.rastai.allowlist] (spec §27)"]
+    problems = []
+    users = entry.get("users", [])
+    if EVERY_MEMBER not in users and member not in users:
+        problems.append(f"{member}: depends on `{name}`, but the allowlist names only {', '.join(users)} as its users")
+    section = CARGO_SECTIONS.get(dependency["kind"], dependency["kind"])
+    if entry.get("category") == DEV_CATEGORY and dependency["kind"] != "dev":
+        problems.append(f'{member}: `{name}` is dev-only (category "dev") but sits in [{section}]')
+    return problems
+
+
+# ---- Python ----
+
+
+def check_python(root: Path) -> list[str]:
+    allowlist = json.loads((root / PYTHON_ALLOWLIST).read_text())
+    listed = allowlist["packages"]
+    problems = check_listed_licenses(PYTHON_ALLOWLIST, allowlist)
+    locked_names = set()
+    for lock_path in allowlist["locks"]:
+        for name, version in read_uv_lock(root / lock_path):
+            locked_names.add(name)
+            problems.extend(check_listed_version(PYTHON_ALLOWLIST, lock_path, name, version, listed))
+    for name in sorted(set(listed) - locked_names):
+        problems.append(f"{PYTHON_ALLOWLIST}: `{name}` is listed, but no lock holds it; remove the entry")
+    return problems
+
+
+def read_uv_lock(lock_file: Path) -> list[tuple[str, str]]:
+    """(name, version) of every downloaded package in a uv lock. A build variant like 2.14.1+cpu is 2.14.1."""
+    lock = tomllib.loads(lock_file.read_text())
+    packages = []
+    for package in lock.get("package", []):
+        source_kinds = set(package.get("source", {}))
+        if source_kinds & LOCAL_PYTHON_SOURCES:
+            continue
+        packages.append((package["name"], package["version"].split("+")[0]))
+    return packages
+
+
+def check_listed_version(allowlist_path: str, lock_path: str, name: str, version: str, listed: dict) -> list[str]:
+    entry = listed.get(name)
+    if entry is None:
+        return [f"{lock_path}: `{name}` {version} isn't in {allowlist_path} (spec §27)"]
+    if entry["version"] != version:
+        return [f"{lock_path}: `{name}` is {version}, but {allowlist_path} lists {entry['version']}"]
+    return []
+
+
+def check_listed_licenses(allowlist_path: str, allowlist: dict) -> list[str]:
+    """Each listed package's recorded license passes the allowlist's own `licenses` section."""
+    problems = []
+    for name, entry in sorted(allowlist["packages"].items()):
+        if not license_passes(entry["license"], name, allowlist["licenses"]):
+            problems.append(
+                f"{allowlist_path}: `{name}` has license {entry['license']}, which `licenses` doesn't allow"
+            )
+    return problems
+
+
+# ---- npm ----
+
+
+def check_npm(root: Path) -> list[str]:
+    allowlist = json.loads((root / NPM_ALLOWLIST).read_text())
+    listed = allowlist["packages"]
+    problems = []
+    direct_names = set()
+    locked_packages = set()
+    for lock_path in allowlist["locks"]:
+        direct_dependencies, packages = read_pnpm_lock((root / lock_path).read_text())
+        locked_packages.update(packages)
+        for name, version in direct_dependencies:
+            direct_names.add(name)
+            problems.extend(check_listed_version(NPM_ALLOWLIST, lock_path, name, version, listed))
+    for name in sorted(set(listed) - direct_names):
+        problems.append(f"{NPM_ALLOWLIST}: `{name}` is listed, but no package.json depends on it; remove the entry")
+    problems.extend(check_installed_npm_licenses(root, locked_packages, allowlist["licenses"]))
+    return problems
+
+
+def read_pnpm_lock(text: str) -> tuple[list[tuple[str, str]], set[tuple[str, str]]]:
+    """(direct dependencies, every package) of a pnpm-lock.yaml, each as (name, version).
+
+    A small reader for the one YAML layout pnpm writes, not general YAML: the standard library has no YAML
+    parser, and the lock's shape is fixed by its lockfileVersion. Indentation says what each line is.
+    """
+    direct_dependencies = []
+    packages = set()
+    section = group = dependency_name = None
+    for line in text.splitlines():
+        indent = len(line) - len(line.lstrip(" "))
+        key, _, value = line.strip().partition(":")
+        key = key.strip("'\"")
+        value = value.strip()
+        if not key or line.strip() == "---":
+            continue
+        if indent == 0:
+            section = key
+        elif section == "importers" and indent == GROUP_INDENT:
+            group = key if key in NPM_DEPENDENCY_GROUPS else None
+        elif section == "importers" and indent == DEPENDENCY_INDENT and group:
+            dependency_name = key
+        elif section == "importers" and indent == VERSION_INDENT and group and key == "version":
+            if not value.startswith(LOCAL_NPM_VERSION_PREFIXES):
+                direct_dependencies.append((dependency_name, without_peer_suffix(value)))
+        elif section == "packages" and indent == PACKAGE_INDENT:
+            packages.add(split_package_id(key))
+    return direct_dependencies, packages
+
+
+def without_peer_suffix(version: str) -> str:
+    """pnpm writes the peers a package was resolved with after its version: 5.0.2(vite@8.3.1) is 5.0.2."""
+    return version.split("(")[0]
+
+
+def split_package_id(package_id: str) -> tuple[str, str]:
+    """Splits "@scope/name@1.2.3" into ("@scope/name", "1.2.3"). The version starts at the last @ that isn't the
+    first character, because a scoped name starts with @ too."""
+    at = package_id.rindex("@", 1)
+    return package_id[:at], without_peer_suffix(package_id[at + 1 :])
+
+
+def check_installed_npm_licenses(root: Path, locked_packages: set, licenses: dict) -> list[str]:
+    """pnpm-lock.yaml holds no licenses, so they're read from the installed packages. Packages for other
+    platforms (another OS's native binary) aren't installed here; their own platform's run checks them."""
+    store = root / PNPM_STORE_FOLDER
+    if not store.is_dir():
+        return [f"{PNPM_STORE_FOLDER} is missing, so npm licenses can't be read; run `just env-js` first"]
+    installed = read_installed_npm_packages(store)
+    problems = []
+    for name, version in sorted(locked_packages):
+        license_expression = installed.get((name, version))
+        if license_expression is None:
+            continue
+        if not license_passes(license_expression, name, licenses):
+            problems.append(f"npm package `{name}` {version} has license {license_expression}, outside `licenses`")
+    checked_count = len([package for package in locked_packages if package in installed])
+    print(
+        f"check-deps: npm licenses read for {checked_count} of {len(locked_packages)} locked packages (the rest "
+        "are for other platforms and aren't installed here)"
+    )
+    return problems
+
+
+def read_installed_npm_packages(store: Path) -> dict[tuple[str, str], str]:
+    """(name, version) -> license, from each real package folder in the pnpm store. The store's symlinks point at
+    those same folders, so they're skipped."""
+    installed = {}
+    for manifest_path in list_store_manifests(store):
+        if manifest_path.parent.is_symlink():
+            continue
+        manifest = json.loads(manifest_path.read_text())
+        if "name" in manifest and "version" in manifest:
+            installed[(manifest["name"], manifest["version"])] = license_of_manifest(manifest)
+    return installed
+
+
+def list_store_manifests(store: Path) -> list[Path]:
+    """The package.json of every package in the store: <id>/node_modules/<name>/ and, for a scoped package,
+    <id>/node_modules/@scope/<name>/. Deeper package.json files belong to a package's own contents."""
+    plain = store.glob(f"*/node_modules/*/{NPM_MANIFEST}")
+    scoped = store.glob(f"*/node_modules/@*/*/{NPM_MANIFEST}")
+    return sorted(plain) + sorted(scoped)
+
+
+def license_of_manifest(manifest: dict) -> str:
+    """package.json `license` is a string; very old packages wrote {"type": ...} instead."""
+    license_field = manifest.get("license", "")
+    if isinstance(license_field, dict):
+        return license_field.get("type", "")
+    return license_field
+
+
+# ---- licenses ----
+
+
+def license_passes(expression: str, package_name: str, licenses: dict) -> bool:
+    """Whether an SPDX expression is allowed: every part of an AND, at least one side of an OR. A license id
+    passes when `allowed` lists it or when `named_entries` gives this package that exact id (or "id WITH
+    exception")."""
+    named_entry = licenses.get("named_entries", {}).get(package_name, {})
+    allowed = set(licenses["allowed"])
+    if named_entry:
+        allowed.add(named_entry["license"])
+    tokens = LICENSE_TOKEN.findall(expression)
+    passes, position = evaluate_any_of(tokens, 0, allowed)
+    return passes and position == len(tokens)
+
+
+def evaluate_any_of(tokens: list[str], position: int, allowed: set[str]) -> tuple[bool, int]:
+    """`A OR B OR ...` starting at position: (passes, the position after it)."""
+    passes, position = evaluate_all_of(tokens, position, allowed)
+    while position < len(tokens) and tokens[position] == "OR":
+        right_passes, position = evaluate_all_of(tokens, position + 1, allowed)
+        passes = passes or right_passes
+    return passes, position
+
+
+def evaluate_all_of(tokens: list[str], position: int, allowed: set[str]) -> tuple[bool, int]:
+    """`A AND B AND ...` starting at position."""
+    passes, position = evaluate_license(tokens, position, allowed)
+    while position < len(tokens) and tokens[position] == "AND":
+        right_passes, position = evaluate_license(tokens, position + 1, allowed)
+        passes = passes and right_passes
+    return passes, position
+
+
+def evaluate_license(tokens: list[str], position: int, allowed: set[str]) -> tuple[bool, int]:
+    """One license id, `id WITH exception`, or a parenthesized expression."""
+    if position >= len(tokens):
+        return False, position
+    if tokens[position] == "(":
+        passes, position = evaluate_any_of(tokens, position + 1, allowed)
+        if position >= len(tokens) or tokens[position] != ")":
+            return False, len(tokens) + 1  # unbalanced: never passes
+        return passes, position + 1
+    license_id = tokens[position]
+    position += 1
+    if position + 1 < len(tokens) and tokens[position] == "WITH":
+        license_id = f"{license_id} WITH {tokens[position + 1]}"
+        position += 2
+    return license_id in allowed, position
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -15,14 +15,16 @@ target-version = "py312"
 line-length = 120          # the same width as rustfmt.toml and .prettierrc.json
 
 [tool.ruff.lint]
-# pycodestyle, pyflakes, import order, bugbear, pyupgrade, naming, complexity, argument count, banned APIs.
-select = ["E", "W", "F", "I", "B", "UP", "N", "C90", "PLR0913", "TID251"]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, naming, complexity, argument count, statement count,
+# banned APIs.
+select = ["E", "W", "F", "I", "B", "UP", "N", "C90", "PLR0913", "PLR0915", "TID251"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15        # clippy.toml cognitive-complexity-threshold: small, readable functions (ADR-0023)
 
 [tool.ruff.lint.pylint]
 max-args = 6               # clippy.toml too-many-arguments-threshold
+max-statements = 50        # ruff's default; the Python stand-in for clippy's too-many-lines (60): small functions
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # No pickle, anywhere (CLAUDE.md hard rules; tools/checks/check-no-pickle greps for the rest from M1-05).

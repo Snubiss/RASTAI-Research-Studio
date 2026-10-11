@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""check-colors: no color literal outside @rastai/ui's tokens (owner decision N1, contracts 5.6, frontend 2.10).
+
+Components and plugin UIs read only the --rr-* CSS variables, and renderers take their colors through setColors,
+so a theme switch reaches everything. A color written into the code would ignore the theme, so it fails here.
+The checked folders are every hand-written frontend source folder: the canvas, viz, sections and plugin-UI
+folders contracts 5.6 names, @rastai/ui outside tokens/ (frontend 4.4) and the rest of the apps (CLAUDE.md).
+"""
+
+import re
+import sys
+from fnmatch import fnmatch
+from pathlib import Path
+
+from repo_files import line_number_at, list_files, parse_root_argument, read_text, report, split_javascript
+
+# The hand-written frontend source folders (fnmatch patterns, where * also crosses folders).
+CHECKED_FOLDER_PATTERNS = ["apps/*/src/*", "packages/*/src/*", "plugins/*/ui/src/*"]
+# The one place color values live (contracts 5.6).
+TOKEN_FOLDER = "packages/ui/src/tokens/"
+# Generated folders hold no hand-written colors and aren't reviewed (frontend layout 1.1).
+GENERATED_FOLDERS = ("packages/proto/", "packages/catalog/")
+GENERATED_FOLDER_PART = "/src/generated/"
+JAVASCRIPT_SUFFIXES = (".js", ".jsx", ".mjs")
+CSS_SUFFIXES = (".css",)
+
+# #rgb, #rgba, #rrggbb and #rrggbbaa, as a whole word: "#101318" matches, "&#123;" and "#1013180" don't.
+HEX_COLOR = re.compile(r"(?<![\w&#])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?!\w)")
+# The CSS color functions.
+COLOR_FUNCTION = re.compile(r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\(", re.IGNORECASE)
+# One CSS declaration, `property: value`; its value is where a named color would be.
+CSS_DECLARATION = re.compile(r"[\w-]+\s*:\s*([^;{}]+)")
+WORD = re.compile(r"[A-Za-z]+")
+CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+NOT_LINE_BREAK = re.compile(r"[^\n]")
+# The CSS named colors (CSS Color 4). transparent and currentColor aren't here: they name no color value.
+NAMED_COLORS = set(
+    """
+    aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
+    cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod
+    darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon
+    darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray
+    dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green
+    greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon
+    lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon
+    lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta
+    maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen
+    mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive
+    olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru
+    pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen
+    seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato
+    turquoise violet wheat white whitesmoke yellow yellowgreen
+    """.split()
+)
+
+
+def main() -> int:
+    root = parse_root_argument("Fails on a color literal in frontend code outside @rastai/ui's tokens.")
+    problems = find_problems(root)
+    return report("check-colors", problems, "no color literals outside the theme tokens")
+
+
+def find_problems(root: Path) -> list[str]:
+    problems = []
+    for path in list_files(root, JAVASCRIPT_SUFFIXES + CSS_SUFFIXES):
+        if is_checked(path):
+            problems.extend(check_file(path, read_text(root, path)))
+    return problems
+
+
+def is_checked(path: str) -> bool:
+    if path.startswith(TOKEN_FOLDER) or path.startswith(GENERATED_FOLDERS) or GENERATED_FOLDER_PART in path:
+        return False
+    return any(fnmatch(path, pattern) for pattern in CHECKED_FOLDER_PATTERNS)
+
+
+def check_file(path: str, text: str) -> list[str]:
+    problems = []
+    for offset, literal in find_colors_in_file(path, text):
+        line = line_number_at(text, offset)
+        problems.append(f"{path}:{line}: color literal `{literal}`; use a theme token (--rr-* or setColors)")
+    return problems
+
+
+def find_colors_in_file(path: str, text: str) -> list[tuple[int, str]]:
+    """(offset, literal) for each color. A stylesheet is all declarations, so all of it is read except comments.
+    In JavaScript a color can only be a string ("#101318", a style object's "red"), so only strings are read."""
+    if path.endswith(CSS_SUFFIXES):
+        return find_colors_in_style_text(blank_out_css_comments(text))
+    found = []
+    for kind, start, end in split_javascript(text):
+        if kind == "string":
+            found += [(start + offset, literal) for offset, literal in find_colors_in_string(text[start:end])]
+    return found
+
+
+def find_colors_in_style_text(text: str) -> list[tuple[int, str]]:
+    found = find_color_values(text)
+    for declaration in CSS_DECLARATION.finditer(text):
+        for word in WORD.finditer(declaration.group(1)):
+            if word.group().lower() in NAMED_COLORS:
+                found.append((declaration.start(1) + word.start(), word.group()))
+    return found
+
+
+def find_colors_in_string(quoted_text: str) -> list[tuple[int, str]]:
+    """A string literal, quotes included. A string whose whole value is a color name counts too; a name inside a
+    sentence ("Status: green") doesn't, because UI text may name a color."""
+    found = find_color_values(quoted_text)
+    if quoted_text[1:-1].strip().lower() in NAMED_COLORS:
+        found.append((0, quoted_text))
+    return found
+
+
+def find_color_values(text: str) -> list[tuple[int, str]]:
+    found = [(match.start(), match.group()) for match in HEX_COLOR.finditer(text)]
+    return found + [(match.start(), match.group()) for match in COLOR_FUNCTION.finditer(text)]
+
+
+def blank_out_css_comments(text: str) -> str:
+    """Replaces each /* comment */ with spaces of the same length, keeping line breaks, so offsets still match."""
+    return CSS_COMMENT.sub(spaces_for_comment, text)
+
+
+def spaces_for_comment(comment: re.Match) -> str:
+    return NOT_LINE_BREAK.sub(" ", comment.group())
+
+
+if __name__ == "__main__":
+    sys.exit(main())

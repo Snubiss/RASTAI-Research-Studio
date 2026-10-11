@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""check-imports: layering, public-API and one-wrapper-file rules (contracts 2.4 and 2.5).
+
+- Python packages import only their "Internal deps" (contracts 2.2), and each external library only in its one
+  wrapper file (contracts 2.5, python layout 1.4). The packages are found by folder, so a rule applies from the
+  day its package lands.
+- JavaScript packages import only their "Internal deps" (contracts 2.3), the public entry of another package and
+  not its files, @rastai/ui/security only inside apps/web, @rastai/client in apps/web only from the three folders
+  frontend layout 1 names, and each library only where contracts 2.5 allows it.
+- Rust: cargo-deny and check-deps pin each single-owner crate to its owning crate; this check pins the file
+  inside the owner (contracts 2.5 "Enforced owners").
+The tables below restate contracts 2.2, 2.3 and 2.5; tools/checks/tests checks that every package those tables
+name has a row here.
+"""
+
+import ast
+import json
+import posixpath
+import re
+import sys
+from fnmatch import fnmatch
+from pathlib import Path
+
+from repo_files import line_number_at, list_files, parse_root_argument, read_text, report, split_javascript
+
+# ---- Python: contracts 2.2 and 2.5, python layout 1.3 and 1.4 ----
+
+# Package -> the internal packages it may import (its own is always allowed). Anything not listed is forbidden.
+PYTHON_INTERNAL_DEPS = {
+    "rastai_proto": [],
+    "rastai_formats": [],
+    "rastai_plugin": ["rastai_proto", "rastai_formats"],
+    "rastai_models": ["rastai_formats", "rastai_plugin"],
+    "rastai_data": ["rastai_formats", "rastai_plugin"],
+    "rastai_lens": ["rastai_models", "rastai_formats", "rastai_plugin"],
+    "rastai_train": ["rastai_models", "rastai_data", "rastai_lens", "rastai_formats", "rastai_plugin"],
+    "rastai_rl": ["rastai_train", "rastai_models", "rastai_data", "rastai_formats", "rastai_plugin"],
+    "rastai_worker": [
+        "rastai_proto",
+        "rastai_formats",
+        "rastai_plugin",
+        "rastai_models",
+        "rastai_data",
+        "rastai_lens",
+        "rastai_train",
+        "rastai_rl",
+    ],
+    # rastai_proto only in connect_transport.py (PYTHON_FILE_EXTRA_DEPS).
+    "rastai": [
+        "rastai_formats",
+        "rastai_plugin",
+        "rastai_models",
+        "rastai_data",
+        "rastai_lens",
+        "rastai_train",
+        "rastai_rl",
+    ],
+    "rastai_psychology": ["rastai", "rastai_plugin"],
+    "rastai_eval": ["rastai", "rastai_plugin"],
+}
+# Module path (relative to the package's folder) -> extra internal packages that one file may import.
+PYTHON_FILE_EXTRA_DEPS = {
+    # decodes the binary EventService.Subscribe stream with the generated messages (python layout 1.3)
+    "rastai/connect_transport.py": ["rastai_proto"],
+}
+# The folders that hold Python packages: python/<package>/ and plugins/<plugin>/python/<package>/.
+PYTHON_PACKAGE_ROOTS = ["python/", "plugins/*/python/"]
+# Folders under python/ that aren't packages: the locked environments (python layout 11).
+PYTHON_NON_PACKAGE_FOLDERS = {"envs"}
+
+# Marks a library only test files may import.
+TESTS_ONLY = "tests only"
+# Marks a library no Rastai file may import.
+NEVER = "never"
+# A pattern that matches every module path: a foundation used directly, not wrapped.
+ANYWHERE = ["*"]
+# External module (the longest dotted prefix wins) -> the module paths that may import it. A module path is the
+# file's path inside its package folder, as the contracts write it: "rastai_data/image_decode.py".
+PYTHON_LIBRARY_FILES = {
+    "torch": ANYWHERE,
+    "torch.distributed": ["rastai_train/distributed.py", "rastai_worker/distributed.py"],
+    "torch.onnx": ["rastai_models/onnx_export.py"],
+    "onnx": ["rastai_models/onnx_export.py"],
+    "onnxscript": ["rastai_models/onnx_export.py"],
+    "torchvision": ["rastai_data/image_decode.py"],
+    "transformers": ["rastai_models/compat/transformers_runtime.py"],
+    "tokenizers": ["rastai_data/tokenization.py"],
+    "bitsandbytes": ["rastai_train/kernels/four_bit_linear.py"],
+    "grpc": ["rastai_worker/worker_server.py", "rastai_plugin/host.py", "rastai_proto/*"],
+    "google.protobuf": [
+        "rastai_proto/*",
+        "rastai_worker/event_payloads.py",
+        "rastai_models/importers/onnx_proto/*",
+        "rastai_data/run_logs/*_proto/*",
+    ],
+    "pyarrow": ["rastai_data/readers/parquet.py"],
+    "pymysql": ["rastai_data/readers/mysql_reader.py"],
+    "pytest": TESTS_ONLY,
+    # transitive packages of torchvision that no Rastai file imports (python layout 1.4)
+    "PIL": NEVER,
+    "numpy": NEVER,
+}
+# Module path -> (standard-library modules that file must not import, why).
+PYTHON_FORBIDDEN_MODULES = {
+    "rastai_models/io/safetensors_reader.py": (
+        ["struct", "json"],
+        "rastai-formats owns the safetensors header check; call it through the wheel (contracts 2.4 rule 10)",
+    ),
+}
+
+# ---- JavaScript: contracts 2.3 and 2.4, frontend layout 1 and 2.10 ----
+
+# The public API sections and plugin UIs use (contracts 2.4 rule 5).
+JS_PUBLIC_API = ["@rastai/plugin", "@rastai/ui", "@rastai/canvas", "@rastai/viz"]
+JS_WEB_DEPS_WITHOUT_CLIENT = [
+    "@rastai/proto",
+    "@rastai/formats",
+    "@rastai/catalog",
+    "@rastai/ui",
+    "@rastai/canvas",
+    "@rastai/viz",
+    "@rastai/plugin",
+    "@rastai/psychology-ui",
+    "@rastai/eval-ui",
+]
+# Package -> the internal packages its code may import (its own is always allowed).
+JS_INTERNAL_DEPS = {
+    "@rastai/proto": [],
+    "@rastai/formats": [],
+    "@rastai/catalog": [],
+    "@rastai/ui": ["@rastai/catalog"],
+    "@rastai/client": ["@rastai/proto", "@rastai/formats"],
+    "@rastai/canvas": [],
+    "@rastai/viz": ["@rastai/canvas"],  # its gl module, which @rastai/canvas exports from its entry
+    "@rastai/plugin": ["@rastai/client", "@rastai/ui", "@rastai/formats", "@rastai/proto", "@rastai/catalog"],
+    "@rastai/psychology-ui": ["@rastai/plugin", "@rastai/ui", "@rastai/canvas", "@rastai/viz"],
+    "@rastai/eval-ui": ["@rastai/plugin", "@rastai/ui", "@rastai/viz"],
+    # @rastai/client only from the folders in JS_FOLDER_DEPS
+    "@rastai/web": JS_WEB_DEPS_WITHOUT_CLIENT,
+    "@rastai/viewer": ["@rastai/formats", "@rastai/ui", "@rastai/canvas", "@rastai/viz"],
+    "@rastai/desktop": [],
+}
+# Package -> packages it may name only in a JSDoc type import (`@typedef {import("...").Name}`), erased at build.
+JS_TYPE_ONLY_DEPS = {
+    "@rastai/ui": ["@rastai/proto", "@rastai/canvas", "@rastai/viz"],
+}
+# Folder -> the internal packages files in it may import, in place of their package's list.
+JS_FOLDER_DEPS = {
+    "apps/web/src/app/": JS_WEB_DEPS_WITHOUT_CLIENT + ["@rastai/client"],
+    "apps/web/src/events/": JS_WEB_DEPS_WITHOUT_CLIENT + ["@rastai/client"],
+    "apps/web/src/plugin-host/": JS_WEB_DEPS_WITHOUT_CLIENT + ["@rastai/client"],
+    "apps/web/src/sections/": JS_PUBLIC_API,
+}
+# The only subpath imports of our packages, and the folders that may use each one.
+JS_SUBPATH_FOLDERS = {
+    "@rastai/ui/security": ["apps/web/src/"],
+}
+# External library -> path patterns of the files that may import it (fnmatch: * also crosses folders).
+JS_LIBRARY_FILES = {
+    "react": [
+        "packages/ui/src/*",
+        "packages/plugin/src/*",
+        "plugins/psychology/ui/src/*",
+        "plugins/evaluation/ui/src/*",
+        "apps/web/src/*",
+        "apps/viewer/src/*",
+    ],
+    "react-dom": ["packages/ui/src/*", "apps/web/src/*"],
+    "@connectrpc/connect": ["packages/client/src/connection.js", "packages/proto/*"],
+    "@connectrpc/connect-web": ["packages/client/src/connection.js"],
+    "@bufbuild/protobuf": ["packages/client/src/connection.js", "packages/proto/*"],
+    "vitest": TESTS_ONLY,
+    "node:": TESTS_ONLY,
+}
+# The folders that hold JavaScript packages, each with its package.json. Only a package's src/ is its code; config
+# files beside it (vite.config.js) are dev tooling.
+JS_PACKAGE_FOLDER_PATTERNS = ["apps/*/", "packages/*/", "plugins/*/ui/"]
+JS_SOURCE_FOLDER = "src/"
+JS_SUFFIXES = (".js", ".jsx", ".mjs")
+JS_TEST_SUFFIXES = (".test.js", ".test.jsx")
+OUR_SCOPE = "@rastai/"
+# A string right after these is an import specifier: `... from "x"`, `import "x"` and `import("x")`.
+SPECIFIER_BEFORE = re.compile(r"(\bfrom|\bimport|\bimport\s*\()\s*$")
+# A JSDoc type import inside a comment: {import("@rastai/proto").Diagnostic}.
+TYPE_IMPORT = re.compile(r"\bimport\(\s*[\"']([^\"']+)[\"']\s*\)")
+
+# ---- Rust: contracts 2.5 ----
+
+# Crate (as Rust code names it) -> the only files that may use it.
+RUST_LIBRARY_FILES = {
+    "hyper": ["crates/rastai-transport/src/http_client.rs", "crates/rastai-sandbox/src/engine_http.rs"],
+    "hyper_util": ["crates/rastai-transport/src/http_client.rs", "crates/rastai-sandbox/src/engine_http.rs"],
+    "rustls": ["crates/rastai-transport/src/http_client.rs"],
+    "tokio_rustls": ["crates/rastai-transport/src/http_client.rs"],
+    "webpki_roots": ["crates/rastai-transport/src/http_client.rs"],
+    "tower": ["crates/rastai-transport/src/grpc_channel.rs"],
+    "rusqlite": ["crates/rastai-store/src/sqlite.rs"],
+    "libc": ["crates/rastai-store/src/disk_space.rs"],
+    "blake3": ["crates/rastai-formats/src/hashing.rs"],
+    "miniz_oxide": ["crates/rastai-formats/src/zip/inflate.rs"],
+    "ed25519_dalek": ["crates/rastai-node/src/identity.rs"],
+    "tokenizers": ["crates/rastai-gateway/src/tokenizer.rs"],
+    "minijinja": ["crates/rastai-gateway/src/chat_template.rs", "crates/rastai-gateway/src/template_methods.rs"],
+    "keyring": ["crates/rastai-server/src/secrets.rs"],
+    "mysql_async": ["crates/rastai-archive/src/mysql.rs"],
+    "wasm_bindgen": ["crates/rastai-formats/bindings/wasm/src/lib.rs"],
+    "pyo3": ["crates/rastai-formats/bindings/python/src/lib.rs"],
+}
+# The first segment of a Rust path (`blake3::hash`, `use rusqlite::Connection`), not one after `::` or a name.
+RUST_PATH_ROOT = re.compile(r"(?<![\w:])([a-z_][a-z0-9_]*)\s*::")
+RUST_LINE_COMMENT = re.compile(r"//.*")
+
+
+def main() -> int:
+    root = parse_root_argument("Fails on an import that breaks the layering or wrapper-file rules.")
+    problems = check_python(root) + check_javascript(root) + check_rust(root)
+    return report("check-imports", problems, "every import follows the layering and wrapper-file rules")
+
+
+# ---- Python ----
+
+
+def check_python(root: Path) -> list[str]:
+    problems = []
+    for path in list_files(root, (".py",)):
+        package, module_path = python_package_of(path)
+        if package is None:
+            continue
+        if package not in PYTHON_INTERNAL_DEPS:
+            problems.append(f"{path}: package `{package}` isn't in contracts 2.2 or check-imports' table")
+            continue
+        problems.extend(check_python_file(root, path, package, module_path))
+    return problems
+
+
+def python_package_of(path: str) -> tuple[str | None, str]:
+    """(package, module path) of a file inside a package folder, else (None, ""). The package folder is named
+    after its package, so python/rastai_data/rastai_data/image_decode.py gives
+    ("rastai_data", "rastai_data/image_decode.py")."""
+    for package_root in PYTHON_PACKAGE_ROOTS:
+        root_depth = package_root.count("/")
+        parts = path.split("/")
+        if len(parts) > root_depth + 1 and fnmatch("/".join(parts[:root_depth]) + "/", package_root):
+            package = parts[root_depth]
+            if package in PYTHON_NON_PACKAGE_FOLDERS:
+                return None, ""
+            return package, "/".join(parts[root_depth + 1 :])
+    return None, ""
+
+
+def check_python_file(root: Path, path: str, package: str, module_path: str) -> list[str]:
+    try:
+        tree = ast.parse(read_text(root, path), filename=path)
+    except SyntaxError as error:
+        return [f"{path}:{error.lineno}: can't be parsed, so its imports can't be checked: {error.msg}"]
+    problems = []
+    for line, module in python_imports(tree):
+        reason = python_import_problem(module, package, module_path)
+        if reason:
+            problems.append(f"{path}:{line}: imports `{module}`: {reason}")
+    return sorted(set(problems))
+
+
+def python_imports(tree: ast.AST) -> list[tuple[int, str]]:
+    """(line, module) for each import. `from torch import distributed` gives both torch and torch.distributed,
+    so a rule on torch.distributed sees it. Relative imports stay inside their package and are skipped."""
+    imports = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports += [(node.lineno, alias.name) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imports.append((node.lineno, node.module))
+            imports += [(node.lineno, f"{node.module}.{alias.name}") for alias in node.names if alias.name != "*"]
+    return imports
+
+
+def python_import_problem(module: str, package: str, module_path: str) -> str | None:
+    top_name = module.split(".")[0]
+    if top_name in PYTHON_INTERNAL_DEPS:
+        return python_internal_problem(top_name, package, module_path)
+    if top_name in sys.stdlib_module_names:
+        return python_forbidden_module_problem(top_name, module_path)
+    return python_library_problem(module, module_path)
+
+
+def python_forbidden_module_problem(top_name: str, module_path: str) -> str | None:
+    forbidden_modules, reason = PYTHON_FORBIDDEN_MODULES.get(module_path, ([], ""))
+    return reason if top_name in forbidden_modules else None
+
+
+def python_internal_problem(imported: str, package: str, module_path: str) -> str | None:
+    allowed = PYTHON_INTERNAL_DEPS[package] + PYTHON_FILE_EXTRA_DEPS.get(module_path, [])
+    if imported == package or imported in allowed:
+        return None
+    return f"`{package}` may import only {', '.join(allowed) or 'no other package'} (contracts 2.2)"
+
+
+def python_library_problem(module: str, module_path: str) -> str | None:
+    library = longest_listed_prefix(module, PYTHON_LIBRARY_FILES)
+    if library is None:
+        return "not a §27 library (contracts 2.5); add it to the allowlist and its wrapper row first"
+    rule = PYTHON_LIBRARY_FILES[library]
+    if rule == NEVER:
+        return f"`{library}` arrives only as a transitive package; no Rastai file imports it"
+    if rule == TESTS_ONLY:
+        return None if is_python_test(module_path) else f"`{library}` is for tests only"
+    if any(fnmatch(module_path, pattern) for pattern in rule):
+        return None
+    return f"`{library}` is imported only in {', '.join(rule)} (contracts 2.5); call that wrapper instead"
+
+
+def longest_listed_prefix(module: str, table: dict) -> str | None:
+    """The longest key of table that is module or a dotted prefix of it: torch.distributed.rpc -> torch.distributed."""
+    parts = module.split(".")
+    for length in range(len(parts), 0, -1):
+        prefix = ".".join(parts[:length])
+        if prefix in table:
+            return prefix
+    return None
+
+
+def is_python_test(module_path: str) -> bool:
+    file_name = module_path.split("/")[-1]
+    return module_path.startswith("tests/") or file_name.startswith("test_") or file_name == "conftest.py"
+
+
+# ---- JavaScript ----
+
+
+def check_javascript(root: Path) -> list[str]:
+    problems = []
+    for package_name, package_folder in find_js_packages(root):
+        if package_name not in JS_INTERNAL_DEPS:
+            problems.append(
+                f"{package_folder}package.json: package `{package_name}` isn't in contracts 2.3 or check-imports' table"
+            )
+            continue
+        source_folder = package_folder + JS_SOURCE_FOLDER
+        for path in list_files(root / source_folder, JS_SUFFIXES):
+            problems.extend(check_js_file(root, source_folder + path, package_name, package_folder))
+    return problems
+
+
+def find_js_packages(root: Path) -> list[tuple[str, str]]:
+    """(name, folder ending in /) of every package.json in the workspace's package folders."""
+    packages = []
+    for pattern in JS_PACKAGE_FOLDER_PATTERNS:
+        for manifest in sorted(root.glob(pattern + "package.json")):
+            folder = manifest.parent.relative_to(root).as_posix() + "/"
+            packages.append((json.loads(manifest.read_text()).get("name", ""), folder))
+    return packages
+
+
+def check_js_file(root: Path, path: str, package: str, package_folder: str) -> list[str]:
+    text = read_text(root, path)
+    problems = []
+    for offset, specifier, is_type_only in js_imports(text):
+        reason = js_import_problem(specifier, is_type_only, path, package, package_folder)
+        if reason:
+            problems.append(f"{path}:{line_number_at(text, offset)}: imports `{specifier}`: {reason}")
+    return problems
+
+
+def js_imports(text: str) -> list[tuple[int, str, bool]]:
+    """(offset, specifier, is_type_only) for each import: strings right after `from` or `import` in code, and
+    JSDoc `import("...")` types in comments."""
+    imports = []
+    previous_code = ""
+    for kind, start, end in split_javascript(text):
+        if kind == "code":
+            previous_code = text[start:end]
+        elif kind == "string" and SPECIFIER_BEFORE.search(previous_code):
+            imports.append((start, text[start + 1 : end - 1], False))
+        elif kind == "comment":
+            imports += type_imports_in_comment(text[start:end], start)
+        if kind != "code":
+            previous_code = ""
+    return imports
+
+
+def type_imports_in_comment(comment: str, comment_start: int) -> list[tuple[int, str, bool]]:
+    return [(comment_start + match.start(), match.group(1), True) for match in TYPE_IMPORT.finditer(comment)]
+
+
+def js_import_problem(specifier: str, is_type_only: bool, path: str, package: str, package_folder: str) -> str | None:
+    if specifier.startswith("."):
+        return js_relative_problem(specifier, path, package_folder)
+    if specifier.startswith(OUR_SCOPE):
+        return js_internal_problem(specifier, is_type_only, path, package)
+    if is_type_only:
+        return None  # a type from a library the package may already use; erased at build time
+    return js_library_problem(specifier, path)
+
+
+def js_relative_problem(specifier: str, path: str, package_folder: str) -> str | None:
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(path), specifier))
+    if (target + "/").startswith(package_folder):
+        return None
+    return "reaches outside its package; import the other package by name"
+
+
+def js_internal_problem(specifier: str, is_type_only: bool, path: str, package: str) -> str | None:
+    imported = "/".join(specifier.split("/")[:2])
+    if imported != specifier and specifier not in JS_SUBPATH_FOLDERS:
+        return f"import `{imported}` itself; its files aren't public API"
+    subpath_folders = JS_SUBPATH_FOLDERS.get(specifier)
+    if subpath_folders and not path.startswith(tuple(subpath_folders)):
+        return f"only {', '.join(subpath_folders)} may import it (frontend layout 2.10)"
+    allowed = js_allowed_internal_deps(path, package)
+    if imported == package or imported in allowed:
+        return None
+    if is_type_only and imported in JS_TYPE_ONLY_DEPS.get(package, []):
+        return None
+    if imported in JS_TYPE_ONLY_DEPS.get(package, []):
+        return f"`{package}` may name `{imported}` only in a JSDoc type import (contracts 2.4)"
+    return f"`{package}` here may import only {', '.join(allowed) or 'no other package'} (contracts 2.3, 2.4)"
+
+
+def js_allowed_internal_deps(path: str, package: str) -> list[str]:
+    for folder, allowed in JS_FOLDER_DEPS.items():
+        if path.startswith(folder):
+            return allowed
+    return JS_INTERNAL_DEPS[package]
+
+
+def js_library_problem(specifier: str, path: str) -> str | None:
+    library = js_library_name(specifier)
+    rule = JS_LIBRARY_FILES.get(library)
+    if rule is None:
+        return "not a §27 library (contracts 2.5); add it to deps/allowlist-npm.json and its wrapper row first"
+    if rule == TESTS_ONLY:
+        return None if path.endswith(JS_TEST_SUFFIXES) else f"`{specifier}` is for tests only"
+    if any(fnmatch(path, pattern) for pattern in rule):
+        return None
+    return f"`{library}` is imported only in {', '.join(rule)} (contracts 2.5)"
+
+
+def js_library_name(specifier: str) -> str:
+    """The npm package a specifier names: react-dom/client -> react-dom, @connectrpc/connect/x -> @connectrpc/connect.
+    Every Node built-in (node:fs) is "node:"."""
+    if specifier.startswith("node:"):
+        return "node:"
+    parts = specifier.split("/")
+    return "/".join(parts[:2]) if specifier.startswith("@") else parts[0]
+
+
+# ---- Rust ----
+
+
+def check_rust(root: Path) -> list[str]:
+    problems = []
+    for path in list_files(root, (".rs",)):
+        code = RUST_LINE_COMMENT.sub("", read_text(root, path))
+        for match in RUST_PATH_ROOT.finditer(code):
+            crate = match.group(1)
+            allowed_files = RUST_LIBRARY_FILES.get(crate)
+            if allowed_files and path not in allowed_files:
+                line = line_number_at(code, match.start())
+                problems.append(
+                    f"{path}:{line}: uses `{crate}`, which only {', '.join(allowed_files)} may use (contracts 2.5)"
+                )
+    return sorted(set(problems))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

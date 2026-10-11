@@ -1,0 +1,13 @@
+# Not a package: the settings for the repo checks in this folder (layout: rust-control-plane.md section 2.1).
+# ruff uses the same rules as python/ (owner decision 7); the check scripts have no .py ending, so they're
+# named here. pytest runs tests/ with the same options as python/, plus this folder on the import path so a
+# test can load repo_files and a check's functions.
+
+[tool.ruff]
+extend = "../../python/pyproject.toml"
+extend-include = ["check-*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["--strict-markers", "--import-mode=importlib"]
