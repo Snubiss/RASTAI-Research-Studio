@@ -10,6 +10,12 @@
 //! frame that fails its checks counts as the torn tail when nothing but zeros follows its start (a power cut can
 //! leave a zero-filled block) or, for a checksum mismatch, when it ends exactly at the end of the file. A bad frame
 //! with real bytes after it is corruption (`RRS-S2002`).
+//!
+//! A frame whose declared end lies past the end of the file is usually the tail: the writer is still writing it, or
+//! died while writing it. Bit rot in its `body_length` looks the same, though, and would make a torn-tail cut drop
+//! every whole frame after it. The writer makes one write per frame, so a crash tears at most the last frame: when a
+//! whole, CRC-valid, version-1 frame with a later sequence lies in the `LATER_FRAME_SEARCH_BYTES` after the
+//! overrunning frame's header, the length was damaged and the frame is corrupt.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -19,13 +25,16 @@ use rastai_proto::events::v1::EventRecord;
 
 use crate::error::{StoreError, event_log_io_error};
 use crate::event_log::frame::{
-    EVENT_LOG_HEADER, FRAME_HEADER_BYTES, body_matches_header, decode_frame_body, decode_frame_header,
+    EVENT_LOG_HEADER, FIRST_SEQUENCE, FRAME_HEADER_BYTES, body_matches_header, decode_frame_body, decode_frame_header,
 };
 
-/// Every log's first record has sequence 1 (contracts 7.1).
-const FIRST_SEQUENCE: u64 = 1;
 /// How much of the file the zero-tail check reads at a time.
 const ZERO_SCAN_CHUNK_BYTES: usize = 64 * 1024;
+/// How far past an overrunning frame's header the reader looks for a whole later frame (see the top of this file).
+/// A record carries hashes, not data, so a real frame is a few KiB: 1 MiB holds the damaged frame's true body and
+/// the frame after it many times over, and it bounds the memory and time a damaged length can cost. A later frame
+/// that doesn't lie wholly inside it isn't seen, and the overrunning frame is then cut off as the torn tail.
+const LATER_FRAME_SEARCH_BYTES: usize = 1024 * 1024;
 
 /// What one `read_next_frame` call found.
 // The record is held by value, as the layout's signature has it (rust-control-plane.md 6.2): one FrameRead exists
@@ -99,9 +108,7 @@ pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreEr
     let frame_end = frame_start + FRAME_HEADER_BYTES as u64 + u64::from(header.body_length);
     // Checked before allocating, so a damaged length can't ask for 4 GiB of memory.
     if frame_end > file_length {
-        return Ok(FrameRead::Incomplete {
-            valid_bytes: frame_start,
-        });
+        return classify_overrunning_frame(reader, frame_start, file_length);
     }
 
     let mut body = vec![0u8; header.body_length as usize];
@@ -172,6 +179,65 @@ fn classify_bad_frame(
         });
     }
     Ok(FrameRead::Corrupt { offset: frame_start })
+}
+
+/// A frame whose declared end lies past the end of the file: the torn (or still unfinished) tail, unless a whole
+/// later frame follows its header, which proves its length is damaged (see the top of this file).
+fn classify_overrunning_frame(
+    reader: &mut EventLogReader,
+    frame_start: u64,
+    file_length: u64,
+) -> Result<FrameRead, StoreError> {
+    let search_start = frame_start + FRAME_HEADER_BYTES as u64;
+    if whole_later_frame_follows(reader, search_start, file_length)? {
+        return Ok(FrameRead::Corrupt { offset: frame_start });
+    }
+    Ok(FrameRead::Incomplete {
+        valid_bytes: frame_start,
+    })
+}
+
+/// True when a whole later frame lies inside the `LATER_FRAME_SEARCH_BYTES` from `search_start`. Every byte offset
+/// is tried, because the damaged length says nothing about where the next frame really starts.
+fn whole_later_frame_follows(
+    reader: &mut EventLogReader,
+    search_start: u64,
+    file_length: u64,
+) -> Result<bool, StoreError> {
+    let bytes_left = file_length.saturating_sub(search_start);
+    let window_length = bytes_left.min(LATER_FRAME_SEARCH_BYTES as u64) as usize;
+    let mut window = vec![0u8; window_length];
+    let bytes_read = read_at(reader, search_start, &mut window)?;
+    window.truncate(bytes_read);
+
+    let mut candidate_start = 0;
+    while candidate_start + FRAME_HEADER_BYTES <= window.len() {
+        if is_whole_later_frame(&window[candidate_start..], reader.next_sequence) {
+            return Ok(true);
+        }
+        candidate_start += 1;
+    }
+    Ok(false)
+}
+
+/// True when `bytes` start with a whole frame: a body that fits in `bytes` and has the header's CRC-32, holding a
+/// version-1 record whose sequence is `next_sequence` or later (after the last record read).
+fn is_whole_later_frame(bytes: &[u8], next_sequence: u64) -> bool {
+    let mut header_bytes = [0u8; FRAME_HEADER_BYTES];
+    header_bytes.copy_from_slice(&bytes[..FRAME_HEADER_BYTES]);
+    let header = decode_frame_header(&header_bytes);
+    let body_end = FRAME_HEADER_BYTES as u64 + u64::from(header.body_length);
+    if body_end > bytes.len() as u64 {
+        return false;
+    }
+    let body = &bytes[FRAME_HEADER_BYTES..body_end as usize];
+    if !body_matches_header(&header, body) {
+        return false;
+    }
+    match decode_frame_body(body) {
+        Some(record) => record.sequence >= next_sequence,
+        None => false,
+    }
 }
 
 /// True when every byte from `start` to `file_length` is zero.

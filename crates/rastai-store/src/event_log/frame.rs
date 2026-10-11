@@ -20,6 +20,9 @@ pub const FRAME_HEADER_BYTES: usize = 8;
 /// The record layout this code reads and writes (`EventRecord.format_version`). A reader refuses any other version
 /// instead of guessing at it.
 pub const EVENT_RECORD_FORMAT_VERSION: u32 = 1;
+/// Every log's first record has sequence 1, and each next one adds 1 (contracts 7.1). Used by the reader and the
+/// writer only, so it isn't part of the crate's public names.
+pub(crate) const FIRST_SEQUENCE: u64 = 1;
 
 /// The two numbers in front of a frame's body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

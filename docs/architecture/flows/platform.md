@@ -1300,7 +1300,9 @@ flowchart TD
   H -->|"yes"| N["Read the next frame header"]
   N --> E{"Bytes left?"}
   E -->|"none"| DONE["End of log"]
-  E -->|"less than a full frame"| LIVE{"Writer still alive?"}
+  E -->|"less than a full frame"| LATER{"A whole later frame<br/>within 1 MiB after its header?"}
+  LATER -->|"yes"| CORR
+  LATER -->|"no"| LIVE{"Writer still alive?"}
   LIVE -->|"yes"| WAIT["Wait 50 ms and read again"]
   WAIT --> N
   LIVE -->|"no"| TORN["Torn tail, stop here, RRS-S2001"]
@@ -1316,6 +1318,7 @@ flowchart TD
 
 - Only the writer truncates. Readers (the tailer, the daemon, a rebuild) stop at a torn tail and leave the file alone. A resumed worker opens the log, truncates the torn tail and continues from the last valid sequence plus 1.
 - "Last frame in the file" means the bad frame ends exactly at the end of the file, or only zeros follow its start (a power cut can leave a zero-filled block, and an all-zero frame header even has a matching CRC-32). A frame whose CRC-32 matches but whose body isn't a version-1 `EventRecord` is corruption wherever it is (contracts 7.1). A header that is a prefix of `RRSEVLG1`, or zeros, is a torn tail at offset 0.
+- "Less than a full frame" means fewer than the 8 bytes of a frame header are left, or the frame's declared end lies past the end of the file. In the second case bit rot in `body_length` looks the same as a torn frame, so before calling it the tail the reader looks for a whole, CRC-valid, version-1 frame with a later sequence in the 1 MiB after its header; the writer makes one write per frame, so a crash tears only the last frame, and such a frame makes the overrunning one corruption (`RRS-S2002`). Without one it is the tail: a damaged length on the last frame, or with no whole frame within 1 MiB after it, is truncated as torn, and the records from it to the end are lost (contracts 7.1).
 - "Writer still alive" is known to the tailer from the job state. An offline reader (6.4) treats every writer as gone.
 
 **Persisted:** no new writes; this is recovery. **Tests:** the kill -9 matrix (6.5) and the reader fixtures (6.1); a tmpfs test: fill the volume mid-run (TextCNN on CPU), check the run goes `paused` with `RRS-S3002` and the job keeps its pid, free space, send `RESUME`, and the run continues from memory with every step's `run.metrics` present once (no lost or repeated steps); a variant with no reserve file left exits with code 4.
