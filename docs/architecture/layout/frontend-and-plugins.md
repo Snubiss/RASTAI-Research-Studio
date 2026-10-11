@@ -1990,7 +1990,7 @@ src/sections/
     HardwareSummary.jsx         system.hardware and the doctor result; says plainly when no GPU is usable, offers 270M
     DownloadSizes.jsx           download size and time per backend before starting (spike numbers as estimates)
     HfSignIn.jsx                hf.login, hf.license.check, the model license text
-  assistant/                    panel core.assistant only (8.4); no section, no sidebar entry
+  assistant/                    Phase 2 (plan §10 row 45): panel core.assistant only (8.4); no section, no sidebar entry
     AssistantPanel.jsx          tutorials, the step in progress with Check and Show me, registered skills
     TutorialList.jsx            tutorial.list; started, done and not started
     tutorial-runner.js          runs one rastai.tutorial/1 document: tutorial.check per step, advance on pass
@@ -2111,7 +2111,7 @@ src/sections/
     PluginSettingsPages.jsx     settings pages contributed by plugins
 ```
 
-Section ids: `home`, `inference`, `training`, `designer`, `gym`, `data`, `plugins`, `remote`, `settings`. The plugin sections are `psychology` and `eval`. `assistant/` registers only the panel `core.assistant`.
+Section ids: `home`, `inference`, `training`, `designer`, `gym`, `data`, `plugins`, `remote`, `settings`. The plugin sections are `psychology` and `eval`. `assistant/` (Phase 2, plan §10 row 45) registers only the panel `core.assistant`.
 
 ### 8.3 Main and boot
 
@@ -2177,14 +2177,14 @@ sequenceDiagram
   - Tauri: `window.rs` turns a `window.open` to the daemon origin into a second `WebviewWindow`. It gets the same navigation guard, the same cookie store and no IPC. A `window.open` to any other origin goes to the system browser (9.3).
   - Each window is a full app frame with its own stores and query cache. Settings and documents stay in step through bus events, as between two tabs.
   - Nothing is persisted per window. Closing a second window loses nothing: the run keeps going, and a reopened dashboard loads its series the same way as on first open.
-- **Assistant and tutorials** (spec §7, §13): the panel `core.assistant` docks on the right in every section. It opens from the palette (`view.panel.open`) and from Home's "Take the tour".
+- **Assistant and tutorials** (spec §7, §13; Phase 2, plan §10 row 45): the panel `core.assistant` docks on the right in every section. It opens from the palette (`view.panel.open`) and from Home's "Take the tour".
   - **Tutorials** are `rastai.tutorial/1` documents (owner `rastai-formats`, contracts §5.2). Built-in ones live in `templates/tutorials/`, starting with `first-run.tutorial.json`.
   - Each step is `{step_id, text, check_command_id, check_arguments_json, expected{path, test, value}, show_me_command_id, show_me_arguments_json}`.
   - `expected.path` is a JSON Pointer into the check command's result. `test` is `equals`, `not_empty`, `at_least` or `contains` (an array element whose fields include all of `value`'s).
   - **Check:** `tutorial-runner.js` calls `tutorial.check {tutorial_id, step_id}` (scope `read`, sync) when a step opens and after each `command.finished` or `job.state_changed` (debounced 500 ms; a job command finishes before its job does). The daemon runs the step's check command with the caller's principal narrowed to `read` and `conversations.read`. A tutorial can't change state; a check command outside those scopes fails with RRS-C1005. The result is `{passed, actual_json}`. The runner advances on `passed`.
   - **Show me:** runs `show_me_command_id`. A view action navigates or opens a panel. A daemon command opens in `CommandForm`, prefilled, so the user presses Run. Nothing runs without the user.
   - `tutorial.list` (scope `read`, sync) returns the built-in tutorials with titles and step counts. Progress lives in React state for the session; a finished step is re-checked, not remembered.
-  - **Assistant skills:** `assistant-skills.js` reads `host.contributions("assistant_skills")`. Each skill is `{skill_id, title, prompt, command_ids[]}`. In the prototype the panel lists each skill and its commands, and each command opens in `CommandForm`. The capability `assistant.skill@1` is experimental (contracts §5.5), so a third-party skill loads only with `plugins.experimental_apis` on.
+  - **Assistant skills:** `assistant-skills.js` reads `host.contributions("assistant_skills")`. Each skill is `{skill_id, title, prompt, command_ids[]}`. When skills arrive in Phase 2, the panel lists each skill and its commands, and each command opens in `CommandForm`. Until then the capability `assistant.skill@1` is unsupported (contracts §5.5), so a manifest that uses the key is refused with `RRS-P1002`.
   - The language-model assistant that answers free text and runs "do it" by itself is Phase 2 (section 19, question 11). The tutorials and assistant skills above are Phase 2 too: tutorials are L3 work (ADR-0017 decision 3), and plan §10 row 45 schedules both there. This design is ready for then.
 - **Sending files:** `FileDrop` uploads files up to 256 MiB with `PUT /api/blobs` and calls `file.open` with the blob. Bigger files get "Open from disk", which uses `file.browse` and opens by path.
 - **Embedding:** `rastai-server` embeds `apps/web/dist/` in the binary. `index.html` is served `no-store`; hashed assets `immutable`. The CSP the daemon sends must allow `'wasm-unsafe-eval'` (the `@rastai/formats` validator) and `frame-src` for `/plugins/*`, and nothing from other origins.
@@ -2491,7 +2491,7 @@ The manifest (`rastai-plugin.json`, `rastai.plugin/1`, owned by `rastai-formats`
 | `chat_templates[]` | `template_id`, `match{family, model_ref_glob}`, `file` | data only. `inference.chat_template@1`: from M8, files only; the gateway reads them, not the UI |
 | `layouts[]`, `keybindings[]` | `rastai.layout/1` files; keybinding entries as in 2.5 | data only. Supported |
 | `recipes[]`, `converters[]`, `reward_functions[]`, `node_types[]`, `importers[]`, `exporters[]`, `sae_loaders[]`, `samplers[]`, `benchmark_loaders[]`, `data_sources[]` (experimental) | `<kind>_id` (e.g. `recipe_id`, `sampler_id`), `title`, `class` (Python); plus each kind's own fields, such as `recipes[].requirements` (training flow) | the Python base class of 11.2, registered as `registry.register("<key>", <id>, implementation)` |
-| `assistant_skills[]` | `skill_id`, `title`, `prompt` (text), `command_ids[]` | data only; listed by `core.assistant` (8.4). Experimental capability `assistant.skill@1` |
+| `assistant_skills[]` | `skill_id`, `title`, `prompt` (text), `command_ids[]` | data only; listed by `core.assistant` (8.4). Capability `assistant.skill@1`, unsupported until Phase 2 (plan §10 row 45) |
 
 - `ui{entry, kind}`: `kind` is `in_process` (first-party only) or `iframe`. For `iframe`, `entry` is a path under the plugin's `ui/` folder, served at `/plugins/<plugin_id>/<version>/ui/<entry>`.
 - `python{module, lockfile}`: the module's `register()` and `handle_command()` (section 11).
@@ -2528,7 +2528,7 @@ flowchart TD
 | Lens | manifest `lenses[]` | Python `registry.register("lenses", lens_id, lens)` (offline lenses); JS `LensView` | Psychology's lens picker via `host.contributions("lenses")`; `rastai_lens` jobs with `registry.find("lenses", lens_id)` |
 | Metric | manifest `metrics[]` | Python `registry.register("metrics", metric_id, metric)`; JS `MetricView` | Evaluation's suite editor via `host.contributions("metrics")`; eval and gym jobs with `registry.find("metrics", metric_id)` |
 | Other Python extension points | manifest `recipes[]`, `converters[]`, ... (10.1) | Python `registry.register("<key>", id, implementation)` | engines with `registry.find("<key>", id)` |
-| Assistant skill | manifest `assistant_skills[]` | nothing: data only | `assistant-skills.js` via `host.contributions("assistant_skills")` |
+| Assistant skill (Phase 2, plan §10 row 45) | manifest `assistant_skills[]` | nothing: data only | `assistant-skills.js` via `host.contributions("assistant_skills")` |
 
 At startup, for each kind, a plugin module's `registry.names(kind)` must equal its manifest's ids under that key. If not, the module fails with RRS-P0103 and the plugin is marked `failed` with that diagnostic.
 

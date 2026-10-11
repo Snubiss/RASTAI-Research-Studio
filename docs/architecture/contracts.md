@@ -13,13 +13,13 @@ Conventions in this file:
 - "Phase 2" or "Phase 3" marks something designed now and built later. Everything else is in the prototype.
 - **"(L2)"** marks a name designed now but built only after the core loop reaches L2 (ADR-0017). Build the minimal durable path first: event logs, reattach, atomic writes.
 - "(M8)", "(M11)" and so on mark a name first built in that milestone (plan §2).
-- **Milestone markers are read by `check-names`.** A name listed here but not yet in the code must carry one of these markers: `(M<n>)`, `(L2)`, `(Phase 2)` or `(Phase 3)`. A marker covers the name it follows, the table row it sits in, or the whole section when it is in the heading. When markers nest, the nearest one is the name's milestone: its own, then its row's, then its heading's (`plugin.list` (M1) / `plugin.permissions` (M8) in one cell). An unmarked name that the code doesn't have fails as stale (12.6).
+- **Milestone markers are read by `check-names`.** A name listed here but not yet in the code must carry one of these markers: `(M<n>)`, `(L2)`, `(Phase 2)` or `(Phase 3)`. A marker covers the name it follows, the table row it sits in, or the whole section when it is in the heading; one in the notes of a list cell covers nothing (12.6). When markers nest, the nearest one is the name's milestone: its own, then its row's, then its heading's (`plugin.list` (M1) / `plugin.permissions` (M8) in one cell). An unmarked name that the code doesn't have fails as stale (12.6).
 - "(spike)" marks a decision that comes from a measured spike result.
 - Spec section numbers are written as §n.
 
 ### Changes in v1.2
 
-Items 1–10 owner-approved on 2026-10-11. Items 11 and 12 are M1-01's marker pass, for the owner's review in its PR.
+Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR.
 
 1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
 2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
@@ -33,6 +33,7 @@ Items 1–10 owner-approved on 2026-10-11. Items 11 and 12 are M1-01's marker pa
 10. **§27 approvals noted where this file lists them** (2.5): `@vitest/browser`, axe-core and the Tauri CLI as dev tooling, the Tauri updater plugin as foundation, MinIO as a test-only CI service, and a named license entry for pillow (MIT-CMU/HPND) in `deps/allowlist-python.json`.
 11. **Every registered name carries its milestone** (M1-01; 12.6 "Landing"). No code exists yet, so each name `check-names` reads has a marker: the crates and packages of 2.1–2.3 and 15.1–15.3, the schema ids of 5.2, the commands of 6.4, the event types of 7.3, the tables of 8.2 and 8.3, the 10.3 codes (the heading's "(M1)", with the plugin ranges `RRS-L` (M4) and `RRS-V` (M5)) and the settings sections of 11.2. Each milestone is the one whose task builds or registers the name. When markers nest, the nearest wins (conventions).
 12. **Fixes found while marking.** Tutorials and assistant skills are Phase 2 (plan §10 row 45: `tutorial.list`, `tutorial.check`, `rastai.tutorial/1`). `vault_changes` is built in M3 by M3-E02, not M11 (8.3). `archive_cursors` arrives with M11's migration, as plan M1-23 says; the control-plane layout follows. The settings example is `RASTAI_DAEMON__PORT` (11.1), because `gateway.port` isn't a key. 15.6 registers the settings page id `psychology.settings`. 2.5 cites ADR-0037 beside `miniz_oxide` and `torchvision.io.decode_image`. The node layout's build table puts the egress proxy at step 7 (plan §10 row 27).
+13. **Review fixes (PR #164).** `sandbox.list`, `sandbox.kill` and `sandbox.cleanup` are (M5): M5-E10 builds them and M5-E01 registers them, so M7-E01 no longer claims `sandbox.*` (6.4). `checkpoint.resumed` is (M5) with `train.preempted`, because `train.resume` and M5-E14 are M5 (7.3). Row 45 reaches every tutorial and assistant-skill name: the `assistant_skills` key, `assistant.skill@1` (now unsupported until Phase 2, refused with `RRS-P1002`), `core.assistant`, `assistant-skills.js` and `templates/tutorials/` carry "(Phase 2)" (§1, 5.2, 5.5, 15.3, 15.6, 15.8), and its reasoning cites ADR-0017 and spec §31 rather than spec §7. The plugin permission names of spec §24 and ADR-0015 decision 5 get their own table beside the scopes (6.3). A marker in a list cell's notes covers nothing (conventions, 12.6). `gateway.port` is recorded as replaced by `daemon.port` (15.11).
 
 ### Changes in v1.1
 
@@ -143,7 +144,8 @@ RASTAI/
     harnesses/               starter .rrsharness files
     evals/                   starter .rrseval suites, the fixed drift prompt set, the default anchor set
     projects/                starter .rrsproj folders
-    tutorials/               built-in rastai.tutorial/1 documents (first-run.tutorial.json first)
+    tutorials/               built-in rastai.tutorial/1 documents (first-run.tutorial.json first); Phase 2,
+                             plan §10 row 45
     plugins/                 `rastai plugin new` templates (UIs are .jsx): panel, section, converter, recipe,
                              designer-node, lens, metric, reward, adapter, importer, exporter, theme
 
@@ -814,7 +816,7 @@ Each type is defined once in `crates/rastai-formats/src/documents/` (the file is
 | **Replay** `.rrsreplay` | `rastai.replay/1` (M4) | Zip | `replay.json` (header, `model_hash`, `model_ref`, `settings`, `branches[]`, `annotations[]`, `hardware_fingerprint` (proto JSON of `HardwareFingerprint`), `fidelity` exact/approximate/proxy); `conversation.jsonl`; `summary/summary.safetensors` + `summary/features.json` (summary layer, always present); `activations/*.safetensors` (optional) |
 | **Model diff** | `rastai.model_diff/1` (M4) (`ModelDiffReport`, `model_diff.rs`) | JSON blob | feature-frequency, lens and routing shifts, eval deltas |
 | **SAE fit check** | `rastai.sae_fit_check/1` (M4) (`SaeFitCheckReport`) | JSON blob | per-SAE reconstruction quality before and after, stale-label flags |
-| **Plugin manifest** (inside `.rrsplugin`) | `rastai.plugin/1` (M1) | `rastai-plugin.json` in a Zip | `plugin_id`, `display_name`, `version`, `engines{rastai: semver}`, `requires_capabilities[]` (`designer.node@1`; table 5.5), `contributes{...}` (keys in 5.5, rules below), `permissions[]`, `ui{entry, kind (in_process/iframe)}`, `python{module, lockfile}`, `provider{binaries{platform: path}}`, `dependencies{plugin_id: semver}`, `catalog`, `experimental` |
+| **Plugin manifest** (inside `.rrsplugin`) | `rastai.plugin/1` (M1) | `rastai-plugin.json` in a Zip | `plugin_id`, `display_name`, `version`, `engines{rastai: semver}`, `requires_capabilities[]` (`designer.node@1`; table 5.5), `contributes{...}` (keys in 5.5, rules below), `permissions[]` (names in 6.3), `ui{entry, kind (in_process/iframe)}`, `python{module, lockfile}`, `provider{binaries{platform: path}}`, `dependencies{plugin_id: semver}`, `catalog`, `experimental` |
 | Plugin command types | `types.json` beside the manifest | JSON | a list of `TypeDescription` records (5.4) for the plugin's own command arguments and results; `x-rastai-cli-position` hints; core types referred to as `core:<Type>` |
 | **Converter** | `rastai.converter/1` (M5) (`ConverterDocument`, `converter.rs`) | JSON in `data/converters/` | column mapping, templates, filters (declarative; the Python fallback is a plugin `Converter`) |
 | **Project** `.rrsproj` | `rastai.project/1` (M1) | Folder `<name>.rrsproj/` or Zip | `project.json` (header, `name`, `default_node`); folders `designs/ harnesses/ data/ data/converters/ evals/ replays/ presets/ layouts/ runs/` (run records only); `evals/pinned.rrseval` (created on the first pin), `evals/votes.rrsdata` (blind A/B votes), `evals/teach-<run_id>.rrseval` (generated Verify suites); `rastai.lock`; `settings.json` (the project settings layer, 11.1; it holds the project's data policy as `privacy.data_policy`, `local-only`/`trusted-remote`/`any`); `weights/` only in offline bundles |
@@ -841,7 +843,7 @@ Later (plan, not M1): `rastai.icon_set/1` (M8) for icon-set plugins.
 - **`event_handlers[]{event_type, command_id}`**: when the daemon indexes a durable event of `event_type`, it runs `command_id` as the plugin principal with `HandlerEventArgs`. `command_id` must be one of the plugin's own `commands[]`. Deliveries are tracked in `plugin_event_deliveries` (8.2).
 - **`samplers[]`** is the sampler/logits-processor point (`rastai_plugin` `Sampler`). A session that uses one decodes eagerly, without the CUDA graph.
 - **`sandbox_images[]{image, digest}`**: OCI images, always pinned by digest.
-- **`assistant_skills[]{skill_id, title, prompt, command_ids[]}`**: listed and runnable by the user; nothing in the prototype interprets free text.
+- **`assistant_skills[]{skill_id, title, prompt, command_ids[]}`** (Phase 2, plan §10 row 45): listed and runnable by the user; nothing interprets free text. Until then the host refuses the key (`assistant.skill@1`, 5.5).
 - **Two plugins matching one model** with `chat_templates` or `tokenizers`: neither is used, and `RRS-G1007` names both.
 - **Experimental, because the feature is deferred:** `data_sources[]` (streaming data, spec §33) and `tokenizers[]` with code (the gateway tokenizes in Rust with HF `tokenizers`). The host loads experimental keys only when `plugins.experimental_apis` is on (`RRS-P1003` otherwise), and registry plugins can't use them (spec §13).
 
@@ -887,7 +889,7 @@ A manifest's `requires_capabilities` lists `"<name>@<major>"`. Each contribution
 | `psychology.lens@1`, `psychology.sae_loader@1` | `lenses`, `sae_loaders` | first-party `psychology`, only while it is enabled | supported |
 | `eval.metric@1`, `eval.benchmark_loader@1` | `metrics`, `benchmark_loaders` | first-party `eval`, only while it is enabled | supported |
 | `inference.adapter@1` | `adapters` | host | experimental: gateway adapters are a closed Rust enum today |
-| `assistant.skill@1` | `assistant_skills` | host | experimental |
+| `assistant.skill@1` | `assistant_skills` | host | unsupported; Phase 2 with the tutorials (plan §10 row 45), refused with `RRS-P1002` until then |
 | `compute.target@1` | `compute_targets` | host | experimental until providers arrive (Phase 3) |
 
 That is 31 capabilities. A major version is added when an extension point changes incompatibly; the host keeps serving the previous major for 12 months after plugin API 1.0 (§13).
@@ -939,7 +941,7 @@ The theme contract every section, plugin UI, renderer and the static viewer foll
 - **Form:** `<area>.<verb>` or `<area>.<noun>.<verb>`. Lowercase, `snake_case` segments, the last segment is a verb. Examples: `model.load`, `conversation.star`, `eval.suite.edit`.
 - **Core areas** (reserved; no plugin may use them as its id): `system`, `settings`, `token`, `secret`, `storage`, `archive`, `artifact`, `project`, `file`, `document`, `workspace`, `command`, `job`, `hf`, `model`, `chat`, `conversation`, `adapter`, `gateway`, `train`, `teach`, `rlhf`, `sweep`, `recipe`, `run`, `checkpoint`, `design`, `harness`, `gym`, `sandbox`, `plugin`, `node`, `transfer`, `dataset`, `converter`, `tutorial`, `view`, `core`.
   - `view` holds UI-only view actions (`view.section.open`, `view.panel.open`, `view.window.open`, `view.palette.repeat_last`) that never reach the daemon.
-  - `core` is the pseudo plugin id core sections and core panels register under in the UI (`core.lineage`, `core.assistant`); never an installable plugin.
+  - `core` is the pseudo plugin id core sections and core panels register under in the UI (`core.lineage`; `core.assistant` in Phase 2, plan §10 row 45); never an installable plugin.
 - **Plugin commands** start with the plugin id: `psychology.replay.open`, `eval.test`. Plugin ids are `[a-z][a-z0-9_]*`, unique among installed plugins (`RRS-P0002`; `RRS-P0004` for a command outside the plugin's namespace).
 - **Generated surfaces:** CLI verb = the segments as words with `_` turned into `-` (`rastai eval suite add-conversation`), flags likewise; MCP tool name = dots replaced with `__` (`eval__suite__add_conversation`); palette entry = `title`; typed JS wrapper = camelCase of the segments (`evalSuiteAddConversation(executor, args)`, 12.4); typed Python call = `client.execute(command_id, arguments)`.
 - **Kinds:** `sync` returns the result (target under 2 s); `job` returns a `job_id` at once and reports through events; `stream` returns at once and streams ephemeral events for the result (generation).
@@ -1004,6 +1006,22 @@ def handle_command(call: CommandCall, host: PluginHost) -> CommandReply:
 | `system.admin` | settings, tokens, storage GC and recovery, archive configuration and maintenance, updates, doctor, crash reports |
 
 The owner (cookie, socket peer, `owner.token`) has every scope. A plugin's `commands:[scopes]` permission is the upper bound for any command its UI or module runs (the Psychology manifest includes `inference.manage` so `psychology.sae.load` can run `model.download`). A third-party plugin also holds its own scope, `Scope::Plugin(<plugin_id>)`. Scoped-token presets: `chat-only` = `chat`; `mcp-default` = `read`, `chat`, `project`.
+
+**Plugin permissions** (the manifest's `permissions[]`, 5.2; spec §24, ADR-0015 decision 5). A plugin declares them; the trust prompt lists them in plain English with the sensitive ones marked; what the user granted is `plugins.granted_permissions` (8.2) and `PluginInstallArgs.granted_permissions` (6.5). Any network or data permission triggers the trust prompt, even for a declarative plugin, and an update that adds a permission asks again (back to `awaiting_trust`, 9.7). `check-names` doesn't read this table; the markers say when the host first checks each permission.
+
+| Permission | Grants | Checked from |
+|---|---|---|
+| `commands:[scopes]` (M1) | the scopes (table above) of the commands its UI or module may run; the upper bound of the plugin principal, so a plugin can't escalate | M1: the plugin host and the in-process UI host (M1-32, M1-52) |
+| `network:[hosts]` (M4) | network for its Python module, to the listed hosts only | M4: a module without it runs with network off (8.8, M4-E02) |
+| `fs:project\|ro` (M8) | its Python module may read the open project's files (read-only) | M8: permission enforcement (M8-E02) |
+| `secrets` (M8) | the `secrets` scope (above) for the plugin's own calls | M8 (M8-E02) |
+| `gpu` (M8) | its jobs may hold GPU leases (`ResourceRequest.gpu_indices`, 4.1) | M8 (M8-E02) |
+| `weights.read` (M8) | read a loaded model's weights and tensors (`FetchTensor`, SAE loading); sensitive | M8 (M8-E02) |
+| `conversations.read` (M8) | the `conversations.read` scope (above); sensitive | M8 (M8-E02) |
+| `gateway.spend` (M8) | the `gateway.spend` scope (above): calls to paid third-party APIs | M8 (M8-E02) |
+| `sandbox.spawn` (M8) | the `sandbox.spawn` scope (above): create and remove sandboxes | M8 (M8-E02) |
+
+First-party plugins (Psychology from M4, Evaluation from M5) declare their permissions from the start; they are preinstalled and granted, so the host checking them from M8 changes nothing for them.
 
 ### 6.4 Initial command catalog
 
@@ -1180,8 +1198,8 @@ Columns: **Scope**; **Undo** (U = undoable); **Kind**. Every command is `preview
 | `gym.stop` (M7) | stop with checkpoint | | sync |
 | `gym.peek.start` / `gym.peek.stop` (M7) | live peek | | sync |
 | `gym.step` (M7) | hold, step or release one sandbox (`action`) | | sync |
-| `sandbox.list` (M7) | sandboxes per node (scope read) | | sync |
-| `sandbox.kill` / `sandbox.cleanup` (M7) | remove one / remove orphans (scope sandbox.spawn) | | sync / job |
+| `sandbox.list` (M5) | sandboxes per node (scope read) | | sync |
+| `sandbox.kill` / `sandbox.cleanup` (M5) | remove one / remove orphans (scope sandbox.spawn) | | sync / job |
 
 **Plugins** (scope `plugins.manage` unless noted)
 
@@ -1324,7 +1342,7 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 | `chain.step_started` (M5) | durable | daemon chain driver | chain run id, step index and name, child run id |
 | `chain.step_finished` (M5) | durable | daemon chain driver | step index, child outcome, gate result |
 | `checkpoint.saved` (M1) | durable | worker | step, folder, file hashes, is_best |
-| `checkpoint.resumed` (M1) | durable | worker | step, from checkpoint |
+| `checkpoint.resumed` (M5) | durable | worker | step, from checkpoint |
 | `train.preempted` (M5) | durable | worker | signal, checkpoint step |
 | `artifact.created` (M1) | durable | worker, daemon | artifact_id, kind, content_hash, size_bytes, home_node_id, parents[]{id, relation} (one `lineage` row each, 8.2) |
 | `lineage.linked` (M5) | durable | daemon | from_id, to_id, relation: a lineage link whose child isn't an artifact (8.2) |
@@ -1455,7 +1473,7 @@ Every table and every column is listed here and in 8.3, because `check-names` co
 | `plugins` (M1) | `plugin_id`, `version`, `state`, `content_hash`, `granted_permissions`, `source` |
 | `transfers` (M1) | `transfer_id`, `node_id`, `direction`, `path`, `hash`, `bytes_done`, `bytes_total`, `state` |
 | `log_cursors` (M1) | `log_name`, `acked_sequence`: the daemon log's ack, like `runs.acked_sequence` |
-| `plugin_event_deliveries` (M1) | `plugin_id`, `handler_id`, `command_id`, `event_type`, `log_name`, `sequence`, `run_id`, `subject_id`, `queued_unix_ms`, `delivered_unix_ms`, `journal_id`, `code`; key `plugin_id`, `handler_id`, `log_name`, `sequence`. M5 builds only what Evaluation auto-run and pins need (queue, deliver once, retry on restart); backlog views, per-plugin limits and redelivery tools are (L2). |
+| `plugin_event_deliveries` (M1) | `plugin_id`, `handler_id`, `command_id`, `event_type`, `log_name`, `sequence`, `run_id`, `subject_id`, `queued_unix_ms`, `delivered_unix_ms`, `journal_id`, `code`; key `plugin_id`, `handler_id`, `log_name`, `sequence`. M5 builds only what Evaluation auto-run and pins need (queue, deliver once, retry on restart); backlog views, per-plugin limits and redelivery tools are L2 work. |
 | `archive_cursors` (M11) | `stream` (`log:<log_name>`, `run_log:<run_id>`, `table:<name>`, `vault_changes`, `blobs`), `position`, `acked_unix_ms`. Written only after the MySQL commit for that position. |
 
 **There is no `settings` table.** Settings, keybindings and layouts live only in the files of 11.1; `rastai.db` keeps no copy (spec v5.4 §19). Platform flow §8.4 and any other doc must not name a settings table.
@@ -2512,7 +2530,7 @@ Two M1 checks keep the code and this file in step (owner, 2026-10-11). Both run 
 ```
 
 **`check-names`** (`tools/checks/check-names`, `just check-names`):
-- **Where it reads this file.** Backticked names in fixed places: the first name in the first column of 2.1–2.3 (crates and packages), the schema-id column of 5.2 (ids of the form `rastai.<type>/<n>` only), the first column of the 6.4 tables, the first column of 7.3, the two table-and-columns tables of 8.2 and 8.3 (the first column is the table, the second its columns), the first column of 10.3, the section and key names of 11.2, and section 15. In a list cell, only backticked names outside parentheses and before the first `:`, `;` or full stop (outside backticks and parentheses) count (`archive_state` counts, its values `local`, `archived` don't; the notes after a column list don't), and `lora{rank 16, alpha 32}` counts as `lora`, so `settings_keys` stops at that depth too. A heading or table that moves so the parser can't find it fails the check, so the parser and this file change together.
+- **Where it reads this file.** Backticked names in fixed places: the first name in the first column of 2.1–2.3 (crates and packages), the schema-id column of 5.2 (ids of the form `rastai.<type>/<n>` only), the first column of the 6.4 tables, the first column of 7.3, the two table-and-columns tables of 8.2 and 8.3 (the first column is the table, the second its columns), the first column of 10.3, the section and key names of 11.2, and section 15. In a list cell, only backticked names outside parentheses and before the first `:`, `;` or full stop (outside backticks and parentheses) count (`archive_state` counts, its values `local`, `archived` don't; the notes after a column list don't). A marker in those notes is prose too: it covers no name and isn't the row's marker, so it can't hide a dropped column. `lora{rank 16, alpha 32}` counts as `lora`, so `settings_keys` stops at that depth too. A heading or table that moves so the parser can't find it fails the check, so the parser and this file change together.
 - **Code → contracts.** Every name in `names.json` must appear in its place here. A CLI verb matches when it is the words of a registered command id (6.1) or is listed under `CLI_MODE_WORDS` or `ALIASES` in 15.1. A miss fails with the name, its key and the section to add it to.
 - **Contracts → code.** Every name in those places must be in `names.json`, unless a milestone marker covers it (`(M<n>)`, `(L2)`, `(Phase 2)`, `(Phase 3)`; conventions at the top). An unmarked missing name fails as stale: remove it, or mark it with the milestone that builds it. The PR that lands a marked name removes its marker (the reviewer's naming lens checks it); a `(L2)`, `(Phase 2)` or `(Phase 3)` tag that describes scope, not build state, may stay on a name that is already in code. In section 15 this direction covers the crate and package names in the first column of 15.1–15.3; the code-level names there (functions, types, files) aren't in `names.json`, and the reviewer agent checks them.
 - **Renames** show up as one stale name and one unknown name; the PR fixes both here and adds the old name to 15.11 when any doc used it.
@@ -2709,7 +2727,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `@rastai/canvas` (M4) | `GraphRenderer` (`setColors`), `createGraphRenderer`, `GraphScene`, `CanvasColors`, `createGlyphAtlas`, `layoutLayered`, `attachInteraction`, `MAX_GRAPH_NODES` (50,000, measured) |
 | `@rastai/viz` (M4) | `LineChart`, `BarChart`, `Heatmap`, `Histogram`, `Scatter2d`, `DataFlowView`, `VectorSpaceView` (each with `setColors`), `TableData`, `VizColors` |
 | first-party UIs | `psychologyUi`, `evalUi`, `PacketStore`, `summarizeVerify`; `MAX_TOKENS_PER_STORE` (8192) |
-| `@rastai/web` (`apps/web`) (M1) | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js`; `DRAFT_MAX_AGE_DAYS` (30) |
+| `@rastai/web` (`apps/web`) (M1) | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js` (Phase 2, plan §10 row 45); `DRAFT_MAX_AGE_DAYS` (30) |
 
 ### 15.4 Desktop shell, CLI and HTTP details
 
@@ -2729,7 +2747,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 ### 15.6 UI ids and keys
 
 - **Section ids:** `home`, `inference`, `training`, `designer`, `gym`, `data`, `plugins`, `remote`, `settings`; plugin sections `psychology`, `eval`.
-- **Panel ids:** `core.lineage`, `core.assistant`, `psychology.live`, `psychology.steer`, `psychology.branches`, `eval.verify`, `eval.vote`.
+- **Panel ids:** `core.lineage`, `core.assistant` (Phase 2, plan §10 row 45), `psychology.live`, `psychology.steer`, `psychology.branches`, `eval.verify`, `eval.vote`.
 - **Lens ids:** `psychology.entropy`, `psychology.logit_lens`, `psychology.attention`, `psychology.sae_features`, `psychology.moe_routing`, `psychology.depth_attention`, `psychology.latent_cache`.
 - **SAE loader ids:** `psychology.gemma_scope`, `psychology.llama_scope`.
 - **Settings page ids** (`settings_pages[]{page_id, title}`): `psychology.settings` (the `psychology.*` settings keys).
@@ -2768,7 +2786,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `tools/github/sync_backlog.py` | syncs labels, milestones and issues from `backlog.json` (M1-07) |
 | `tools/release/apparmor/rastai` | the AppArmor profile granting `userns` (8.8) |
 | `.dev/envs/cpu` | (dev only, git-ignored) the M1 stopgap environment until M2-16 |
-| `templates/tutorials/first-run.tutorial.json` | the first tutorial |
+| `templates/tutorials/first-run.tutorial.json` (Phase 2) | the first tutorial (plan §10 row 45) |
 | `fixtures/datasets/textcnn_tiny.jsonl` | synthetic 4-label dataset written by us |
 | `fixtures/jobs/textcnn_train/job.json` | a launch file for the worker's train job test |
 | `fixtures/hf-server/` | a local fake of the HF endpoints the download client uses |
@@ -2887,6 +2905,7 @@ Each lives at the top of the file that owns it, with a comment saying why.
 | `apps/desktop/src-tauri` as the crate's name | contracts v1.1 §2.1, 15.1 | the Cargo package `rastai-desktop` (the binary's name), so `check-names` can match it |
 | `RRS-D3001` for every MySQL source failure; `RRS-D1003` for a non-PNG/JPEG image | training-evaluation, Python drafts | `RRS-D3005`–`D3009`; `RRS-D1001` (format), `RRS-D1002` (more than 1% failed), `RRS-D1004` (too large); `RRS-D1003` stays "Python converter raised" |
 | `InterventionHook` in `rastai_models` | contracts v1.1 draft | `rastai_lens/interventions.py` |
+| `gateway.port`, `RASTAI_GATEWAY__PORT` (the settings-precedence example) | contracts 11.1, plan and backlog M1-21, control-plane layout | `daemon.port`, `RASTAI_DAEMON__PORT`: the 11.2 `gateway` section has no `port`, so `gateway.port` was never a key |
 
 ---
 
@@ -2945,6 +2964,6 @@ Every row of plan §10 (1–45) has one answer: rows 1–37 in the first table, 
 | 42 | When the Rust safetensors header check lands | control-plane §4.13 (step 2) vs Python §2.9 (the wheel's `check_safetensors_header` must exist in M1) | M1: M1-34 ports the header check into `rastai-formats` and exposes it through the wheel; M2-13 keeps the `ByteSource` reader, the writer's planner and `model_hash` (2.4 rule 10) |
 | 43 | Sessions across a daemon restart | frontend §19 Q5 assumed they survive; platform 4.1 drops them | sessions live in daemon memory; a restart signs everyone out (`RRS-U0003`); the desktop shell reruns `rastai open --print-url` |
 | 44 | `node-over-ssh` | a required PR job in `ci.yml` (plan v1.2 8.7) vs a nightly job | `nightly.yml`, on schedule and `main` only (15.9); the PR-level `ssh-loopback` and `remote-network-drop` jobs stay required |
-| 45 | Tutorials and assistant skills | the frontend layout builds them from step 2 and step 8, the control-plane layout writes `tutorial.rs` at step 1; ADR-0017 decision 3, spec §7 and the plan's level table make them Phase 2, and no backlog task builds them | Phase 2: `tutorial.list`, `tutorial.check` (6.4) and `rastai.tutorial/1` (5.2) are marked "(Phase 2)"; the layouts keep the design and point to plan §10 row 45 |
+| 45 | Tutorials and assistant skills | the frontend layout builds them from step 2 and step 8, the control-plane layout writes `tutorial.rs` at step 1. ADR-0017 decision 3, spec §31's Phase 2 list ("guided tutorials ... the L3 work") and the plan's level table make them Phase 2, and no backlog task builds them. Spec §4 and §7 on their own say only that tutorials are polished in Phase 2, which would leave room for a basic tutorial in the prototype | Default, for the owner to accept or override: Phase 2, following ADR-0017. `tutorial.list`, `tutorial.check` (6.4), `rastai.tutorial/1` (5.2), the `assistant_skills` key and `assistant.skill@1` (5.2, 5.5, unsupported until then), `core.assistant` (15.6), `assistant-skills.js` (15.3) and `templates/tutorials/` (§1, 15.8) are marked "(Phase 2)"; the layouts keep the design and point to plan §10 row 45 |
 | none | Branch picks | `.rrsdata` `examples[]` references vs inline rows (training-evaluation §15 asked for a plan row) | Prefer this branch writes inline rows with copied token IDs; `examples[]` references are only for `dataset.from_conversations` (5.2) |
 | none | Psychology analyses | contracts v1 put the math in `rastai_psychology` | the math is in `rastai_lens`; the plugin owns commands, jobs and UI (section 1) |
