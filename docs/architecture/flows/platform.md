@@ -569,7 +569,7 @@ sequenceDiagram
   participant STO as rastai-store
   participant H as Command handler
   alt UI, palette, keybinding or menu
-    UI->>SRV: CommandService.Execute over HTTP with the session cookie
+    UI->>SRV: CommandService.Execute over HTTP with the session cookie and Rastai-Session-Key
   else CLI verb
     CLI->>SRV: Execute over daemon.sock, peer uid checked
   else MCP tools/call
@@ -802,7 +802,7 @@ sequenceDiagram
 - `rastai open` without a flag creates a code the same way and opens the default browser. `rastai open --print-url` prints one `DesktopLaunchInfo` JSON line (`{url, cli_version, daemon_version, runtime_dir, config_dir, updates}`) instead; the shell parses it, and on a headless GPU box reached through an SSH tunnel the user copies `url` to the laptop.
 - Sessions live in daemon memory and expire after 24 h idle. A restart signs everyone out. The Tauri shell notices (its 5 s check finds `daemon.lock` free) and runs `rastai open --print-url` again. A plain browser tab shows `RRS-U0003` (signed out; frontend layout) with the `rastai open` hint.
 - **Sessions are bound to the origin that redeemed the code** (ADR-0034, decision N4). `POST /api/login` must carry Origin; the session records it, and every later cookie request must carry the same Origin (4.2). Why: the Host rule accepts any loopback port (SSH tunnels need it), and browsers send a cookie to every port on `127.0.0.1`. Without the binding, a page served by another local program on another port, which forwards its requests to the daemon, would pass both the Host and the Origin check with the user's cookie.
-- **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `POST /api/login` returns 32 random bytes in the response body, and the daemon keeps only their hash. The web app holds the key in memory only and sends it as `Rastai-Session-Key` on every cookie request other than `GET` or `HEAD`; a missing or wrong key is `RRS-C1002`. A page reload loses it: a browser tab signs in again with a new code from `rastai open`, and the desktop shell does that on its own.
+- **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `POST /api/login` returns the key in its response body as `{"session_key": "<64 lowercase hex>"}` (32 random bytes, hex-encoded; contracts §3.3), and the daemon keeps only the hash of that hex text. The web app holds the key in memory only and sends it as `Rastai-Session-Key` on every cookie request other than `GET` or `HEAD`; a missing or wrong key is `RRS-C1002`. A page reload loses it: a browser tab signs in again with a new code from `rastai open`, and the desktop shell does that on its own.
 - Cookie name `rastai_session_<daemon id prefix>`; flags HttpOnly, SameSite=Strict, Path=/. No Secure flag on plain-HTTP loopback.
 - The web app never asks the shell for anything; it only talks to the daemon over HTTP, so a plain browser is a full client. `@rastai/client`'s `connectToDaemon` takes a `credential` option: the web app uses the cookie, scripts and tools use a bearer token (4.3).
 - **Cross-origin browser clients are refused in v1.** A web page on any other origin can't use the session. Two routes are designed for later, both Phase 2: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand). Non-browser clients use scoped bearer tokens today.
@@ -811,7 +811,7 @@ sequenceDiagram
 
 **Persisted:** `<config>/auth/owner.token` (durable, 0600; the desktop shell never reads it). Login codes and sessions (with their bound origin and key hash) are ephemeral.
 
-**Tests:** Playwright: valid code → signed in; reused code → `RRS-C1007`; code after 61 s → `RRS-C1007`; daemon restart → a browser tab shows `RRS-U0003`. **Origin binding:** redeem a code at `127.0.0.1:47820`, then send the same cookie through a fixture forwarder on `127.0.0.1:9000` (Host and Origin both port 9000) → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards. CLI: `rastai open --print-url` prints exactly one JSON line that parses as `DesktopLaunchInfo` and whose `url` fragment holds a working code.
+**Tests:** Playwright: valid code → signed in; reused code → `RRS-C1007`; code after 61 s → `RRS-C1007`; daemon restart → a browser tab shows `RRS-U0003`; a page reload after sign-in → `SignedOutScreen` (`RRS-U0003`, the key is gone), and a new code from `rastai open --print-url` signs the tab in again. **Origin binding:** redeem a code at `127.0.0.1:47820`, then send the same cookie through a fixture forwarder on `127.0.0.1:9000` (Host and Origin both port 9000) → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards. CLI: `rastai open --print-url` prints exactly one JSON line that parses as `DesktopLaunchInfo` and whose `url` fragment holds a working code.
 
 ### 4.2 The request gate
 

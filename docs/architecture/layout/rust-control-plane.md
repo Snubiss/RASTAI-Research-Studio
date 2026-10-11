@@ -2487,6 +2487,7 @@ fn check_session_origin(request: &RequestHead, session: &Session) -> Result<(), 
 /// receives the cookie can forge both, but it never sees the key, which the web app keeps in memory only.
 fn check_session_key(request: &RequestHead, session: &Session) -> Result<(), Diagnostic> {
     match &request.session_key {
+        // The key travels as 64 lowercase hex characters; the session stored hash_bytes of that same text at login.
         Some(key) if hash_bytes(key.as_bytes()) == session.key_hash => Ok(()),
         _ => Err(diagnostic("RRS-C1002", &[])),                      // missing or wrong key
     }
@@ -2502,7 +2503,7 @@ fn allowed_without_origin(request: &RequestHead) -> bool {
 ```
 
 - **Sessions record their origin.** `POST /api/login` must carry Origin; `redeem_login_code` stores it in the session (`bound_origin`). Sessions live in memory only and expire after `SESSION_IDLE_EXPIRY_HOURS` (24); a restart signs everyone out.
-- **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `redeem_login_code` returns 32 random bytes in the login response body and keeps only their BLAKE3 hash (`key_hash`). Every cookie request other than `GET` or `HEAD` (`Execute`, `Subscribe`, `PUT /api/blobs`) must send the key as `Rastai-Session-Key`; a missing or wrong key is `RRS-C1002`. The cookie alone reads only static files and blobs. Bearer requests don't use the key.
+- **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `redeem_login_code` takes 32 bytes from `random_bytes(32)` and encodes them as 64 lowercase hex characters; that text is the key. The login response body is `{"session_key": "<64 lowercase hex>"}` (contracts §3.3). The session keeps only `hash_bytes` of the hex text as sent (`key_hash`), the same rule as job tokens, so the gate hashes the header's text without decoding it; a header of any other form simply doesn't match. Every cookie request other than `GET` or `HEAD` (`Execute`, `Subscribe`, `PUT /api/blobs`) must send the key as `Rastai-Session-Key`; a missing or wrong key is `RRS-C1002`. The cookie alone reads only static files and blobs. Bearer requests don't use the key.
 - **Bearer requests** may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed iframe) is refused.
 - **Cross-origin browser clients are refused in v1.** Two routes are designed for Phase 2 and not built: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand).
 - **`owner.token`** that group or others can read stops the start with `RRS-C1008` and the fix `chmod 600 <path>` (`auth_files.rs`); the daemon never rotates or rewrites it.
