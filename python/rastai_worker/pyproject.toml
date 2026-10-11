@@ -1,0 +1,25 @@
+# rastai_worker: the process every Python job runs in (contracts 2.2; layout python.md section 7). M1-39 lands the
+# event-log writer and the payload conversion; M1-40 the job process, WorkerService, the host connection and control.
+
+[project]
+name = "rastai-worker"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+# The workspace packages it imports so far. The environments (python/envs/) install them from their folders and pin
+# the protobuf runtime that rastai-proto brings; grpcio (worker_server.py) joins with M1-40, torch with the jobs.
+dependencies = [
+    "rastai-proto",        # EventRecord, EventPayload and the other generated messages
+    "rastai-plugin",       # rastai_plugin.catalog: the error codes WorkerError carries
+]
+
+[tool.uv.sources]
+rastai-proto = { workspace = true }
+rastai-plugin = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_worker/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""
