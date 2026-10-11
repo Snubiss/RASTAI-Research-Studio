@@ -8,7 +8,7 @@ use rastai_diag::diagnostic::Diagnostic;
 
 use crate::documents::theme::{ThemeDocument, set_colors};
 use crate::json::pointer::join_pointer;
-use crate::validate::meaning::{MeaningSource, meaning_diagnostic};
+use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
 
 const CODE_VALUE_FORM: &str = "RRS-E2006";
 const COLORS_POINTER: &str = "/colors";
@@ -21,7 +21,7 @@ pub fn check_theme(theme: &ThemeDocument, source: &MeaningSource) -> Vec<Diagnos
     let mut diagnostics = Vec::new();
     for (role, color) in set_colors(&theme.colors) {
         if !is_hex_color(color) {
-            let values = [("found", color), ("expected", EXPECTED_COLOR)];
+            let values = [("found", shown_value(color)), ("expected", EXPECTED_COLOR)];
             let pointer = join_pointer(COLORS_POINTER, role);
             diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &pointer));
         }

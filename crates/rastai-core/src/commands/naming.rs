@@ -11,7 +11,10 @@
 //! which sits below this crate, so a plugin manifest's layer-3 check and this registry share one implementation.
 
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
-use rastai_formats::validate::meaning::plugin_manifest::{CORE_AREAS, is_command_id, is_core_area, is_plugin_id};
+use rastai_formats::validate::meaning::plugin_manifest::{
+    CORE_AREAS, EXPECTED_PLUGIN_ID_FORM, is_command_id, is_core_area, is_plugin_id,
+};
+use rastai_formats::validate::meaning::shown_value;
 
 use crate::commands::registry::{CommandRegistry, find_command};
 
@@ -28,8 +31,6 @@ const MAX_SEGMENTS: usize = 3;
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
 const CODE_PLUGIN_COMMAND_OUTSIDE_NAMESPACE: &str = "RRS-P0004";
 const EXPECTED_ID_FORM: &str = "<area>.<verb> or <area>.<noun>.<verb>, in lowercase snake_case";
-const EXPECTED_PLUGIN_ID_FORM: &str =
-    "a plugin id: lowercase letters and digits in words joined by single underscores, starting with a letter";
 
 /// Short CLI words for commands people type often: the word, then the command id it runs (contracts 15.1).
 pub const ALIASES: &[(&str, &str)] = &[("doctor", "system.doctor"), ("rerun", "run.rerun")];
@@ -120,7 +121,7 @@ pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnos
     if !is_command_id(command_id) {
         return Err(diagnostic(
             CODE_VALUE_NOT_ALLOWED,
-            &[("found", command_id), ("expected", EXPECTED_ID_FORM)],
+            &[("found", shown_value(command_id)), ("expected", EXPECTED_ID_FORM)],
         ));
     }
     let area = command_id.split(ID_SEPARATOR).next().unwrap_or_default();
@@ -144,7 +145,7 @@ pub(crate) fn check_plugin_id(plugin_id: &str) -> Result<(), Diagnostic> {
     }
     Err(diagnostic(
         CODE_VALUE_NOT_ALLOWED,
-        &[("found", plugin_id), ("expected", EXPECTED_PLUGIN_ID_FORM)],
+        &[("found", shown_value(plugin_id)), ("expected", EXPECTED_PLUGIN_ID_FORM)],
     ))
 }
 
@@ -284,6 +285,16 @@ mod tests {
             assert!(!is_plugin_id(plugin_id), "{plugin_id:?}");
             assert_eq!(check_plugin_id(plugin_id).unwrap_err().code, CODE_VALUE_NOT_ALLOWED);
         }
+    }
+
+    #[test]
+    fn an_empty_plugin_id_is_shown_as_a_word() {
+        let refusal = check_plugin_id("").unwrap_err();
+        assert!(
+            refusal.message.starts_with("(blank) is not one of the allowed values"),
+            "{}",
+            refusal.message
+        );
     }
 
     #[test]

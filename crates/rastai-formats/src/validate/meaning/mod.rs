@@ -16,6 +16,10 @@ use crate::validate::meaning::plugin_manifest::check_plugin_manifest;
 use crate::validate::meaning::project::check_project;
 use crate::validate::meaning::theme::check_theme;
 
+/// What a finding shows for a value that is empty or only spaces, so the sentence doesn't start with a blank:
+/// "(blank) isn't a plugin id ...".
+const BLANK_VALUE: &str = "(blank)";
+
 /// Where a document came from, so each finding can name its file, line and column.
 pub struct MeaningSource<'a> {
     pub file_name: &'a str,
@@ -33,8 +37,29 @@ pub fn check_meaning(document: &Document, source: &MeaningSource) -> Vec<Diagnos
     }
 }
 
+/// A value as a finding shows it: the value itself, or `(blank)` when it is empty or only spaces.
+pub fn shown_value(value: &str) -> &str {
+    if value.trim().is_empty() {
+        return BLANK_VALUE;
+    }
+    value
+}
+
 /// A coded diagnostic at a JSON pointer of the document being checked.
 pub fn meaning_diagnostic(code: &str, values: &[(&str, &str)], source: &MeaningSource, pointer: &str) -> Diagnostic {
     let path = diagnostic_path(source.file_name, source.positions, pointer);
     diagnostic_at(code, values, &path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_value_is_shown_as_a_word() {
+        assert_eq!(shown_value(""), "(blank)");
+        assert_eq!(shown_value("   "), "(blank)");
+        assert_eq!(shown_value("acme"), "acme");
+        assert_eq!(shown_value(" acme "), " acme ");
+    }
 }

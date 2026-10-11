@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::describe::types::{
-    FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of,
+    FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of, type_description,
 };
 use crate::header::{SharedHeader, header_fields};
 
@@ -334,18 +334,21 @@ pub fn describe_theme_types() -> Vec<TypeDescription> {
         describe_theme_document(),
         describe_theme_colors(),
         describe_theme_typography(),
-        part(
+        type_description(
             FONT_WEIGHTS_NAME,
+            THEME_SCHEMA_ID,
             "Font weights, 100 to 900.",
             integer_fields(&["regular", "medium", "bold"], "CSS font weight."),
         ),
-        part(
+        type_description(
             FONT_SIZES_NAME,
+            THEME_SCHEMA_ID,
             "Font sizes in CSS pixels, smallest first.",
             integer_fields(&["xs", "sm", "md", "lg", "xl"], "Font size in CSS pixels."),
         ),
-        part(
+        type_description(
             LINE_HEIGHTS_NAME,
+            THEME_SCHEMA_ID,
             "Unitless CSS line heights.",
             number_fields(
                 &["body", "heading", "code"],
@@ -353,37 +356,18 @@ pub fn describe_theme_types() -> Vec<TypeDescription> {
             ),
         ),
         describe_theme_density(),
-        part(
-            SPACING_NAME,
-            "One spacing scale.",
-            vec![field(
-                "spacing_px",
-                list_of(FieldKind::Integer),
-                REQUIRED,
-                "Spacing steps in CSS pixels; --rr-space-<n> is step n.",
-            )],
-        ),
-        part(
+        describe_theme_spacing(),
+        type_description(
             RADIUS_NAME,
+            THEME_SCHEMA_ID,
             "Corner radii in CSS pixels.",
             integer_fields(&["small", "medium", "large"], "Corner radius in CSS pixels."),
         ),
         describe_theme_motion(),
-        part(
-            FOCUS_RING_NAME,
-            "Focus ring size; its color is the focus_ring role.",
-            vec![
-                field("width_px", FieldKind::Integer, REQUIRED, "Ring width in CSS pixels."),
-                field(
-                    "offset_px",
-                    FieldKind::Integer,
-                    REQUIRED,
-                    "Gap between the ring and the control.",
-                ),
-            ],
-        ),
-        part(
+        describe_theme_focus_ring(),
+        type_description(
             ELEVATION_NAME,
+            THEME_SCHEMA_ID,
             "Three shadow levels.",
             text_fields(&["level_1", "level_2", "level_3"], "A CSS box-shadow value."),
         ),
@@ -425,16 +409,18 @@ fn describe_theme_colors() -> TypeDescription {
         .iter()
         .map(|(role, doc)| field(role, FieldKind::String, OPTIONAL, &format!("{doc} A #rrggbb color.")))
         .collect();
-    part(
+    type_description(
         COLORS_NAME,
+        THEME_SCHEMA_ID,
         "Color roles; a role left out comes from the base theme. Locked --rr-locked-* tokens are not roles.",
         fields,
     )
 }
 
 fn describe_theme_typography() -> TypeDescription {
-    part(
+    type_description(
         TYPOGRAPHY_NAME,
+        THEME_SCHEMA_ID,
         "Typography tokens.",
         vec![
             field(
@@ -461,8 +447,9 @@ fn describe_theme_typography() -> TypeDescription {
 }
 
 fn describe_theme_density() -> TypeDescription {
-    part(
+    type_description(
         DENSITY_NAME,
+        THEME_SCHEMA_ID,
         "Spacing scales; ui.density picks one.",
         vec![
             type_field("comfortable", SPACING_NAME, "The default scale."),
@@ -472,8 +459,9 @@ fn describe_theme_density() -> TypeDescription {
 }
 
 fn describe_theme_motion() -> TypeDescription {
-    part(
+    type_description(
         MOTION_NAME,
+        THEME_SCHEMA_ID,
         "Animation timing; ui.reduced_motion sets both durations to 0.",
         vec![
             field(
@@ -493,14 +481,35 @@ fn describe_theme_motion() -> TypeDescription {
     )
 }
 
-/// A part of the theme document: its own type, under the document's schema id.
-fn part(name: &str, doc: &str, fields: Vec<FieldDescription>) -> TypeDescription {
-    TypeDescription {
-        name: name.to_string(),
-        schema_id: THEME_SCHEMA_ID.to_string(),
-        doc: doc.to_string(),
-        fields,
-    }
+fn describe_theme_spacing() -> TypeDescription {
+    type_description(
+        SPACING_NAME,
+        THEME_SCHEMA_ID,
+        "One spacing scale.",
+        vec![field(
+            "spacing_px",
+            list_of(FieldKind::Integer),
+            REQUIRED,
+            "Spacing steps in CSS pixels; --rr-space-<n> is step n.",
+        )],
+    )
+}
+
+fn describe_theme_focus_ring() -> TypeDescription {
+    type_description(
+        FOCUS_RING_NAME,
+        THEME_SCHEMA_ID,
+        "Focus ring size; its color is the focus_ring role.",
+        vec![
+            field("width_px", FieldKind::Integer, REQUIRED, "Ring width in CSS pixels."),
+            field(
+                "offset_px",
+                FieldKind::Integer,
+                REQUIRED,
+                "Gap between the ring and the control.",
+            ),
+        ],
+    )
 }
 
 fn type_field(name: &str, type_name: &str, doc: &str) -> FieldDescription {

@@ -17,7 +17,7 @@
 use rastai_diag::diagnostic::Diagnostic;
 
 use crate::documents::plugin_manifest::PluginManifest;
-use crate::validate::meaning::{MeaningSource, meaning_diagnostic};
+use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
 
 const CODE_DUPLICATE_ID: &str = "RRS-E2005";
 const CODE_VALUE_FORM: &str = "RRS-E2006";
@@ -28,14 +28,16 @@ const PLUGIN_ID_POINTER: &str = "/plugin_id";
 const COMMANDS_POINTER: &str = "/contributes/commands";
 const EVENT_HANDLERS_POINTER: &str = "/contributes/event_handlers";
 const COMMAND_ID_KEY: &str = "command_id";
-const EXPECTED_PLUGIN_ID: &str =
-    "a plugin id: lowercase letters and digits in words joined by single underscores, starting with a letter";
 const EXPECTED_COMMAND_ID: &str = "<plugin_id>.<verb> or <plugin_id>.<noun>.<verb>, in lowercase snake_case";
 
 const ID_SEPARATOR: char = '.';
 const WORD_SEPARATOR: char = '_';
 const MIN_COMMAND_SEGMENTS: usize = 2;
 const MAX_COMMAND_SEGMENTS: usize = 3;
+
+/// What a plugin id should look like, for the manifest check here and the registry's `check_plugin_id`.
+pub const EXPECTED_PLUGIN_ID_FORM: &str =
+    "a plugin id: lowercase letters and digits in words joined by single underscores, starting with a letter";
 
 /// The reserved core areas (contracts 6.1). No plugin may use one as its id, and every core command sits in one.
 /// `view` holds UI-only actions and `core` is the pseudo plugin id of core sections and panels.
@@ -84,7 +86,7 @@ pub const CORE_AREAS: &[&str] = &[
 pub fn check_plugin_manifest(manifest: &PluginManifest, source: &MeaningSource) -> Vec<Diagnostic> {
     let plugin_id = manifest.plugin_id.as_str();
     if !is_plugin_id(plugin_id) {
-        let values = [("found", plugin_id), ("expected", EXPECTED_PLUGIN_ID)];
+        let values = [("found", shown_value(plugin_id)), ("expected", EXPECTED_PLUGIN_ID_FORM)];
         return vec![meaning_diagnostic(CODE_VALUE_FORM, &values, source, PLUGIN_ID_POINTER)];
     }
     if is_core_area(plugin_id) {
@@ -109,7 +111,7 @@ fn check_commands(manifest: &PluginManifest, source: &MeaningSource) -> Vec<Diag
         let command_id = command.command_id.as_str();
         let pointer = format!("{COMMANDS_POINTER}/{index}/{COMMAND_ID_KEY}");
         if !is_command_id(command_id) {
-            let values = [("found", command_id), ("expected", EXPECTED_COMMAND_ID)];
+            let values = [("found", shown_value(command_id)), ("expected", EXPECTED_COMMAND_ID)];
             diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &pointer));
         } else if command_area(command_id) != plugin_id {
             let values = [("command_id", command_id), ("plugin_id", plugin_id)];

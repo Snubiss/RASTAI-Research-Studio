@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::describe::types::{
-    FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of,
+    FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of, type_description,
 };
 use crate::header::{SharedHeader, header_fields};
 
@@ -240,8 +240,9 @@ fn provenance_fields() -> Vec<FieldDescription> {
 
 fn describe_recipe() -> TypeDescription {
     let settings = FieldKind::Map(Box::new(FieldKind::Json));
-    part(
+    type_description(
         RECIPE_NAME,
+        RUN_RECORD_SCHEMA_ID,
         "The recipe a run used.",
         vec![
             field("name", FieldKind::String, REQUIRED, "Recipe name."),
@@ -251,8 +252,9 @@ fn describe_recipe() -> TypeDescription {
 }
 
 fn describe_base_model() -> TypeDescription {
-    part(
+    type_description(
         BASE_MODEL_NAME,
+        RUN_RECORD_SCHEMA_ID,
         "The model a run started from.",
         vec![
             field("model_ref", FieldKind::String, REQUIRED, "Model ref (contracts 8.6)."),
@@ -263,16 +265,18 @@ fn describe_base_model() -> TypeDescription {
 
 fn describe_chain() -> TypeDescription {
     let steps = list_of(type_kind(CHAIN_STEP_NAME));
-    part(
+    type_description(
         CHAIN_NAME,
+        RUN_RECORD_SCHEMA_ID,
         "The steps of a chain run.",
         vec![field("steps", steps, REQUIRED, "Steps in order.")],
     )
 }
 
 fn describe_source() -> TypeDescription {
-    part(
+    type_description(
         SOURCE_NAME,
+        RUN_RECORD_SCHEMA_ID,
         "Where an imported run came from.",
         vec![
             field("kind", FieldKind::String, REQUIRED, "Its source, such as tensorboard."),
@@ -293,8 +297,9 @@ fn describe_source() -> TypeDescription {
 }
 
 fn describe_chain_step() -> TypeDescription {
-    part(
+    type_description(
         CHAIN_STEP_NAME,
+        RUN_RECORD_SCHEMA_ID,
         "One step of a chain run.",
         vec![
             field("step_name", FieldKind::String, REQUIRED, "Such as train or verify."),
@@ -327,15 +332,6 @@ fn type_kind(type_name: &str) -> FieldKind {
 
 fn string_map() -> FieldKind {
     FieldKind::Map(Box::new(FieldKind::String))
-}
-
-fn part(name: &str, doc: &str, fields: Vec<FieldDescription>) -> TypeDescription {
-    TypeDescription {
-        name: name.to_string(),
-        schema_id: RUN_RECORD_SCHEMA_ID.to_string(),
-        doc: doc.to_string(),
-        fields,
-    }
 }
 
 #[cfg(test)]

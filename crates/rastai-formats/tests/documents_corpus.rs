@@ -155,6 +155,37 @@ fn every_corpus_file_gets_its_expected_diagnostics_in_one_read() {
     );
 }
 
+/// The messages a person reads, for the two cases whose values have to be reworded: serde's refusal of an integer
+/// out of range (no Rust type names) and a blank value (a word, not a leading space).
+fn corpus_messages(relative_path: &str) -> Vec<String> {
+    let fixture = corpus_root().join(relative_path);
+    let bytes = fs::read(&fixture).unwrap();
+    let outcome = read_document(
+        &file_name_of(&fixture),
+        &SliceSource { bytes: &bytes },
+        &ImportLimits::default(),
+    );
+    outcome.diagnostics.into_iter().map(|item| item.message).collect()
+}
+
+#[test]
+fn a_negative_step_reads_as_a_sentence_without_rust_types() {
+    let messages = corpus_messages("rastai.resume/invalid/negative_step.json");
+    assert_eq!(
+        messages,
+        vec!["A number in this file should be a whole number of zero or more that fits its field, but it is -1."]
+    );
+}
+
+#[test]
+fn a_blank_project_name_is_shown_as_a_word() {
+    let messages = corpus_messages("rastai.project/invalid/blank_name_and_host_name.json");
+    assert_eq!(
+        messages[0],
+        "(blank) isn't a project name: it needs at least one letter, digit or other visible character."
+    );
+}
+
 // A test document type with every kind of field, run through the same layers as read_document.
 
 const SAMPLE_TYPE: &str = "test.sample";
