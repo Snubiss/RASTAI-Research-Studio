@@ -1,0 +1,332 @@
+[
+  {
+    "code": "RRS-P0001",
+    "severity": "error",
+    "title": "Plugin manifest invalid",
+    "message": "The manifest of {plugin_id} is invalid: {reason}.",
+    "basic_text": "This plugin's description file has a mistake, so Rastai can't load it.",
+    "fix_text": "Ask the plugin's author for a fixed version.",
+    "docs_anchor": "rrs-p0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0002",
+    "severity": "error",
+    "title": "Plugin id reserved or already installed",
+    "message": "The plugin id {plugin_id} is reserved or already installed.",
+    "basic_text": "A plugin with this name is already installed, or the name is reserved.",
+    "fix_text": "Remove the installed plugin first, or give yours another id.",
+    "docs_anchor": "rrs-p0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0004",
+    "severity": "error",
+    "title": "Plugin command id outside the plugin's namespace or in a reserved area",
+    "message": "The command id {command_id} is outside the plugin's namespace or in a reserved area.",
+    "basic_text": "This plugin tries to add a command under a name it isn't allowed to use.",
+    "fix_text": "The plugin's author must name the command under the plugin's own id.",
+    "docs_anchor": "rrs-p0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0005",
+    "severity": "error",
+    "title": "Plugin command type missing from types.json",
+    "message": "The command {command_id} names the type {type_name}, which types.json doesn't define.",
+    "basic_text": "This plugin is incomplete: a command refers to a definition it doesn't ship.",
+    "fix_text": "Ask the plugin's author for a fixed version.",
+    "docs_anchor": "rrs-p0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0006",
+    "severity": "error",
+    "title": "Plugin contributes to an extension point it doesn't require",
+    "message": "The plugin contributes to {extension_point}, which it doesn't require.",
+    "basic_text": "This plugin adds a feature it didn't declare.",
+    "fix_text": "Ask the plugin's author for a fixed version.",
+    "docs_anchor": "rrs-p0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0101",
+    "severity": "error",
+    "title": "Manifest declares a UI id that the UI didn't register",
+    "message": "The manifest declares {ui_id}, but the plugin's UI didn't register it.",
+    "basic_text": "A panel or view this plugin promised didn't appear.",
+    "fix_text": "Ask the plugin's author for a fixed version.",
+    "docs_anchor": "rrs-p0101",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0102",
+    "severity": "error",
+    "title": "The UI registered an id the manifest doesn't declare",
+    "message": "The plugin's UI registered {ui_id}, which the manifest doesn't declare.",
+    "basic_text": "This plugin tried to add a panel or view it didn't declare.",
+    "fix_text": "Ask the plugin's author for a fixed version.",
+    "docs_anchor": "rrs-p0102",
+    "retired": false
+  },
+  {
+    "code": "RRS-P0103",
+    "severity": "error",
+    "title": "Python register() names differ from the manifest's ids",
+    "message": "The names the plugin's Python register() returns differ from the manifest's ids: {difference}.",
+    "basic_text": "This plugin's parts don't agree about what it provides.",
+    "fix_text": "Ask the plugin's author for a fixed version.",
+    "docs_anchor": "rrs-p0103",
+    "retired": false
+  },
+  {
+    "code": "RRS-P1001",
+    "severity": "error",
+    "title": "Plugin's engines range excludes this plugin API",
+    "message": "{plugin_id} needs plugin API {range}; this version of Rastai provides {api_version}.",
+    "basic_text": "This plugin was made for a different version of Rastai.",
+    "fix_text": "Update the plugin, or the app, so the two match.",
+    "docs_anchor": "rrs-p1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-P1002",
+    "severity": "error",
+    "title": "Required capability not provided",
+    "message": "{plugin_id} requires the capability {capability}, which isn't provided.",
+    "basic_text": "This plugin needs a feature this version of Rastai doesn't have.",
+    "fix_text": "Update Rastai, or use a version of the plugin that doesn't need it.",
+    "docs_anchor": "rrs-p1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-P1003",
+    "severity": "error",
+    "title": "Experimental API used without the flag",
+    "message": "{plugin_id} uses the experimental API {api_name}, but experimental APIs are off.",
+    "basic_text": "This plugin uses an experimental feature that is turned off.",
+    "fix_text": "Turn on plugins.experimental_apis if you trust the plugin.",
+    "docs_anchor": "rrs-p1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-P1004",
+    "severity": "error",
+    "title": "Plugin command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-p1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-P2001",
+    "severity": "error",
+    "title": "User namespaces unavailable: a third-party plugin module can't be isolated",
+    "message": "User namespaces are unavailable, so the plugin module of {plugin_id}, which has no network permission, can't be isolated; it is refused.",
+    "basic_text": "Your system can't sandbox this plugin, so Rastai won't run it.",
+    "fix_text": "Install Rastai's AppArmor profile, or grant the plugin network access.",
+    "docs_anchor": "rrs-p2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-P2002",
+    "severity": "info",
+    "title": "Trust prompt declined",
+    "message": "The trust prompt for {plugin_id} was declined; nothing was installed.",
+    "basic_text": "You chose not to install this plugin.",
+    "fix_text": "",
+    "docs_anchor": "rrs-p2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-P2003",
+    "severity": "error",
+    "title": "Plugin archive changed since the trust prompt",
+    "message": "The plugin archive {path} changed since its trust prompt; the install stopped.",
+    "basic_text": "The plugin file changed after you approved it, so Rastai stopped.",
+    "fix_text": "Get the plugin again from its source and review its permissions again.",
+    "docs_anchor": "rrs-p2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-P2004",
+    "severity": "error",
+    "title": "Iframe called a command outside the plugin's granted scopes",
+    "message": "The plugin's panel called {command_id}, which needs the scope {scope} that the plugin wasn't granted.",
+    "basic_text": "This plugin tried to do something you didn't allow.",
+    "fix_text": "Grant the permission in the plugin's settings if you trust it.",
+    "docs_anchor": "rrs-p2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-P2005",
+    "severity": "warning",
+    "title": "User namespaces unavailable: a first-party plugin module runs without network isolation",
+    "message": "User namespaces are unavailable; the plugin module of {plugin_id} runs without network isolation.",
+    "basic_text": "Your system can't fully sandbox this built-in plugin, so it runs with less isolation.",
+    "fix_text": "Install Rastai's AppArmor profile to restore isolation.",
+    "docs_anchor": "rrs-p2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-P3001",
+    "severity": "error",
+    "title": "Plugin dependency missing or unsatisfiable",
+    "message": "The dependency {dependency} of {plugin_id} is missing or can't be satisfied.",
+    "basic_text": "This plugin needs something that isn't installed.",
+    "fix_text": "Install the dependency, or a version of the plugin that works without it.",
+    "docs_anchor": "rrs-p3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-P3003",
+    "severity": "error",
+    "title": "Plugin lockfile conflicts with the base environment",
+    "message": "The lockfile of {plugin_id} conflicts with the base environment: {reason}.",
+    "basic_text": "This plugin needs Python packages that clash with Rastai's own.",
+    "fix_text": "Ask the plugin's author for a version that matches this Rastai.",
+    "docs_anchor": "rrs-p3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-P3004",
+    "severity": "error",
+    "title": "Plugin install interrupted",
+    "message": "Installing {plugin_id} was interrupted.",
+    "basic_text": "The plugin install stopped before it finished.",
+    "fix_text": "Install the plugin again.",
+    "docs_anchor": "rrs-p3004",
+    "retired": false
+  },
+  {
+    "code": "RRS-P3005",
+    "severity": "warning",
+    "title": "Plugin data from a newer version of this plugin; opened read-only",
+    "message": "This data is from version {version} of {plugin_id}, newer than the installed one; it opens read-only.",
+    "basic_text": "This data was made by a newer version of the plugin. You can look at it but not change it.",
+    "fix_text": "Update the plugin.",
+    "docs_anchor": "rrs-p3005",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4001",
+    "severity": "error",
+    "title": "Plugin module crashed",
+    "message": "The plugin module of {plugin_id} crashed.",
+    "basic_text": "Part of this plugin stopped unexpectedly.",
+    "fix_text": "Try again; if it keeps happening, report it to the plugin's author.",
+    "docs_anchor": "rrs-p4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4002",
+    "severity": "error",
+    "title": "Plugin module didn't answer in time",
+    "message": "The plugin module of {plugin_id} didn't answer within {timeout_seconds} seconds.",
+    "basic_text": "This plugin took too long to respond.",
+    "fix_text": "Try again; if it keeps happening, report it to the plugin's author.",
+    "docs_anchor": "rrs-p4002",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4003",
+    "severity": "error",
+    "title": "Plugin module crashed repeatedly; plugin disabled",
+    "message": "The plugin module of {plugin_id} crashed repeatedly, so the plugin was disabled.",
+    "basic_text": "This plugin kept crashing, so Rastai turned it off.",
+    "fix_text": "Update the plugin or report the problem to its author, then turn it back on.",
+    "docs_anchor": "rrs-p4003",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4101",
+    "severity": "error",
+    "title": "Malformed bridge message",
+    "message": "The plugin's panel sent a malformed bridge message: {reason}.",
+    "basic_text": "This plugin's panel sent something Rastai couldn't understand.",
+    "fix_text": "Report it to the plugin's author.",
+    "docs_anchor": "rrs-p4101",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4102",
+    "severity": "error",
+    "title": "Too many bridge calls in flight",
+    "message": "The plugin's panel has more than {limit} bridge calls in flight.",
+    "basic_text": "This plugin's panel is sending requests too fast.",
+    "fix_text": "Report it to the plugin's author.",
+    "docs_anchor": "rrs-p4102",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4103",
+    "severity": "error",
+    "title": "Bridge message too large",
+    "message": "A bridge message from the plugin's panel is {size_bytes} bytes; the limit is {limit_bytes}.",
+    "basic_text": "This plugin's panel sent a message that is too large.",
+    "fix_text": "Report it to the plugin's author.",
+    "docs_anchor": "rrs-p4103",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4104",
+    "severity": "error",
+    "title": "Iframe didn't initialize in time",
+    "message": "The panel of {plugin_id} didn't initialize within {timeout_seconds} seconds.",
+    "basic_text": "This plugin's panel didn't start.",
+    "fix_text": "Reload the panel; if it keeps happening, report it to the plugin's author.",
+    "docs_anchor": "rrs-p4104",
+    "retired": false
+  },
+  {
+    "code": "RRS-P4105",
+    "severity": "error",
+    "title": "Plugin UI threw while loading or registering",
+    "message": "The UI of {plugin_id} threw while loading or registering: {reason}.",
+    "basic_text": "This plugin's panel failed to load.",
+    "fix_text": "Report it to the plugin's author.",
+    "docs_anchor": "rrs-p4105",
+    "retired": false
+  },
+  {
+    "code": "RRS-P5001",
+    "severity": "error",
+    "title": "Unknown template",
+    "message": "Unknown plugin template {template_name}.",
+    "basic_text": "There is no plugin template with that name.",
+    "fix_text": "Pick one of the listed templates.",
+    "docs_anchor": "rrs-p5001",
+    "retired": false
+  },
+  {
+    "code": "RRS-P5002",
+    "severity": "error",
+    "title": "Target folder for plugin new is not empty",
+    "message": "The target folder {path} for plugin new is not empty.",
+    "basic_text": "The folder for the new plugin already has files in it.",
+    "fix_text": "Pick an empty or new folder.",
+    "docs_anchor": "rrs-p5002",
+    "retired": false
+  },
+  {
+    "code": "RRS-P5003",
+    "severity": "error",
+    "title": "Generated plugin types are out of date",
+    "message": "The generated plugin types are out of date.",
+    "basic_text": "The plugin's generated code no longer matches its types.json.",
+    "fix_text": "Run rastai plugin codegen.",
+    "docs_anchor": "rrs-p5003",
+    "retired": false
+  },
+  {
+    "code": "RRS-P5004",
+    "severity": "error",
+    "title": "types.json is invalid",
+    "message": "types.json is invalid: {reason}.",
+    "basic_text": "The plugin's type definitions file has a mistake.",
+    "fix_text": "Fix types.json at the place shown.",
+    "docs_anchor": "rrs-p5004",
+    "retired": false
+  }
+]

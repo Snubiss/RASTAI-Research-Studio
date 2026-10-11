@@ -1,0 +1,342 @@
+[
+  {
+    "code": "RRS-N0001",
+    "severity": "error",
+    "title": "Node protocol version not supported",
+    "message": "Node {node_id} speaks protocol version {version}; this daemon supports {supported_versions}.",
+    "basic_text": "This computer runs a version of Rastai that can't talk to yours.",
+    "fix_text": "Update Rastai on both computers.",
+    "docs_anchor": "rrs-n0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-N0002",
+    "severity": "error",
+    "title": "Daemon key not paired with this node",
+    "message": "This daemon's key is not paired with node {node_id}.",
+    "basic_text": "This computer hasn't been paired with your Rastai.",
+    "fix_text": "Pair the node again.",
+    "docs_anchor": "rrs-n0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-N0003",
+    "severity": "error",
+    "title": "A node is already running on this machine",
+    "message": "A node is already running on this machine (process {pid}).",
+    "basic_text": "Rastai's node service is already running here.",
+    "fix_text": "Use the running node, or stop it first.",
+    "docs_anchor": "rrs-n0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-N0004",
+    "severity": "error",
+    "title": "The node lacks a capability this job needs",
+    "message": "Node {node_id} lacks the capability {capability} that this job needs.",
+    "basic_text": "This computer can't run this kind of task.",
+    "fix_text": "Pick another node, or update this one.",
+    "docs_anchor": "rrs-n0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-N0005",
+    "severity": "error",
+    "title": "Node, transfer or Hugging Face command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-n0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1001",
+    "severity": "error",
+    "title": "SSH authentication failed",
+    "message": "SSH authentication to {host} failed.",
+    "basic_text": "Rastai couldn't log in to that computer.",
+    "fix_text": "Check your SSH key and user name for this host.",
+    "docs_anchor": "rrs-n1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1002",
+    "severity": "error",
+    "title": "SSH host key changed; refused",
+    "message": "The SSH host key of {host} changed; the connection is refused.",
+    "basic_text": "That computer's identity changed since last time, so Rastai won't connect. This can mean an attack.",
+    "fix_text": "If the host was reinstalled, remove its old key from known_hosts and confirm the new fingerprint.",
+    "docs_anchor": "rrs-n1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1003",
+    "severity": "info",
+    "title": "Unknown SSH host key; confirm the fingerprint",
+    "message": "The SSH host key of {host} is unknown: {fingerprint}.",
+    "basic_text": "Rastai hasn't connected to this computer before.",
+    "fix_text": "Check the fingerprint with the host's owner, then confirm it.",
+    "docs_anchor": "rrs-n1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1004",
+    "severity": "error",
+    "title": "Remote OS or CPU architecture not supported",
+    "message": "{host} runs {os} on {architecture}, which Rastai doesn't support.",
+    "basic_text": "Rastai can't run on that computer.",
+    "fix_text": "Use a host whose system Rastai supports; the install guide lists them.",
+    "docs_anchor": "rrs-n1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1005",
+    "severity": "warning",
+    "title": "Linger unavailable; the node stops when you log out",
+    "message": "Linger is unavailable on {host}; the node stops when you log out.",
+    "basic_text": "Rastai on that computer stops when you log out of it.",
+    "fix_text": "Ask the host's admin to enable linger for your user (loginctl enable-linger).",
+    "docs_anchor": "rrs-n1005",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1006",
+    "severity": "error",
+    "title": "ssh binary not found",
+    "message": "The ssh binary {ssh_binary} was not found.",
+    "basic_text": "Rastai couldn't find the SSH program on this computer.",
+    "fix_text": "Install OpenSSH, or set nodes.ssh_binary to its path.",
+    "docs_anchor": "rrs-n1006",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1007",
+    "severity": "error",
+    "title": "Rastai isn't installed on the host",
+    "message": "Rastai isn't installed on {host}.",
+    "basic_text": "Rastai isn't installed on that computer yet.",
+    "fix_text": "Install Rastai on the host, then pair it again.",
+    "docs_anchor": "rrs-n1007",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1008",
+    "severity": "error",
+    "title": "SSH connection timed out or the host is unreachable",
+    "message": "The SSH connection to {host} timed out, or the host is unreachable.",
+    "basic_text": "Rastai couldn't reach that computer.",
+    "fix_text": "Check the host name, the network and that the computer is on.",
+    "docs_anchor": "rrs-n1008",
+    "retired": false
+  },
+  {
+    "code": "RRS-N1009",
+    "severity": "error",
+    "title": "No free local port for the tunnel",
+    "message": "No free local port for the tunnel to {host}.",
+    "basic_text": "Rastai couldn't find a free network port for the connection.",
+    "fix_text": "Close programs that use many ports, then try again.",
+    "docs_anchor": "rrs-n1009",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2001",
+    "severity": "warning",
+    "title": "Node unreachable",
+    "message": "Node {node_id} missed {missed_heartbeats} heartbeats and is unreachable.",
+    "basic_text": "Rastai lost contact with that computer.",
+    "fix_text": "Check that the computer is on and connected.",
+    "docs_anchor": "rrs-n2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2002",
+    "severity": "warning",
+    "title": "Connection to the node dropped; its streams ended",
+    "message": "The connection to node {node_id} dropped; its streams ended.",
+    "basic_text": "The connection to that computer dropped. Its tasks keep running and reconnect.",
+    "fix_text": "",
+    "docs_anchor": "rrs-n2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-N2003",
+    "severity": "info",
+    "title": "Node reconnected; jobs reattached",
+    "message": "Node {node_id} reconnected; its jobs were reattached.",
+    "basic_text": "The connection to that computer is back.",
+    "fix_text": "",
+    "docs_anchor": "rrs-n2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3001",
+    "severity": "error",
+    "title": "Transfer path outside the allowed folders",
+    "message": "The path {path} is outside the allowed folders.",
+    "basic_text": "Rastai won't copy files to or from that folder.",
+    "fix_text": "Pick a file inside Rastai's data or project folders.",
+    "docs_anchor": "rrs-n3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3002",
+    "severity": "error",
+    "title": "Transfer chunk at the wrong offset",
+    "message": "A transfer chunk arrived at offset {offset}; expected {expected_offset}.",
+    "basic_text": "A file copy got out of step.",
+    "fix_text": "Try the transfer again.",
+    "docs_anchor": "rrs-n3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3003",
+    "severity": "error",
+    "title": "Transferred file hash mismatch",
+    "message": "The transferred file {path} doesn't match its hash.",
+    "basic_text": "A copied file arrived damaged.",
+    "fix_text": "Try the transfer again.",
+    "docs_anchor": "rrs-n3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3004",
+    "severity": "error",
+    "title": "Model repository or file not found",
+    "message": "{repository} or its file {file_name} was not found.",
+    "basic_text": "Rastai couldn't find that model online.",
+    "fix_text": "Check the model's name and spelling.",
+    "docs_anchor": "rrs-n3004",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3005",
+    "severity": "error",
+    "title": "Gated model: license not accepted or no access",
+    "message": "{repository} is gated: its license isn't accepted, or this account has no access.",
+    "basic_text": "This model needs you to accept its license first.",
+    "fix_text": "Accept the license on the model's Hugging Face page, then try again.",
+    "docs_anchor": "rrs-n3005",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3006",
+    "severity": "error",
+    "title": "Offline mode: download refused",
+    "message": "Offline mode is on, so the download of {repository} is refused.",
+    "basic_text": "Rastai is set to work offline, so it won't download anything.",
+    "fix_text": "Turn off hf.offline to download.",
+    "docs_anchor": "rrs-n3006",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3007",
+    "severity": "error",
+    "title": "Hugging Face token missing or rejected",
+    "message": "The Hugging Face token is missing or was rejected.",
+    "basic_text": "Rastai needs your Hugging Face access token for this.",
+    "fix_text": "Sign in to Hugging Face in Rastai again.",
+    "docs_anchor": "rrs-n3007",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3008",
+    "severity": "error",
+    "title": "Outbound HTTPS request without an egress tag",
+    "message": "An outbound HTTPS request to {host} had no egress tag; it was refused.",
+    "basic_text": "Rastai blocked a network request that wasn't labeled. This is a bug.",
+    "fix_text": "Please report this bug; the log has the details.",
+    "docs_anchor": "rrs-n3008",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3009",
+    "severity": "error",
+    "title": "Download interrupted; retries used up",
+    "message": "The download of {file_name} was interrupted and its retries are used up; it can resume.",
+    "basic_text": "The download stopped and couldn't restart by itself. What was downloaded is kept.",
+    "fix_text": "Check your connection, then start the download again to resume it.",
+    "docs_anchor": "rrs-n3009",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3010",
+    "severity": "info",
+    "title": "Waiting for another program's download of this file",
+    "message": "Waiting for another program's download of {file_name}.",
+    "basic_text": "Another program is downloading the same file, so Rastai is waiting for it.",
+    "fix_text": "",
+    "docs_anchor": "rrs-n3010",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3011",
+    "severity": "error",
+    "title": "Another program held this file's download lock for 10 minutes",
+    "message": "Another program held the download lock of {file_name} for 10 minutes.",
+    "basic_text": "Another program has been downloading this file for a long time.",
+    "fix_text": "Check whether the other download is stuck, then try again.",
+    "docs_anchor": "rrs-n3011",
+    "retired": false
+  },
+  {
+    "code": "RRS-N3012",
+    "severity": "info",
+    "title": "Transfer cancelled; partial file kept",
+    "message": "The transfer of {file_name} was cancelled; the partial file is kept.",
+    "basic_text": "The copy was cancelled. What was copied is kept so it can resume.",
+    "fix_text": "",
+    "docs_anchor": "rrs-n3012",
+    "retired": false
+  },
+  {
+    "code": "RRS-N4001",
+    "severity": "error",
+    "title": "Update signature or hash invalid",
+    "message": "The update's signature or hash is invalid; nothing was installed.",
+    "basic_text": "The update didn't pass its security check, so Rastai didn't install it.",
+    "fix_text": "Try the update again later.",
+    "docs_anchor": "rrs-n4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-N4002",
+    "severity": "error",
+    "title": "Update download failed",
+    "message": "The update download failed: {reason}.",
+    "basic_text": "Rastai couldn't download the update.",
+    "fix_text": "Check your connection and try again.",
+    "docs_anchor": "rrs-n4002",
+    "retired": false
+  },
+  {
+    "code": "RRS-N4003",
+    "severity": "warning",
+    "title": "Update would make installed plugins incompatible",
+    "message": "Updating to {version} would make these plugins incompatible: {plugin_ids}.",
+    "basic_text": "This update would stop some of your plugins from working.",
+    "fix_text": "Update those plugins first, or update anyway and turn them back on later.",
+    "docs_anchor": "rrs-n4003",
+    "retired": false
+  },
+  {
+    "code": "RRS-N4004",
+    "severity": "info",
+    "title": "Update waiting for running jobs",
+    "message": "The update waits for {job_count} running jobs to finish.",
+    "basic_text": "Rastai will update once its running tasks finish.",
+    "fix_text": "",
+    "docs_anchor": "rrs-n4004",
+    "retired": false
+  },
+  {
+    "code": "RRS-N4005",
+    "severity": "error",
+    "title": "The new version failed its health check; the previous version was restored",
+    "message": "Version {version} failed its health check; the previous version was restored.",
+    "basic_text": "The update didn't work, so Rastai went back to the version you had.",
+    "fix_text": "Report the problem with a bundle.",
+    "docs_anchor": "rrs-n4005",
+    "retired": false
+  }
+]

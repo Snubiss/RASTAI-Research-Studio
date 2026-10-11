@@ -46,6 +46,7 @@ Items 1–10 owner-approved on 2026-10-11. Entries after item 10 are keyed by ta
 - **M1-23 (contract):** A read-failure code for the databases. `RRS-S0006` (a database read failed on a file that passed its integrity check: an I/O error, or the writer held the file past the busy timeout; SQLite's reason is attached), where M1-23's first draft borrowed `RRS-S3005`, "Write failed for a reason other than a full disk", so a failing `run.list` or token lookup would have told the user a write failed. It sits in the databases range, 0001–0999, beside the codes for opening a database (10.3). A damaged file keeps `RRS-S0003` (`rastai.db`) and `RRS-S0005` (`vault.db`).
 - **M1-23:** `rastai.db` and its writer thread. Migration 1 creates every table of 8.2 but `archive_cursors`, which M11's migration adds, so the 8.2 rows lose their (M1) markers and `archive_cursors` keeps (M11); there is no `settings` table. `runs.archive_state` starts `local` by its column default and no M1 write changes it. `rastai-store` loses its (M1) marker (2.1, 15.1); its names not built yet carry their milestones, and 15.1 registers the code names M1-23 adds: the row structs and read functions of `index/`, `close_store`, `IndexWriter`, `IndexReader`, `DaemonLock`, `StoreError`, the migration types of `sqlite.rs` and `store.rs`, `writer_batch_count` (the convoy test reads it, so a writer that stops batching fails deterministically), `list_table_columns` and `read_index_schema_version`. The store's errors use `RRS-S0001`–`S0004`, `RRS-S3002` and `RRS-S3005` for a failed write, and the `RRS-S0006` of the M1-23 (contract) entry for a failed read on a reader's connection, including a reader that can't open its file (10.3). One new code, `RRS-S0007`: the runtime folder or its `daemon.lock` isn't private to this user. `take_daemon_lock` refuses an existing runtime folder that is a symbolic link, another user's or open to group or others, and a `daemon.lock` that is a symbolic link or not a regular file, so another user can't plant `/tmp/rastai-<uid>` or a link that makes the daemon overwrite a file (8.1, 10.3). The migration types (`INDEX_MIGRATIONS` and `INDEX_DATABASE_SETTINGS` in `store.rs`, `Migration` and `DatabaseSettings` in `sqlite.rs`), `open_database_for_writing` and `set_log_cursor`, which takes the writer's transaction, are crate-private, so no other crate runs SQL or opens a second write connection (15.1). `rastai-store`'s external libraries gain serde_json, for the JSON list columns (2.1).
 - **M1-41 (contract):** Codes for local sockets. `rastai-transport` opens every local socket (daemon.sock, node.sock, worker-host.sock, the job sockets) and no code covered its failures, so six join the `RRS-N` heartbeat and reachability range, 2000–2999 (10.3): `RRS-N2004` (nothing is listening at the socket's path), `RRS-N2005` (the socket folder is owned by another user or open to group or others, so a folder planted in the shared `/tmp` can't catch the sockets, 8.1), `RRS-N2006` (the peer of a local socket is another user), `RRS-N2007` (a socket can't be created because its folder or the socket file is unusable, including a live socket or a non-socket file in the way), `RRS-N2008` (a local connection failed or timed out mid-request) and `RRS-N2009` (local sockets aren't built for this platform yet: Windows named pipes arrive with tier 2).
+- **M1-13:** One "not available yet" code per area. A command whose handler isn't built yet is an honest L0 stub that fails with its area's code (ADR-0017, plan 3.2), so each command area gets one, the next free number under its area's prefix: `RRS-C0010` (system, settings, tokens, projects, files and the other core commands), `RRS-P1004` (plugins), `RRS-S3006` (storage, archive, secrets), `RRS-N0005` (nodes, transfers, Hugging Face), `RRS-H0003` (hardware and environments), `RRS-G0011` (inference), `RRS-M0004` (Designer), `RRS-T0006` (training), `RRS-D0002` (data), `RRS-R0007` (Agent Gym), and in the plugins' catalogs `RRS-L0007` (M4) and `RRS-V0004` (M5). The `job` commands share `RRS-C0010` with the other core commands, so `RRS-J` gets none. No range of 10.1 is meant for stubs, so some of these sit in a range whose subject they don't share (`RRS-S3006` under disk and quotas, `RRS-D0002` under task detection, `RRS-M0004` under the compiler); confirmed by the owner, 2026-10-11 (10.3). `catalog/README.md` maps each command area to its code.
 
 ### Changes in v1.1
 
@@ -1994,6 +1995,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-P1001` | error | Plugin's engines range excludes this plugin API |
 | `RRS-P1002` | error | Required capability not provided |
 | `RRS-P1003` | error | Experimental API used without the flag |
+| `RRS-P1004` | error | Plugin command not available yet (L0 stub, ADR-0017) |
 | `RRS-P2001` | error | User namespaces unavailable: a third-party plugin module without network permission can't be isolated; refused (fix: install the AppArmor profile or grant network) |
 | `RRS-P2002` | info | Trust prompt declined |
 | `RRS-P2003` | error | Plugin archive (`.rrsplugin`) changed since the trust prompt |
@@ -2029,6 +2031,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-C0007` | error | Command retired; use its replacement |
 | `RRS-C0008` | error | Update in progress; try again in a moment |
 | `RRS-C0009` | error | A settings file doesn't parse; fix the file first (it is never overwritten) |
+| `RRS-C0010` | error | Command not available yet: its handler isn't built (L0 stub, ADR-0017); for `system`, `settings`, `token`, `command`, `job`, `project`, `file`, `document`, `workspace`, `artifact` and `tutorial` commands, except the hardware ones |
 | `RRS-C0401` | warning | Events missed outside the daemon's bus buffer; the client refetches state |
 | `RRS-C0501` | error | No home folder for the data folders (set `RASTAI_HOME`, or `HOME` on Linux and macOS and `USERPROFILE` on Windows) |
 | `RRS-C0502` | error | The operating system's random source can't be read |
@@ -2067,6 +2070,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-S3003` | error | Storage quota exceeded |
 | `RRS-S3004` | warning | (L2) Database snapshot skipped or failed (not enough space, or the copy failed its check); older snapshots kept |
 | `RRS-S3005` | error | Write failed for a reason other than a full disk (the operating system's reason is attached; a full disk is `RRS-S3002`) |
+| `RRS-S3006` | error | Storage, archive or secret command not available yet (L0 stub, ADR-0017) |
 | `RRS-S4001` | warning | OS keychain unavailable; fallback store in use |
 | `RRS-S5001` | error | Archive database unreachable; retrying with backoff |
 | `RRS-S5002` | error | Archive schema needs a newer Rastai (`min_writer_version`); this daemon stops writing to it |
@@ -2089,6 +2093,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-N0002` | error | Daemon key not paired with this node |
 | `RRS-N0003` | error | A node is already running on this machine |
 | `RRS-N0004` | error | The node lacks a capability this job needs |
+| `RRS-N0005` | error | Node, transfer or Hugging Face command not available yet (L0 stub, ADR-0017) |
 | `RRS-N1001` | error | SSH authentication failed |
 | `RRS-N1002` | error | SSH host key changed; refused |
 | `RRS-N1003` | info | Unknown SSH host key; confirm the fingerprint |
@@ -2131,6 +2136,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 |---|---|---|
 | `RRS-H0001` | info | No usable GPU; running on CPU |
 | `RRS-H0002` | warning | A detection tool failed or timed out; profile is partial |
+| `RRS-H0003` | error | Hardware or environment command (`system.doctor`, `system.hardware`, `system.env.*`) not available yet (L0 stub, ADR-0017) |
 | `RRS-H1001` | error | Numerical self-test mismatch against the CPU reference; GPU not used |
 | `RRS-H1002` | error | Self-test could not run a kernel |
 | `RRS-H1003` | error | Self-test exceeded its time budget |
@@ -2181,6 +2187,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-G0007` | error | Tool calls not supported for this model family |
 | `RRS-G0009` | error | Generation timed out or stalled |
 | `RRS-G0010` | error | Steering preset was made for different weights |
+| `RRS-G0011` | error | Inference command (`chat`, `model`, `conversation`, `gateway`, `adapter`) not available yet (L0 stub, ADR-0017) |
 | `RRS-G1001` | error | Tokenizer couldn't be loaded |
 | `RRS-G1002` | error | Chat template error |
 | `RRS-G1003` | error | No tokenizer files for this model |
@@ -2210,6 +2217,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-M0001` | error | A graph node has no implementation; the design is view only |
 | `RRS-M0002` | error | Smoke forward shape differs from the inferred shape (compiler bug) |
 | `RRS-M0003` | warning | Compiled parameter count differs from live stats (stats bug) |
+| `RRS-M0004` | error | Designer command not available yet (L0 stub, ADR-0017) |
 | `RRS-M0601` | error | Graph nodes without Eject or ONNX support |
 | `RRS-M0602` | error | ONNX lowering failed for a graph node |
 | `RRS-M0603` | warning | ONNX round trip differs beyond tolerance; file kept as unverified |
@@ -2240,6 +2248,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-T0003` | error | No usable rows for this recipe |
 | `RRS-T0004` | error | No method fits the memory budget |
 | `RRS-T0005` | error | Dataset task doesn't match the recipe |
+| `RRS-T0006` | error | Training command (`train`, `checkpoint`, `recipe`, `rlhf`, `sweep`, `teach`, `run`) not available yet (L0 stub, ADR-0017) |
 | `RRS-T0201` | error | Reward model accuracy below the RLHF gate |
 | `RRS-T0202` | warning | Reward model base differs from the policy base (extra VRAM) |
 | `RRS-T2001` | error | Checkpoint write failed: disk full; run paused (or failed during preemption) |
@@ -2261,6 +2270,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | Code | Severity | Meaning |
 |---|---|---|
 | `RRS-D0001` | error | No task matches the columns |
+| `RRS-D0002` | error | Data command (`dataset`, `converter`) not available yet (L0 stub, ADR-0017) |
 | `RRS-D1001` | error | File format not recognized; no converter (also an image that isn't PNG or JPEG, ADR-0037) |
 | `RRS-D1002` | error | More than 1% of rows failed conversion |
 | `RRS-D1003` | error | Python converter raised |
@@ -2289,6 +2299,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-R0004` | warning | Harbor task folder incomplete; task skipped |
 | `RRS-R0005` | warning | MCP `env` values not imported; set them as secrets |
 | `RRS-R0006` | warning | Harbor task has no prebuilt image; build it and set `environment.image` |
+| `RRS-R0007` | error | Agent Gym command (`gym`, `harness`, `sandbox`) not available yet (L0 stub, ADR-0017) |
 | `RRS-R1001` | error | Sandbox cap reached |
 | `RRS-R1002` | error | No container engine found |
 | `RRS-R1003` | error | Container engine API version not supported |
@@ -2321,6 +2332,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-L0004` (M4) | error | Replay file has no readable summary layer |
 | `RRS-L0005` (M4) | info | API conversation: pick a local observer model |
 | `RRS-L0006` (M4) | error | Incognito conversations are never saved, so replay, export and Prefer are refused |
+| `RRS-L0007` (M4) | error | Psychology command not available yet (L0 stub, ADR-0017) |
 | `RRS-L1001` (M4) | warning | Live panel overhead above `psychology.overhead_budget_percent` |
 | `RRS-L1002` (M4) | error | Tensor request over 64 MiB; pick a smaller range |
 | `RRS-L2001` (M4) | error | SAE weights missing (fix `psychology.sae.load`) |
@@ -2341,6 +2353,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 |---|---|---|
 | `RRS-V0001` (M5) | error | Suite has no tests |
 | `RRS-V0003` (M5) | error | Model or checkpoint not found |
+| `RRS-V0004` (M5) | error | Evaluation command not available yet (L0 stub, ADR-0017) |
 | `RRS-V0101` (M5) | warning | Suite checks generated text only with keyword or regex metrics |
 | `RRS-V1001` (M5) | warning | Judge uncalibrated or not configured |
 | `RRS-V1002` (M5) | error | Judge agreement below the bar |
@@ -2897,9 +2910,10 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `tools/codegen/pyproject.toml`, `tools/codegen/tests/` | the Python codegen tools' ruff and pytest settings (ruff extends `python/pyproject.toml`); `test_rewrite_python_imports.py` |
 | `crates/rastai-proto/src/generated/`, `python/rastai_proto/rastai_proto/`, `packages/proto/src/generated/`, `packages/proto/src/index.js` | the three folders `buf generate` writes from `buf.gen.yaml` and `check-generated` compares; `@rastai/proto`'s hand-written entry, one re-export line per `.proto` file |
 | `catalog/errors/RRS-<letter>.json`, `catalog/terms/terms.json`, `plugins/<name>/catalog/errors.json`, `plugins/<name>/catalog/terms.json` | the catalog sources (10): each file is a JSON array of entries; a source that doesn't exist yet holds none |
+| `catalog/README.md` | how to add a code, the command area of each "not available yet" code, and the withdrawn draft numbers (10.2) |
 | `crates/rastai-diag/src/generated/` (`mod.rs`, `catalog_table.rs`, `terms_table.rs`), `packages/catalog/src/generated/catalog.js`, `python/rastai_plugin/rastai_plugin/catalog/generated.py`, `docs/reference/errors.md` | the four outputs `rastai-catalog-codegen` writes and `check-generated` compares (a folder it owns whole, or a single file); `packages/catalog/src/index.js` and `python/rastai_plugin/rastai_plugin/catalog/__init__.py` are hand-written |
 | `schemas/<type>/<version>.json`, `schemas/commands/rastai.command.<command_id>/1.json`, `schemas/index.json`, `packages/formats/src/generated/`, `packages/client/src/generated/commands.js`, `python/rastai_formats/rastai_formats/generated/`, `docs/reference/commands.md` | the outputs `rastai-formats-codegen` writes and `check-generated` compares (`schemas/` as one folder until `schemas/names.json` joins it). A schema's `$id` is `https://schemas.rastai.dev/` plus its path under `schemas/`; a command schema holds `$defs` `arguments` and `result` beside the types they refer to. `index.json` holds `format_version` (1) and `schemas[]{schema_id, file, content_hash}` (the canonical-JSON BLAKE3 hash, as for documents, 5.1). `packages/formats/src/index.js`, `packages/formats/src/index.test.js`, `python/rastai_formats/rastai_formats/__init__.py` and `python/rastai_formats/tests/test_generated.py` are hand-written |
-| `tools/codegen/tests/catalog_checks.rs`, `tools/codegen/tests/outputs_check.rs` | the catalog rules (codes well formed, unique, in the owner's file and range, never deleted since the merge base; `catalog_ranges.rs` equals the 10.1 table) and the outputs checks (generated catalog JavaScript passes `tsc` and the catalog's JavaScript and Python read back the entries; the formats type modules and command wrappers pass `tsc` against the JSON rastai-formats writes, run in Node, and the formats Python round-trips that JSON); the merge-base and outputs tests are `#[ignore]`d in a plain `cargo test` and run by `just codegen-check` |
+| `tools/codegen/tests/catalog_checks.rs`, `tools/codegen/tests/outputs_check.rs` | the catalog rules (codes well formed, unique, in the owner's file and range, never deleted since the merge base; `catalog_ranges.rs` equals the 10.1 table; the codes and severities equal 10.3; every `RRS-` code in first-party source outside its tests is in the catalog; call-site placeholders match their entries) and the outputs checks (generated catalog JavaScript passes `tsc` and the catalog's JavaScript and Python read back the entries; the formats type modules and command wrappers pass `tsc` against the JSON rastai-formats writes, run in Node, and the formats Python round-trips that JSON); the merge-base and outputs tests are `#[ignore]`d in a plain `cargo test` and run by `just codegen-check` |
 | `fixtures/proto-golden/<package>/<MessageName>.json`, `.binpb`, `fixtures/proto-golden/README.md` | one filled golden per message: protobuf JSON with proto field names, and its binary form from `buf convert`; read by `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py` and `packages/proto/src/golden.test.js` |
 | `crates/rastai-proto/tests/services.rs`, `python/rastai_proto/tests/test_services.py` | the gRPC services build from the generated code: a tonic server stub per service (Rust), and per service its RPC list, a grpcio servicer on a server, and a `WorkerService` call over a Unix socket (Python) (node layout 3.5) |
 | `fixtures/proto-golden/commands/without_stability/`, `fixtures/proto-golden/events/without_stability/` | a `CommandDescriptor` and an `EventTypeDescriptor` without `stability`, as a daemon that predates the field sends them; the three golden tests check that they decode as `STABILITY_UNSPECIFIED` (read as `PREVIEW`) and round-trip (node layout 3.5) |

@@ -1,0 +1,222 @@
+[
+  {
+    "code": "RRS-H0001",
+    "severity": "info",
+    "title": "No usable GPU; running on CPU",
+    "message": "No usable GPU was found; running on the CPU.",
+    "basic_text": "Rastai didn't find a graphics card it can use, so it runs on the processor. That is slower.",
+    "fix_text": "",
+    "docs_anchor": "rrs-h0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-H0002",
+    "severity": "warning",
+    "title": "A detection tool failed or timed out; profile is partial",
+    "message": "{tool} failed or timed out; the hardware profile is partial.",
+    "basic_text": "Rastai couldn't check all of this computer's hardware.",
+    "fix_text": "Run the hardware check again.",
+    "docs_anchor": "rrs-h0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-H0003",
+    "severity": "error",
+    "title": "Hardware or environment command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-h0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-H1001",
+    "severity": "error",
+    "title": "Numerical self-test mismatch against the CPU reference; GPU not used",
+    "message": "GPU {gpu_index} gave results that differ from the CPU reference ({detail}); it is not used.",
+    "basic_text": "This GPU failed Rastai's safety check, so Rastai won't use it.",
+    "fix_text": "Update the GPU driver, then run the hardware check again.",
+    "docs_anchor": "rrs-h1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-H1002",
+    "severity": "error",
+    "title": "Self-test could not run a kernel",
+    "message": "The self-test could not run {kernel} on GPU {gpu_index}.",
+    "basic_text": "This GPU failed Rastai's safety check, so Rastai won't use it.",
+    "fix_text": "Update the GPU driver, then run the hardware check again.",
+    "docs_anchor": "rrs-h1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-H1003",
+    "severity": "error",
+    "title": "Self-test exceeded its time budget",
+    "message": "The self-test on GPU {gpu_index} took longer than {budget_seconds} seconds.",
+    "basic_text": "This GPU failed Rastai's safety check, so Rastai won't use it.",
+    "fix_text": "Close other programs using the GPU, then run the hardware check again.",
+    "docs_anchor": "rrs-h1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-H1004",
+    "severity": "warning",
+    "title": "Self-test: decode graph capture failed on this GPU; eager decode used there",
+    "message": "Decode graph capture failed on GPU {gpu_index}; eager decode is used there.",
+    "basic_text": "This GPU works, but chat on it will be a little slower.",
+    "fix_text": "",
+    "docs_anchor": "rrs-h1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-H2001",
+    "severity": "error",
+    "title": "uv missing or its hash is wrong",
+    "message": "uv at {path} is missing or its hash is wrong.",
+    "basic_text": "Rastai couldn't set up the Python environment it needs to run this.",
+    "fix_text": "Reinstall Rastai.",
+    "docs_anchor": "rrs-h2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-H2002",
+    "severity": "error",
+    "title": "Environment lockfile can't be installed on this platform",
+    "message": "The {environment} environment's lockfile can't be installed on {platform}.",
+    "basic_text": "Rastai couldn't set up the Python environment it needs to run this.",
+    "fix_text": "Pick another backend for this computer.",
+    "docs_anchor": "rrs-h2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-H2003",
+    "severity": "error",
+    "title": "Environment import check failed",
+    "message": "The {environment} environment failed its import check: {reason}.",
+    "basic_text": "Rastai couldn't set up the Python environment it needs to run this.",
+    "fix_text": "Reinstall the environment.",
+    "docs_anchor": "rrs-h2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-H2004",
+    "severity": "error",
+    "title": "Environment sync failed",
+    "message": "Syncing the {environment} environment failed: {reason}.",
+    "basic_text": "Rastai couldn't set up the Python environment it needs to run this.",
+    "fix_text": "Check your connection, then install the environment again.",
+    "docs_anchor": "rrs-h2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-H2005",
+    "severity": "error",
+    "title": "A package's hash doesn't match the lockfile",
+    "message": "The package {package} doesn't match the hash in the lockfile.",
+    "basic_text": "A downloaded package didn't pass its security check.",
+    "fix_text": "Install the environment again.",
+    "docs_anchor": "rrs-h2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-H2006",
+    "severity": "error",
+    "title": "Environment not installed or incomplete",
+    "message": "The {environment} environment is not installed or is incomplete.",
+    "basic_text": "Rastai couldn't set up the Python environment it needs to run this.",
+    "fix_text": "Install the environment.",
+    "docs_anchor": "rrs-h2006",
+    "retired": false
+  },
+  {
+    "code": "RRS-H3001",
+    "severity": "error",
+    "title": "Not enough GPU memory for this lease",
+    "message": "GPU {gpu_index} has {free_bytes} bytes free but this needs {needed_bytes}; held by {holders}.",
+    "basic_text": "The graphics card doesn't have enough free memory for this.",
+    "fix_text": "Unload a model or stop another task, then try again.",
+    "docs_anchor": "rrs-h3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-H3004",
+    "severity": "info",
+    "title": "Model is being evicted; generation stopped",
+    "message": "{model_name} is being unloaded to free GPU memory; generation stopped.",
+    "basic_text": "The model was unloaded to make room for another task.",
+    "fix_text": "",
+    "docs_anchor": "rrs-h3004",
+    "retired": false
+  },
+  {
+    "code": "RRS-H3005",
+    "severity": "warning",
+    "title": "Process uses more GPU memory than its lease",
+    "message": "Job {job_id} uses {used_bytes} bytes of GPU memory, more than its lease of {lease_bytes}.",
+    "basic_text": "A task is using more graphics memory than it asked for.",
+    "fix_text": "",
+    "docs_anchor": "rrs-h3005",
+    "retired": false
+  },
+  {
+    "code": "RRS-H3006",
+    "severity": "error",
+    "title": "Out of GPU memory while loading",
+    "message": "Out of GPU memory while loading {model_name}.",
+    "basic_text": "The graphics card ran out of memory while loading the model.",
+    "fix_text": "Unload other models, or use a smaller or quantized model.",
+    "docs_anchor": "rrs-h3006",
+    "retired": false
+  },
+  {
+    "code": "RRS-H3007",
+    "severity": "error",
+    "title": "Out of GPU memory inside a job step",
+    "message": "Out of GPU memory during {operation}.",
+    "basic_text": "The graphics card ran out of memory.",
+    "fix_text": "Use a smaller batch or model, or stop other tasks on this GPU.",
+    "docs_anchor": "rrs-h3007",
+    "retired": false
+  },
+  {
+    "code": "RRS-H4001",
+    "severity": "warning",
+    "title": "NVIDIA driver too old for CUDA 13; using cuda126",
+    "message": "NVIDIA driver {driver_version} is too old for CUDA 13; using the cuda126 environment.",
+    "basic_text": "Your graphics driver is a bit old, so Rastai uses an older GPU toolkit.",
+    "fix_text": "Update the NVIDIA driver for the newest toolkit.",
+    "docs_anchor": "rrs-h4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-H4002",
+    "severity": "warning",
+    "title": "HSA_OVERRIDE_GFX_VERSION removed from a job",
+    "message": "HSA_OVERRIDE_GFX_VERSION was removed from job {job_id}.",
+    "basic_text": "Rastai removed a risky AMD override setting from this task.",
+    "fix_text": "",
+    "docs_anchor": "rrs-h4002",
+    "retired": false
+  },
+  {
+    "code": "RRS-H4003",
+    "severity": "error",
+    "title": "No permission to use the AMD GPU",
+    "message": "No permission to use the AMD GPU; the user isn't in the render and video groups.",
+    "basic_text": "Your user isn't allowed to use the graphics card.",
+    "fix_text": "Add your user to the render and video groups, then log in again.",
+    "docs_anchor": "rrs-h4003",
+    "retired": false
+  },
+  {
+    "code": "RRS-H4004",
+    "severity": "warning",
+    "title": "GPU architecture not supported by this backend; GPU not used",
+    "message": "GPU {gpu_index} ({architecture}) isn't supported by the {backend} backend; it is not used.",
+    "basic_text": "This graphics card isn't supported, so Rastai won't use it.",
+    "fix_text": "",
+    "docs_anchor": "rrs-h4004",
+    "retired": false
+  }
+]

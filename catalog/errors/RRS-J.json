@@ -1,0 +1,132 @@
+[
+  {
+    "code": "RRS-J0001",
+    "severity": "error",
+    "title": "Job process could not be started",
+    "message": "The process of job {job_id} could not be started: {reason}.",
+    "basic_text": "Rastai couldn't start this task.",
+    "fix_text": "Try again; if it keeps happening, run the hardware check.",
+    "docs_anchor": "rrs-j0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-J0002",
+    "severity": "error",
+    "title": "Worker didn't register in time",
+    "message": "The worker of job {job_id} didn't register within {timeout_seconds} seconds.",
+    "basic_text": "This task didn't start in time.",
+    "fix_text": "Try again; if it keeps happening, reinstall the environment.",
+    "docs_anchor": "rrs-j0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-J1001",
+    "severity": "error",
+    "title": "Job killed by a signal",
+    "message": "Job {job_id} was killed by signal {signal}.",
+    "basic_text": "This task stopped before it finished.",
+    "fix_text": "Run it again.",
+    "docs_anchor": "rrs-j1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-J1002",
+    "severity": "error",
+    "title": "Job killed by the kernel's out-of-memory killer",
+    "message": "Job {job_id} was killed by the kernel's out-of-memory killer.",
+    "basic_text": "This computer ran out of memory, so the system stopped the task.",
+    "fix_text": "Close other programs, or use a smaller batch or model.",
+    "docs_anchor": "rrs-j1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-J1003",
+    "severity": "error",
+    "title": "Job killed by the node",
+    "message": "Job {job_id} was killed by the node: {reason}.",
+    "basic_text": "This task stopped before it finished.",
+    "fix_text": "",
+    "docs_anchor": "rrs-j1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-J1004",
+    "severity": "error",
+    "title": "Worker exited with no final record or diagnostic",
+    "message": "The worker of job {job_id} exited with code {exit_code} and no final record or diagnostic.",
+    "basic_text": "This task stopped before it finished. It didn't say why.",
+    "fix_text": "Check the job's stderr.log, then run it again.",
+    "docs_anchor": "rrs-j1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-J2001",
+    "severity": "error",
+    "title": "Worker couldn't start",
+    "message": "The worker of job {job_id} couldn't start: {reason}.",
+    "basic_text": "Rastai couldn't start this task.",
+    "fix_text": "Reinstall the environment, then try again.",
+    "docs_anchor": "rrs-j2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-J2002",
+    "severity": "error",
+    "title": "Job token rejected",
+    "message": "The token of job {job_id} was rejected.",
+    "basic_text": "A task tried to connect with a key Rastai doesn't accept.",
+    "fix_text": "",
+    "docs_anchor": "rrs-j2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-J2003",
+    "severity": "error",
+    "title": "Worker protocol version not supported by this node; stopped with a checkpoint",
+    "message": "The worker of job {job_id} speaks protocol version {version}, which this node doesn't support; it stopped with a checkpoint.",
+    "basic_text": "This task and Rastai are different versions. The task saved its progress and stopped.",
+    "fix_text": "Update Rastai, then resume the run.",
+    "docs_anchor": "rrs-j2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-J3002",
+    "severity": "error",
+    "title": "Job ended while no node was watching; no final state",
+    "message": "Job {job_id} ended while no node was watching, so it has no final state.",
+    "basic_text": "This task ended while Rastai wasn't running, so its result is unknown.",
+    "fix_text": "Check its output, or run it again.",
+    "docs_anchor": "rrs-j3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-J3003",
+    "severity": "error",
+    "title": "Job didn't reconnect after a node restart",
+    "message": "Job {job_id} didn't reconnect after the node restarted.",
+    "basic_text": "This task didn't come back after Rastai restarted.",
+    "fix_text": "Run it again.",
+    "docs_anchor": "rrs-j3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-J3004",
+    "severity": "info",
+    "title": "Job lost with the daemon; resubmitted",
+    "message": "Job {job_id} was lost with the daemon and resubmitted.",
+    "basic_text": "This task was interrupted when Rastai stopped, so it started again.",
+    "fix_text": "",
+    "docs_anchor": "rrs-j3004",
+    "retired": false
+  },
+  {
+    "code": "RRS-J3005",
+    "severity": "error",
+    "title": "Job ran inside the daemon and stopped with it",
+    "message": "Job {job_id} ran inside the daemon and stopped with it.",
+    "basic_text": "This task stopped when Rastai stopped.",
+    "fix_text": "Run it again.",
+    "docs_anchor": "rrs-j3005",
+    "retired": false
+  }
+]

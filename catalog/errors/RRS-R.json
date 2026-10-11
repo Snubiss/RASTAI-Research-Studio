@@ -1,0 +1,282 @@
+[
+  {
+    "code": "RRS-R0001",
+    "severity": "error",
+    "title": "Reward or metric name not found",
+    "message": "The reward or metric {name} was not found.",
+    "basic_text": "This harness uses a reward or metric that isn't installed.",
+    "fix_text": "Install the plugin that provides it.",
+    "docs_anchor": "rrs-r0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-R0002",
+    "severity": "error",
+    "title": "A tool needs network hosts that aren't allowed",
+    "message": "The tool {tool_name} needs network hosts that aren't allowed: {hosts}.",
+    "basic_text": "A tool in this harness wants internet access you haven't allowed.",
+    "fix_text": "Allow the hosts in the harness, or remove the tool.",
+    "docs_anchor": "rrs-r0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-R0003",
+    "severity": "warning",
+    "title": "Import entry skipped: unsupported transport",
+    "message": "The entry {entry_name} uses the unsupported transport {transport}; it was skipped.",
+    "basic_text": "One tool couldn't be imported.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-R0004",
+    "severity": "warning",
+    "title": "Harbor task folder incomplete; task skipped",
+    "message": "The Harbor task folder {path} is incomplete; the task was skipped.",
+    "basic_text": "One task couldn't be imported because files are missing.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-R0005",
+    "severity": "warning",
+    "title": "MCP env values not imported; set them as secrets",
+    "message": "The env values of {server_name} were not imported.",
+    "basic_text": "Settings that may be secret weren't copied.",
+    "fix_text": "Set them as secrets in Rastai.",
+    "docs_anchor": "rrs-r0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-R0006",
+    "severity": "warning",
+    "title": "Harbor task has no prebuilt image",
+    "message": "The Harbor task {task_id} has no prebuilt image.",
+    "basic_text": "This task needs a container image that hasn't been built.",
+    "fix_text": "Build the image, then set environment.image in the task.",
+    "docs_anchor": "rrs-r0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-R0007",
+    "severity": "error",
+    "title": "Agent Gym command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-r0007",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1001",
+    "severity": "error",
+    "title": "Sandbox cap reached",
+    "message": "The sandbox cap of {cap} is reached.",
+    "basic_text": "Rastai is already running as many sandboxes as allowed.",
+    "fix_text": "Wait for some to finish, or raise compute.sandbox_cap.",
+    "docs_anchor": "rrs-r1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1002",
+    "severity": "error",
+    "title": "No container engine found",
+    "message": "No container engine was found.",
+    "basic_text": "Rastai couldn't run the sandbox this task needs. No container software is installed.",
+    "fix_text": "Install Podman or Docker.",
+    "docs_anchor": "rrs-r1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1003",
+    "severity": "error",
+    "title": "Container engine API version not supported",
+    "message": "The container engine's API version {version} is not supported.",
+    "basic_text": "Rastai couldn't run the sandbox this task needs. The container software is too old or too new.",
+    "fix_text": "Update Podman or Docker.",
+    "docs_anchor": "rrs-r1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1004",
+    "severity": "error",
+    "title": "Sandbox image pull failed",
+    "message": "Pulling the image {image} failed: {reason}.",
+    "basic_text": "Rastai couldn't run the sandbox this task needs. Its image couldn't be downloaded.",
+    "fix_text": "Check the image name and your connection.",
+    "docs_anchor": "rrs-r1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1005",
+    "severity": "error",
+    "title": "Sandbox container exited at start",
+    "message": "The sandbox container exited at start with code {exit_code}.",
+    "basic_text": "Rastai couldn't run the sandbox this task needs. It stopped as soon as it started.",
+    "fix_text": "Check the image's start command.",
+    "docs_anchor": "rrs-r1005",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1006",
+    "severity": "error",
+    "title": "Sandbox time cap reached",
+    "message": "The sandbox reached its time cap of {time_seconds} seconds.",
+    "basic_text": "The sandbox ran out of time and was stopped.",
+    "fix_text": "Raise the time cap, or make the task shorter.",
+    "docs_anchor": "rrs-r1006",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1007",
+    "severity": "error",
+    "title": "Container engine can't pause sandboxes",
+    "message": "The container engine can't pause sandboxes.",
+    "basic_text": "Your container software can't pause sandboxes, so step mode isn't available.",
+    "fix_text": "Use Podman or Docker with pause support.",
+    "docs_anchor": "rrs-r1007",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1008",
+    "severity": "error",
+    "title": "Not enough RAM for the requested sandboxes",
+    "message": "The requested sandboxes need {needed_bytes} bytes of RAM, but {free_bytes} are free.",
+    "basic_text": "This computer doesn't have enough memory for that many sandboxes.",
+    "fix_text": "Request fewer sandboxes.",
+    "docs_anchor": "rrs-r1008",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1009",
+    "severity": "error",
+    "title": "Requested sandboxes exceed the node's sandbox cap",
+    "message": "{requested} sandboxes were requested, more than the node's cap of {cap}.",
+    "basic_text": "You asked for more sandboxes than this computer allows.",
+    "fix_text": "Request fewer sandboxes.",
+    "docs_anchor": "rrs-r1009",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1010",
+    "severity": "error",
+    "title": "Sandbox egress network or proxy unavailable; refusing an open network",
+    "message": "The sandbox egress network or proxy is unavailable; Rastai refuses to give the sandbox an open network.",
+    "basic_text": "Rastai couldn't set up the sandbox's filtered network, so it won't start the sandbox.",
+    "fix_text": "Check the container engine's network setup.",
+    "docs_anchor": "rrs-r1010",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1011",
+    "severity": "error",
+    "title": "Permission denied on the container engine socket",
+    "message": "Permission denied on the container engine socket {path}.",
+    "basic_text": "Rastai isn't allowed to use the container software.",
+    "fix_text": "Give your user access to the engine's socket, or use rootless Podman.",
+    "docs_anchor": "rrs-r1011",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1012",
+    "severity": "info",
+    "title": "Sandbox killed by its memory cap",
+    "message": "The sandbox of {rollout_id} was killed by its memory cap.",
+    "basic_text": "A sandbox used more memory than allowed and was stopped.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r1012",
+    "retired": false
+  },
+  {
+    "code": "RRS-R1013",
+    "severity": "error",
+    "title": "Container engine failed during the run, or a container can't be removed",
+    "message": "The container engine failed during the run, or a container can't be removed: {reason}.",
+    "basic_text": "Rastai couldn't run the sandbox this task needs. The container software failed.",
+    "fix_text": "Check the container engine, then try again.",
+    "docs_anchor": "rrs-r1013",
+    "retired": false
+  },
+  {
+    "code": "RRS-R2001",
+    "severity": "info",
+    "title": "Infra failure; rollout retried",
+    "message": "Rollout {rollout_id} hit an infrastructure failure and was retried.",
+    "basic_text": "One attempt failed for a technical reason and was retried.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-R2002",
+    "severity": "warning",
+    "title": "Group dropped: too few valid members",
+    "message": "Group {group_id} was dropped: only {valid_count} valid members.",
+    "basic_text": "One group of attempts had too few usable results, so it was left out.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-R2003",
+    "severity": "error",
+    "title": "Too many dropped groups in a row; run failed",
+    "message": "{count} groups were dropped in a row; the run failed.",
+    "basic_text": "Too many attempts failed, so the training stopped.",
+    "fix_text": "Check the harness and the sandboxes.",
+    "docs_anchor": "rrs-r2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-R2004",
+    "severity": "warning",
+    "title": "Reward code raised an error; rollout excluded",
+    "message": "The reward code raised on rollout {rollout_id}: {reason}.",
+    "basic_text": "The scoring code failed for one attempt, so it was left out.",
+    "fix_text": "Fix the reward code.",
+    "docs_anchor": "rrs-r2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-R2005",
+    "severity": "info",
+    "title": "Held sandbox released after the hold timeout",
+    "message": "The held sandbox of {rollout_id} was released after the hold timeout.",
+    "basic_text": "A paused sandbox was closed because it waited too long.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-R3001",
+    "severity": "error",
+    "title": "An MCP tool server failed to start in the sandbox",
+    "message": "The MCP tool server {server_name} failed to start in the sandbox: {reason}.",
+    "basic_text": "A tool the agent needs didn't start.",
+    "fix_text": "Check the tool server's command in the harness.",
+    "docs_anchor": "rrs-r3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-R3002",
+    "severity": "error",
+    "title": "A harness tool isn't offered by its server",
+    "message": "The tool {tool_name} isn't offered by its server {server_name}.",
+    "basic_text": "A tool the harness lists doesn't exist on its server.",
+    "fix_text": "Fix the tool's name in the harness.",
+    "docs_anchor": "rrs-r3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-R3003",
+    "severity": "warning",
+    "title": "A tool server crashed twice in one rollout; rollout excluded",
+    "message": "The tool server {server_name} crashed twice in rollout {rollout_id}; the rollout was excluded.",
+    "basic_text": "A tool kept crashing, so that attempt was left out.",
+    "fix_text": "",
+    "docs_anchor": "rrs-r3003",
+    "retired": false
+  }
+]

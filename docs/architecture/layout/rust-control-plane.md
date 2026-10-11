@@ -313,7 +313,8 @@ catalog/
 }
 ```
 
-- Placeholders are `{snake_case}` names. The codegen test checks that every placeholder used in Rust call sites exists in the entry (it scans for `diagnostic("RRS-...", &[("name", ...)])` with a plain text search; no macro). *Pending: M1-13 adds this scan to `catalog_checks.rs` with the `RRS-` source scan.*
+- Placeholders are `{snake_case}` names. The codegen test checks that every placeholder used in Rust call sites exists in the entry, and that the entry uses no placeholder the call doesn't fill (it scans for `diagnostic("RRS-...", &[("name", ...)])` with a plain text search; no macro). The code may be a string literal or a `const` of the same file; a call that builds its values elsewhere is skipped, and its own tests check its message. With it, the `RRS-` source scan checks that every code first-party source names outside its tests is in the catalog (both in `catalog_checks.rs`, M1-13).
+- The catalog and contracts §10.3 hold the same codes with the same severities; a row marked for a later milestone (the plugins' `RRS-L` (M4) and `RRS-V` (M5)) may wait for its entry (`catalog_checks.rs`, M1-13).
 - `fix_command_id`, when set, must be a command id in the core table or a first-party manifest. Checked by the codegen. *Pending: M1-22 adds this rule to `catalog_checks.rs` with the first rows of the core table; first-party manifests join it when the first one lands.*
 - `docs_anchor`, when set, is a lowercase kebab-case slug (`storage-disk-full`), used once among the error entries and once among the terms. It becomes an HTML id in `docs/reference/errors.md`. Checked by `catalog_checks.rs` (M1-12).
 - Terms: `{"term_id": "logit_lens", "title": "Logit lens", "basic_text": "...", "advanced_text": "...", "docs_anchor": "..."}`. Each `term_id` is listed once (`catalog_checks.rs`, M1-12).
@@ -537,7 +538,7 @@ error[RRS-E2004]: Input ranges overlap
 |---|---|---|
 | Unit | bottom of `path.rs`, `catalog.rs`, `render_text.rs` | path round trip; a missing placeholder value stays visible as `{name}`; snippet and caret at line 1, at the last line, with tabs and multi-byte characters |
 | Snapshots | `tests/render_snapshots.rs`, `fixtures/diagnostics/` (new) | plain, color-stripped and Basic output for one case per severity and path shape |
-| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); `catalog_ranges.rs` equals the contracts §10.1 table (prefixes, areas, ranges); docs anchors are kebab-case slugs used once; term ids unique (all M1-12); placeholders in call sites exist in the entry (M1-13); every `fix_command_id` exists in the core table (M1-22) or a first-party manifest (when the first one lands) |
+| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); `catalog_ranges.rs` equals the contracts §10.1 table (prefixes, areas, ranges); docs anchors are kebab-case slugs used once; term ids unique (all M1-12); the catalog's codes and severities equal contracts §10.3; every `RRS-` code in first-party source is in the catalog; placeholders in call sites exist in the entry and the other way round (M1-13); every `fix_command_id` exists in the core table (M1-22) or a first-party manifest (when the first one lands) |
 | Append-only | `tools/codegen/tests/catalog_checks.rs` (the `#[ignore]`d merge-base test, run by `just codegen-check`) | a code present at the merge base can be marked `retired` but never deleted or renumbered |
 
 ### 3.6 Ported from the spike
@@ -1138,7 +1139,8 @@ tools/codegen/
                               generator owns whole, delete the files it no longer writes
   tests/
     catalog_checks.rs         the catalog rules of 3.5 (well formed, unique, owner's file and range, never deleted
-                              since the merge base); catalog_ranges.rs equals the contracts §10.1 table; the
+                              since the merge base); catalog_ranges.rs equals the contracts §10.1 table; the codes
+                              equal contracts §10.3; the RRS- source scan and the call-site placeholder scan; the
                               merge-base test is #[ignore]d and run by `just codegen-check`
     names_registry.rs         a sample tree yields the expected names.json; output is sorted and stable; a dropped
                               column or a renamed command shows in the diff

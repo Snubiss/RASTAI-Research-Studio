@@ -16,6 +16,8 @@ use crate::semver::{Version, parse_version, version_matches};
 
 const CODE_PLUGIN_MISSING: &str = "RRS-E3001";
 const REQUIRES_POINTER: &str = "/requires";
+/// What RRS-E1004's message says a requirement must be when its range doesn't read.
+const RANGE_EXPECTED: &str = "a version range, such as ^1.2";
 // Any release does to find out whether a range reads; the answer to the match itself is thrown away.
 const RANGE_PROBE_VERSION: Version = Version {
     major: 0,
@@ -53,7 +55,13 @@ pub fn check_requirements(requires: &BTreeMap<String, String>, facts: &Environme
             json_pointer: join_pointer(REQUIRES_POINTER, plugin_id),
             ..DiagnosticPath::default()
         });
-        let values = [("plugin_id", plugin_id.as_str()), ("range", range.as_str())];
+        // `found` and `expected` are the values RRS-E1004's message names when the range doesn't read.
+        let values = [
+            ("plugin_id", plugin_id.as_str()),
+            ("range", range.as_str()),
+            ("found", range.as_str()),
+            ("expected", RANGE_EXPECTED),
+        ];
         if let Some(code) = range_problem(range) {
             diagnostics.push(diagnostic_at(code, &values, &path));
         } else if !plugin_is_satisfied(plugin_id, range, facts) {
@@ -146,5 +154,22 @@ mod tests {
             reported(&[("x", "^1")], &[("x", "one")]),
             vec![pair("RRS-E3001", "#/requires/x")]
         );
+    }
+
+    /// A placeholder without a value stays visible as `{name}` (rastai-diag), so a message with a `{` left in it is
+    /// missing a value. Only the braces are checked, not the catalog's wording.
+    #[test]
+    fn both_messages_have_every_placeholder_filled() {
+        let entries = [("a", "about one"), ("b", "^1")];
+        let diagnostics = check_requirements(&requires(&entries), &facts(&[]));
+        assert_eq!(diagnostics.len(), 2);
+        for diagnostic in diagnostics {
+            assert!(
+                !diagnostic.message.contains('{'),
+                "{}: {}",
+                diagnostic.code,
+                diagnostic.message
+            );
+        }
     }
 }
