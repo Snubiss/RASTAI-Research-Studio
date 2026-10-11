@@ -24,11 +24,11 @@
       },
       "typing-extensions": {
         "license": "PSF-2.0",
-        "reason": "Required by torch and grpcio. The Python Software Foundation license is permissive, but not one of the standard identifiers above."
+        "reason": "A transitive package of torch and grpcio; no Rastai file imports it. ADR-0012 decision 5 accepts a transitive package whose license passes, or gets an explicit, reasoned exception: this is that exception. The Python Software Foundation license is permissive, but not one of the standard identifiers above."
       },
       "torch": {
         "license": "Apache-2.0 WITH LLVM-exception",
-        "reason": "Part of PyTorch's compound license (it vendors LLVM code). The exception only widens Apache-2.0."
+        "reason": "Part of PyTorch's compound license (it vendors LLVM code). The exception only widens Apache-2.0. torch is a direct foundation package (spec §27 PyTorch row), so ADR-0012 decision 5 does not cover it: OWNER APPROVAL PENDING, requested on PR #168. Once given, record it here and in spec §27 and contracts §2.5 as pillow's is, before merge."
       }
     }
   },

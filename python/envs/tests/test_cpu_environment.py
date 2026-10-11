@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 CPU_PROJECT_FILE = Path("python/envs/cpu/pyproject.toml")
-# The import name of each locked package, where it differs from its distribution name.
+# The direct runtime packages of the cpu lock, each with its import name (grpcio and protobuf import as another name).
 IMPORT_NAMES = {"torch": "torch", "tokenizers": "tokenizers", "grpcio": "grpc", "protobuf": "google.protobuf"}
 
 
@@ -44,7 +44,7 @@ def test_installed_versions_match_the_pins(repo_root: Path) -> None:
 
 
 @pytest.mark.parametrize("distribution_name", sorted(IMPORT_NAMES))
-def test_locked_package_imports(distribution_name: str) -> None:
+def test_direct_runtime_package_imports(distribution_name: str) -> None:
     importlib.import_module(IMPORT_NAMES[distribution_name])
 
 

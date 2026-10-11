@@ -12,3 +12,7 @@ minimumReleaseAge: 20160
 
 # No "update available" banner: pnpm is pinned in package.json (packageManager) and updated by a deliberate PR.
 updateNotifier: false
+
+# Refuse any Node.js but the exact one package.json `engines.node` names (the justfile header gives its download
+# and SHA-256). pnpm checks the root project's engines only when this is on.
+engineStrict: true
