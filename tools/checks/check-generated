@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""check-generated: checked-in generated code equals a fresh codegen run (contracts 2.4 rule 2, `just codegen-check`).
+
+Generated folders are never edited by hand and aren't reviewed, so CI proves them instead: every generator
+writes into a temporary tree and each of its output folders must match the checked-in one file for file.
+Until the codegen tasks land (M1-08 buf, M1-12 the rastai-codegen binaries) the generator list is empty and the
+check passes with a note; each of those tasks adds its row to GENERATORS.
+"""
+
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from repo_files import parse_root_argument, report
+
+# Replaced in a generator's command by the temporary folder it must write into, laid out like the repository.
+OUTPUT_ROOT_PLACEHOLDER = "{output_root}"
+# How much of a failing generator's error output to show.
+ERROR_OUTPUT_LINES = 20
+
+
+@dataclass(frozen=True)
+class Generator:
+    """One codegen step: the command (run from the repository root) and the folders it owns, relative to the
+    repository root. The command writes those folders under OUTPUT_ROOT_PLACEHOLDER instead of in place."""
+
+    name: str
+    command: list[str]
+    outputs: list[str]
+
+
+# The codegen steps of `just codegen`, in its order (layout rust-control-plane.md 2.5). Empty until M1-08 and M1-12.
+GENERATORS: list[Generator] = []
+
+
+def main() -> int:
+    root = parse_root_argument("Regenerates every generated folder into a temporary tree and fails on any change.")
+    if not GENERATORS:
+        print("check-generated: no generators yet (M1-08 and M1-12 add them); nothing to compare")
+        return 0
+    problems = find_stale_files(root, GENERATORS)
+    return report("check-generated", problems, "every generated folder matches a fresh codegen run")
+
+
+def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
+    problems = []
+    with tempfile.TemporaryDirectory(prefix="rastai-check-generated-") as temporary_folder:
+        output_root = Path(temporary_folder)
+        for generator in generators:
+            problems.extend(run_generator(root, generator, output_root))
+            for folder in generator.outputs:
+                problems.extend(compare_folders(root, output_root, folder))
+    return problems
+
+
+def run_generator(root: Path, generator: Generator, output_root: Path) -> list[str]:
+    command = [part.replace(OUTPUT_ROOT_PLACEHOLDER, str(output_root)) for part in generator.command]
+    result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+    if result.returncode == 0:
+        return []
+    error_lines = result.stderr.strip().splitlines()[-ERROR_OUTPUT_LINES:]
+    return [f"{generator.name} failed (exit {result.returncode}):"] + error_lines
+
+
+def compare_folders(root: Path, output_root: Path, folder: str) -> list[str]:
+    """Problems for one output folder: files codegen writes that aren't checked in, checked-in files it no longer
+    writes, and files whose bytes differ."""
+    checked_in = files_in(root / folder)
+    regenerated = files_in(output_root / folder)
+    problems = []
+    for name in sorted(regenerated - checked_in):
+        problems.append(f"{folder}/{name}: missing; run `just codegen` and commit the result")
+    for name in sorted(checked_in - regenerated):
+        problems.append(f"{folder}/{name}: codegen no longer writes it; delete it")
+    for name in sorted(checked_in & regenerated):
+        if (root / folder / name).read_bytes() != (output_root / folder / name).read_bytes():
+            problems.append(f"{folder}/{name}: differs from a fresh codegen run; never edit it, run `just codegen`")
+    return problems
+
+
+def files_in(folder: Path) -> set[str]:
+    """Every file below folder, as relative paths with / separators. A folder that doesn't exist holds none."""
+    if not folder.is_dir():
+        return set()
+    return {path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file()}
+
+
+if __name__ == "__main__":
+    sys.exit(main())

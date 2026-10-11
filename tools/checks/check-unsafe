@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""check-unsafe: no Rust `unsafe` outside the files an ADR names (contracts 12.2, ADR-0033).
+
+The workspace lint `unsafe_code = "deny"` can be switched off with an #[allow] anywhere; this check is what keeps
+the exception list honest. Today the list has one file and one block: the statvfs call in disk_space.rs.
+"""
+
+import re
+import sys
+from pathlib import Path
+
+from repo_files import line_number_at, list_files, parse_root_argument, read_text, report
+
+# File -> how many `unsafe` uses its ADR allows. Adding a file here needs an ADR that names it.
+ALLOWED_UNSAFE_USES = {
+    "crates/rastai-store/src/disk_space.rs": 1,  # ADR-0033: one libc::statvfs call
+}
+# The Rust syntax that is unsafe: a block, a function, an impl, a trait, an extern block and the edition-2024
+# unsafe attributes such as #[unsafe(no_mangle)]. Matching the syntax, not the bare word, lets a message such as
+# "unsafe path" in a string pass.
+UNSAFE_SYNTAX = re.compile(r"\bunsafe\s*(\{|\(|fn\b|impl\b|trait\b|extern\b)")
+# A line comment, so `// no unsafe { } here` doesn't count.
+LINE_COMMENT = re.compile(r"//.*")
+
+
+def main() -> int:
+    root = parse_root_argument("Fails on Rust unsafe code outside the files an ADR allows.")
+    problems = find_problems(root)
+    return report("check-unsafe", problems, "no unsafe outside the ADR exception list")
+
+
+def find_problems(root: Path) -> list[str]:
+    problems = []
+    for path in list_files(root, (".rs",)):
+        problems.extend(check_file(root, path))
+    return problems
+
+
+def check_file(root: Path, path: str) -> list[str]:
+    code = LINE_COMMENT.sub("", read_text(root, path))
+    uses = list(UNSAFE_SYNTAX.finditer(code))
+    allowed_count = ALLOWED_UNSAFE_USES.get(path, 0)
+    if len(uses) <= allowed_count:
+        return []
+    if allowed_count == 0:
+        return [f"{path}:{line_number_at(code, use.start())}: `unsafe` outside the ADR exception list" for use in uses]
+    return [f"{path}: {len(uses)} `unsafe` uses, but its ADR allows {allowed_count}"]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

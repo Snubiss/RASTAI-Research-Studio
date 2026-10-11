@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""check-dco: every commit in a range carries a Signed-off-by that matches its author (CONTRIBUTING.md, plan 8.6).
+
+The `dco` CI job runs it on a pull request's commits. It is in-house, so no GitHub App is needed. Merge commits
+are skipped: they add no authored change of their own (git's merge of a base branch, or GitHub's own merges).
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+from repo_files import REPO_ROOT, report
+
+# The commits a pull request adds, when no range is given.
+DEFAULT_RANGE = "origin/main..HEAD"
+SIGN_OFF_PREFIX = "Signed-off-by:"
+# git log fields, split by the unit separator, which can't appear in a name, an email or a commit message.
+FIELD_SEPARATOR = "\x1f"
+COMMIT_FORMAT = FIELD_SEPARATOR.join(["%H", "%an", "%ae", "%B"])
+
+
+def main() -> int:
+    repository, commit_range = parse_arguments()
+    problems = find_problems(repository, commit_range)
+    return report("check-dco", problems, f"every commit in {commit_range} is signed off by its author")
+
+
+def parse_arguments() -> tuple[Path, str]:
+    parser = argparse.ArgumentParser(description="Fails on a commit without a Signed-off-by from its author.")
+    parser.add_argument("range", nargs="?", default=DEFAULT_RANGE, help=f"commit range (default: {DEFAULT_RANGE})")
+    parser.add_argument("--repo", type=Path, default=REPO_ROOT, help="the git repository (default: this one)")
+    arguments = parser.parse_args()
+    return arguments.repo, arguments.range
+
+
+def find_problems(repository: Path, commit_range: str) -> list[str]:
+    problems = []
+    for commit in list_commits(repository, commit_range):
+        problems.extend(check_commit(repository, commit))
+    return problems
+
+
+def list_commits(repository: Path, commit_range: str) -> list[str]:
+    output = run_git(repository, ["rev-list", "--no-merges", "--reverse", commit_range])
+    return output.split()
+
+
+def check_commit(repository: Path, commit: str) -> list[str]:
+    fields = run_git(repository, ["show", "--no-patch", f"--format={COMMIT_FORMAT}", commit])
+    commit_hash, author_name, author_email, message = fields.split(FIELD_SEPARATOR, 3)
+    author = f"{author_name} <{author_email}>"
+    sign_offs = find_sign_offs(message)
+    if any(is_same_person(sign_off, author_name, author_email) for sign_off in sign_offs):
+        return []
+    short_hash = commit_hash[:12]
+    if not sign_offs:
+        return [f"{short_hash}: no Signed-off-by line; sign it with `git commit -s` (author {author})"]
+    return [f"{short_hash}: signed off by {', '.join(sign_offs)}, but the author is {author}"]
+
+
+def find_sign_offs(message: str) -> list[str]:
+    """The "Name <email>" of every Signed-off-by line in a commit message."""
+    sign_offs = []
+    for line in message.splitlines():
+        if line.startswith(SIGN_OFF_PREFIX):
+            sign_offs.append(line[len(SIGN_OFF_PREFIX) :].strip())
+    return sign_offs
+
+
+def is_same_person(sign_off: str, author_name: str, author_email: str) -> bool:
+    """The name must match exactly; the email ignores case, because mail addresses do."""
+    name, _, email_part = sign_off.partition(" <")
+    email = email_part.removesuffix(">")
+    return name == author_name and email.lower() == author_email.lower()
+
+
+def run_git(repository: Path, arguments: list[str]) -> str:
+    result = subprocess.run(["git", "-C", str(repository)] + arguments, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"check-dco: git {' '.join(arguments)} failed: {result.stderr.strip()}")
+        sys.exit(2)
+    return result.stdout
+
+
+if __name__ == "__main__":
+    sys.exit(main())

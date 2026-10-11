@@ -23,8 +23,8 @@
 #     corepack enable --install-directory ~/.local/bin pnpm
 #     package.json `packageManager` pins pnpm 12.7.0 with its sha512, and corepack refuses a download that differs.
 #
-# Later tasks add their recipes here: the repo checks (M1-05), codegen (M1-12), proto (M1-08),
-# check-names (M1-57) and check-schema-diff (M1-58).
+# Later tasks add their recipes here: codegen (M1-12), proto (M1-08), check-names (M1-57) and
+# check-schema-diff (M1-58).
 
 # `deny` refuses any other cargo-deny version, so every machine reads deny.toml the same way.
 cargo_deny_version := "0.20.2"
@@ -33,11 +33,17 @@ fuzz_toolchain := "nightly-2026-09-27"
 cargo_fuzz_version := "0.13.2"
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
+# The repo checks in tools/checks are standard-library Python scripts. They run on the cpu environment's Python,
+# so every machine runs them with the same interpreter.
+check_python := cpu_environment / "bin/python"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build and dependency policy.
-check: fmt-check lint check-js test-rust test-python test-js wasm deny
+# The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: CI's `dco` job runs it
+# on a pull request's commits.
+# The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
+check: fmt-check lint check-js test-rust test-python test-js wasm deny \
+    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check
 
 # Build every crate in the workspace. --locked: Cargo.lock is checked in and never silently changes.
 build:
@@ -47,12 +53,13 @@ build:
 test-rust:
     cargo test --workspace --locked
 
-# Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml), JavaScript, JSON, CSS and YAML by
-# prettier (.prettierrc.json, .prettierignore). All three use 120 columns.
+# Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml extends it for
+# the repo checks), JavaScript, JSON, CSS and YAML by prettier (.prettierrc.json, .prettierignore). All three use
+# 120 columns.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
-    "{{cpu_environment}}/bin/ruff" format --check python
+    "{{cpu_environment}}/bin/ruff" format --check python tools/checks
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -64,7 +71,7 @@ wasm:
 # clippy and ruff check; every warning fails.
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    "{{cpu_environment}}/bin/ruff" check python
+    "{{cpu_environment}}/bin/ruff" check python tools/checks
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one
@@ -79,10 +86,12 @@ env-js:
     pnpm install --frozen-lockfile
 
 # Settings and markers are in python/pyproject.toml; python/conftest.py skips gpu tests without a device and
-# posix_only tests on Windows.
-# pytest over python/ in the cpu environment.
+# posix_only tests on Windows. tools/checks/tests runs every repo check on passing and failing fixture trees, with
+# its own settings in tools/checks/pyproject.toml.
+# pytest over python/ and tools/checks/tests in the cpu environment.
 test-python: env-cpu
     cd python && "{{cpu_environment}}/bin/python" -m pytest
+    cd tools/checks && "{{cpu_environment}}/bin/python" -m pytest
 
 # The test files are listed in vitest.config.js.
 # vitest over the whole JavaScript workspace.
@@ -125,3 +134,40 @@ fuzz crate target seconds="60":
     # against the same dependency versions every night.
     cd "crates/{{crate}}"
     cargo +{{fuzz_toolchain}} fuzz run "{{target}}" -- -max_total_time="{{seconds}}"
+
+# ---- Repo checks (layout rust-control-plane.md 2.1 and 2.3). Each is one script in tools/checks. ----
+
+# It reads pnpm's installed packages for npm licenses, so it needs env-js; cargo metadata needs no network.
+# Every crate, Python package and npm package against its allowlist (Cargo.toml metadata, deps/allowlist-*.json).
+check-deps: env-cpu env-js
+    "{{check_python}}" tools/checks/check-deps
+
+# No Rust `unsafe` outside the files an ADR names: today only crates/rastai-store/src/disk_space.rs (ADR-0033).
+check-unsafe: env-cpu
+    "{{check_python}}" tools/checks/check-unsafe
+
+# No pickle, torch.load, torch.save, torch.distributed.checkpoint or pickle-format weights (contracts 12.3).
+check-no-pickle: env-cpu
+    "{{check_python}}" tools/checks/check-no-pickle
+
+# Python and JavaScript layering, public-API rules and the one wrapper file per library (contracts 2.4, 2.5).
+check-imports: env-cpu
+    "{{check_python}}" tools/checks/check-imports
+
+# No color literal in frontend code outside @rastai/ui's tokens (contracts 5.6).
+check-colors: env-cpu
+    "{{check_python}}" tools/checks/check-colors
+
+# No .ts, .tsx or .d.ts file outside the generated folders (ADR-0036).
+check-no-typescript: env-cpu
+    "{{check_python}}" tools/checks/check-no-typescript
+
+# Until M1-08 and M1-12 add the generators it passes with a note.
+# Checked-in generated code equals a fresh codegen run into a temporary tree.
+codegen-check: env-cpu
+    "{{check_python}}" tools/checks/check-generated
+
+# CI's `dco` job passes the pull request's range; locally it checks the commits not yet on origin/main.
+# Every commit in the range carries a Signed-off-by matching its author (CONTRIBUTING.md).
+check-dco range="origin/main..HEAD": env-cpu
+    "{{check_python}}" tools/checks/check-dco "{{range}}"

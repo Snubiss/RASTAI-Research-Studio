@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""check-no-pickle: no pickle anywhere (CLAUDE.md hard rules, contracts 12.3, python layout 1.4 rule 1).
+
+Weights are safetensors and checkpoints are safetensors plus JSON. This check reads every Python file's syntax
+tree, so a comment or a string that mentions pickle passes and an aliased import (`import torch as t; t.load`)
+doesn't slip through. It also fails on pickle-format files (`.bin` weights and their cousins) in the tree.
+ruff's banned-api rule (python/pyproject.toml) catches the plain imports too, as you type.
+"""
+
+import ast
+import sys
+from pathlib import Path
+
+from repo_files import list_files, parse_root_argument, read_text, report
+
+# Modules and functions that pickle or unpickle, with the reason shown to the author. A name matches itself
+# and everything below it: "torch.distributed.checkpoint" also covers "torch.distributed.checkpoint.save".
+BANNED_NAMES = {
+    "pickle": "pickle runs code when it loads; use safetensors plus JSON",
+    "_pickle": "pickle runs code when it loads; use safetensors plus JSON",
+    "cPickle": "pickle runs code when it loads; use safetensors plus JSON",
+    "shelve": "shelve stores pickles",
+    "dill": "dill is pickle",
+    "cloudpickle": "cloudpickle is pickle",
+    "joblib": "joblib stores pickles",
+    "torch.load": "torch.load unpickles; read safetensors through the wheel and rastai_models.io",
+    "torch.save": "torch.save pickles; write safetensors plus JSON",
+    "torch.serialization": "torch.serialization is the pickle format behind torch.load and torch.save",
+    "torch.jit.load": "TorchScript archives hold pickled data",
+    "torch.jit.save": "TorchScript archives hold pickled data",
+    "torch.distributed.checkpoint": "its metadata file is pickled; checkpoints are safetensors plus JSON",
+    "multiprocessing": "multiprocessing pickles what it sends to a child process",
+    "torch.multiprocessing": "torch.multiprocessing pickles what it sends to a child process",
+    "concurrent.futures.ProcessPoolExecutor": "a process pool pickles every task and result",
+}
+# Function and argument names that mean pickle wherever they appear: the torch.distributed object collectives
+# pickle the objects they send, and numpy's and pandas' pickle switches.
+BANNED_IDENTIFIERS = {
+    "broadcast_object_list": "the *_object collectives pickle what they send",
+    "all_gather_object": "the *_object collectives pickle what they send",
+    "gather_object": "the *_object collectives pickle what they send",
+    "scatter_object_list": "the *_object collectives pickle what they send",
+    "send_object_list": "the *_object collectives pickle what they send",
+    "recv_object_list": "the *_object collectives pickle what they send",
+    "allow_pickle": "allow_pickle loads pickled arrays",
+    "read_pickle": "read_pickle unpickles",
+    "to_pickle": "to_pickle pickles",
+}
+# Pickle-format files: PyTorch's .bin, .pt and .pth weights and plain pickles. Weights are safetensors.
+PICKLE_FILE_SUFFIXES = (".bin", ".pt", ".pth", ".pkl", ".pickle")
+# The first line of a Python script without a .py ending (the checks in tools/checks are such scripts).
+PYTHON_SHEBANG_START = "#!/usr/bin/env python"
+
+
+def main() -> int:
+    root = parse_root_argument("Fails on pickle, torch.load, torch.save and pickle-format files.")
+    problems = find_problems(root)
+    return report("check-no-pickle", problems, "no pickle found")
+
+
+def find_problems(root: Path) -> list[str]:
+    problems = []
+    for path in list_files(root, PICKLE_FILE_SUFFIXES):
+        problems.append(f"{path}: pickle-format file; weights are safetensors, checkpoints safetensors plus JSON")
+    for path in list_python_files(root):
+        problems.extend(check_python_file(root, path))
+    return problems
+
+
+def list_python_files(root: Path) -> list[str]:
+    scripts = [path for path in list_files(root, ("",)) if "." not in Path(path).name and is_python_script(root, path)]
+    return sorted(list_files(root, (".py",)) + scripts)
+
+
+def is_python_script(root: Path, path: str) -> bool:
+    with open(root / path, "rb") as file:
+        first_line = file.readline(len(PYTHON_SHEBANG_START))
+    return first_line == PYTHON_SHEBANG_START.encode()
+
+
+def check_python_file(root: Path, path: str) -> list[str]:
+    try:
+        tree = ast.parse(read_text(root, path), filename=path)
+    except SyntaxError as error:
+        return [f"{path}:{error.lineno}: can't be parsed, so it can't be checked: {error.msg}"]
+    findings = find_banned_uses(tree)
+    return [f"{path}:{line}: {reason}" for line, reason in sorted(findings)]
+
+
+def find_banned_uses(tree: ast.AST) -> set[tuple[int, str]]:
+    """(line, reason) for every banned import, dotted name and identifier. A set, because `torch.load.x` is
+    seen once for each of its prefixes and should be reported once."""
+    aliases = import_aliases(tree)
+    findings = set()
+    for node in ast.walk(tree):
+        for name in names_used_by(node, aliases):
+            reason = banned_reason(name)
+            if reason:
+                findings.add((node.lineno, f"`{name}`: {reason}"))
+    return findings
+
+
+def import_aliases(tree: ast.AST) -> dict[str, str]:
+    """Local name -> the full module or object it stands for: `import torch as t` gives t -> torch."""
+    aliases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name.split(".")[0]
+                aliases[local_name] = alias.name if alias.asname else local_name
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return aliases
+
+
+def names_used_by(node: ast.AST, aliases: dict[str, str]) -> list[str]:
+    """The full dotted names and bare identifiers one syntax node uses."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        return [node.module] + [f"{node.module}.{alias.name}" for alias in node.names] + import_from_names(node)
+    if isinstance(node, ast.Attribute):
+        return [node.attr] + resolved_dotted_name(node, aliases)
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.keyword) and node.arg:
+        return [node.arg]
+    return []
+
+
+def import_from_names(node: ast.ImportFrom) -> list[str]:
+    return [alias.name for alias in node.names]
+
+
+def resolved_dotted_name(node: ast.Attribute, aliases: dict[str, str]) -> list[str]:
+    """`t.load` with t -> torch gives ["torch.load"]; a chain that doesn't start at a plain name gives []."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return []
+    parts.append(aliases.get(node.id, node.id))
+    return [".".join(reversed(parts))]
+
+
+def banned_reason(name: str) -> str | None:
+    if name in BANNED_IDENTIFIERS:
+        return BANNED_IDENTIFIERS[name]
+    for banned_name, reason in BANNED_NAMES.items():
+        if name == banned_name or name.startswith(banned_name + "."):
+            return reason
+    return None
+
+
+if __name__ == "__main__":
+    sys.exit(main())

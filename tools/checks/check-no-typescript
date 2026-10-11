@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""check-no-typescript: no TypeScript file outside the generated folders (ADR-0036, contracts 2.4 rule 11).
+
+Hand-written frontend, plugin-UI and SDK code is .js and .jsx with JSDoc types. Generated code may carry .d.ts
+declarations (protobuf-es writes js+dts), so the generated folders are the only place a TypeScript file may be.
+TypeScript syntax inside a .js file is caught by `just check-js` (tsc refuses type annotations in .js files).
+"""
+
+import sys
+from pathlib import Path
+
+from repo_files import list_files, parse_root_argument, report
+
+# Every TypeScript source and declaration ending: ".ts" also matches ".d.ts", and ".mts" and ".cts" match the
+# module variants and their declarations.
+TYPESCRIPT_SUFFIXES = (".ts", ".tsx", ".mts", ".cts")
+# The generated folders of the frontend layout 1.1 and contracts 12.4. A path is generated when it starts with
+# one of GENERATED_FOLDERS or contains GENERATED_FOLDER_PART (each package's and plugin UI's src/generated/).
+GENERATED_FOLDERS = ("packages/proto/", "packages/catalog/")
+GENERATED_FOLDER_PART = "/src/generated/"
+
+
+def main() -> int:
+    root = parse_root_argument("Fails on any .ts, .tsx or .d.ts file outside the generated folders.")
+    problems = find_problems(root)
+    return report("check-no-typescript", problems, "no TypeScript outside the generated folders")
+
+
+def find_problems(root: Path) -> list[str]:
+    problems = []
+    for path in list_files(root, TYPESCRIPT_SUFFIXES):
+        if not is_generated(path):
+            problems.append(f"{path}: TypeScript file outside the generated folders; write .js or .jsx with JSDoc")
+    return problems
+
+
+def is_generated(path: str) -> bool:
+    return path.startswith(GENERATED_FOLDERS) or GENERATED_FOLDER_PART in f"/{path}"
+
+
+if __name__ == "__main__":
+    sys.exit(main())
