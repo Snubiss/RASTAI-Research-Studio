@@ -1,0 +1,18 @@
+# prettier formats the JavaScript workspace: .js, .jsx, .json, .css, .html and .yaml files (owner decision 7).
+# It skips what people write as prose, what tools write, and what is history.
+
+# Prose: the design docs and READMEs keep their hand-made line breaks and tables.
+*.md
+docs/
+
+# Generated, never edited by hand; check-generated diffs it against a fresh codegen run instead.
+schemas/
+packages/proto/
+packages/catalog/
+**/src/generated/
+pnpm-lock.yaml
+
+# History and local output.
+spike/
+target/
+.dev/

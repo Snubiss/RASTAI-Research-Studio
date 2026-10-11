@@ -1,0 +1,14 @@
+# The JavaScript workspace (contracts §1; layout: frontend-and-plugins.md section 1).
+# A package joins by having its folder here, the same way a crate joins Cargo.toml.
+# The root package.json holds only the dev tools: the typescript checker, vitest and prettier.
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "plugins/*/ui"
+
+# Supply-chain guard, the same rule as the uv locks' exclude-newer: never resolve a version published in the
+# last 14 days (in minutes), the window in which a compromised upload is usually caught.
+minimumReleaseAge: 20160
+
+# No "update available" banner: pnpm is pinned in package.json (packageManager) and updated by a deliberate PR.
+updateNotifier: false

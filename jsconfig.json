@@ -1,0 +1,4 @@
+{
+  "extends": "./jsconfig.base.json",
+  "include": ["apps/*/src", "packages/*/src", "plugins/*/ui/src", "tests/workspace", "vitest.config.js"]
+}

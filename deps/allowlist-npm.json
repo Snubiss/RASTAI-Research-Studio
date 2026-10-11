@@ -1,0 +1,47 @@
+{
+  "format_version": 1,
+  "about": "The npm packages spec §27 allows, as data (contracts §1 and §2.5). Lists the direct dependencies of every package.json in the pnpm workspace, with the exact version pnpm-lock.yaml holds, the §27 category and the reason. Their transitive packages are accepted when they pass `licenses` (ADR-0012 decision 5). check-deps (M1-05) fails a direct dependency or version not listed here, and a license outside `licenses` anywhere in the lock.",
+  "locks": ["pnpm-lock.yaml"],
+  "licenses": {
+    "allowed": [
+      "Apache-2.0",
+      "MIT",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "ISC",
+      "Unicode-3.0",
+      "Zlib",
+      "CC0-1.0",
+      "MPL-2.0",
+      "BSL-1.0",
+      "CDLA-Permissive-2.0"
+    ],
+    "named_entries": {}
+  },
+  "packages": {
+    "pnpm": {
+      "version": "12.7.0",
+      "category": "dev",
+      "license": "MIT",
+      "reason": "the JavaScript workspace and its lockfile; pinned with its sha512 in package.json packageManager, which corepack checks"
+    },
+    "typescript": {
+      "version": "7.0.2",
+      "category": "dev",
+      "license": "Apache-2.0",
+      "reason": "the checkJs checker only: `just check-js` runs tsc --noEmit over jsconfig.json; never emits or ships, nobody writes TypeScript (ADR-0036)"
+    },
+    "vitest": {
+      "version": "5.0.2",
+      "category": "dev",
+      "license": "MIT",
+      "reason": "JavaScript unit tests (`just test-js`); brings vite, the frontend build"
+    },
+    "prettier": {
+      "version": "3.9.9",
+      "category": "dev",
+      "license": "MIT",
+      "reason": "JavaScript, JSON, CSS and YAML formatting inside `just check` (owner decision 7)"
+    }
+  }
+}
