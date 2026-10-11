@@ -1,0 +1,84 @@
+# The Rust workspace root (layout: rust-control-plane.md section 2.2).
+# Every crate inherits its package fields and lints from here, and every external crate is declared here once.
+
+[workspace]
+resolver = "3"
+# Each crate's own PR adds its line, in the build order of rust-control-plane.md section 2.2:
+# rastai-diag, rastai-proto, rastai-formats, its wasm and python bindings, rastai-core, rastai-plugin, rastai-store,
+# rastai-transport, rastai-sandbox, rastai-gateway, rastai-mcp, rastai-node, rastai-archive, rastai-server,
+# rastai-cli, apps/desktop/src-tauri, tools/codegen, tests/crash.
+# Cargo refuses a member folder that doesn't exist yet, which is why the list starts short.
+members = [
+  "crates/rastai-diag",
+]
+# cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
+exclude = [
+  "crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz", "crates/rastai-mcp/fuzz",
+  "crates/rastai-transport/fuzz", "crates/rastai-node/fuzz", "crates/rastai-archive/fuzz", "spike",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+
+[workspace.dependencies]
+# Every external crate is declared here once, with an exact version (=), so Cargo.lock and the allowlist agree
+# and an update is a deliberate PR. Member crates write `tokio = { workspace = true }` and turn on only the
+# features they use. The reason and allowed users of each one are in [workspace.metadata.rastai.allowlist] below.
+# Versions are the ones the spike measured with.
+tokio = { version = "=1.53.0", default-features = false }
+axum = { version = "=0.8.9", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+# Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
+# prost, tonic, hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc, blake3, miniz_oxide,
+# ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build, tauri-plugin-updater,
+# mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
+
+[workspace.lints.rust]
+unsafe_code = "deny"           # deny, not forbid, so ADR-0033 can allow one named function; check-unsafe keeps the list honest
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"           # tests opt out with #[allow] at the test module
+expect_used = "warn"
+dbg_macro = "deny"
+todo = "deny"
+print_stdout = "deny"          # only rastai-cli/src/output.rs and codegen bins print; they allow it per file
+too_many_lines = "warn"        # 60 lines, from clippy.toml: small functions
+cognitive_complexity = "warn"  # 15, from clippy.toml
+
+[workspace.metadata.rastai.allowlist]
+# The spec §27 crate table as data (contracts §2.1 and §2.5), so there is one place to read it.
+# crate = { category, reason, users }. check-deps (M1-05) fails if a member uses a crate not listed,
+# or a crate a member isn't listed for. "*" means every member crate.
+serde                = { category = "foundation", reason = "document and JSON types", users = ["*"] }
+serde_json           = { category = "foundation", reason = "JSON values and text", users = ["*"] }
+tokio                = { category = "foundation", reason = "async runtime", users = ["rastai-server", "rastai-node", "rastai-gateway", "rastai-mcp", "rastai-transport", "rastai-sandbox", "rastai-plugin", "rastai-cli", "rastai-store", "rastai-archive", "rastai-crash-tests"] }
+axum                 = { category = "foundation", reason = "HTTP server routing", users = ["rastai-server", "rastai-gateway"] }
+prost                = { category = "compatibility", reason = "protobuf messages", users = ["rastai-proto", "rastai-store", "rastai-server", "rastai-cli"] }
+tonic                = { category = "compatibility", reason = "gRPC services and channels", users = ["rastai-proto", "rastai-plugin", "rastai-transport", "rastai-gateway", "rastai-node", "rastai-server"] }
+hyper                = { category = "foundation", reason = "HTTP client and the sandbox engine socket", users = ["rastai-transport", "rastai-sandbox"] }
+hyper-util           = { category = "foundation", reason = "HTTP client helpers", users = ["rastai-transport", "rastai-sandbox"] }
+rustls               = { category = "security", reason = "TLS, and SHA-256 and HMAC from its crypto provider", users = ["rastai-transport"] }
+tokio-rustls         = { category = "security", reason = "TLS on tokio streams", users = ["rastai-transport"] }
+webpki-roots         = { category = "security", reason = "TLS root certificates", users = ["rastai-transport"] }
+tower                = { category = "foundation", reason = "the connector tonic needs on Unix sockets", users = ["rastai-transport"] }
+rusqlite             = { category = "foundation", reason = "SQLite (bundled)", users = ["rastai-store"] }
+libc                 = { category = "foundation", reason = "one statvfs call (ADR-0033)", users = ["rastai-store"] }
+blake3               = { category = "security", reason = "content hashes, blob names", users = ["rastai-formats"] }   # every other crate hashes through rastai_formats::hashing
+miniz_oxide          = { category = "compatibility", reason = "zip inflate (ADR-0037)", users = ["rastai-formats"] }
+ed25519-dalek        = { category = "security", reason = "node and daemon identity, update signatures", users = ["rastai-node"] }   # the daemon signs through rastai_node::identity
+tokenizers           = { category = "compatibility", reason = "Hugging Face tokenizers", users = ["rastai-gateway"] }
+minijinja            = { category = "compatibility", reason = "chat templates", users = ["rastai-gateway"] }
+keyring              = { category = "security", reason = "OS keychain", users = ["rastai-server"] }
+mysql_async          = { category = "compatibility", reason = "MySQL client for the long-term archive", users = ["rastai-archive"] }
+wasm-bindgen         = { category = "foundation", reason = "the rastai-formats WASM build", users = ["rastai-formats-wasm"] }
+pyo3                 = { category = "foundation", reason = "the rastai-formats wheel", users = ["rastai-formats-python"] }
+tauri                = { category = "foundation", reason = "desktop shell", users = ["rastai-desktop"] }
+tauri-build          = { category = "foundation", reason = "desktop shell build script", users = ["rastai-desktop"] }
+tauri-plugin-updater = { category = "foundation", reason = "desktop self-update", users = ["rastai-desktop"] }
+libfuzzer-sys        = { category = "dev", reason = "fuzz targets (contracts §12.5)", users = ["*"] }   # dev dependencies of the fuzz crates only

@@ -1,0 +1,5 @@
+# Thresholds for the workspace lints in Cargo.toml (layout: rust-control-plane.md sections 2.1 and 2.3).
+# They keep functions small and readable, the owner's style (ADR-0023).
+too-many-lines-threshold = 60
+too-many-arguments-threshold = 6
+cognitive-complexity-threshold = 15

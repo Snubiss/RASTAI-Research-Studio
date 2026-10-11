@@ -1,0 +1,8 @@
+# One Rust toolchain for every developer and CI runner (layout: rust-control-plane.md section 2.1).
+# 1.99.0 is the version the spike was built and measured with. A toolchain update is a deliberate PR.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+# rastai-diag and rastai-formats also build for the browser (just wasm).
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
