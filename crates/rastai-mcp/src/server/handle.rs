@@ -8,16 +8,12 @@
 
 use rastai_core::commands::naming::command_id_from_mcp_tool_name;
 use rastai_core::time::now_unix_ms;
-use rastai_diag::diagnostic::diagnostic;
 use serde_json::{Value, json};
 
-use crate::error::McpError;
-use crate::jsonrpc::{INVALID_PARAMS, JsonRpcId, JsonRpcMessage, METHOD_NOT_FOUND, diagnostic_reply, error_reply};
+use crate::error::{McpError, malformed_message};
+use crate::jsonrpc::{INVALID_PARAMS, JsonRpcId, JsonRpcMessage, METHOD_NOT_FOUND, error_reply};
 use crate::server::session::{McpSession, initialize_session, mark_initialized, require_initialize};
 use crate::server::tools::{McpTool, tools_list_result};
-
-/// A tool name the session doesn't list (contracts 10.3).
-const CODE_UNKNOWN_COMMAND: &str = "RRS-C0001";
 
 /// What the caller must do next. Plain data out, so rastai-mcp needs no callback into the daemon.
 #[derive(Debug, Clone, PartialEq)]
@@ -34,8 +30,8 @@ pub enum McpStep {
     NoReply,
 }
 
-/// Handles one message of this session. `tools` are the session principal's (`tools_for_principal`): a tool call
-/// asks to execute only a tool listed there, so an MCP client can never reach a command its token can't see.
+/// Handles one message of this session. `tools` are the session principal's (`tools_for_principal`), which
+/// `tools/list` shows. A `tools/call` isn't checked against them: `execute_command` decides (layout 7.5).
 pub fn handle_message(session: &mut McpSession, message: JsonRpcMessage, tools: &[McpTool]) -> McpStep {
     session.last_used_unix_ms = now_unix_ms();
     match message {
@@ -54,7 +50,7 @@ fn handle_request(session: &mut McpSession, id: JsonRpcId, method: &str, params:
         "initialize" => initialize_session(session, params).map(|result| reply(&id, result)),
         "ping" => Ok(reply(&id, json!({}))),
         "tools/list" => require_initialize(session).map(|()| reply(&id, tools_list_result(tools))),
-        "tools/call" => require_initialize(session).and_then(|()| call_tool(&id, params, tools)),
+        "tools/call" => require_initialize(session).and_then(|()| call_tool(&id, params)),
         _ => Err(unknown_method(method)),
     };
     match step {
@@ -71,29 +67,32 @@ fn handle_notification(session: &mut McpSession, method: &str) {
     }
 }
 
-/// A listed tool becomes `ExecuteTool` with its arguments as JSON text. A name the session doesn't list is refused
-/// here (JSON-RPC `-32602`, as MCP says for an unknown tool) and never reaches the daemon.
-fn call_tool(id: &JsonRpcId, params: &Value, tools: &[McpTool]) -> Result<McpStep, McpError> {
+/// Any tool name becomes `ExecuteTool` with its command id and its arguments as JSON text. Whether the command
+/// exists, the principal holds its scope and its plugin is on is `execute_command`'s decision (flows/platform.md
+/// 3.2: `RRS-C0001`, `RRS-C1005`, `RRS-C0003`), so an MCP client gets the same answer the CLI would. Refusing
+/// unlisted names here would answer a missing scope as an unknown command.
+fn call_tool(id: &JsonRpcId, params: &Value) -> Result<McpStep, McpError> {
     let Some(Value::String(name)) = params.get("name") else {
-        return Err(invalid_params("tools/call needs \"name\" as a string"));
+        return Err(malformed_message(
+            "tools/call needs \"name\" as a string",
+            INVALID_PARAMS,
+            None,
+        ));
     };
     let arguments = match params.get("arguments") {
         None => json!({}),
         Some(Value::Object(members)) => Value::Object(members.clone()),
-        Some(_) => return Err(invalid_params("tools/call \"arguments\" must be an object")),
-    };
-    let Some(tool) = tools.iter().find(|tool| tool.name == *name) else {
-        let command_id = command_id_from_mcp_tool_name(name);
-        let unknown = diagnostic(CODE_UNKNOWN_COMMAND, &[("command_id", &command_id)]);
-        return Ok(McpStep::Reply(diagnostic_reply(
-            Some(id.clone()),
-            INVALID_PARAMS,
-            &unknown,
-        )));
+        Some(_) => {
+            return Err(malformed_message(
+                "tools/call \"arguments\" must be an object",
+                INVALID_PARAMS,
+                None,
+            ));
+        }
     };
     Ok(McpStep::ExecuteTool {
         request_id: id.clone(),
-        command_id: tool.command_id.clone(),
+        command_id: command_id_from_mcp_tool_name(name),
         arguments_json: arguments.to_string(),
     })
 }
@@ -103,19 +102,8 @@ fn reply(id: &JsonRpcId, result: Value) -> McpStep {
 }
 
 fn unknown_method(method: &str) -> McpError {
-    McpError::MalformedMessage {
-        reason: format!("the method {method:?} isn't supported"),
-        json_rpc_code: METHOD_NOT_FOUND,
-        id: None,
-    }
-}
-
-fn invalid_params(reason: &str) -> McpError {
-    McpError::MalformedMessage {
-        reason: reason.to_string(),
-        json_rpc_code: INVALID_PARAMS,
-        id: None,
-    }
+    let reason = format!("the method {method:?} isn't supported");
+    malformed_message(&reason, METHOD_NOT_FOUND, None)
 }
 
 #[cfg(test)]
@@ -189,6 +177,21 @@ mod tests {
         assert!(matches!(pong, McpStep::Reply(JsonRpcMessage::Response { .. })));
         let early = handle_message(&mut session, request(2, "tools/list", Value::Null), &[]);
         assert!(matches!(early, McpStep::Reply(JsonRpcMessage::Error { .. })));
+    }
+
+    #[test]
+    fn a_call_to_an_unlisted_tool_is_still_handed_to_the_daemon() {
+        let mut session = initialized_session();
+        let params = json!({"name": "train__start", "arguments": {"recipe": "textcnn"}});
+        let step = handle_message(&mut session, request(4, "tools/call", params), &[]);
+        assert_eq!(
+            step,
+            McpStep::ExecuteTool {
+                request_id: JsonRpcId::Number(4),
+                command_id: "train.start".to_string(),
+                arguments_json: r#"{"recipe":"textcnn"}"#.to_string(),
+            }
+        );
     }
 
     #[test]

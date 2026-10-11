@@ -42,6 +42,16 @@ impl McpError {
     }
 }
 
+/// The one way this crate builds a `MalformedMessage`: `reason` fills the catalog message, `json_rpc_code` is the
+/// code of the reply, and `id` is the refused request's id when it could be read.
+pub(crate) fn malformed_message(reason: &str, json_rpc_code: i64, id: Option<JsonRpcId>) -> McpError {
+    McpError::MalformedMessage {
+        reason: reason.to_string(),
+        json_rpc_code,
+        id,
+    }
+}
+
 /// The error as a catalog diagnostic, with its placeholders filled.
 pub fn error_diagnostic(error: &McpError) -> Diagnostic {
     match error {
@@ -56,11 +66,7 @@ mod tests {
     use super::*;
 
     fn malformed() -> McpError {
-        McpError::MalformedMessage {
-            reason: "batch arrays aren't supported".to_string(),
-            json_rpc_code: -32600,
-            id: None,
-        }
+        malformed_message("batch arrays aren't supported", -32600, None)
     }
 
     #[test]

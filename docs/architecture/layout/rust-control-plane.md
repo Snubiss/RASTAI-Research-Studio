@@ -2103,10 +2103,10 @@ pub async fn run_bridge(daemon: &DaemonEndpoint, token: &str, input: impl AsyncB
 ```
 
 - **Server methods:** `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Anything else gets JSON-RPC error `-32601`. `resources/*` for `ui://` panels comes with two-way MCP Apps, which is deferred (§33).
-- **Tool list:** one tool per command the session's principal may run (`tools_for_principal`, through `check_scope`), named by `mcp_tool_name`. A `tools/call` names only a listed tool; any other name is JSON-RPC `-32602` with `RRS-C0001`, and nothing is executed. `inputSchema` is the command's `arguments_schema_json`; `outputSchema` its `result_schema_json`; `annotations.readOnlyHint` is true for `read`-scope commands. Experimental commands are listed only when `plugins.experimental_apis` is on.
+- **Tool list:** one tool per command the session's principal may run (`tools_for_principal`, through `check_scope`), named by `mcp_tool_name`. A `tools/call` isn't checked against the list: any name becomes `ExecuteTool` with `command_id_from_mcp_tool_name`, and `execute_command` decides (7.5; flows/platform.md 3.2), so a missing scope is `RRS-C1005` and an unknown command `RRS-C0001`, each replied as `isError`. `inputSchema` is the command's `arguments_schema_json`; `outputSchema` its `result_schema_json` when that schema has `"type": "object"` (MCP's rule; left out otherwise); `annotations.readOnlyHint` is true for `read`-scope commands. Experimental commands are listed only when `plugins.experimental_apis` is on.
 - **Tool results:** `structuredContent` is the command's result object and `content` holds the same JSON as one text item. A `job` command returns `{job_id}` at once, with a text note to poll `job.get`. A failed command returns `isError: true` with each diagnostic rendered by `render_basic` and its code, so an agent can act on the code.
-- **Errors:** every JSON-RPC error carries its diagnostic (`render_json`) as `data`: `-32700` and `-32600` for a malformed message, `-32601` for an unknown method, `-32602` for bad params or an unknown tool, `-32000` for a Rastai diagnostic (`RRS-C3002`, the daemon unreachable, a refusal from the request gate).
-- **The bridge:** a line that isn't a valid message is answered by the bridge itself (`RRS-C3001`); without a token every request is answered `RRS-C3002` and the daemon is never contacted. Messages go one at a time, in order. After a 404 to its session id it replays the client's `initialize` (and `notifications/initialized`) once, then retries the message once.
+- **Errors:** every JSON-RPC error carries its diagnostic (`render_json`) as `data`: `-32700` and `-32600` for a malformed message, `-32601` for an unknown method, `-32602` for `tools/call` params without a string `name` or with `arguments` that aren't an object, `-32000` for a Rastai diagnostic (`RRS-C3002`, the daemon unreachable, a refusal from the request gate).
+- **The bridge:** a line that isn't a valid message (not UTF-8, over `MAX_MESSAGE_BYTES`, or refused by `parse_message`) is answered by the bridge itself with `RRS-C3001`; without a token every request is answered `RRS-C3002` and the daemon is never contacted. Messages go one at a time, in order. A new `initialize` from the client starts a new session and forgets the old one. After a 404 to its session id it replays the client's `initialize` (and `notifications/initialized`, if the client sent it for this session) once, then retries the message once.
 - **Transport:** Streamable HTTP on `/mcp`. Every reply is a single `application/json` body in the prototype (no command needs server-pushed progress yet). `GET /mcp` answers 405. The session id travels in `Mcp-Session-Id`; sessions idle for 24 h are dropped.
 - **Callers:** `rastai-server/src/http/mcp_endpoint.rs` (server side), `rastai-cli` (`rastai mcp` → `run_stdio_bridge`), `rastai-node` (gym and Pass@k tools: `connection_from_lines` over `ExecInSandbox`, `connect_http` for remote MCP servers the harness allows).
 
@@ -2127,7 +2127,9 @@ pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: 
         McpStep::Reply(reply) => Some(reply),
         McpStep::NoReply => None,
         McpStep::ExecuteTool { request_id, command_id, arguments_json } => {
-            let outcome = execute_tool(server, &principal, &command_id, &arguments_json).await;   // execute_command inside
+            // An experimental command while plugins.experimental_apis is off is RRS-C0001: it isn't listed, so it
+            // stays unknown to MCP. Anything else goes through execute_command (flows/platform.md 3.2).
+            let outcome = execute_tool(server, &principal, &command_id, &arguments_json).await;
             Some(tool_call_reply(request_id, &outcome))
         }
     };

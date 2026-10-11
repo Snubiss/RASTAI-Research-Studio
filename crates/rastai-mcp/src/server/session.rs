@@ -10,7 +10,7 @@ use rastai_core::time::now_unix_ms;
 use rastai_core::versions::APP_VERSION;
 use serde_json::{Value, json};
 
-use crate::error::McpError;
+use crate::error::{McpError, malformed_message};
 use crate::jsonrpc::{INVALID_PARAMS, INVALID_REQUEST};
 use crate::protocol_versions::pick_protocol_version;
 
@@ -52,12 +52,17 @@ pub fn new_session(principal: Principal) -> Result<McpSession, McpError> {
 /// takes one `initialize`; a client that lost its session starts a new one (the bridge does this after a restart).
 pub(crate) fn initialize_session(session: &mut McpSession, params: &Value) -> Result<Value, McpError> {
     if !session.protocol_version.is_empty() {
-        return Err(refusal("initialize was already sent on this session", INVALID_REQUEST));
+        return Err(malformed_message(
+            "initialize was already sent on this session",
+            INVALID_REQUEST,
+            None,
+        ));
     }
     let Some(Value::String(requested)) = params.get("protocolVersion") else {
-        return Err(refusal(
+        return Err(malformed_message(
             "initialize needs \"protocolVersion\" as a string",
             INVALID_PARAMS,
+            None,
         ));
     };
     let protocol_version = pick_protocol_version(requested);
@@ -74,7 +79,7 @@ pub(crate) fn mark_initialized(session: &mut McpSession) {
 /// Refuses every request but `initialize` and `ping` before `initialize` (MCP lifecycle).
 pub(crate) fn require_initialize(session: &McpSession) -> Result<(), McpError> {
     if session.protocol_version.is_empty() {
-        return Err(refusal("send initialize first", INVALID_REQUEST));
+        return Err(malformed_message("send initialize first", INVALID_REQUEST, None));
     }
     Ok(())
 }
@@ -93,14 +98,6 @@ fn client_name(params: &Value) -> String {
     match params.get("clientInfo").and_then(|info| info.get("name")) {
         Some(Value::String(name)) => name.clone(),
         _ => String::new(),
-    }
-}
-
-fn refusal(reason: &str, json_rpc_code: i64) -> McpError {
-    McpError::MalformedMessage {
-        reason: reason.to_string(),
-        json_rpc_code,
-        id: None,
     }
 }
 

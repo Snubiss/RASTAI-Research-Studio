@@ -67,7 +67,7 @@ fn a_job_call_replies_with_its_job_id() {
 }
 
 #[test]
-fn a_call_outside_the_scopes_is_never_executed() {
+fn a_call_outside_the_scopes_gets_the_refusal_of_execute_command() {
     replay_transcript("tool_call_outside_scopes");
 }
 

@@ -16,6 +16,8 @@ use crate::jsonrpc::{JsonRpcId, JsonRpcMessage};
 
 /// The scope whose commands only read; their tools say so with `readOnlyHint` (layout 7.2).
 const READ_SCOPE: &str = "read";
+/// The JSON Schema `type` MCP requires of an `outputSchema`.
+const OBJECT_TYPE: &str = "object";
 /// Said beside a job's id: a job command returns at once, and its outcome comes later.
 const JOB_STARTED_NOTE: &str =
     "The job runs in the background. Call job__get with this job_id for its state and result.";
@@ -125,7 +127,11 @@ fn output_schema(command: &CommandDescriptor) -> Value {
             "required": ["job_id"],
         });
     }
-    object_schema(&command.result_schema_json).unwrap_or(Value::Null)
+    // MCP's outputSchema describes an object; a result schema of another type is left out, and so is the check.
+    match object_schema(&command.result_schema_json) {
+        Some(schema) if schema.get("type") == Some(&Value::String(OBJECT_TYPE.to_string())) => schema,
+        _ => Value::Null,
+    }
 }
 
 /// The schema when the text is a JSON object; MCP refuses any other kind of schema.
@@ -136,11 +142,14 @@ fn object_schema(schema_json: &str) -> Option<Value> {
     }
 }
 
+/// A tool with an `outputSchema` always gets an object here: the schema is advertised only when the command's result
+/// schema has `"type": "object"` (`output_schema`), and `execute_command` returns the command's `result_type`, a
+/// rastai-formats struct, whose JSON is an object. A result of another kind can come only from a tool without an
+/// `outputSchema`, and it travels as text only, since `structuredContent` is an object in MCP.
 fn sync_call_result(result_json: &str) -> Value {
     let text = if result_json.is_empty() { "{}" } else { result_json };
     let mut result = Map::new();
     result.insert("content".to_string(), json!([text_item(text)]));
-    // structuredContent is an object in MCP; a result of another kind travels as text only.
     if let Some(structured) = object_schema(text) {
         result.insert("structuredContent".to_string(), structured);
     }
@@ -243,6 +252,15 @@ mod tests {
         let listed = tools_list_result(&[tool]);
         assert!(listed["tools"][0].get("outputSchema").is_none());
         assert_eq!(listed["tools"][0]["annotations"]["readOnlyHint"], true);
+    }
+
+    #[test]
+    fn a_result_schema_that_is_not_of_type_object_is_not_advertised() {
+        let mut descriptor = command("system.status", "read", CommandKind::Sync);
+        descriptor.result_schema_json = r#"{"type":"array","items":{"type":"string"}}"#.to_string();
+        assert_eq!(tool_from_command(&descriptor).output_schema, Value::Null);
+        descriptor.result_schema_json = r#"{"properties":{}}"#.to_string();
+        assert_eq!(tool_from_command(&descriptor).output_schema, Value::Null);
     }
 
     #[test]
