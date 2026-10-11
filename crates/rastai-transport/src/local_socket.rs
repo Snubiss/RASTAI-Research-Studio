@@ -19,7 +19,7 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
 use crate::error::TransportError;
 use crate::peer::PeerIdentity;
 #[cfg(unix)]
-use crate::peer::{check_same_user, credentials_unreadable, current_user_id, peer_identity_of};
+use crate::peer::{compare_users, credentials_unreadable, current_user_id, peer_identity_of};
 
 /// The socket folder's mode: only its owner may list, enter or create files in it (contracts 8.1).
 pub const SOCKET_DIRECTORY_MODE: u32 = 0o700;
@@ -72,8 +72,9 @@ pub fn bind_local_socket(_socket_path: &Path) -> Result<LocalListener, Transport
 /// an accept loop logs that and keeps accepting.
 #[cfg(unix)]
 pub async fn accept_local(listener: &LocalListener) -> Result<(LocalStream, PeerIdentity), TransportError> {
+    let own_user_id = current_user_id()?;
     match listener {
-        LocalListener::Unix(unix_listener) => accept_unix(unix_listener).await,
+        LocalListener::Unix(unix_listener) => accept_unix(unix_listener, own_user_id).await,
     }
 }
 
@@ -91,9 +92,8 @@ pub async fn connect_local_socket(socket_path: &Path) -> Result<LocalStream, Tra
     let stream = tokio::net::UnixStream::connect(socket_path)
         .await
         .map_err(|error| not_reachable(socket_path, error))?;
-    let server = peer_identity_of(&stream).map_err(credentials_unreadable)?;
-    check_same_user(&server)?;
-    Ok(LocalStream::Unix(stream))
+    let own_user_id = current_user_id()?;
+    keep_if_served_by_user(stream, own_user_id)
 }
 
 #[cfg(not(unix))]
@@ -203,18 +203,32 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), TransportError> {
         ));
     }
     // A blocking connect is fine here: on a local socket it answers at once, accepted or refused. If it is
-    // accepted, the live listener later sees this probe as a client that has already hung up.
-    if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
-        return Err(not_created(socket_path, "another process is listening on this socket"));
+    // accepted, the live listener later sees this probe as a client that has already hung up. (A live listener
+    // whose queue is full could make it wait; callers hold their process lock, so no second copy of us is there.)
+    match std::os::unix::net::UnixStream::connect(socket_path) {
+        Ok(_probe) => Err(not_created(socket_path, "another process is listening on this socket")),
+        // Refused is the only answer that proves nobody listens. Any other (no permission, say) proves nothing,
+        // so the file stays.
+        Err(error) if error.kind() == ErrorKind::ConnectionRefused => {
+            fs::remove_file(socket_path).map_err(|error| not_created(socket_path, error))
+        }
+        Err(error) => Err(not_created(
+            socket_path,
+            format!("can't tell whether anyone listens on this socket, so it is left alone: {error}"),
+        )),
     }
-    fs::remove_file(socket_path).map_err(|error| not_created(socket_path, error))
 }
 
-/// Accepts until a client is still there to be served. macOS can't read the credentials of a client that hung up
-/// before we looked (ENOTCONN), such as the probe of a second `bind_local_socket`; there is nobody to serve, so
-/// that connection is skipped. Linux keeps the credentials, and the closed connection simply reads as ended.
+/// Accepts until a client is still there to be served, and refuses one that doesn't run as `own_user_id`
+/// (RRS-N2006). `accept_local` passes our own user id; the tests pass another, to see the refusal on a real
+/// connection. macOS can't read the credentials of a client that hung up before we looked (ENOTCONN), such as the
+/// probe of a second `bind_local_socket`; there is nobody to serve, so that connection is skipped. Linux keeps the
+/// credentials, and the closed connection simply reads as ended.
 #[cfg(unix)]
-async fn accept_unix(listener: &tokio::net::UnixListener) -> Result<(LocalStream, PeerIdentity), TransportError> {
+async fn accept_unix(
+    listener: &tokio::net::UnixListener,
+    own_user_id: u32,
+) -> Result<(LocalStream, PeerIdentity), TransportError> {
     loop {
         let (stream, _client_address) = listener
             .accept()
@@ -226,9 +240,20 @@ async fn accept_unix(listener: &tokio::net::UnixListener) -> Result<(LocalStream
             Err(error) => return Err(credentials_unreadable(error)),
         };
         // Returning early drops `stream`, which closes the refused connection.
-        check_same_user(&peer)?;
+        compare_users(&peer, own_user_id)?;
         return Ok((LocalStream::Unix(stream), peer));
     }
+}
+
+/// The client's peer check: keeps the connection when the server runs as `own_user_id`, else refuses it
+/// (RRS-N2006). `connect_local_socket` passes our own user id; the tests pass another. It is separate from the
+/// folder check before it because a test can't make a folder another user owns, yet can pass another user id here.
+#[cfg(unix)]
+fn keep_if_served_by_user(stream: tokio::net::UnixStream, own_user_id: u32) -> Result<LocalStream, TransportError> {
+    let server = peer_identity_of(&stream).map_err(credentials_unreadable)?;
+    // Returning early drops `stream`, which closes the refused connection.
+    compare_users(&server, own_user_id)?;
+    Ok(LocalStream::Unix(stream))
 }
 
 #[cfg(unix)]
@@ -248,11 +273,116 @@ fn not_reachable(socket_path: &Path, reason: impl std::fmt::Display) -> Transpor
 }
 
 #[cfg(all(test, unix))]
+#[allow(clippy::unwrap_used)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    use tokio::io::AsyncReadExt;
+
     use super::*;
 
     const OWN_USER_ID: u32 = 1000;
     const ANOTHER_USER_ID: u32 = 1001;
+    const ROOT_USER_ID: u32 = 0;
+    const SOCKET_FOLDER: &str = "run";
+    const SOCKET_FILE: &str = "unit.sock";
+    /// A socket file nobody may read or write, so connecting to it is "permission denied", not "refused".
+    const NO_PERMISSIONS: u32 = 0o000;
+
+    /// A fresh test folder and a socket path inside it, short enough for the 107-byte Unix socket path limit.
+    fn new_socket_path(test_tag: &str) -> (PathBuf, PathBuf) {
+        let test_folder = std::env::temp_dir().join(format!("rtu-{}-{test_tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&test_folder);
+        fs::create_dir_all(&test_folder).unwrap();
+        let socket_path = test_folder.join(SOCKET_FOLDER).join(SOCKET_FILE);
+        (test_folder, socket_path)
+    }
+
+    /// True once the other end has closed the connection: a read then returns no bytes.
+    async fn was_closed(stream: &mut tokio::net::UnixStream) -> bool {
+        let mut buffer = [0; 1];
+        stream.read(&mut buffer).await.unwrap() == 0
+    }
+
+    #[tokio::test]
+    async fn accepting_refuses_a_client_of_another_user_and_closes_it() {
+        let (test_folder, socket_path) = new_socket_path("accept");
+        let LocalListener::Unix(listener) = bind_local_socket(&socket_path).unwrap();
+        let real_user_id = current_user_id().unwrap();
+        let pretended_user_id = real_user_id.wrapping_add(1);
+
+        let (accepted, connected) = tokio::join!(
+            accept_unix(&listener, pretended_user_id),
+            tokio::net::UnixStream::connect(&socket_path)
+        );
+
+        let expected = TransportError::PeerIsAnotherUser {
+            peer_user_id: real_user_id,
+            own_user_id: pretended_user_id,
+        };
+        assert_eq!(accepted.map(|_| ()), Err(expected));
+        assert!(was_closed(&mut connected.unwrap()).await);
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn connecting_refuses_a_server_of_another_user_and_closes_it() {
+        let (test_folder, socket_path) = new_socket_path("connect");
+        let LocalListener::Unix(listener) = bind_local_socket(&socket_path).unwrap();
+        let real_user_id = current_user_id().unwrap();
+        let pretended_user_id = real_user_id.wrapping_add(1);
+
+        let (accepted, connected) = tokio::join!(
+            accept_unix(&listener, real_user_id),
+            tokio::net::UnixStream::connect(&socket_path)
+        );
+        let (LocalStream::Unix(mut server_end), _client) = accepted.unwrap();
+        let refusal = keep_if_served_by_user(connected.unwrap(), pretended_user_id);
+
+        let expected = TransportError::PeerIsAnotherUser {
+            peer_user_id: real_user_id,
+            own_user_id: pretended_user_id,
+        };
+        assert_eq!(refusal.map(|_| ()), Err(expected));
+        assert!(was_closed(&mut server_end).await);
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_server_of_our_own_user_is_kept() {
+        let (test_folder, socket_path) = new_socket_path("own");
+        let LocalListener::Unix(listener) = bind_local_socket(&socket_path).unwrap();
+        let real_user_id = current_user_id().unwrap();
+
+        let (accepted, connected) = tokio::join!(
+            accept_unix(&listener, real_user_id),
+            tokio::net::UnixStream::connect(&socket_path)
+        );
+
+        assert!(accepted.is_ok());
+        assert!(keep_if_served_by_user(connected.unwrap(), real_user_id).is_ok());
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_socket_that_cant_be_probed_is_never_deleted() {
+        let (test_folder, socket_path) = new_socket_path("probe");
+        // A socket nobody listens on, but whose mode denies the probe: "permission denied" proves nothing.
+        drop(bind_local_socket(&socket_path).unwrap());
+        fs::set_permissions(&socket_path, fs::Permissions::from_mode(NO_PERMISSIONS)).unwrap();
+        // Root connects whatever the mode, so its probe is simply refused; the case can't happen for root.
+        if current_user_id().unwrap() == ROOT_USER_ID {
+            fs::remove_dir_all(&test_folder).unwrap();
+            return;
+        }
+
+        let refusal = bind_local_socket(&socket_path).map(|_| ());
+
+        assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N2007"));
+        assert!(fs::symlink_metadata(&socket_path).unwrap().file_type().is_socket());
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
 
     fn folder(owner_user_id: u32, mode: u32) -> FolderFacts {
         FolderFacts {

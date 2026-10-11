@@ -5,11 +5,14 @@
 //! Unix sockets only; on Windows the functions return RRS-N2009 until named pipes arrive (tier 2).
 
 #[cfg(unix)]
+mod common;
+
+#[cfg(unix)]
 #[allow(clippy::unwrap_used)]
 mod on_unix {
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU32, Ordering};
 
     use rastai_core::paths::DataPaths;
     use rastai_proto::node::v1::{LiveEvent, WatchLiveRequest};
@@ -22,14 +25,16 @@ mod on_unix {
     use tonic::codegen::tokio_stream;
     use tonic::{Request, Response, Status};
 
+    use crate::common::{SOCKET_FOLDER, new_test_folder, socket_path_in};
+
     const SOCKET_FILE: &str = "worker.sock";
-    const SOCKET_FOLDER: &str = "run";
+    const TEST_FOLDER_PREFIX: &str = "rtg";
+    /// A socket folder others can enter, which the client refuses (contracts 8.1).
+    const OPEN_FOLDER_MODE: u32 = 0o755;
     const TINY_JOB_ID: &str = "job_tiny";
     const TINY_PROCESS_ID: u32 = 4242;
     /// How many events WatchLive sends before it ends.
     const STREAMED_EVENT_COUNT: i64 = 5;
-
-    static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
 
     /// Answers Hello with fixed values and streams STREAMED_EVENT_COUNT numbered events from WatchLive.
     struct TinyWorker;
@@ -69,11 +74,8 @@ mod on_unix {
     }
 
     fn new_socket_path() -> (PathBuf, PathBuf) {
-        let number = NEXT_FOLDER_NUMBER.fetch_add(1, Ordering::SeqCst);
-        let test_folder = std::env::temp_dir().join(format!("rtg-{}-{number}", std::process::id()));
-        let _ = fs::remove_dir_all(&test_folder);
-        fs::create_dir_all(&test_folder).unwrap();
-        let socket_path = test_folder.join(SOCKET_FOLDER).join(SOCKET_FILE);
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let socket_path = socket_path_in(&test_folder, SOCKET_FILE);
         (test_folder, socket_path)
     }
 
@@ -138,6 +140,20 @@ mod on_unix {
         drop(bind_local_socket(&socket_path).unwrap());
         let refusal = connect_grpc_channel(&socket_path).await.map(|_| ());
         assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N2004"));
+        fs::remove_dir_all(&test_folder).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_socket_folder_others_can_enter_is_refused_before_connecting() {
+        // tonic's unix: endpoint reads no peer credentials, so this folder check is what proves the server is ours.
+        let (test_folder, socket_path) = new_socket_path();
+        start_tiny_server(&socket_path);
+        let socket_folder = test_folder.join(SOCKET_FOLDER);
+        fs::set_permissions(&socket_folder, fs::Permissions::from_mode(OPEN_FOLDER_MODE)).unwrap();
+
+        let refusal = connect_grpc_channel(&socket_path).await.map(|_| ());
+
+        assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N2005"));
         fs::remove_dir_all(&test_folder).unwrap();
     }
 

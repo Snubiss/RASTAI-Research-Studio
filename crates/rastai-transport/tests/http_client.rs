@@ -6,6 +6,9 @@
 //! The test servers are a few lines of raw HTTP/1.1 rather than a server library, so they also check the exact
 //! bytes the client sends.
 
+#[cfg(unix)]
+mod common;
+
 #[allow(clippy::unwrap_used)]
 mod test_server {
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -118,29 +121,25 @@ mod over_loopback {
 mod over_a_unix_socket {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU32, Ordering};
 
+    use rastai_transport::error::TransportError;
     use rastai_transport::http_client::{HttpRequest, HttpTarget, next_body_chunk, open_response_stream, send_request};
     use rastai_transport::local_socket::{LocalListener, LocalStream, accept_local, bind_local_socket};
     use tokio::io::AsyncWriteExt;
 
+    use crate::common::{new_test_folder, socket_path_in};
     use crate::test_server::{read_request, write_response};
 
     const SOCKET_FILE: &str = "daemon.sock";
-    const SOCKET_FOLDER: &str = "run";
+    const TEST_FOLDER_PREFIX: &str = "rth";
     const REQUEST_BODY: &[u8] = br#"{"command_id":"system.health"}"#;
     const RESPONSE_BODY: &[u8] = br#"{"ok":true}"#;
     /// Long enough for any test machine, short enough that the timeout test stays quick.
     const SILENT_SERVER_TIMEOUT_MS: u64 = 300;
 
-    static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
-
     fn new_socket_path() -> (PathBuf, PathBuf) {
-        let number = NEXT_FOLDER_NUMBER.fetch_add(1, Ordering::SeqCst);
-        let test_folder = std::env::temp_dir().join(format!("rth-{}-{number}", std::process::id()));
-        let _ = fs::remove_dir_all(&test_folder);
-        fs::create_dir_all(&test_folder).unwrap();
-        let socket_path = test_folder.join(SOCKET_FOLDER).join(SOCKET_FILE);
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let socket_path = socket_path_in(&test_folder, SOCKET_FILE);
         (test_folder, socket_path)
     }
 
@@ -244,7 +243,12 @@ mod over_a_unix_socket {
         });
 
         let refusal = send_request(request_to(&socket_path, "GET", b"", SILENT_SERVER_TIMEOUT_MS)).await;
-        assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N2008"));
+        // TimedOut itself, not only its code: a server that hung up is RRS-N2008 too (ConnectionFailed).
+        let expected = TransportError::TimedOut {
+            timeout_ms: SILENT_SERVER_TIMEOUT_MS,
+        };
+        assert_eq!(expected.code(), "RRS-N2008");
+        assert_eq!(refusal, Err(expected));
         fs::remove_dir_all(&test_folder).unwrap();
     }
 

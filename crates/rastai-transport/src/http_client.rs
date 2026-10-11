@@ -214,6 +214,8 @@ fn stream_from_response(response: Response<Incoming>, timeout_ms: u64) -> HttpSt
 /// The next data frame of the body; trailers, which nothing here uses, are skipped.
 async fn next_data_frame(body: &mut Incoming) -> Result<Option<Vec<u8>>, TransportError> {
     loop {
+        // hyper's Body only has poll_frame; the awaitable `frame()` lives in http-body-util, which isn't on the §27
+        // list, so poll_fn turns the poll into a future here.
         let frame = std::future::poll_fn(|context| Pin::new(&mut *body).poll_frame(context)).await;
         match frame {
             None => return Ok(None),
