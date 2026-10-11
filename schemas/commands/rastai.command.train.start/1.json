@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "TrainingPlan": {
+      "additionalProperties": false,
+      "description": "How the daemon decided to train: recipe, method, dtype, GPUs, batch sizes and the estimates.",
+      "properties": {
+        "dtype": {
+          "description": "bf16, fp16 or fp32.",
+          "type": "string"
+        },
+        "gpu_indices": {
+          "description": "The GPUs on the node; empty for a CPU run.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "gradient_accumulation": {
+          "description": "Micro-batches per optimizer step.",
+          "type": "integer"
+        },
+        "memory_estimate_bytes": {
+          "description": "Estimated peak memory on each GPU.",
+          "type": "integer"
+        },
+        "method": {
+          "description": "full, lora or qlora.",
+          "type": "string"
+        },
+        "micro_batch": {
+          "description": "Samples per forward pass.",
+          "type": "integer"
+        },
+        "recipe": {
+          "description": "The recipe id.",
+          "type": "string"
+        },
+        "sequence_length": {
+          "description": "Tokens or positions per sample.",
+          "type": "integer"
+        },
+        "time_estimate_seconds": {
+          "description": "Estimated time to finish.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "recipe",
+        "method",
+        "dtype",
+        "gpu_indices",
+        "micro_batch",
+        "gradient_accumulation",
+        "sequence_length",
+        "memory_estimate_bytes",
+        "time_estimate_seconds"
+      ],
+      "title": "TrainingPlan",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "What to train: a recipe, the design to train and the data to train it on.",
+      "properties": {
+        "dataset_path": {
+          "description": "The dataset to train on, a path on the node.",
+          "type": "string",
+          "x-rastai-cli-position": 1
+        },
+        "design_path": {
+          "description": "The .rrsmodel design to train, a path on the node.",
+          "type": "string",
+          "x-rastai-cli-position": 0
+        },
+        "eval_suite_ids": {
+          "description": "Eval suites to run on each new checkpoint.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recipe": {
+          "description": "A recipe id from recipe.list; classification in M1.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipe",
+        "design_path",
+        "dataset_path"
+      ],
+      "title": "TrainStartArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The run that was started, and the plan it runs with. A dry run returns the plan alone.",
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/TrainingPlan",
+          "description": "How the run trains."
+        },
+        "run_id": {
+          "description": "The new run; empty on a dry run, which starts nothing.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "title": "TrainStartResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.train.start/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Start training",
+  "title": "train.start",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

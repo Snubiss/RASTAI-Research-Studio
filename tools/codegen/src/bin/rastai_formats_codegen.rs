@@ -60,7 +60,7 @@ fn main() -> ExitCode {
 /// Reads the descriptions and commands once and writes each output in turn. Returns how many files changed.
 fn generate_formats(output_root: &Path) -> Result<usize, CodegenError> {
     let all_types = describe_all_types();
-    let commands = command_descriptions();
+    let commands = command_descriptions()?;
     let mut changed_count = write_json_schema_files(output_root, DOCUMENT_TYPES, &all_types, &commands)?;
     changed_count += write_javascript_types(output_root, &all_types)?;
     changed_count += write_javascript_commands(output_root, &commands)?;

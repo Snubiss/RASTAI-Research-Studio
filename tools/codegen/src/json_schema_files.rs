@@ -10,6 +10,7 @@
 
 use std::path::Path;
 
+use rastai_formats::commands::command_schema_id;
 use rastai_formats::describe::json_schema::json_schema_for;
 use rastai_formats::describe::registry::find_description;
 use rastai_formats::describe::types::TypeDescription;
@@ -28,9 +29,6 @@ const INDEX_FILE: &str = "index.json";
 const COMMANDS_FOLDER: &str = "commands";
 /// The `$id` of a file is this plus its path under schemas/ (contracts 14 row 8). Nothing serves it before Phase 2.
 const SCHEMA_URL_BASE: &str = "https://schemas.rastai.dev/";
-/// A command's arguments and results are one schema id per command (contracts 5.2).
-const COMMAND_SCHEMA_ID_PREFIX: &str = "rastai.command.";
-const COMMAND_SCHEMA_VERSION: u32 = 1;
 /// Bumped only if the shape of index.json itself changes.
 const INDEX_FORMAT_VERSION: u32 = 1;
 // The keywords a command schema adds to JSON Schema (contracts 12.6, 15.1).
@@ -41,8 +39,8 @@ const ARGUMENTS_DEFINITION: &str = "arguments";
 const RESULT_DEFINITION: &str = "result";
 const DEFINITIONS_KEY: &str = "$defs";
 const DIALECT_KEY: &str = "$schema";
-/// Where the core command rows will live; a command whose types aren't described is fixed there or in the registry.
-const COMMAND_TABLE_FILE: &str = "crates/rastai-core/src/commands/table.rs";
+/// Where each command's argument and result types are listed; a type that isn't described is fixed there.
+const COMMAND_TYPES_FILE: &str = "crates/rastai-formats/src/commands/mod.rs";
 
 /// One schema file: its schema id, its path under schemas/ (with `/` separators) and its contents.
 #[derive(Debug, Clone, PartialEq)]
@@ -120,13 +118,11 @@ fn command_schema_file(
     command: &CommandDescription,
     all_types: &[TypeDescription],
 ) -> Result<SchemaFile, CodegenError> {
-    let schema_id = format!(
-        "{COMMAND_SCHEMA_ID_PREFIX}{}/{COMMAND_SCHEMA_VERSION}",
-        command.command_id
-    );
+    // The same schema id rastai-formats gives the command's types, so the file and the generated modules agree.
+    let schema_id = command_schema_id(&command.command_id);
     let relative_path = format!("{COMMANDS_FOLDER}/{schema_id}.json");
-    let arguments = find_or_fail(all_types, &command.arguments_type, COMMAND_TABLE_FILE)?;
-    let result = find_or_fail(all_types, &command.result_type, COMMAND_TABLE_FILE)?;
+    let arguments = find_or_fail(all_types, &command.arguments_type, COMMAND_TYPES_FILE)?;
+    let result = find_or_fail(all_types, &command.result_type, COMMAND_TYPES_FILE)?;
     // Each type's own schema carries the types it refers to in `$defs`. They are merged into the file's `$defs`
     // beside `arguments` and `result`, so every `#/$defs/<Name>` reference still points at its definition.
     // The dialect line is the one every rastai-formats schema carries, taken from the arguments' schema.
@@ -325,7 +321,7 @@ mod tests {
         command.result_type = "MissingResult".to_string();
         let error = command_schema_file(&command, &sample_types()).unwrap_err();
         assert!(error.problem.contains("`MissingResult`"), "{error}");
-        assert_eq!(error.path, Path::new(COMMAND_TABLE_FILE));
+        assert_eq!(error.path, Path::new(COMMAND_TYPES_FILE));
     }
 
     #[test]

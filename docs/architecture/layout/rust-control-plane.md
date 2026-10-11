@@ -319,7 +319,7 @@ catalog/
 
 - Placeholders are `{snake_case}` names. The codegen test checks that every placeholder used in Rust call sites exists in the entry, and that the entry uses no placeholder the call doesn't fill (it scans for `diagnostic("RRS-...", &[("name", ...)])` with a plain text search; no macro). The code may be a string literal or a `const` of the same file, and the values an inline array or `&values` where the closest `let values = [...]` above the call is the array; a call that builds its values another way (`error_values(...)`, `borrow_values(...)`) is skipped, and its own tests check its message. With it, the `RRS-` source scan checks that every code first-party source names outside its tests is in the catalog (both in `catalog_checks.rs`, M1-13).
 - The catalog and contracts §10.3 hold the same codes with the same severities; a row marked for a later milestone (the plugins' `RRS-L` (M4) and `RRS-V` (M5)) may wait for its entry (`catalog_checks.rs`, M1-13).
-- `fix_command_id`, when set, must be a command id in the core table or a first-party manifest. Checked by the codegen. *Pending: M1-22 adds this rule to `catalog_checks.rs` with the first rows of the core table; first-party manifests join it when the first one lands.*
+- `fix_command_id`, when set, must be a command the fix button can run: a row of the core table, or a command contracts §6.4 registers with the milestone marker of the task that builds it (`storage.gc` (M5)), which may wait for its row. Checked by `catalog_checks.rs` (M1-22). First-party manifests join the rule when the first one lands.
 - `docs_anchor`, when set, is a lowercase kebab-case slug, used once among the error entries and once among the terms. An error entry's anchor is its code in lowercase (`rrs-s3001`), so a link stays valid when the title changes; a term's is its own slug. It becomes an HTML id in `docs/reference/errors.md`. Checked by `catalog_checks.rs` (M1-12).
 - Terms: `{"term_id": "logit_lens", "title": "Logit lens", "basic_text": "...", "advanced_text": "...", "docs_anchor": "..."}`. Each `term_id` is listed once (`catalog_checks.rs`, M1-12).
 
@@ -542,7 +542,7 @@ error[RRS-E2004]: Input ranges overlap
 |---|---|---|
 | Unit | bottom of `path.rs`, `catalog.rs`, `render_text.rs` | path round trip; a missing placeholder value stays visible as `{name}`; snippet and caret at line 1, at the last line, with tabs and multi-byte characters |
 | Snapshots | `tests/render_snapshots.rs`, `fixtures/diagnostics/` (new) | plain, color-stripped and Basic output for one case per severity and path shape |
-| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); `catalog_ranges.rs` equals the contracts §10.1 table (prefixes, areas, ranges); docs anchors are kebab-case slugs used once; term ids unique (all M1-12); the catalog's codes and severities equal contracts §10.3; every `RRS-` code in first-party source is in the catalog; placeholders in call sites exist in the entry and the other way round (M1-13); every `fix_command_id` exists in the core table (M1-22) or a first-party manifest (when the first one lands) |
+| Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); `catalog_ranges.rs` equals the contracts §10.1 table (prefixes, areas, ranges); docs anchors are kebab-case slugs used once; term ids unique (all M1-12); the catalog's codes and severities equal contracts §10.3; every `RRS-` code in first-party source is in the catalog; placeholders in call sites exist in the entry and the other way round (M1-13); every `fix_command_id` is a row of the core table or a contracts §6.4 command with its milestone marker (M1-22), or in a first-party manifest (when the first one lands) |
 | Append-only | `tools/codegen/tests/catalog_checks.rs` (the `#[ignore]`d merge-base test, run by `just codegen-check`) | a code present at the merge base can be marked `retired` but never deleted or renumbered |
 
 ### 3.6 Ported from the spike
@@ -1120,8 +1120,8 @@ tools/codegen/
                               ErrorRecord and TermRecord lists, sorted; exact fields, strict JSON
     catalog_ranges.rs         CATALOG_PREFIXES: contracts §10.1 as data (prefix, owner's file, ranges); split_code
     literals.rs               the generated-file notice, string literals for Rust and for JSON (JavaScript, Python)
-    command_source.rs         CommandDescription rows for the formats outputs, from rastai_core::commands::COMMANDS
-                              (an empty list until that table exists, M1-21 and M1-22)
+    command_source.rs         CommandDescription rows for the formats outputs, from rastai_core::commands::COMMANDS,
+                              with each row's type names from rastai-formats' describe_arguments and describe_result
     type_modules.rs           which generated module a type goes into: one per schema id (`rastai.run_record/1` is
                               run_record; the shared header's empty id is shared), the same for JavaScript and Python
     json_schema_files.rs      schemas/<type>/<version>.json, schemas/commands/*, schemas/events/*, schemas/index.json;

@@ -1,0 +1,36 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "system.shutdown takes no arguments.",
+      "properties": {},
+      "required": [],
+      "title": "SystemShutdownArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "What the daemon left running when it stopped.",
+      "properties": {
+        "running_job_ids": {
+          "description": "Jobs that keep running in their own process groups; the next daemon start reattaches them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "running_job_ids"
+      ],
+      "title": "SystemShutdownResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.shutdown/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Stop the daemon",
+  "title": "system.shutdown",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

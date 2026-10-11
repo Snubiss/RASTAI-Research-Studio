@@ -1,0 +1,43 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "token.login_code.create takes no arguments.",
+      "properties": {},
+      "required": [],
+      "title": "TokenLoginCodeCreateArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "A single-use login code for the UI start URL.",
+      "properties": {
+        "code": {
+          "description": "The single-use login code, for the #login=<code> fragment.",
+          "type": "string"
+        },
+        "expires_unix_ms": {
+          "description": "When the code stops working, 60 seconds after it was made.",
+          "type": "integer"
+        },
+        "http_port": {
+          "description": "The daemon's HTTP port.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "expires_unix_ms",
+        "http_port"
+      ],
+      "title": "TokenLoginCodeCreateResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.token.login_code.create/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Create a login code",
+  "title": "token.login_code.create",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

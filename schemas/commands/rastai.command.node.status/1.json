@@ -1,0 +1,142 @@
+{
+  "$defs": {
+    "JobSummary": {
+      "additionalProperties": false,
+      "description": "One job: its run, node, kind and state.",
+      "properties": {
+        "error_code": {
+          "description": "The catalog code it failed with; empty unless it failed.",
+          "type": "string"
+        },
+        "job_id": {
+          "description": "The job's id.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Its job kind, such as train.",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "The node it runs on.",
+          "type": "string"
+        },
+        "run_id": {
+          "description": "The run it belongs to; empty for a job without a run.",
+          "type": "string"
+        },
+        "state": {
+          "description": "Its job state, such as running.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "node_id",
+        "kind",
+        "state"
+      ],
+      "title": "JobSummary",
+      "type": "object"
+    },
+    "NodeSummary": {
+      "additionalProperties": false,
+      "description": "One node: how the daemon reaches it, its state and its last heartbeat.",
+      "properties": {
+        "address": {
+          "description": "user@host for an SSH node; empty for the embedded one.",
+          "type": "string"
+        },
+        "capabilities": {
+          "description": "The capability flags of its handshake.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "last_heartbeat_unix_ms": {
+          "description": "When its last heartbeat arrived; 0 or absent before the first.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "The node's name.",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "The node's id.",
+          "type": "string"
+        },
+        "protocol_version": {
+          "description": "The node protocol version it speaks.",
+          "type": "integer"
+        },
+        "state": {
+          "description": "Its connection state, such as connected.",
+          "type": "string"
+        },
+        "transport": {
+          "description": "local for the embedded node, ssh for a paired one.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "name",
+        "transport",
+        "state",
+        "protocol_version",
+        "capabilities"
+      ],
+      "title": "NodeSummary",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Which node to show.",
+      "properties": {
+        "node_id": {
+          "description": "The node to show.",
+          "type": "string",
+          "x-rastai-cli-position": 0
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "title": "NodeStatusArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "One node in detail: its state, last telemetry and unfinished jobs.",
+      "properties": {
+        "jobs": {
+          "description": "The jobs on the node that haven't finished.",
+          "items": {
+            "$ref": "#/$defs/JobSummary"
+          },
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeSummary",
+          "description": "The node."
+        },
+        "telemetry": {
+          "description": "Its last heartbeat's telemetry; absent before the first heartbeat. Protobuf JSON of rastai.common.v1.NodeTelemetry.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "node",
+        "jobs"
+      ],
+      "title": "NodeStatusResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.node.status/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Show node",
+  "title": "node.status",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

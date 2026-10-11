@@ -3,13 +3,32 @@
 //! serde would read; this test catches both in CI.
 //!
 //! Each type is checked with a filled value: every optional field set, so serde writes every key. A document type's
-//! PR adds one test here with its own filled value, for the document and for every part of it.
+//! PR adds one test here with its own filled value, for the document and for every part of it; the core commands'
+//! argument and result types have one test per area (M1-22).
 
 #![allow(clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use rastai_formats::commands::COMMAND_TYPES;
+use rastai_formats::commands::command::{CommandListArgs, CommandListResult};
+use rastai_formats::commands::job::{
+    JobCancelArgs, JobCancelResult, JobGetArgs, JobGetResult, JobListArgs, JobListResult, JobSummary,
+};
+use rastai_formats::commands::node::{NodeListArgs, NodeListResult, NodeStatusArgs, NodeStatusResult, NodeSummary};
+use rastai_formats::commands::plugin::{PluginListArgs, PluginListResult, PluginSummary};
+use rastai_formats::commands::settings::{
+    SettingKeySource, SettingsGetArgs, SettingsGetResult, SettingsSetArgs, SettingsSetResult,
+};
+use rastai_formats::commands::system::{
+    SystemShutdownArgs, SystemShutdownResult, SystemStatusArgs, SystemStatusResult,
+};
+use rastai_formats::commands::token::{
+    TokenCreateArgs, TokenCreateResult, TokenListArgs, TokenListResult, TokenLoginCodeCreateArgs,
+    TokenLoginCodeCreateResult, TokenRevokeArgs, TokenRevokeResult, TokenSummary,
+};
+use rastai_formats::commands::train::{TrainStartArgs, TrainStartResult, TrainingPlan};
 use rastai_formats::describe::registry::{describe_all_types, find_description};
 use rastai_formats::describe::structure_check::{StructureCheck, find_mismatches};
 use rastai_formats::documents::lock::{LockEnvironment, LockFile, LockedModel, LockedPlugin};
@@ -142,10 +161,16 @@ fn a_header_with_only_required_fields_still_writes_every_key() {
     assert_eq!(written["license"], Value::String(String::new()));
 }
 
+// A command that takes nothing (`system.status`) has arguments with no fields; every other type has some.
 #[test]
 fn every_registered_description_has_fields() {
     for description in describe_all_types() {
-        assert!(!description.fields.is_empty(), "{} has no fields", description.name);
+        let may_be_empty = is_command_arguments(&description.name);
+        assert!(
+            may_be_empty || !description.fields.is_empty(),
+            "{} has no fields",
+            description.name
+        );
         assert!(!description.doc.is_empty(), "{} has no doc", description.name);
     }
 }
@@ -746,4 +771,274 @@ fn every_document_type_has_a_case_here() {
         .map(|row: &DocumentType| row.description_name)
         .collect();
     assert_eq!(registered, covered);
+}
+
+/// True when the type is some core command's arguments.
+fn is_command_arguments(type_name: &str) -> bool {
+    COMMAND_TYPES
+        .iter()
+        .any(|row| (row.describe_arguments)().name == type_name)
+}
+
+// ---- The core commands' argument and result types (M1-22), one test per area ----
+
+fn filled_job() -> JobSummary {
+    JobSummary {
+        job_id: "job_01J".to_string(),
+        run_id: "run_01J".to_string(),
+        node_id: "node_01J".to_string(),
+        kind: "train".to_string(),
+        state: "failed".to_string(),
+        error_code: "RRS-J1002".to_string(),
+    }
+}
+
+fn filled_node() -> NodeSummary {
+    NodeSummary {
+        node_id: "node_01J".to_string(),
+        name: "workstation".to_string(),
+        transport: "ssh".to_string(),
+        address: "ada@gpu-box".to_string(),
+        state: "connected".to_string(),
+        protocol_version: 1,
+        capabilities: vec!["fast_runtime".to_string()],
+        last_heartbeat_unix_ms: 1_760_000_000_000,
+    }
+}
+
+#[test]
+fn the_system_types_match_their_descriptions() {
+    assert_description_matches(&SystemStatusArgs {}, "SystemStatusArgs");
+    let status = SystemStatusResult {
+        app_version: "0.1.0".to_string(),
+        plugin_api_version: "0.1.0".to_string(),
+        node_protocol_version: 1,
+        worker_protocol_version: 1,
+        api_packages: vec!["rastai.commands.v1".to_string()],
+        nodes: vec![filled_node()],
+    };
+    assert_description_matches(&status, "SystemStatusResult");
+    assert_description_matches(&SystemShutdownArgs {}, "SystemShutdownArgs");
+    let shutdown = SystemShutdownResult {
+        running_job_ids: vec!["job_01J".to_string()],
+    };
+    assert_description_matches(&shutdown, "SystemShutdownResult");
+}
+
+#[test]
+fn the_command_types_match_their_descriptions() {
+    let arguments = CommandListArgs {
+        section: "training".to_string(),
+        include_experimental: true,
+        basic_only: true,
+    };
+    assert_description_matches(&arguments, "CommandListArgs");
+    let result = CommandListResult {
+        commands: vec![json!({"commandId": "system.status", "kind": "COMMAND_KIND_SYNC"})],
+    };
+    assert_description_matches(&result, "CommandListResult");
+}
+
+#[test]
+fn the_job_types_match_their_descriptions() {
+    assert_description_matches(&filled_job(), "JobSummary");
+    let list = JobListArgs {
+        run_id: "run_01J".to_string(),
+        state: "running".to_string(),
+    };
+    assert_description_matches(&list, "JobListArgs");
+    let jobs = JobListResult {
+        jobs: vec![filled_job()],
+    };
+    assert_description_matches(&jobs, "JobListResult");
+    let job_id = "job_01J".to_string();
+    assert_description_matches(&JobGetArgs { job_id: job_id.clone() }, "JobGetArgs");
+    assert_description_matches(&JobGetResult { job: filled_job() }, "JobGetResult");
+    assert_description_matches(&JobCancelArgs { job_id }, "JobCancelArgs");
+    assert_description_matches(&JobCancelResult { job: filled_job() }, "JobCancelResult");
+}
+
+#[test]
+fn the_train_types_match_their_descriptions() {
+    let arguments = TrainStartArgs {
+        recipe: "classification".to_string(),
+        design_path: "designs/textcnn.rrsmodel".to_string(),
+        dataset_path: "data/sentiment.rrsdata".to_string(),
+        eval_suite_ids: vec!["evals/facts.rrseval".to_string()],
+    };
+    assert_description_matches(&arguments, "TrainStartArgs");
+    let plan = TrainingPlan {
+        recipe: "classification".to_string(),
+        method: "full".to_string(),
+        dtype: "fp32".to_string(),
+        gpu_indices: vec![0],
+        micro_batch: 32,
+        gradient_accumulation: 1,
+        sequence_length: 128,
+        memory_estimate_bytes: 1 << 30,
+        time_estimate_seconds: 90,
+    };
+    assert_description_matches(&plan, "TrainingPlan");
+    let result = TrainStartResult {
+        run_id: "run_01J".to_string(),
+        plan,
+    };
+    assert_description_matches(&result, "TrainStartResult");
+}
+
+#[test]
+fn the_settings_types_match_their_descriptions() {
+    let get = SettingsGetArgs {
+        key: "ui.theme".to_string(),
+    };
+    assert_description_matches(&get, "SettingsGetArgs");
+    let source = SettingKeySource {
+        key: "ui.theme".to_string(),
+        source: "project".to_string(),
+        project_folder: "/home/ada/projects/sentiment".to_string(),
+    };
+    assert_description_matches(&source, "SettingKeySource");
+    let effective = SettingsGetResult {
+        values: json!({"ui": {"theme": "dark"}}),
+        sources: vec![source],
+    };
+    assert_description_matches(&effective, "SettingsGetResult");
+    let set = SettingsSetArgs {
+        key: "ui.theme".to_string(),
+        value: json!("dark"),
+        level: "user".to_string(),
+    };
+    assert_description_matches(&set, "SettingsSetArgs");
+    let set_result = SettingsSetResult {
+        key: "ui.theme".to_string(),
+        value: json!("dark"),
+        source: "user".to_string(),
+    };
+    assert_description_matches(&set_result, "SettingsSetResult");
+}
+
+#[test]
+fn the_token_types_match_their_descriptions() {
+    assert_description_matches(&TokenLoginCodeCreateArgs {}, "TokenLoginCodeCreateArgs");
+    let login_code = TokenLoginCodeCreateResult {
+        code: "f3c9a1".to_string(),
+        expires_unix_ms: 1_760_000_060_000,
+        http_port: 47_820,
+    };
+    assert_description_matches(&login_code, "TokenLoginCodeCreateResult");
+    let create = TokenCreateArgs {
+        name: "claude-desktop".to_string(),
+        preset: "mcp-default".to_string(),
+        scopes: vec!["training".to_string()],
+    };
+    assert_description_matches(&create, "TokenCreateArgs");
+    let created = TokenCreateResult {
+        token_id: "tok_01J".to_string(),
+        name: "claude-desktop".to_string(),
+        scopes: vec!["read".to_string(), "chat".to_string()],
+        token: "rrs_secret".to_string(),
+    };
+    assert_description_matches(&created, "TokenCreateResult");
+    let summary = TokenSummary {
+        token_id: "tok_01J".to_string(),
+        name: "navi".to_string(),
+        scopes: vec!["chat".to_string()],
+        created_unix_ms: 1_760_000_000_000,
+        revoked_unix_ms: 1_760_000_100_000,
+    };
+    assert_description_matches(&summary, "TokenSummary");
+    let list = TokenListArgs { include_revoked: true };
+    assert_description_matches(&list, "TokenListArgs");
+    let tokens = TokenListResult { tokens: vec![summary] };
+    assert_description_matches(&tokens, "TokenListResult");
+    let revoke = TokenRevokeArgs {
+        token_id: "tok_01J".to_string(),
+    };
+    assert_description_matches(&revoke, "TokenRevokeArgs");
+    let revoked = TokenRevokeResult {
+        token_id: "tok_01J".to_string(),
+        revoked_unix_ms: 1_760_000_100_000,
+    };
+    assert_description_matches(&revoked, "TokenRevokeResult");
+}
+
+#[test]
+fn the_plugin_types_match_their_descriptions() {
+    assert_description_matches(&PluginListArgs {}, "PluginListArgs");
+    let plugin = PluginSummary {
+        plugin_id: "psychology".to_string(),
+        version: "0.1.0".to_string(),
+        state: "incompatible".to_string(),
+        source: "preinstalled".to_string(),
+        granted_permissions: vec!["commands:[psychology]".to_string()],
+        manifest: json!({"type": "rastai.plugin", "id": "psychology"}),
+        diagnostics: vec![json!({"code": "RRS-P1002", "severity": "SEVERITY_ERROR"})],
+    };
+    assert_description_matches(&plugin, "PluginSummary");
+    let plugins = PluginListResult { plugins: vec![plugin] };
+    assert_description_matches(&plugins, "PluginListResult");
+}
+
+#[test]
+fn the_node_types_match_their_descriptions() {
+    assert_description_matches(&filled_node(), "NodeSummary");
+    assert_description_matches(&NodeListArgs {}, "NodeListArgs");
+    let nodes = NodeListResult {
+        nodes: vec![filled_node()],
+    };
+    assert_description_matches(&nodes, "NodeListResult");
+    let status = NodeStatusArgs {
+        node_id: "node_01J".to_string(),
+    };
+    assert_description_matches(&status, "NodeStatusArgs");
+    let detail = NodeStatusResult {
+        node: filled_node(),
+        telemetry: json!({"gpus": []}),
+        jobs: vec![filled_job()],
+    };
+    assert_description_matches(&detail, "NodeStatusResult");
+}
+
+// The few optional fields that are left out when empty, because the empty text or null isn't a value their
+// description allows: they must still read back, and what serde writes must still pass layer 2.
+#[test]
+fn fields_left_out_when_empty_still_match() {
+    let without_level = SettingsSetArgs {
+        key: "ui.theme".to_string(),
+        value: json!("dark"),
+        level: String::new(),
+    };
+    assert_empty_fields_left_out(&without_level, "SettingsSetArgs", &["level"]);
+    let without_preset = TokenCreateArgs {
+        name: "navi".to_string(),
+        preset: String::new(),
+        scopes: vec!["chat".to_string()],
+    };
+    assert_empty_fields_left_out(&without_preset, "TokenCreateArgs", &["preset"]);
+    let without_telemetry = NodeStatusResult {
+        node: filled_node(),
+        telemetry: Value::Null,
+        jobs: Vec::new(),
+    };
+    assert_empty_fields_left_out(&without_telemetry, "NodeStatusResult", &["telemetry"]);
+}
+
+fn assert_empty_fields_left_out<T: Serialize + DeserializeOwned + PartialEq + Debug>(
+    value: &T,
+    type_name: &str,
+    left_out: &[&str],
+) {
+    let all_types = describe_all_types();
+    let description = find_description(&all_types, type_name).unwrap();
+    let written = serde_json::to_value(value).unwrap();
+    for key in left_out {
+        assert!(written.get(key).is_none(), "{type_name}: {key} is written");
+    }
+    let check = StructureCheck {
+        all_types: &all_types,
+        report_unknown_fields: true,
+    };
+    assert_eq!(find_mismatches(&written, description, &check), vec![], "{type_name}");
+    let read_back: T = serde_json::from_value(written).unwrap();
+    assert_eq!(&read_back, value);
 }

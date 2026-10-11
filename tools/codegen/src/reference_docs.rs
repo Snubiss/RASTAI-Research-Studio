@@ -16,7 +16,7 @@ use crate::write_if_changed::write_if_changed;
 const ERRORS_REFERENCE_FILE: &str = "docs/reference/errors.md";
 const EMPTY_PREFIX_LINE: &str = "No codes yet.\n";
 const COMMANDS_REFERENCE_FILE: &str = "docs/reference/commands.md";
-const NO_COMMANDS_LINE: &str = "No core commands yet: the command table arrives with rastai-core (M1-21, M1-22).\n";
+const NO_COMMANDS_LINE: &str = "No core commands are registered.\n";
 const COMMANDS_TABLE_HEADER: &str = "| Command | Title | Kind | Stability | Since | Arguments | Result |
 |---|---|---|---|---|---|---|
 ";

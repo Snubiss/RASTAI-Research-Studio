@@ -3,6 +3,22 @@
 
 // Every generated type module. A type is named as `import("@rastai/formats").<Name>`.
 
+export * from "./command-command-list.js";
+export * from "./command-job-cancel.js";
+export * from "./command-job-get.js";
+export * from "./command-job-list.js";
+export * from "./command-node-list.js";
+export * from "./command-node-status.js";
+export * from "./command-plugin-list.js";
+export * from "./command-settings-get.js";
+export * from "./command-settings-set.js";
+export * from "./command-system-shutdown.js";
+export * from "./command-system-status.js";
+export * from "./command-token-create.js";
+export * from "./command-token-list.js";
+export * from "./command-token-login-code-create.js";
+export * from "./command-token-revoke.js";
+export * from "./command-train-start.js";
 export * from "./lock.js";
 export * from "./plugin.js";
 export * from "./project.js";

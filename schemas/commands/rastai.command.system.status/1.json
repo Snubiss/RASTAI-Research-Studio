@@ -1,0 +1,115 @@
+{
+  "$defs": {
+    "NodeSummary": {
+      "additionalProperties": false,
+      "description": "One node: how the daemon reaches it, its state and its last heartbeat.",
+      "properties": {
+        "address": {
+          "description": "user@host for an SSH node; empty for the embedded one.",
+          "type": "string"
+        },
+        "capabilities": {
+          "description": "The capability flags of its handshake.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "last_heartbeat_unix_ms": {
+          "description": "When its last heartbeat arrived; 0 or absent before the first.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "The node's name.",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "The node's id.",
+          "type": "string"
+        },
+        "protocol_version": {
+          "description": "The node protocol version it speaks.",
+          "type": "integer"
+        },
+        "state": {
+          "description": "Its connection state, such as connected.",
+          "type": "string"
+        },
+        "transport": {
+          "description": "local for the embedded node, ssh for a paired one.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "name",
+        "transport",
+        "state",
+        "protocol_version",
+        "capabilities"
+      ],
+      "title": "NodeSummary",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "system.status takes no arguments.",
+      "properties": {},
+      "required": [],
+      "title": "SystemStatusArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The daemon's versions, the protocol versions it speaks, and its nodes.",
+      "properties": {
+        "api_packages": {
+          "description": "The wire packages the daemon serves, such as rastai.commands.v1.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "app_version": {
+          "description": "The daemon's app version.",
+          "type": "string"
+        },
+        "node_protocol_version": {
+          "description": "The node protocol version the daemon speaks.",
+          "type": "integer"
+        },
+        "nodes": {
+          "description": "Every known node, the embedded one first.",
+          "items": {
+            "$ref": "#/$defs/NodeSummary"
+          },
+          "type": "array"
+        },
+        "plugin_api_version": {
+          "description": "The plugin API version plugins are matched against.",
+          "type": "string"
+        },
+        "worker_protocol_version": {
+          "description": "The worker protocol version of this release.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "app_version",
+        "plugin_api_version",
+        "node_protocol_version",
+        "worker_protocol_version",
+        "api_packages",
+        "nodes"
+      ],
+      "title": "SystemStatusResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.status/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Show status",
+  "title": "system.status",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

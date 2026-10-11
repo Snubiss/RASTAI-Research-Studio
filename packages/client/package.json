@@ -1,0 +1,14 @@
+{
+  "name": "@rastai/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The thin daemon client. For now only the generated typed command wrappers and the two JSDoc files they name (CommandExecutor, ExecuteOutcome); the connection, sign-in, execute and the event stream join in M1-50.",
+  "exports": {
+    "./commands": "./src/generated/commands.js"
+  },
+  "dependencies": {
+    "@rastai/formats": "workspace:*",
+    "@rastai/proto": "workspace:*"
+  }
+}

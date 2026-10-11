@@ -1,18 +1,21 @@
 //! The core command table (layout rust-control-plane.md 5.5, 10.1): every row of `COMMANDS` is well formed — an
 //! id of the contract form in a core area, no duplicates, a fixed scope, a known kind and section, a semver
 //! `since_version`, and `preview` stability until Phase 2 picks the stable subset. Retired ids are never reused.
+//! No argument field takes a global CLI flag (layout 9.4), and the table holds the skeleton's commands (M1-22).
 //!
-//! `row_problems` holds the checks, so the same function runs over the table and over sample bad rows: an empty
-//! table (before M1-22's rows) still proves each check catches what it should.
+//! `row_problems` and `flag_collisions` hold the checks, so the same functions run over the table and over sample
+//! bad rows and fields, which proves each check catches what it should.
 
 #![allow(clippy::unwrap_used)]
 
 use std::collections::BTreeSet;
 
 use rastai_core::commands::descriptor::CommandRow;
-use rastai_core::commands::naming::check_command_id;
+use rastai_core::commands::naming::{GLOBAL_FLAGS, check_command_id, flag_name, negated_flag_name};
 use rastai_core::commands::table::{COMMANDS, RETIRED_COMMANDS};
 use rastai_core::scopes::Scope;
+use rastai_formats::commands::describe_arguments;
+use rastai_formats::describe::types::{FieldDescription, FieldKind, OPTIONAL, TypeDescription, field};
 use rastai_formats::semver::parse_version;
 use rastai_proto::commands::v1::CommandKind;
 use rastai_proto::common::v1::Stability;
@@ -28,6 +31,26 @@ const CORE_SECTIONS: &[&str] = &[
     "plugins",
     "remote",
     "settings",
+];
+
+/// The skeleton's commands (plan M1-22, contracts 6.4): the first rows, every one `preview`.
+const SKELETON_COMMAND_IDS: &[&str] = &[
+    "system.status",
+    "system.shutdown",
+    "command.list",
+    "job.list",
+    "job.get",
+    "job.cancel",
+    "train.start",
+    "settings.get",
+    "settings.set",
+    "token.login_code.create",
+    "token.create",
+    "token.list",
+    "token.revoke",
+    "plugin.list",
+    "node.list",
+    "node.status",
 ];
 
 const GOOD_ROW: CommandRow = CommandRow {
@@ -70,6 +93,33 @@ fn row_problems(row: &CommandRow) -> Vec<String> {
         problems.push(format!("since_version {:?}", row.since_version));
     }
     problems
+}
+
+/// Every flag an argument type's fields would take on the command line that is a global flag: `--name` for each
+/// field, and `--no-name` too for a boolean one (layout 9.4).
+fn flag_collisions(arguments: &TypeDescription) -> Vec<String> {
+    let mut collisions = Vec::new();
+    for field in &arguments.fields {
+        let mut flags = vec![flag_name(&field.name)];
+        if field.kind == FieldKind::Boolean {
+            flags.push(negated_flag_name(&field.name));
+        }
+        for flag in flags {
+            if GLOBAL_FLAGS.contains(&flag.as_str()) {
+                collisions.push(format!("{}.{} takes {flag}", arguments.name, field.name));
+            }
+        }
+    }
+    collisions
+}
+
+fn sample_arguments(fields: Vec<FieldDescription>) -> TypeDescription {
+    TypeDescription {
+        name: "SampleArgs".to_string(),
+        schema_id: "rastai.command.sample.run/1".to_string(),
+        doc: "Sample arguments.".to_string(),
+        fields,
+    }
 }
 
 #[test]
@@ -151,4 +201,49 @@ fn the_checks_catch_each_bad_field() {
         ..GOOD_ROW
     };
     assert_eq!(row_problems(&plugin_scope).len(), 1);
+}
+
+#[test]
+fn the_skeleton_commands_are_registered() {
+    let registered: Vec<&str> = COMMANDS.iter().map(|row| row.command_id).collect();
+    assert_eq!(registered, SKELETON_COMMAND_IDS);
+}
+
+#[test]
+fn no_argument_takes_a_global_cli_flag() {
+    for row in COMMANDS {
+        let arguments = describe_arguments(row.command_id);
+        let arguments = arguments.unwrap_or_else(|| panic!("{} has no argument type", row.command_id));
+        assert_eq!(flag_collisions(&arguments), Vec::<String>::new());
+    }
+}
+
+#[test]
+fn a_field_that_takes_a_global_flag_is_caught() {
+    let fine = sample_arguments(vec![
+        field("node_id", FieldKind::String, OPTIONAL, "Not --node."),
+        field(
+            "dry",
+            FieldKind::Boolean,
+            OPTIONAL,
+            "Neither --dry nor --no-dry is global.",
+        ),
+    ]);
+    assert_eq!(flag_collisions(&fine), Vec::<String>::new());
+    let colliding = sample_arguments(vec![
+        field("dry_run", FieldKind::Boolean, OPTIONAL, "Takes --dry-run."),
+        field("project", FieldKind::String, OPTIONAL, "Takes --project."),
+        field("start", FieldKind::Boolean, OPTIONAL, "Its off flag is --no-start."),
+    ]);
+    assert_eq!(
+        flag_collisions(&colliding),
+        [
+            "SampleArgs.dry_run takes --dry-run",
+            "SampleArgs.project takes --project",
+            "SampleArgs.start takes --no-start",
+        ]
+    );
+    // A text field named `start` has no off flag, so it is free.
+    let text_start = sample_arguments(vec![field("start", FieldKind::String, OPTIONAL, "Takes --start.")]);
+    assert_eq!(flag_collisions(&text_start), Vec::<String>::new());
 }

@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "SettingKeySource": {
+      "additionalProperties": false,
+      "description": "The layer one key's value came from.",
+      "properties": {
+        "key": {
+          "description": "A dotted key, such as ui.theme.",
+          "type": "string"
+        },
+        "project_folder": {
+          "description": "For the project layer, the project folder whose settings.json holds the value.",
+          "type": "string"
+        },
+        "source": {
+          "description": "The layer its value came from.",
+          "enum": [
+            "default",
+            "user",
+            "project",
+            "environment",
+            "flag"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "source"
+      ],
+      "title": "SettingKeySource",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Which settings to show.",
+      "properties": {
+        "key": {
+          "description": "A section (ui) or a dotted key (ui.theme); empty or absent for every setting.",
+          "type": "string",
+          "x-rastai-cli-position": 0
+        }
+      },
+      "required": [],
+      "title": "SettingsGetArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The effective settings and the layer each key came from.",
+      "properties": {
+        "sources": {
+          "description": "The layer of each dotted key in values, sorted by key.",
+          "items": {
+            "$ref": "#/$defs/SettingKeySource"
+          },
+          "type": "array"
+        },
+        "values": {
+          "description": "The merged sections, as in a settings.json file."
+        }
+      },
+      "required": [
+        "values",
+        "sources"
+      ],
+      "title": "SettingsGetResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.settings.get/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Show settings",
+  "title": "settings.get",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

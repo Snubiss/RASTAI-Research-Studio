@@ -11,8 +11,9 @@
 //! and a row marked for a later milestone ("(M4)", the plugins' catalogs) may wait for its entry. The source scan
 //! finds every code that first-party source names outside its tests and checks that the catalog has it, and the
 //! placeholder scan checks that a `diagnostic("RRS-...", &[("name", ...)])` call and its entry name the same values
-//! (layout 2.6, M1-13). One rule joins later, with its input: `fix_command_id` naming a real command (M1-22, with the
-//! first rows of the command table).
+//! (layout 2.6, M1-13). A `fix_command_id` names a command the fix button can run: a row of rastai-core's command
+//! table, or a command contracts 6.4 registers with the milestone that builds it, such as `storage.gc` (M5)
+//! (layout 2.6, M1-22). First-party manifests join that rule when the first one lands (M4).
 //!
 //! Each rule is a small function that returns its problems. The tests run each rule on the real catalog, and on a
 //! small sample that breaks it, so a rule that stops catching anything fails too.
@@ -28,6 +29,7 @@ use rastai_codegen::catalog_ranges::{CATALOG_PREFIXES, CatalogPrefix, CodeRange,
 use rastai_codegen::catalog_source::{ErrorRecord, TermRecord, read_catalog, read_error_codes};
 use rastai_codegen::literals::severity_word;
 use rastai_codegen::repo_root::find_repo_root;
+use rastai_core::commands::table::COMMANDS;
 use rastai_diag::diagnostic::Severity;
 
 /// The branch a pull request merges into; CI passes the PR's base, as for check-schema-diff (contracts 12.6).
@@ -58,6 +60,14 @@ const NEXT_SECTION_START: &str = "\n## ";
 const CODE_ROW_START: &str = "| `RRS-";
 const CODE_COLUMN: usize = 0;
 const SEVERITY_COLUMN: usize = 1;
+
+/// The command tables of contracts 6.4: every table line from this heading to the next subsection whose first cell
+/// starts with a command id. A milestone marker in brackets follows an id (`plugin.permissions` (M8)) or ends the
+/// cell and covers the row (`system.update.check` / `system.update.apply` (M9)), as contracts' conventions say.
+const COMMANDS_HEADING: &str = "### 6.4 Initial command catalog";
+const NEXT_SUBSECTION_START: &str = "\n### ";
+const COMMAND_ROW_START: &str = "| `";
+const MARKER_START: char = '(';
 
 /// The source scan (layout rust-control-plane.md 3.2: "it scans the source for RRS- literals and checks each against
 /// the catalog") reads these folders, relative to the repository root, and these kinds of file.
@@ -1516,4 +1526,174 @@ fn unused_values_and_unfilled_placeholders_are_caught() {
         ]
     );
     assert_eq!(placeholder_names("{a} {b_2} {Not} {} { c} {"), ["a", "b_2"]);
+}
+
+// ---- fix_command_id names a registered command ----
+
+/// One command id of the contracts 6.4 tables, and whether a milestone marker covers it: the milestone that will
+/// build it, so it may be missing from the code until then (12.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ContractsCommand {
+    command_id: String,
+    marked: bool,
+}
+
+/// The command ids of every table under the 6.4 heading, up to the next subsection. Empty when it is missing.
+fn contracts_commands(contracts_text: &str) -> Vec<ContractsCommand> {
+    let Some((_, after_heading)) = contracts_text.split_once(COMMANDS_HEADING) else {
+        return Vec::new();
+    };
+    let section = match after_heading.split_once(NEXT_SUBSECTION_START) {
+        Some((section, _)) => section,
+        None => after_heading,
+    };
+    let mut commands = Vec::new();
+    for line in section.lines() {
+        if let Some(rest) = line.strip_prefix(COMMAND_ROW_START) {
+            let first_cell = rest.split('|').next().unwrap_or_default();
+            commands.extend(parse_command_cell(&format!("`{first_cell}")));
+        }
+    }
+    commands
+}
+
+/// The ids of one first cell: "`plugin.list` / `plugin.permissions` (M8)". Splitting on backticks puts the ids at
+/// the odd places and the text between them at the even ones, so an id's own marker is in the piece after it, and
+/// the row's marker is in the last piece.
+fn parse_command_cell(cell: &str) -> Vec<ContractsCommand> {
+    let pieces: Vec<&str> = cell.split('`').collect();
+    let row_marked = pieces.last().is_some_and(|tail| tail.contains(MARKER_START));
+    let mut commands = Vec::new();
+    for index in (1..pieces.len()).step_by(2) {
+        let command_id = pieces[index];
+        if !command_id.contains('.') || command_id.contains(' ') {
+            continue;
+        }
+        let after_id = pieces.get(index + 1).copied().unwrap_or_default();
+        commands.push(ContractsCommand {
+            command_id: command_id.to_string(),
+            marked: row_marked || after_id.contains(MARKER_START),
+        });
+    }
+    commands
+}
+
+/// Entries whose `fix_command_id` the fix button couldn't run: not a row of the core table, and not a command
+/// contracts 6.4 registers with a later milestone. An unmarked 6.4 id is built already, so it must be in the table.
+fn unregistered_fix_commands(
+    errors: &[ErrorRecord],
+    core_command_ids: &[&str],
+    contracts: &[ContractsCommand],
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for record in errors {
+        let command_id = record.fix_command_id.as_str();
+        if command_id.is_empty() || core_command_ids.contains(&command_id) {
+            continue;
+        }
+        let place = format!("{} ({})", record.code, record.source_file);
+        match contracts.iter().find(|row| row.command_id == command_id) {
+            Some(row) if row.marked => {}
+            Some(_) => problems.push(format!(
+                "{place}: fix_command_id `{command_id}` has no milestone marker in contracts 6.4, so it must be a row \
+                 of the core command table"
+            )),
+            None => problems.push(format!(
+                "{place}: fix_command_id `{command_id}` is no core command and isn't registered in contracts 6.4"
+            )),
+        }
+    }
+    problems
+}
+
+#[test]
+fn every_fix_command_id_is_a_registered_command() {
+    let contracts_path = find_repo_root().unwrap().join(CONTRACTS_FILE);
+    let contracts_text = std::fs::read_to_string(&contracts_path).expect("contracts.md reads");
+    let contracts = contracts_commands(&contracts_text);
+    assert!(
+        contracts.len() > COMMANDS.len(),
+        "too few ids after {COMMANDS_HEADING:?} in {CONTRACTS_FILE}: the table reader lost its place"
+    );
+    let core_command_ids: Vec<&str> = COMMANDS.iter().map(|row| row.command_id).collect();
+    assert_eq!(
+        unregistered_fix_commands(&real_errors(), &core_command_ids, &contracts),
+        Vec::<String>::new()
+    );
+}
+
+/// A small contracts 6.4: a built row, an id with its own marker, two ids with their own markers in one cell, a row
+/// whose marker ends the cell and so covers both ids, and a table line in the next subsection that must not be read.
+const SAMPLE_COMMANDS_SECTION: &str = "### 6.4 Initial command catalog
+
+| Command | Purpose | Scope | Undo | Kind |
+|---|---|---|---|---|
+| `settings.get` / `settings.set` | effective settings; set one key | read / system.admin | | sync |
+| `storage.gc` (M5) | delete unpinned blobs | system.admin | | job |
+| `node.list` (M1) / `node.pair` (M9) | nodes; SSH pairing | read / remote | | sync / job |
+| `system.update.check` / `system.update.apply` (M9) | self-update | system.admin | | sync / job |
+
+**Not commands:** `chat.lens.set` doesn't exist.
+
+### 6.5 Argument and result types named across docs
+
+| `ModelLoadArgs.files` | not a command row |
+";
+
+#[test]
+fn contracts_command_rows_are_read_with_their_markers() {
+    let read: Vec<(String, bool)> = contracts_commands(SAMPLE_COMMANDS_SECTION)
+        .into_iter()
+        .map(|row| (row.command_id, row.marked))
+        .collect();
+    let expected = [
+        ("settings.get", false),
+        ("settings.set", false),
+        ("storage.gc", true),
+        ("node.list", true),
+        ("node.pair", true),
+        ("system.update.check", true),
+        ("system.update.apply", true),
+    ];
+    let expected: Vec<(String, bool)> = expected.iter().map(|(id, marked)| (id.to_string(), *marked)).collect();
+    assert_eq!(read, expected);
+    assert!(contracts_commands("## 6. Commands\n").is_empty());
+}
+
+#[test]
+fn a_fix_command_that_isnt_registered_is_caught() {
+    let contracts = contracts_commands(SAMPLE_COMMANDS_SECTION);
+    let core_command_ids = ["settings.set"];
+    let with_fix = |code: &str, command_id: &str| {
+        let mut record = sample(code, "catalog/errors/RRS-C.json");
+        record.fix_command_id = command_id.to_string();
+        record
+    };
+    let registered = [
+        sample("RRS-C0001", "catalog/errors/RRS-C.json"),
+        with_fix("RRS-C0002", "settings.set"),
+        with_fix("RRS-C0003", "storage.gc"),
+        with_fix("RRS-C0004", "system.update.apply"),
+        with_fix("RRS-C0005", "node.pair"),
+    ];
+    assert_eq!(
+        unregistered_fix_commands(&registered, &core_command_ids, &contracts),
+        Vec::<String>::new()
+    );
+    let unregistered = [
+        with_fix("RRS-C0006", "settings.sett"),
+        with_fix("RRS-C0007", "settings.get"),
+        with_fix("RRS-C0008", "chat.lens.set"),
+    ];
+    assert_eq!(
+        unregistered_fix_commands(&unregistered, &core_command_ids, &contracts),
+        [
+            "RRS-C0006 (catalog/errors/RRS-C.json): fix_command_id `settings.sett` is no core command and isn't \
+             registered in contracts 6.4",
+            "RRS-C0007 (catalog/errors/RRS-C.json): fix_command_id `settings.get` has no milestone marker in \
+             contracts 6.4, so it must be a row of the core command table",
+            "RRS-C0008 (catalog/errors/RRS-C.json): fix_command_id `chat.lens.set` is no core command and isn't \
+             registered in contracts 6.4",
+        ]
+    );
 }

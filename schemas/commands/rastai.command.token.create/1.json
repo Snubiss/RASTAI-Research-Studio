@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "A new scoped API token: a name, and its scopes as a preset or a list.",
+      "properties": {
+        "name": {
+          "description": "A name to recognise the token by, such as claude-desktop.",
+          "type": "string",
+          "x-rastai-cli-position": 0
+        },
+        "preset": {
+          "description": "A scope preset: chat-only or mcp-default.",
+          "enum": [
+            "chat-only",
+            "mcp-default"
+          ],
+          "type": "string"
+        },
+        "scopes": {
+          "description": "Scope names, added to the preset's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "TokenCreateArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The new token, with its text shown this once.",
+      "properties": {
+        "name": {
+          "description": "The token's name.",
+          "type": "string"
+        },
+        "scopes": {
+          "description": "The scopes it holds.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token": {
+          "description": "The token's text, shown this once; the daemon keeps only its hash.",
+          "type": "string"
+        },
+        "token_id": {
+          "description": "The token's id.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token_id",
+        "name",
+        "scopes",
+        "token"
+      ],
+      "title": "TokenCreateResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.token.create/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Create an API token",
+  "title": "token.create",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}
