@@ -9,18 +9,16 @@ import re
 import sys
 from pathlib import Path
 
-from repo_files import line_number_at, list_files, parse_root_argument, read_text, report
+from repo_files import line_number_at, list_files, parse_root_argument, read_text, report, rust_code_only
 
 # File -> how many `unsafe` uses its ADR allows. Adding a file here needs an ADR that names it.
 ALLOWED_UNSAFE_USES = {
     "crates/rastai-store/src/disk_space.rs": 1,  # ADR-0033: one libc::statvfs call
 }
 # The Rust syntax that is unsafe: a block, a function, an impl, a trait, an extern block and the edition-2024
-# unsafe attributes such as #[unsafe(no_mangle)]. Matching the syntax, not the bare word, lets a message such as
-# "unsafe path" in a string pass.
+# unsafe attributes such as #[unsafe(no_mangle)]. It is matched in the code only, with comments and strings
+# blanked (rust_code_only), so `// no unsafe { } here` passes and `call("http://x", unsafe { g() })` doesn't.
 UNSAFE_SYNTAX = re.compile(r"\bunsafe\s*(\{|\(|fn\b|impl\b|trait\b|extern\b)")
-# A line comment, so `// no unsafe { } here` doesn't count.
-LINE_COMMENT = re.compile(r"//.*")
 
 
 def main() -> int:
@@ -37,7 +35,7 @@ def find_problems(root: Path) -> list[str]:
 
 
 def check_file(root: Path, path: str) -> list[str]:
-    code = LINE_COMMENT.sub("", read_text(root, path))
+    code = rust_code_only(read_text(root, path))
     uses = list(UNSAFE_SYNTAX.finditer(code))
     allowed_count = ALLOWED_UNSAFE_USES.get(path, 0)
     if len(uses) <= allowed_count:

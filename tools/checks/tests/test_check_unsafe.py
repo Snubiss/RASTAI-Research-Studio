@@ -17,6 +17,8 @@ def test_passing_tree(write_tree, run_check):
             ALLOWED_FILE: ONE_STATVFS_CALL,
             "crates/rastai-formats/src/zip/reader.rs": "// no unsafe { } here\n"
             'const MESSAGE: &str = "unsafe path in the archive";\n',
+            "crates/rastai-formats/src/json/reader.rs": "/* unsafe { */\nfn read() {}\n"
+            'const HINT: &str = "never unsafe { here }";\n',
             "spike/bakeoff/rust/src/mmap.rs": "fn map() { unsafe { } }\n",
             "target/debug/build/out.rs": "unsafe fn generated() {}\n",
         }
@@ -38,6 +40,16 @@ def test_unsafe_outside_the_exception_list_fails(write_tree, run_check):
     assert "crates/rastai-formats/src/safetensors/reader.rs:2: `unsafe` outside the ADR exception list" in result.stdout
     assert "crates/rastai-core/src/ids.rs:1:" in result.stdout
     assert "crates/rastai-diag/src/lib.rs:1:" in result.stdout
+
+
+def test_unsafe_after_a_double_slash_in_a_string_fails(write_tree, run_check):
+    """`//` inside a string starts no comment, so the unsafe block after it on the same line is still seen."""
+    root = write_tree(
+        {"crates/rastai-transport/src/client.rs": 'fn f() { call("http://127.0.0.1", unsafe { g() }); }\n'}
+    )
+    result = run_check("check-unsafe", "--root", str(root))
+    assert result.returncode == 1
+    assert "crates/rastai-transport/src/client.rs:1: `unsafe` outside the ADR exception list" in result.stdout
 
 
 def test_a_second_unsafe_in_the_allowed_file_fails(write_tree, run_check):

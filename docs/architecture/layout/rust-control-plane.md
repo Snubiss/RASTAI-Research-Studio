@@ -245,7 +245,7 @@ pyo3       = { category = "foundation", reason = "the rastai-formats wheel", use
 # ... one row per crate in §27 (contracts §2.5)
 ```
 
-Dev-only crates (`libfuzzer-sys` for the fuzz crates) are listed with `category = "dev"`; `check-deps` rejects them in non-dev dependency sections.
+Dev-only crates (`libfuzzer-sys` for the fuzz crates) are listed with `category = "dev"`; `check-deps` rejects them in non-dev dependency sections of workspace members. The cargo-fuzz crates (`crates/<crate>/fuzz/`, excluded from the workspace) are dev-only as a whole: `check-deps` reads their manifests against the same allowlist and accepts a dev crate in their `[dependencies]`, where cargo-fuzz puts `libfuzzer-sys`.
 
 ### 2.5 `justfile` recipes
 

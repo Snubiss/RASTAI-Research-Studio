@@ -28,6 +28,10 @@ def test_passing_tree(write_tree, run_check):
             "plugins/psychology/ui/src/LivePanel.jsx": 'export const PANEL = <div className="live" />;\n',
             "packages/proto/src/generated/colors_pb.js": 'export const EXAMPLE = "#ffffff";\n',
             "apps/web/src/app/tokens.test.js": "// tests outside tokens/ still use tokens\n",
+            # Names that hold a color word, a url() path or fragment, and JSX text with an apostrophe.
+            "apps/web/src/sections/runs/runs.css": ".tag:not(.green) {\n  background: url(icons/red-arrow.svg);\n"
+            "  mask: url(#fade);\n  border-color: var(--rr-color-red);\n}\n",
+            "apps/web/src/sections/runs/RunNote.jsx": "export const NOTE = <p>Don't reopen issue #123</p>;\n",
         }
     )
     result = run_check("check-colors", "--root", str(root))
@@ -42,6 +46,8 @@ def test_every_kind_of_color_literal_fails(write_tree, run_check):
             "plugins/evaluation/ui/src/Score.jsx": 'export const STYLE = { color: "white" };\n',
             "packages/ui/src/components/Button.jsx": 'export const HOVER = "hsl(210, 50%, 40%)";\n',
             "apps/web/src/app/shell.js": 'export const FALLBACK = "#fff";\n',
+            "apps/web/src/app/banner.js": "export const BANNER_STYLE = `\n  color: red;\n`;\n",
+            "apps/web/src/app/theme.css": ".shell {\n  color: var(--rr-color-text, black);\n}\n",
         }
     )
     result = run_check("check-colors", "--root", str(root))
@@ -51,7 +57,9 @@ def test_every_kind_of_color_literal_fails(write_tree, run_check):
     assert 'plugins/evaluation/ui/src/Score.jsx:1: color literal `"white"`' in result.stdout
     assert "packages/ui/src/components/Button.jsx:1: color literal `hsl(`" in result.stdout
     assert "apps/web/src/app/shell.js:1: color literal `#fff`" in result.stdout
-    assert "5 problem(s)" in result.stdout
+    assert "apps/web/src/app/banner.js:2: color literal `red`" in result.stdout
+    assert "apps/web/src/app/theme.css:2: color literal `black`" in result.stdout
+    assert "7 problem(s)" in result.stdout
 
 
 def test_the_real_repository_passes(run_check):

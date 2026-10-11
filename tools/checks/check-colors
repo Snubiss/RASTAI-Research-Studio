@@ -12,7 +12,15 @@ import sys
 from fnmatch import fnmatch
 from pathlib import Path
 
-from repo_files import line_number_at, list_files, parse_root_argument, read_text, report, split_javascript
+from repo_files import (
+    blank_out,
+    line_number_at,
+    list_files,
+    parse_root_argument,
+    read_text,
+    report,
+    split_javascript,
+)
 
 # The hand-written frontend source folders (fnmatch patterns, where * also crosses folders).
 CHECKED_FOLDER_PATTERNS = ["apps/*/src/*", "packages/*/src/*", "plugins/*/ui/src/*"]
@@ -28,11 +36,15 @@ CSS_SUFFIXES = (".css",)
 HEX_COLOR = re.compile(r"(?<![\w&#])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?!\w)")
 # The CSS color functions.
 COLOR_FUNCTION = re.compile(r"\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\(", re.IGNORECASE)
-# One CSS declaration, `property: value`; its value is where a named color would be.
-CSS_DECLARATION = re.compile(r"[\w-]+\s*:\s*([^;{}]+)")
-WORD = re.compile(r"[A-Za-z]+")
+# One CSS declaration, `property: value`, ended by ; or }; its value is where a named color would be. A selector
+# such as `.tag:not(.green) {` looks the same but ends at {, so it isn't one.
+CSS_DECLARATION = re.compile(r"[\w-]+\s*:\s*([^;{}]+)(?=[;}])")
+# A whole CSS identifier: `red` is one, but `red-arrow` and the custom property `--rr-color-red` are other names.
+CSS_IDENTIFIER = re.compile(r"(?<![\w-])[A-Za-z][\w-]*")
 CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-NOT_LINE_BREAK = re.compile(r"[^\n]")
+# url(...) holds a path or a fragment, never a color: `url(icons/red.svg)`, `url(#fade)` (which looks like a hex).
+CSS_URL = re.compile(r"\burl\([^)]*\)", re.IGNORECASE)
+TEMPLATE_QUOTE = "`"
 # The CSS named colors (CSS Color 4). transparent and currentColor aren't here: they name no color value.
 NAMED_COLORS = set(
     """
@@ -83,10 +95,11 @@ def check_file(path: str, text: str) -> list[str]:
 
 
 def find_colors_in_file(path: str, text: str) -> list[tuple[int, str]]:
-    """(offset, literal) for each color. A stylesheet is all declarations, so all of it is read except comments.
-    In JavaScript a color can only be a string ("#101318", a style object's "red"), so only strings are read."""
+    """(offset, literal) for each color. A stylesheet is all declarations, so all of it is read except comments
+    and url(...). In JavaScript a color can only be a string ("#101318", a style object's "red", CSS in a
+    template string), so only strings are read."""
     if path.endswith(CSS_SUFFIXES):
-        return find_colors_in_style_text(blank_out_css_comments(text))
+        return find_colors_in_style_text(blank_out_matches(CSS_URL, blank_out_matches(CSS_COMMENT, text)))
     found = []
     for kind, start, end in split_javascript(text):
         if kind == "string":
@@ -95,9 +108,13 @@ def find_colors_in_file(path: str, text: str) -> list[tuple[int, str]]:
 
 
 def find_colors_in_style_text(text: str) -> list[tuple[int, str]]:
-    found = find_color_values(text)
+    return find_color_values(text) + find_named_colors_in_declarations(text)
+
+
+def find_named_colors_in_declarations(text: str) -> list[tuple[int, str]]:
+    found = []
     for declaration in CSS_DECLARATION.finditer(text):
-        for word in WORD.finditer(declaration.group(1)):
+        for word in CSS_IDENTIFIER.finditer(declaration.group(1)):
             if word.group().lower() in NAMED_COLORS:
                 found.append((declaration.start(1) + word.start(), word.group()))
     return found
@@ -105,10 +122,13 @@ def find_colors_in_style_text(text: str) -> list[tuple[int, str]]:
 
 def find_colors_in_string(quoted_text: str) -> list[tuple[int, str]]:
     """A string literal, quotes included. A string whose whole value is a color name counts too; a name inside a
-    sentence ("Status: green") doesn't, because UI text may name a color."""
+    sentence ("Status: green") doesn't, because UI text may name a color. A template string may hold CSS
+    (`color: red;`), so its declarations are read as a stylesheet's are."""
     found = find_color_values(quoted_text)
     if quoted_text[1:-1].strip().lower() in NAMED_COLORS:
         found.append((0, quoted_text))
+    if quoted_text.startswith(TEMPLATE_QUOTE):
+        found += find_named_colors_in_declarations(blank_out_matches(CSS_URL, quoted_text))
     return found
 
 
@@ -117,13 +137,13 @@ def find_color_values(text: str) -> list[tuple[int, str]]:
     return found + [(match.start(), match.group()) for match in COLOR_FUNCTION.finditer(text)]
 
 
-def blank_out_css_comments(text: str) -> str:
-    """Replaces each /* comment */ with spaces of the same length, keeping line breaks, so offsets still match."""
-    return CSS_COMMENT.sub(spaces_for_comment, text)
+def blank_out_matches(pattern: re.Pattern, text: str) -> str:
+    """Replaces each match of pattern with spaces of the same length, keeping line breaks, so offsets still match."""
+    return pattern.sub(blank_out_match, text)
 
 
-def spaces_for_comment(comment: re.Match) -> str:
-    return NOT_LINE_BREAK.sub(" ", comment.group())
+def blank_out_match(match: re.Match) -> str:
+    return blank_out(match.group())
 
 
 if __name__ == "__main__":

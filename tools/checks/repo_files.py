@@ -1,11 +1,15 @@
 """Shared helpers for the repo checks in tools/checks (layout: rust-control-plane.md section 2.1).
 
 Every check walks the same tree the same way, takes the same --root argument and prints its problems the same
-way, so those three things live here once. Standard library only: the checks run before any environment exists.
+way, so those things live here once, with the small source scanners several checks share. Standard library only:
+`just` runs the checks with the cpu environment's Python, but they import nothing from it, so any Python 3.12 can
+run them.
 """
 
 import argparse
 import os
+import re
+from collections.abc import Callable
 from pathlib import Path
 
 # Folders no check ever reads, wherever they sit: version control, build output, installed packages and the
@@ -15,6 +19,15 @@ SKIPPED_FOLDER_NAMES = {".git", "target", "node_modules", ".dev", ".venv", "__py
 SKIPPED_TOP_FOLDERS = {"spike"}
 # tools/checks/<script> sits two folders below the repository root.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Any character but a line break: blanking a span keeps its line breaks, so line numbers stay right.
+NOT_LINE_BREAK = re.compile(r"[^\n]")
+
+# The characters that can start a Rust comment, string or char literal; any other character is plain code.
+RUST_SPAN_START_CHARACTERS = set("/\"'rbc")
+# A Rust char literal: 'a', '"', '\n', '\'', '\x7f', '\u{1F600}'. A quote that doesn't start one is a lifetime ('a).
+RUST_CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'")
+# The start of a raw string: r"..", r#".."#, r##".."## and so on, and the byte and C forms br".." and cr"..".
+RUST_RAW_STRING_START = re.compile(r"[bc]?r(#*)\"")
 
 
 def parse_root_argument(description: str) -> Path:
@@ -28,6 +41,8 @@ def list_files(root: Path, suffixes: tuple[str, ...]) -> list[str]:
     """Every file under root whose name ends with one of suffixes, as sorted relative paths with / separators."""
     found = []
     for folder, child_folders, file_names in os.walk(root):
+        # os.walk descends into whatever child_folders holds afterwards, so it must be changed in place (a new
+        # list wouldn't be seen); that is how skipped folders are never read at all.
         child_folders[:] = [name for name in child_folders if should_enter(root, Path(folder) / name)]
         for name in file_names:
             if name.endswith(suffixes):
@@ -68,11 +83,41 @@ def split_javascript(text: str) -> list[tuple[str, int, int]]:
     expression literal holding a quote can confuse it; our code has none, and a confused span only means a
     check reads a few characters as the wrong kind.
     """
+    return split_source(text, next_javascript_span)
+
+
+def split_rust(text: str) -> list[tuple[str, int, int]]:
+    """Cuts Rust source into ("code" | "string" | "comment", start, end) spans, in order: // and nested /* */
+    comments, "..." strings with escapes, raw strings (r#"..."#) and char literals. Lifetimes stay code."""
+    return split_source(text, next_rust_span)
+
+
+def rust_code_only(text: str) -> str:
+    """Rust source with every comment and string blanked to spaces, the same length and the same line breaks.
+
+    A check that looks for syntax (`unsafe {`, `blake3::`) reads this, so a URL in a string ("http://...") or a
+    commented-out line can neither hide code nor count as code.
+    """
+    pieces = []
+    for kind, start, end in split_rust(text):
+        piece = text[start:end]
+        pieces.append(piece if kind == "code" else blank_out(piece))
+    return "".join(pieces)
+
+
+def blank_out(text: str) -> str:
+    """Spaces in place of every character but line breaks, so offsets and line numbers still match."""
+    return NOT_LINE_BREAK.sub(" ", text)
+
+
+def split_source(text: str, next_span: Callable[[str, int], tuple[str | None, int]]) -> list[tuple[str, int, int]]:
+    """The scan both languages share. next_span says whether a comment or string starts at a position, and
+    where it ends; everything between those spans is code."""
     spans = []
     position = 0
     code_start = 0
     while position < len(text):
-        kind, end = next_non_code_span(text, position)
+        kind, end = next_span(text, position)
         if kind is None:
             position += 1
             continue
@@ -86,17 +131,28 @@ def split_javascript(text: str) -> list[tuple[str, int, int]]:
     return spans
 
 
-def next_non_code_span(text: str, position: int) -> tuple[str | None, int]:
+# ---- JavaScript ----
+
+
+def next_javascript_span(text: str, position: int) -> tuple[str | None, int]:
     """("comment" | "string", end) when a comment or string starts at position, else (None, position)."""
     if text.startswith("//", position):
-        end = text.find("\n", position)
-        return "comment", len(text) if end == -1 else end
+        return "comment", line_end(text, position)
     if text.startswith("/*", position):
         end = text.find("*/", position + 2)
         return "comment", len(text) if end == -1 else end + 2
-    if text[position] in "\"'`":
+    if text[position] == "`":
+        return "string", string_end(text, position)
+    if text[position] in "\"'" and not follows_a_word(text, position):
         return "string", string_end(text, position)
     return None, position
+
+
+def follows_a_word(text: str, position: int) -> bool:
+    """Whether a letter, digit or _ sits right before position. A quote string never opens there in JavaScript
+    (only a backtick does, for a tagged template), so a quote after a word is JSX text, like the apostrophe in
+    <p>Don't</p>, and not a string that runs to the end of the line. Rust raw strings follow the same rule."""
+    return position > 0 and (text[position - 1].isalnum() or text[position - 1] == "_")
 
 
 def string_end(text: str, start: int) -> int:
@@ -114,6 +170,65 @@ def string_end(text: str, start: int) -> int:
             return position
         position += 1
     return len(text)
+
+
+# ---- Rust ----
+
+
+def next_rust_span(text: str, position: int) -> tuple[str | None, int]:
+    """("comment" | "string", end) when a comment, string or char literal starts at position, else (None, position)."""
+    if text[position] not in RUST_SPAN_START_CHARACTERS:
+        return None, position
+    if text.startswith("//", position):
+        return "comment", line_end(text, position)
+    if text.startswith("/*", position):
+        return "comment", rust_block_comment_end(text, position)
+    if text[position] == '"':
+        return "string", rust_string_end(text, position + 1)
+    if text[position] == "'":
+        char_literal = RUST_CHAR_LITERAL.match(text, position)
+        return ("string", char_literal.end()) if char_literal else (None, position)
+    raw_start = RUST_RAW_STRING_START.match(text, position)
+    if raw_start and not follows_a_word(text, position):
+        closing = '"' + raw_start.group(1)
+        end = text.find(closing, raw_start.end())
+        return "string", len(text) if end == -1 else end + len(closing)
+    return None, position
+
+
+def rust_block_comment_end(text: str, start: int) -> int:
+    """The offset just past the /* comment */ that starts at start. Rust block comments nest."""
+    depth = 0
+    position = start
+    while position < len(text):
+        if text.startswith("/*", position):
+            depth += 1
+            position += 2
+        elif text.startswith("*/", position):
+            depth -= 1
+            position += 2
+            if depth == 0:
+                return position
+        else:
+            position += 1
+    return len(text)
+
+
+def rust_string_end(text: str, position: int) -> int:
+    """The offset just past the "..." string whose text starts at position. Rust strings may span lines."""
+    while position < len(text):
+        if text[position] == "\\":
+            position += 2
+            continue
+        if text[position] == '"':
+            return position + 1
+        position += 1
+    return len(text)
+
+
+def line_end(text: str, position: int) -> int:
+    end = text.find("\n", position)
+    return len(text) if end == -1 else end
 
 
 def report(check_name: str, problems: list[str], passed_message: str) -> int:
