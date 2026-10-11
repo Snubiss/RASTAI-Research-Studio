@@ -1,0 +1,10 @@
+{
+  "name": "@rastai/formats",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The generated document and command types (JSDoc typedefs from rastai-formats' type descriptions); the WASM validator joins in M4. src/generated/ is never edited by hand: run `just codegen`.",
+  "exports": {
+    ".": "./src/index.js"
+  }
+}

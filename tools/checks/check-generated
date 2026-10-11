@@ -4,7 +4,7 @@
 Generated folders are never edited by hand and aren't reviewed, so CI proves them instead: every generator
 writes into a temporary tree and each of its outputs, a folder or a single file, must match the checked-in one byte
 for byte. Each codegen task adds its row to GENERATORS: buf for proto/ (M1-08), then the rastai-codegen binaries
-(M1-12 on).
+(the catalog in M1-12, the formats in M1-16).
 """
 
 import subprocess
@@ -78,6 +78,30 @@ GENERATORS: list[Generator] = [
             "if a generated table in crates/rastai-diag no longer compiles, crates/rastai-diag/CLAUDE.md "
             "says how to recover"
         ),
+    ),
+    # schemas/ is owned whole for now; rastai-names-codegen's schemas/names.json joins it in M1-57.
+    Generator(
+        name="rastai-formats-codegen (type descriptions and commands)",
+        command=[
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "-p",
+            "rastai-codegen",
+            "--bin",
+            "rastai-formats-codegen",
+            "--",
+            "--output",
+            OUTPUT_ROOT_PLACEHOLDER,
+        ],
+        outputs=[
+            "schemas",
+            "packages/formats/src/generated",
+            "packages/client/src/generated/commands.js",
+            "python/rastai_formats/rastai_formats/generated",
+            "docs/reference/commands.md",
+        ],
     ),
 ]
 

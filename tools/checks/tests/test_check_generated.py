@@ -217,6 +217,21 @@ def test_the_catalog_generator_writes_its_four_outputs_after_buf(load_check):
     assert "crates/rastai-diag/CLAUDE.md" in catalog.failure_hint
 
 
+def test_the_formats_generator_writes_its_five_outputs_after_the_catalog(load_check):
+    check = load_check("check-generated")
+    formats = check.GENERATORS[2]
+    assert formats.command[:2] == ["cargo", "run"]
+    assert "rastai-formats-codegen" in formats.command
+    assert formats.command[-2:] == ["--output", check.OUTPUT_ROOT_PLACEHOLDER]
+    assert formats.outputs == [
+        "schemas",
+        "packages/formats/src/generated",
+        "packages/client/src/generated/commands.js",
+        "python/rastai_formats/rastai_formats/generated",
+        "docs/reference/commands.md",
+    ]
+
+
 def test_a_failing_generator_does_not_stop_the_next_one_being_compared(write_tree, load_check):
     check = load_check("check-generated")
     root = write_tree(

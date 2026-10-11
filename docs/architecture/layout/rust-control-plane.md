@@ -1105,12 +1105,17 @@ tools/codegen/
                                   into another tree laid out like the repository (check-generated uses it)
       rastai_names_codegen.rs     main: collect every name, then write schemas/names.json (M1)
     error.rs                  CodegenError: the file at fault and a sentence (no catalog code: the catalog is the output)
+    output_root.rs            read_output_root: the `--output <folder>` option every bin takes
     repo_root.rs              find_repo_root: two folders above this crate's folder, read from CARGO_MANIFEST_DIR at
                               run time (compile-time path only as a fallback); refuses a folder without the manifests
     catalog_source.rs         read_catalog: catalog/errors/*.json, catalog/terms/terms.json and plugins/*/catalog/ into
                               ErrorRecord and TermRecord lists, sorted; exact fields, strict JSON
     catalog_ranges.rs         CATALOG_PREFIXES: contracts §10.1 as data (prefix, owner's file, ranges); split_code
     literals.rs               the generated-file notice, string literals for Rust and for JSON (JavaScript, Python)
+    command_source.rs         CommandDescription rows for the formats outputs, from rastai_core::commands::COMMANDS
+                              (an empty list until that table exists, M1-21 and M1-22)
+    type_modules.rs           which generated module a type goes into: one per schema id (`rastai.run_record/1` is
+                              run_record; the shared header's empty id is shared), the same for JavaScript and Python
     json_schema_files.rs      schemas/<type>/<version>.json, schemas/commands/*, schemas/events/*, schemas/index.json;
                               each command and event file carries `x-rastai-stability`
     names_registry.rs         NameRegistry: one sorted list per kind (2.8), collected from the tables, catalog, store
@@ -1121,8 +1126,8 @@ tools/codegen/
                               string-literal unions for enums, Proto fields as a plain object with a line naming the message)
     javascript_commands.rs    packages/client/src/generated/commands.js: one typed wrapper per core command,
                               modelLoad(executor, args), each taking a CommandExecutor (contracts §12.4)
-    python_dataclasses.rs     python/rastai_formats/generated/*.py (frozen @dataclass per type, from_json/to_json functions;
-                              Proto fields as dict with a docstring line naming the message)
+    python_dataclasses.rs     python/rastai_formats/rastai_formats/generated/*.py (frozen keyword-only @dataclass per type,
+                              <type>_from_json and <type>_to_json; Proto fields as dict with a comment naming the message)
     catalog_rust.rs           crates/rastai-diag/src/generated/: mod.rs (marks both tables #[rustfmt::skip]),
                               catalog_table.rs and terms_table.rs
     catalog_javascript.rs     packages/catalog/src/generated/catalog.js (entries plus a JSDoc @typedef for one entry)
@@ -1137,8 +1142,9 @@ tools/codegen/
     names_registry.rs         a sample tree yields the expected names.json; output is sorted and stable; a dropped
                               column or a renamed command shows in the diff
     outputs_check.rs          the generated JS passes `just check-js` (tsc --noEmit in checkJs mode), the generated JS and
-                              Python read back the entries they came from (#[ignore]d; run by `just codegen-check`, not
-                              a plain cargo test, because it needs both environments)
+                              Python read back the entries they came from, and the shared header and every field kind
+                              round-trip through the formats outputs (#[ignore]d; run by `just codegen-check`, not a
+                              plain cargo test, because it needs both environments)
 ```
 
 ```rust
