@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::describe::types::{FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, field};
+use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, field, type_description};
 use crate::header::{SharedHeader, header_fields};
 
 pub const LOCK_TYPE_NAME: &str = "rastai.lock";
@@ -60,8 +60,9 @@ pub struct LockedModel {
 pub fn describe_lock_types() -> Vec<TypeDescription> {
     vec![
         describe_lock_file(),
-        part(
+        type_description(
             ENVIRONMENT_NAME,
+            LOCK_SCHEMA_ID,
             "The Python environment a project uses.",
             vec![
                 field(
@@ -78,8 +79,9 @@ pub fn describe_lock_types() -> Vec<TypeDescription> {
                 ),
             ],
         ),
-        part(
+        type_description(
             PLUGIN_NAME,
+            LOCK_SCHEMA_ID,
             "A plugin version a project uses.",
             vec![
                 field("version", FieldKind::String, REQUIRED, "Plugin version."),
@@ -91,8 +93,9 @@ pub fn describe_lock_types() -> Vec<TypeDescription> {
                 ),
             ],
         ),
-        part(
+        type_description(
             MODEL_NAME,
+            LOCK_SCHEMA_ID,
             "A model revision a project uses.",
             vec![
                 field(
@@ -144,15 +147,6 @@ fn describe_lock_file() -> TypeDescription {
         name: LOCK_FILE_NAME.to_string(),
         schema_id: LOCK_SCHEMA_ID.to_string(),
         doc: "What a project was last used with (rastai.lock).".to_string(),
-        fields,
-    }
-}
-
-fn part(name: &str, doc: &str, fields: Vec<FieldDescription>) -> TypeDescription {
-    TypeDescription {
-        name: name.to_string(),
-        schema_id: LOCK_SCHEMA_ID.to_string(),
-        doc: doc.to_string(),
         fields,
     }
 }

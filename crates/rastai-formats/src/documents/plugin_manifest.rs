@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::describe::types::{
-    FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of,
+    FieldDescription, FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of, type_description,
 };
 use crate::header::{SharedHeader, header_fields};
 
@@ -375,8 +375,9 @@ fn code_fields() -> Vec<FieldDescription> {
 }
 
 fn describe_engines() -> TypeDescription {
-    part(
+    type_description(
         ENGINES_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "The hosts the plugin runs on.",
         vec![field(
             "rastai",
@@ -388,8 +389,9 @@ fn describe_engines() -> TypeDescription {
 }
 
 fn describe_settings_page_contribution() -> TypeDescription {
-    part(
+    type_description(
         SETTINGS_PAGE_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "A settings page.",
         vec![
             field("page_id", FieldKind::String, REQUIRED, "Page id."),
@@ -399,8 +401,9 @@ fn describe_settings_page_contribution() -> TypeDescription {
 }
 
 fn describe_theme_contribution() -> TypeDescription {
-    part(
+    type_description(
         THEME_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "A theme (from M8).",
         vec![
             field(
@@ -421,8 +424,9 @@ fn describe_theme_contribution() -> TypeDescription {
 }
 
 fn describe_event_handler_contribution() -> TypeDescription {
-    part(
+    type_description(
         EVENT_HANDLER_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "A command run when a durable event is indexed.",
         vec![
             field(
@@ -442,8 +446,9 @@ fn describe_event_handler_contribution() -> TypeDescription {
 }
 
 fn describe_plugin_python() -> TypeDescription {
-    part(
+    type_description(
         PYTHON_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "The plugin's Python module.",
         vec![
             field(
@@ -459,8 +464,9 @@ fn describe_plugin_python() -> TypeDescription {
 
 fn describe_plugin_provider() -> TypeDescription {
     let binaries = FieldKind::Map(Box::new(FieldKind::String));
-    part(
+    type_description(
         PROVIDER_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "Provider binaries (Phase 3).",
         vec![field("binaries", binaries, REQUIRED, "Platform to the binary's path.")],
     )
@@ -487,16 +493,18 @@ fn describe_contributions() -> TypeDescription {
             fields.push(typed_list("event_handlers", EVENT_HANDLER_NAME, "Event handlers."));
         }
     }
-    part(
+    type_description(
         CONTRIBUTIONS_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "One list per extension point (contracts 5.5).",
         fields,
     )
 }
 
 fn describe_command_contribution() -> TypeDescription {
-    part(
+    type_description(
         COMMAND_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "A command the plugin adds; its types are in types.json.",
         vec![
             field("command_id", FieldKind::String, REQUIRED, "Starts with the plugin id."),
@@ -529,8 +537,9 @@ fn describe_command_contribution() -> TypeDescription {
 }
 
 fn describe_section_contribution() -> TypeDescription {
-    part(
+    type_description(
         SECTION_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "The plugin's sidebar section.",
         vec![
             field("section_id", FieldKind::String, REQUIRED, "Equal to the plugin id."),
@@ -553,8 +562,9 @@ fn describe_section_contribution() -> TypeDescription {
 }
 
 fn describe_panel_contribution() -> TypeDescription {
-    part(
+    type_description(
         PANEL_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "A panel.",
         vec![
             field("panel_id", FieldKind::String, REQUIRED, "Panel id."),
@@ -577,8 +587,9 @@ fn describe_panel_contribution() -> TypeDescription {
 }
 
 fn describe_plugin_ui() -> TypeDescription {
-    part(
+    type_description(
         UI_NAME,
+        PLUGIN_MANIFEST_SCHEMA_ID,
         "The plugin's UI entry.",
         vec![
             field(
@@ -595,15 +606,6 @@ fn describe_plugin_ui() -> TypeDescription {
             ),
         ],
     )
-}
-
-fn part(name: &str, doc: &str, fields: Vec<FieldDescription>) -> TypeDescription {
-    TypeDescription {
-        name: name.to_string(),
-        schema_id: PLUGIN_MANIFEST_SCHEMA_ID.to_string(),
-        doc: doc.to_string(),
-        fields,
-    }
 }
 
 fn type_field(name: &str, type_name: &str, required: bool, doc: &str) -> FieldDescription {

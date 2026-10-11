@@ -9,12 +9,12 @@
 use rastai_diag::diagnostic::Diagnostic;
 
 use crate::documents::project::Project;
-use crate::validate::meaning::{MeaningSource, meaning_diagnostic};
+use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
 
 const CODE_VALUE_FORM: &str = "RRS-E2006";
 const NAME_POINTER: &str = "/name";
 const DEFAULT_NODE_POINTER: &str = "/default_node";
-const EXPECTED_NAME: &str = "a name that isn't blank";
+const EXPECTED_NAME: &str = "a project name: it needs at least one letter, digit or other visible character";
 const EXPECTED_NODE: &str = "local, or a node id such as node_<base32 of its public key>";
 /// The embedded node's name (contracts 11.2 `compute.default_node`).
 const LOCAL_NODE: &str = "local";
@@ -25,7 +25,7 @@ const NODE_ID_PREFIX: &str = "node_";
 pub fn check_project(project: &Project, source: &MeaningSource) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     if project.name.trim().is_empty() {
-        let values = [("found", project.name.as_str()), ("expected", EXPECTED_NAME)];
+        let values = [("found", shown_value(&project.name)), ("expected", EXPECTED_NAME)];
         diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, NAME_POINTER));
     }
     // Empty means the user's compute.default_node setting.

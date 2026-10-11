@@ -34,8 +34,17 @@ use crate::validate::syntax::read_raw_json;
 /// font size past `u32`), because `FieldKind::Integer` says nothing about sign or width; and a description that
 /// disagrees with its struct, which tests/describe_matches_struct.rs keeps from happening. Either way the read
 /// fails with this code at the file, since serde's reason names no field (fixtures/documents/rastai.resume/invalid/
-/// negative_step.json).
+/// negative_step.json). The words below fill the catalog sentence "{field} should be {expected}, but it is
+/// {found}." without serde's Rust type names (`u64`), which mean nothing to the person reading it.
 const CODE_WRONG_KIND: &str = "RRS-E1002";
+const FIELD_SOME_NUMBER: &str = "A number in this file";
+const EXPECTED_FITTING_NUMBER: &str = "a whole number of zero or more that fits its field";
+const FIELD_SOME_VALUE: &str = "A value in this file";
+const EXPECTED_FITTING_VALUE: &str = "the kind of value its field holds";
+const FOUND_SOMETHING_ELSE: &str = "something else";
+/// serde writes an integer it refused as "integer `-1`"; the value sits between the two backticks.
+const SERDE_INTEGER_MARK: &str = "integer `";
+const SERDE_VALUE_END: char = '`';
 
 /// What `read_document` found.
 #[derive(Debug, Clone, PartialEq)]
@@ -99,11 +108,37 @@ fn typed_document(
     match document_from_value(type_name, value)? {
         Ok(document) => Some(document),
         Err(reason) => {
-            let values = [("field", ""), ("expected", type_name), ("found", reason.as_str())];
-            diagnostics.push(diagnostic_at(CODE_WRONG_KIND, &values, file_name));
+            diagnostics.push(wrong_kind_diagnostic(file_name, &reason));
             None
         }
     }
+}
+
+/// `RRS-E1002` at the file for a value serde refused. An integer out of its field's range is the case layer 2 lets
+/// through, so it gets a sentence of its own with the value shown: "A number in this file should be a whole number of
+/// zero or more that fits its field, but it is -1."
+fn wrong_kind_diagnostic(file_name: &str, serde_reason: &str) -> Diagnostic {
+    let values = match refused_integer(serde_reason) {
+        Some(integer) => [
+            ("field", FIELD_SOME_NUMBER),
+            ("expected", EXPECTED_FITTING_NUMBER),
+            ("found", integer),
+        ],
+        None => [
+            ("field", FIELD_SOME_VALUE),
+            ("expected", EXPECTED_FITTING_VALUE),
+            ("found", FOUND_SOMETHING_ELSE),
+        ],
+    };
+    diagnostic_at(CODE_WRONG_KIND, &values, file_name)
+}
+
+/// The integer in serde's "invalid value: integer `-1`, expected u64"; None for any other reason.
+fn refused_integer(serde_reason: &str) -> Option<&str> {
+    let start = serde_reason.find(SERDE_INTEGER_MARK)? + SERDE_INTEGER_MARK.len();
+    let rest = &serde_reason[start..];
+    let end = rest.find(SERDE_VALUE_END)?;
+    Some(&rest[..end])
 }
 
 /// The layers `read_document` runs, over any table of document types and descriptions. `read_document` passes the
@@ -214,6 +249,28 @@ mod tests {
         );
         assert!(!outcome.read_only);
         assert_eq!(outcome.migrated_from_version, 0);
+    }
+
+    #[test]
+    fn a_refused_integer_is_shown_without_rust_type_names() {
+        let reason = "invalid value: integer `-1`, expected u64";
+        assert_eq!(refused_integer(reason), Some("-1"));
+        let message = wrong_kind_diagnostic("run.json", reason).message;
+        assert_eq!(
+            message,
+            "A number in this file should be a whole number of zero or more that fits its field, but it is -1."
+        );
+    }
+
+    #[test]
+    fn any_other_refusal_still_reads_as_a_sentence() {
+        let reason = "missing field `step`";
+        assert_eq!(refused_integer(reason), None);
+        let message = wrong_kind_diagnostic("run.json", reason).message;
+        assert_eq!(
+            message,
+            "A value in this file should be the kind of value its field holds, but it is something else."
+        );
     }
 
     #[test]

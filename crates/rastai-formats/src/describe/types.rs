@@ -83,6 +83,17 @@ pub fn enum_of(values: &[&str]) -> FieldKind {
     FieldKind::Enum(values.iter().map(|value| value.to_string()).collect())
 }
 
+/// A described type with its schema id: a document, or one of its parts (a settings section, a theme's colors).
+/// Each document file passes its own schema id, so this one function serves them all.
+pub fn type_description(name: &str, schema_id: &str, doc: &str, fields: Vec<FieldDescription>) -> TypeDescription {
+    TypeDescription {
+        name: name.to_string(),
+        schema_id: schema_id.to_string(),
+        doc: doc.to_string(),
+        fields,
+    }
+}
+
 /// How a kind is named in diagnostics: "an integer", "a list", "SharedHeader".
 pub fn describe_kind(kind: &FieldKind) -> String {
     match kind {
@@ -126,6 +137,16 @@ mod tests {
             enum_of(&["light", "dark"]),
             FieldKind::Enum(vec!["light".to_string(), "dark".to_string()])
         );
+    }
+
+    #[test]
+    fn type_description_keeps_its_schema_id() {
+        let fields = vec![field("x", FieldKind::Integer, REQUIRED, "Across.")];
+        let point = type_description("Point", "rastai.sample/1", "A point.", fields);
+        assert_eq!(point.name, "Point");
+        assert_eq!(point.schema_id, "rastai.sample/1");
+        assert_eq!(point.doc, "A point.");
+        assert_eq!(point.fields.len(), 1);
     }
 
     #[test]

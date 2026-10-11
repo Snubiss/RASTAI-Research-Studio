@@ -11,7 +11,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::describe::types::{FieldDescription, FieldKind, OPTIONAL, TypeDescription, enum_of, field, list_of};
+use crate::describe::types::{
+    FieldDescription, FieldKind, OPTIONAL, TypeDescription, enum_of, field, list_of, type_description,
+};
 use crate::header::{SharedHeader, header_fields};
 
 pub const SETTINGS_TYPE_NAME: &str = "rastai.settings";
@@ -19,6 +21,50 @@ pub(crate) const SETTINGS_SCHEMA_VERSION: u32 = 1;
 const SETTINGS_SCHEMA_ID: &str = "rastai.settings/1";
 
 pub(crate) const SETTINGS_DOCUMENT_NAME: &str = "SettingsDocument";
+
+// Each section and nested object: its described type's name and its doc, written once here.
+const UI_NAME: &str = "SettingsUi";
+const UI_DOC: &str = "Appearance and interface mode.";
+const DAEMON_NAME: &str = "SettingsDaemon";
+const DAEMON_DOC: &str = "The daemon's listener.";
+const GATEWAY_NAME: &str = "SettingsGateway";
+const GATEWAY_DOC: &str = "The inference gateway and its log.";
+const INFERENCE_NAME: &str = "SettingsInference";
+const INFERENCE_DOC: &str = "Default runtime, model and sampling.";
+const SAMPLING_NAME: &str = "SettingsSampling";
+const SAMPLING_DOC: &str = "Default sampling settings.";
+const PSYCHOLOGY_NAME: &str = "SettingsPsychology";
+const PSYCHOLOGY_DOC: &str = "The Psychology plugin.";
+const TRAINING_NAME: &str = "SettingsTraining";
+const TRAINING_DOC: &str = "Training defaults.";
+const LORA_NAME: &str = "SettingsLora";
+const LORA_DOC: &str = "Default LoRA size.";
+const CHECKPOINT_NAME: &str = "SettingsCheckpoint";
+const CHECKPOINT_DOC: &str = "Checkpoint schedule.";
+const EVAL_NAME: &str = "SettingsEval";
+const EVAL_DOC: &str = "The Evaluation plugin.";
+const COMPUTE_NAME: &str = "SettingsCompute";
+const COMPUTE_DOC: &str = "Nodes and GPUs used by default.";
+const GPU_ASSIGNMENT_NAME: &str = "SettingsGpuAssignment";
+const GPU_ASSIGNMENT_DOC: &str = "GPU indices per use; an empty list means any GPU.";
+const NODES_NAME: &str = "SettingsNodes";
+const NODES_DOC: &str = "Remote node connections.";
+const STORAGE_NAME: &str = "SettingsStorage";
+const STORAGE_DOC: &str = "Data folders, quota and cleanup.";
+const HF_NAME: &str = "SettingsHf";
+const HF_DOC: &str = "Hugging Face cache and offline mode.";
+const PLUGINS_NAME: &str = "SettingsPlugins";
+const PLUGINS_DOC: &str = "Plugin development and experimental APIs.";
+const PRIVACY_NAME: &str = "SettingsPrivacy";
+const PRIVACY_DOC: &str = "Data policy and crash reports.";
+const SANDBOX_NAME: &str = "SettingsSandbox";
+const SANDBOX_DOC: &str = "Agent Gym sandboxes.";
+const SANDBOX_CAPS_NAME: &str = "SettingsSandboxCaps";
+const SANDBOX_CAPS_DOC: &str = "Default sandbox limits.";
+const LOGGING_NAME: &str = "SettingsLogging";
+const LOGGING_DOC: &str = "Log level and rotation.";
+const UPDATES_NAME: &str = "SettingsUpdates";
+const UPDATES_DOC: &str = "Update channel.";
 
 // The values of each enumerated key, as serde writes its Rust enum.
 const UI_MODE_VALUES: &[&str] = &["basic", "advanced"];
@@ -29,26 +75,22 @@ const LOG_LEVEL_VALUES: &[&str] = &["debug", "info", "warn", "error"];
 
 /// The sections in contracts 11.2's order, each with its described type.
 const SECTIONS: &[(&str, &str, &str)] = &[
-    ("ui", "SettingsUi", "Appearance and interface mode."),
-    ("daemon", "SettingsDaemon", "The daemon's listener."),
-    ("gateway", "SettingsGateway", "The inference gateway and its log."),
-    ("inference", "SettingsInference", "Default runtime, model and sampling."),
-    ("psychology", "SettingsPsychology", "The Psychology plugin."),
-    ("training", "SettingsTraining", "Training defaults."),
-    ("eval", "SettingsEval", "The Evaluation plugin."),
-    ("compute", "SettingsCompute", "Nodes and GPUs used by default."),
-    ("nodes", "SettingsNodes", "Remote node connections."),
-    ("storage", "SettingsStorage", "Data folders, quota and cleanup."),
-    ("hf", "SettingsHf", "Hugging Face cache and offline mode."),
-    (
-        "plugins",
-        "SettingsPlugins",
-        "Plugin development and experimental APIs.",
-    ),
-    ("privacy", "SettingsPrivacy", "Data policy and crash reports."),
-    ("sandbox", "SettingsSandbox", "Agent Gym sandboxes."),
-    ("logging", "SettingsLogging", "Log level and rotation."),
-    ("updates", "SettingsUpdates", "Update channel."),
+    ("ui", UI_NAME, UI_DOC),
+    ("daemon", DAEMON_NAME, DAEMON_DOC),
+    ("gateway", GATEWAY_NAME, GATEWAY_DOC),
+    ("inference", INFERENCE_NAME, INFERENCE_DOC),
+    ("psychology", PSYCHOLOGY_NAME, PSYCHOLOGY_DOC),
+    ("training", TRAINING_NAME, TRAINING_DOC),
+    ("eval", EVAL_NAME, EVAL_DOC),
+    ("compute", COMPUTE_NAME, COMPUTE_DOC),
+    ("nodes", NODES_NAME, NODES_DOC),
+    ("storage", STORAGE_NAME, STORAGE_DOC),
+    ("hf", HF_NAME, HF_DOC),
+    ("plugins", PLUGINS_NAME, PLUGINS_DOC),
+    ("privacy", PRIVACY_NAME, PRIVACY_DOC),
+    ("sandbox", SANDBOX_NAME, SANDBOX_DOC),
+    ("logging", LOGGING_NAME, LOGGING_DOC),
+    ("updates", UPDATES_NAME, UPDATES_DOC),
 ];
 
 /// One settings file. The header comes first, then one optional object per section.
@@ -423,9 +465,10 @@ fn describe_settings_document() -> TypeDescription {
 }
 
 fn describe_ui() -> TypeDescription {
-    section(
-        "SettingsUi",
-        "Appearance and interface mode.",
+    type_description(
+        UI_NAME,
+        SETTINGS_SCHEMA_ID,
+        UI_DOC,
         vec![
             key("mode", enum_of(UI_MODE_VALUES), "Basic or Advanced interface."),
             key(
@@ -446,9 +489,10 @@ fn describe_ui() -> TypeDescription {
 }
 
 fn describe_daemon() -> TypeDescription {
-    section(
-        "SettingsDaemon",
-        "The daemon's listener.",
+    type_description(
+        DAEMON_NAME,
+        SETTINGS_SCHEMA_ID,
+        DAEMON_DOC,
         vec![
             key("port", FieldKind::Integer, "Loopback HTTP port."),
             key("listen", FieldKind::String, "Address to listen on."),
@@ -463,9 +507,10 @@ fn describe_daemon() -> TypeDescription {
 }
 
 fn describe_gateway() -> TypeDescription {
-    section(
-        "SettingsGateway",
-        "The inference gateway and its log.",
+    type_description(
+        GATEWAY_NAME,
+        SETTINGS_SCHEMA_ID,
+        GATEWAY_DOC,
         vec![
             key("enabled", FieldKind::Boolean, "Serve the /v1 endpoints."),
             key("retention_days", FieldKind::Integer, "Days the gateway log is kept."),
@@ -485,15 +530,16 @@ fn describe_gateway() -> TypeDescription {
 }
 
 fn describe_inference() -> TypeDescription {
-    section(
-        "SettingsInference",
-        "Default runtime, model and sampling.",
+    type_description(
+        INFERENCE_NAME,
+        SETTINGS_SCHEMA_ID,
+        INFERENCE_DOC,
         vec![
             key("default_runtime", enum_of(RUNTIME_VALUES), "inspectable or fast."),
             key("default_model", FieldKind::String, "Model ref used when none is named."),
             key(
                 "sampling",
-                FieldKind::Type("SettingsSampling".to_string()),
+                FieldKind::Type(SAMPLING_NAME.to_string()),
                 "Default sampling settings.",
             ),
             key(
@@ -506,9 +552,10 @@ fn describe_inference() -> TypeDescription {
 }
 
 fn describe_sampling() -> TypeDescription {
-    section(
-        "SettingsSampling",
-        "Default sampling settings.",
+    type_description(
+        SAMPLING_NAME,
+        SETTINGS_SCHEMA_ID,
+        SAMPLING_DOC,
         vec![
             key("temperature", FieldKind::Number, "Sampling temperature."),
             key("top_k", FieldKind::Integer, "Keep the k most likely tokens."),
@@ -525,9 +572,10 @@ fn describe_sampling() -> TypeDescription {
 }
 
 fn describe_psychology() -> TypeDescription {
-    section(
-        "SettingsPsychology",
-        "The Psychology plugin.",
+    type_description(
+        PSYCHOLOGY_NAME,
+        SETTINGS_SCHEMA_ID,
+        PSYCHOLOGY_DOC,
         vec![
             key("live_panel", FieldKind::Boolean, "Show the live panel while chatting."),
             key(
@@ -556,9 +604,10 @@ fn describe_psychology() -> TypeDescription {
 }
 
 fn describe_training() -> TypeDescription {
-    section(
-        "SettingsTraining",
-        "Training defaults.",
+    type_description(
+        TRAINING_NAME,
+        SETTINGS_SCHEMA_ID,
+        TRAINING_DOC,
         vec![
             key(
                 "anchors_default",
@@ -575,14 +624,10 @@ fn describe_training() -> TypeDescription {
                 FieldKind::Boolean,
                 "Trade compute for memory.",
             ),
-            key(
-                "lora",
-                FieldKind::Type("SettingsLora".to_string()),
-                "Default LoRA size.",
-            ),
+            key("lora", FieldKind::Type(LORA_NAME.to_string()), "Default LoRA size."),
             key(
                 "checkpoint",
-                FieldKind::Type("SettingsCheckpoint".to_string()),
+                FieldKind::Type(CHECKPOINT_NAME.to_string()),
                 "Checkpoint schedule.",
             ),
             key(
@@ -605,9 +650,10 @@ fn describe_training() -> TypeDescription {
 }
 
 fn describe_lora() -> TypeDescription {
-    section(
-        "SettingsLora",
-        "Default LoRA size.",
+    type_description(
+        LORA_NAME,
+        SETTINGS_SCHEMA_ID,
+        LORA_DOC,
         vec![
             key("rank", FieldKind::Integer, "LoRA rank."),
             key("alpha", FieldKind::Integer, "LoRA alpha."),
@@ -616,9 +662,10 @@ fn describe_lora() -> TypeDescription {
 }
 
 fn describe_checkpoint() -> TypeDescription {
-    section(
-        "SettingsCheckpoint",
-        "Checkpoint schedule.",
+    type_description(
+        CHECKPOINT_NAME,
+        SETTINGS_SCHEMA_ID,
+        CHECKPOINT_DOC,
         vec![
             key("keep_last", FieldKind::Integer, "Checkpoints kept per run."),
             key("interval_minutes", FieldKind::Integer, "Minutes between checkpoints."),
@@ -632,9 +679,10 @@ fn describe_checkpoint() -> TypeDescription {
 }
 
 fn describe_eval() -> TypeDescription {
-    section(
-        "SettingsEval",
-        "The Evaluation plugin.",
+    type_description(
+        EVAL_NAME,
+        SETTINGS_SCHEMA_ID,
+        EVAL_DOC,
         vec![
             key(
                 "drift_prompt_set",
@@ -656,14 +704,15 @@ fn describe_eval() -> TypeDescription {
 }
 
 fn describe_compute() -> TypeDescription {
-    section(
-        "SettingsCompute",
-        "Nodes and GPUs used by default.",
+    type_description(
+        COMPUTE_NAME,
+        SETTINGS_SCHEMA_ID,
+        COMPUTE_DOC,
         vec![
             key("default_node", FieldKind::String, "local or a node id."),
             key(
                 "gpu_assignment",
-                FieldKind::Type("SettingsGpuAssignment".to_string()),
+                FieldKind::Type(GPU_ASSIGNMENT_NAME.to_string()),
                 "GPUs per use.",
             ),
             key(
@@ -677,9 +726,10 @@ fn describe_compute() -> TypeDescription {
 }
 
 fn describe_gpu_assignment() -> TypeDescription {
-    section(
-        "SettingsGpuAssignment",
-        "GPU indices per use; an empty list means any GPU.",
+    type_description(
+        GPU_ASSIGNMENT_NAME,
+        SETTINGS_SCHEMA_ID,
+        GPU_ASSIGNMENT_DOC,
         vec![
             key("chat", list_of(FieldKind::Integer), "GPUs for chat."),
             key("training", list_of(FieldKind::Integer), "GPUs for training."),
@@ -688,9 +738,10 @@ fn describe_gpu_assignment() -> TypeDescription {
 }
 
 fn describe_nodes() -> TypeDescription {
-    section(
-        "SettingsNodes",
-        "Remote node connections.",
+    type_description(
+        NODES_NAME,
+        SETTINGS_SCHEMA_ID,
+        NODES_DOC,
         vec![
             key("heartbeat_seconds", FieldKind::Integer, "Seconds between heartbeats."),
             key(
@@ -704,9 +755,10 @@ fn describe_nodes() -> TypeDescription {
 }
 
 fn describe_storage() -> TypeDescription {
-    section(
-        "SettingsStorage",
-        "Data folders, quota and cleanup.",
+    type_description(
+        STORAGE_NAME,
+        SETTINGS_SCHEMA_ID,
+        STORAGE_DOC,
         vec![
             key("data_dir", FieldKind::String, "Data folder; left out for the default."),
             key(
@@ -725,9 +777,10 @@ fn describe_storage() -> TypeDescription {
 }
 
 fn describe_hf() -> TypeDescription {
-    section(
-        "SettingsHf",
-        "Hugging Face cache and offline mode.",
+    type_description(
+        HF_NAME,
+        SETTINGS_SCHEMA_ID,
+        HF_DOC,
         vec![
             key(
                 "cache_dir",
@@ -740,9 +793,10 @@ fn describe_hf() -> TypeDescription {
 }
 
 fn describe_plugins() -> TypeDescription {
-    section(
-        "SettingsPlugins",
-        "Plugin development and experimental APIs.",
+    type_description(
+        PLUGINS_NAME,
+        SETTINGS_SCHEMA_ID,
+        PLUGINS_DOC,
         vec![
             key(
                 "dev_paths",
@@ -759,9 +813,10 @@ fn describe_plugins() -> TypeDescription {
 }
 
 fn describe_privacy() -> TypeDescription {
-    section(
-        "SettingsPrivacy",
-        "Data policy and crash reports.",
+    type_description(
+        PRIVACY_NAME,
+        SETTINGS_SCHEMA_ID,
+        PRIVACY_DOC,
         vec![
             key(
                 "data_policy",
@@ -779,9 +834,10 @@ fn describe_privacy() -> TypeDescription {
 }
 
 fn describe_sandbox() -> TypeDescription {
-    section(
-        "SettingsSandbox",
-        "Agent Gym sandboxes.",
+    type_description(
+        SANDBOX_NAME,
+        SETTINGS_SCHEMA_ID,
+        SANDBOX_DOC,
         vec![
             key(
                 "engine_socket",
@@ -790,7 +846,7 @@ fn describe_sandbox() -> TypeDescription {
             ),
             key(
                 "default_caps",
-                FieldKind::Type("SettingsSandboxCaps".to_string()),
+                FieldKind::Type(SANDBOX_CAPS_NAME.to_string()),
                 "Default sandbox limits.",
             ),
         ],
@@ -798,9 +854,10 @@ fn describe_sandbox() -> TypeDescription {
 }
 
 fn describe_sandbox_caps() -> TypeDescription {
-    section(
-        "SettingsSandboxCaps",
-        "Default sandbox limits.",
+    type_description(
+        SANDBOX_CAPS_NAME,
+        SETTINGS_SCHEMA_ID,
+        SANDBOX_CAPS_DOC,
         vec![
             key("cpu", FieldKind::Integer, "CPU cores."),
             key("ram_bytes", FieldKind::Integer, "Memory."),
@@ -812,9 +869,10 @@ fn describe_sandbox_caps() -> TypeDescription {
 }
 
 fn describe_logging() -> TypeDescription {
-    section(
-        "SettingsLogging",
-        "Log level and rotation.",
+    type_description(
+        LOGGING_NAME,
+        SETTINGS_SCHEMA_ID,
+        LOGGING_DOC,
         vec![
             key("level", enum_of(LOG_LEVEL_VALUES), "Lowest level written."),
             key(
@@ -828,24 +886,15 @@ fn describe_logging() -> TypeDescription {
 }
 
 fn describe_updates() -> TypeDescription {
-    section(
-        "SettingsUpdates",
-        "Update channel.",
+    type_description(
+        UPDATES_NAME,
+        SETTINGS_SCHEMA_ID,
+        UPDATES_DOC,
         vec![
             key("channel", FieldKind::String, "Release channel, such as stable."),
             key("auto_check", FieldKind::Boolean, "Check for updates on start."),
         ],
     )
-}
-
-/// A section or nested object: its own type, under the settings schema id.
-fn section(name: &str, doc: &str, fields: Vec<FieldDescription>) -> TypeDescription {
-    TypeDescription {
-        name: name.to_string(),
-        schema_id: SETTINGS_SCHEMA_ID.to_string(),
-        doc: doc.to_string(),
-        fields,
-    }
 }
 
 /// Every settings key is optional: a layer sets only some.
