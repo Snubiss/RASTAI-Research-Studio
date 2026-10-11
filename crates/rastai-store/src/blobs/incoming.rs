@@ -53,8 +53,8 @@ pub(crate) fn copy_into_incoming(store_root: &Path, source: &Path) -> Result<Inc
     }
 }
 
-/// Hard-links the file at `source` into `.incoming/`, for a file whose hash the caller already has. `None` when the
-/// two are on different filesystems, where no hard link can exist: the caller copies instead.
+/// Hard-links the file at `source` into `.incoming/` and fsyncs it, for a file whose hash the caller already has.
+/// `None` when the two are on different filesystems, where no hard link can exist: the caller copies instead.
 pub(crate) fn link_into_incoming(
     store_root: &Path,
     source: &Path,
@@ -64,14 +64,21 @@ pub(crate) fn link_into_incoming(
     let folder = incoming_folder(store_root)?;
     let path = folder.join(random_file_name(&folder)?);
     match std::fs::hard_link(source, &path) {
-        Ok(()) => Ok(Some(IncomingFile {
-            path,
-            hash: hash.to_string(),
-            size_bytes,
-        })),
-        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => Ok(None),
-        Err(error) => Err(blob_write_error(&path, &error)),
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => return Ok(None),
+        Err(error) => return Err(blob_write_error(&path, &error)),
     }
+    // The link shares the source's bytes, which its writer may never have fsynced. Without this a power cut could
+    // leave the blob's name over bytes that never reached the disk.
+    if let Err(error) = sync_file(&path) {
+        discard_incoming_file(&path);
+        return Err(blob_write_error(&path, &error));
+    }
+    Ok(Some(IncomingFile {
+        path,
+        hash: hash.to_string(),
+        size_bytes,
+    }))
 }
 
 /// Renames a fsynced `.incoming/` file to its place in the store, creating its `ab/` folder when needed, and fsyncs
@@ -114,6 +121,23 @@ pub(crate) fn remove_stale_incoming_files(store_root: &Path) {
 /// Removes an `.incoming/` file that won't become a blob. Failing to is harmless: the next start deletes it.
 pub(crate) fn discard_incoming_file(path: &Path) {
     let _ = std::fs::remove_file(path);
+}
+
+/// Opens a file that is already there so its bytes can be fsynced or its modification time set. Unix allows both
+/// on a read-only handle, so a read-only source still works there. Windows needs write access for both
+/// (FlushFileBuffers, SetFileTime); asking for it doesn't truncate or change the bytes.
+#[cfg(unix)]
+pub(crate) fn open_existing_file(path: &Path) -> std::io::Result<File> {
+    File::open(path)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn open_existing_file(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new().write(true).open(path)
+}
+
+fn sync_file(path: &Path) -> std::io::Result<()> {
+    open_existing_file(path)?.sync_all()
 }
 
 fn create_incoming_file(store_root: &Path) -> Result<(PathBuf, File), StoreError> {

@@ -1880,7 +1880,7 @@ fn run_index_writer(connection: SqliteConnection, requests: std::sync::mpsc::Rec
 | `event_type` | Rows |
 |---|---|
 | `job.state_changed` | `jobs` state, exit code, error code |
-| `run.state_changed` | `runs.state`, `finished_unix_ms` on a terminal state |
+| `run.state_changed` | `runs.state`; `finished_unix_ms` set on `completed`, `failed` or `cancelled` (an eval run: `passed`, `failed`, `errored`, `cancelled`) and cleared on any other state, so a resumed run has none (contracts 9.5, 9.6) |
 | `run.metrics` | one `run_metrics` row per value |
 | `checkpoint.saved` | `checkpoints` |
 | `artifact.created` | `artifacts`, `artifact_copies` (home node), `lineage` from the payload's parents |

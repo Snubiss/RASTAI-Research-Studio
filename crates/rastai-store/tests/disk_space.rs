@@ -12,6 +12,8 @@ use common::{remove_test_folder, test_paths};
 
 // Far more than any test machine's disk, so a check that needs it always fails.
 const MORE_THAN_ANY_DISK: u64 = 1 << 62;
+// Far more than another process frees between two calls, so the margin test can't flip on a busy disk.
+const ONE_GIBIBYTE: u64 = 1 << 30;
 
 fn test_folder(test_name: &str) -> (rastai_core::paths::DataPaths, std::path::PathBuf) {
     let paths = test_paths(test_name);
@@ -48,8 +50,8 @@ fn the_margin_counts_against_the_free_space() {
     let (paths, folder) = test_folder("disk-space-margin");
     let free = free_bytes(&folder).unwrap();
 
-    // One byte needed fits on the disk, but not once the margin keeps everything that is free.
-    let error = check_free_space(&folder, 1, free).unwrap_err();
+    // A gibibyte fits on the test disk, but not once the margin keeps everything that is free.
+    let error = check_free_space(&folder, ONE_GIBIBYTE, free).unwrap_err();
     assert_eq!(error.code(), "RRS-S3001");
     let StoreError::NotEnoughFreeSpace { margin_bytes, .. } = error else {
         panic!("expected not enough free space");

@@ -19,7 +19,8 @@ use rastai_formats::hashing::{finish_stream_hasher, new_stream_hasher, update_st
 use rastai_proto::common::v1::BlobRef;
 
 use crate::blobs::incoming::{
-    IncomingFile, copy_into_incoming, discard_incoming_file, link_into_incoming, move_into_place, write_incoming_bytes,
+    IncomingFile, copy_into_incoming, discard_incoming_file, link_into_incoming, move_into_place, open_existing_file,
+    write_incoming_bytes,
 };
 use crate::blobs::quarantine::quarantine_blob;
 use crate::error::{StoreError, blob_read_error, blob_write_error};
@@ -141,7 +142,7 @@ fn link_or_copy_into_incoming(store: &BlobStore, source: &Path) -> Result<Incomi
 
 /// Refreshes an existing blob's modification time, so a sweep running now sees it as just referenced (8.3).
 fn touch_blob(path: &Path) -> Result<(), StoreError> {
-    let file = File::open(path).map_err(|error| blob_write_error(path, &error))?;
+    let file = open_existing_file(path).map_err(|error| blob_write_error(path, &error))?;
     file.set_modified(SystemTime::now())
         .map_err(|error| blob_write_error(path, &error))
 }
