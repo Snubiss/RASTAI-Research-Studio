@@ -54,6 +54,11 @@ const BIN_NAME_LINE = /^name = "([a-z0-9_]+)"$/;
 // nightly.yml caches the cargo-fuzz binary and builds it only when that cache misses, so no job rebuilds it nightly.
 const CARGO_FUZZ_CACHE_PATH_LINE = "path: ~/.cargo/bin/cargo-fuzz";
 const CARGO_FUZZ_INSTALL_CONDITION_LINE = "if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'";
+// Each push to main has a concurrency group of its own (its commit), so no merge loses its CI result to a later one.
+const CONCURRENCY_GROUP_LINE = /^ {2}group: (.*)$/;
+const COMMIT_IN_GROUP = "github.sha";
+// nightly.yml carries each target's fuzz corpus from one night to the next in the cache.
+const FUZZ_CORPUS_CACHE_PATH_LINE = "path: crates/${{ matrix.crate }}/fuzz/corpus/${{ matrix.target }}";
 // The cpu environment's interpreter has one spelling in the justfile, cpu_python, which is right on every OS.
 const CPU_PYTHON_BY_HAND = "{{cpu_environment}}/bin/python";
 
@@ -305,6 +310,16 @@ test("nightly.yml builds cargo-fuzz only when its cached binary is missing", () 
   const lines = readLines(NIGHTLY_WORKFLOW).map((line) => line.trim());
   expect(lines).toContain(CARGO_FUZZ_CACHE_PATH_LINE);
   expect(lines).toContain(CARGO_FUZZ_INSTALL_CONDITION_LINE);
+});
+
+test("ci.yml gives each push to main a concurrency group of its own", () => {
+  const group = findValue(CI_WORKFLOW, CONCURRENCY_GROUP_LINE);
+  expect(group).toContain(COMMIT_IN_GROUP);
+});
+
+test("nightly.yml keeps each target's fuzz corpus from one night to the next", () => {
+  const lines = readLines(NIGHTLY_WORKFLOW).map((line) => line.trim());
+  expect(lines).toContain(FUZZ_CORPUS_CACHE_PATH_LINE);
 });
 
 test("the justfile reaches the cpu environment's Python only through cpu_python", () => {

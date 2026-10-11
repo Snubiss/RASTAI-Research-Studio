@@ -76,6 +76,15 @@ jobs:
         # crate against the index's checksum. Only on a cache miss: a restored binary is already this exact version.
         if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'
         run: cargo install --locked "cargo-fuzz@${{ steps.pins.outputs.cargo_fuzz_version }}"
+      - name: Restore the fuzz corpus
+        # cargo-fuzz keeps the inputs that reached new code in fuzz/corpus/<target>/ (git-ignored). A cache entry can't
+        # be overwritten, so each night saves under a new key (its run id) and the next night restores the newest one
+        # through restore-keys. That way each night starts from what the earlier nights found, not from nothing.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: crates/${{ matrix.crate }}/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.crate }}-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.crate }}-${{ matrix.target }}-
       - name: just fuzz
         run: just fuzz "${{ matrix.crate }}" "${{ matrix.target }}" "$FUZZ_SECONDS"
       - name: Keep the crashing inputs

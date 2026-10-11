@@ -16,10 +16,11 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run it replaces. Every push to main runs to the end, so each merge keeps
-# its own result.
+# A pull request's runs share one group, so a new push cancels the run it replaces. Each push to main gets a group of
+# its own (its commit), because GitHub keeps only one waiting run per group and drops the older one: with one shared
+# group, a merge that landed while another was waiting would never get a result.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
