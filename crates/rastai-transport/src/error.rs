@@ -17,9 +17,9 @@ const CODE_NOT_SUPPORTED_ON_THIS_PLATFORM: &str = "RRS-N2009";
 pub enum TransportError {
     /// Nothing is listening at the socket's path: the file or its folder is missing, or the listener is gone.
     SocketNotReachable { socket_path: PathBuf, reason: String },
-    /// The socket's folder is not a folder this user alone can use: another user owns it, group or others have
-    /// access, or it is a symbolic link. A folder planted in the shared /tmp would otherwise catch the sockets
-    /// (contracts 8.1). `reason` says which.
+    /// The socket's folder is owned by another user, open to group or others, or not a folder (a symbolic link or
+    /// a file). A folder planted in the shared /tmp would otherwise catch the sockets (contracts 8.1). `reason` says
+    /// which.
     SocketFolderInsecure { folder: PathBuf, reason: String },
     /// The process at the other end of a local socket runs as another user.
     PeerIsAnotherUser { peer_user_id: u32, own_user_id: u32 },

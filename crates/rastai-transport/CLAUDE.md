@@ -10,7 +10,8 @@ names are in `docs/architecture/contracts.md` §2.1 and §15.1, its codes in §1
   paths and options in, and decide what to do with an error.
 - **Every path comes from `rastai-core`'s `paths.rs`.** This crate never builds a path itself.
 - **Local sockets are same-user only.** `bind_local_socket` creates the socket folder 0700 and refuses one another
-  user owns or group or others can use; clients check the same folder before they connect. `accept_local` and
+  user owns, group or others can use, or that is not a folder (a symbolic link, even a dangling one, or a file);
+  clients check the same folder before they connect. `accept_local` and
   `connect_local_socket` also check the peer's user (`peer.rs`). The gRPC client (`connect_grpc_channel`) relies on
   the folder check alone, because tonic's `unix:` endpoint reads no peer credentials; the gRPC server accepts
   through `accept_local`. There is no TCP bind function here: the daemon's TCP listener is `rastai-server`'s.

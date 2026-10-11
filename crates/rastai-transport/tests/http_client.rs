@@ -114,6 +114,37 @@ mod over_loopback {
         assert_eq!(response.status, 200);
         assert_eq!(response.body, b"pong");
     }
+
+    #[tokio::test]
+    async fn a_host_header_from_the_caller_is_sent_once_in_place_of_ours() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut connection, _address) = listener.accept().await.unwrap();
+            let received = read_request(&mut connection).await;
+            write_response(&mut connection, b"pong").await;
+            received
+        });
+
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            target: HttpTarget::LoopbackHttp { port },
+            path: "/health".to_string(),
+            headers: vec![("Host".to_string(), "localhost".to_string())],
+            body: Vec::new(),
+            timeout_ms: 5000,
+        };
+        send_request(request).await.unwrap();
+        let received = server.await.unwrap();
+
+        let host_lines = received
+            .head
+            .lines()
+            .filter(|line| line.to_ascii_lowercase().starts_with("host:"))
+            .count();
+        assert_eq!(host_lines, 1, "{}", received.head);
+        assert!(received.head.contains("host: localhost\r\n"), "{}", received.head);
+    }
 }
 
 #[cfg(unix)]
