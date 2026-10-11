@@ -1,0 +1,27 @@
+[package]
+name = "rastai-store"
+description = "Everything the Rastai daemon persists: rastai.db behind one writer thread, read-only reader pools, the daemon lock"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# The only crate that touches SQLite, and sqlite.rs is its only file that imports rusqlite (layout: rust-control-plane.md
+# section 6.6). M1-23 lands rastai.db, its writer thread, the reader pool and the daemon lock; the event logs (M1-24),
+# the indexer, blobs and free space (M1-25) and vault.db (M3) bring rastai-proto, rastai-formats, prost and libc.
+[dependencies]
+# DataPaths and the path functions (the only place paths are built), and now_unix_ms.
+rastai-core = { path = "../rastai-core" }
+rusqlite = { workspace = true }
+# The list columns (tokens.scopes, nodes.capabilities, plugins.granted_permissions) are JSON arrays of text.
+serde_json = { workspace = true }
+# Only the oneshot channels a writer thread answers on (layout section 6.5).
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+# tests/writer_thread.rs runs 256 writers at once on a multi-threaded runtime, the way the daemon calls write_index.
+tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
+
+[lints]
+workspace = true
