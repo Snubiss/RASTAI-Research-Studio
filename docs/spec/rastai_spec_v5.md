@@ -935,6 +935,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Dev tooling (CI services) | MySQL 8.4 and 9.7, MariaDB | Archive and reader tests (M11); test targets only, never shipped | — |
 | Dev tooling (CI service, test-only) | MinIO | The S3-compatible target for the archive's blob tests (M11). A CI service only, never shipped, never a runtime dependency | A folder target plus a stub S3 server in the tests |
 | License entry (not code) | pillow (MIT-CMU / HPND) | A transitive package of `torchvision` (ADR-0037). It gets a named license entry in `deps/allowlist-python.json`, because the license may not match the allowlist's standard identifiers. No Rastai file imports it | — |
+| License entry (not code) | torch (`Apache-2.0 WITH LLVM-exception`) | Part of PyTorch's compound license, because PyTorch vendors LLVM code. The exception only widens Apache-2.0. It gets a named license entry in `deps/allowlist-python.json`, because it isn't one of the allowlist's standard identifiers and torch is a direct foundation package, not a transitive one | — |
 | Data (not code) | Gemma Scope 2, Llama Scope SAE weights; Neuronpedia labels | Pretrained dictionaries and labels | Train our own with the SAE recipe |
 | Service (Phase 3) | Payment provider / merchant of record (e.g. Paddle or Stripe) | Payments and global tax are compliance-critical; never built in-house | Another provider |
 
@@ -1346,6 +1347,7 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 - §29: the agent build protocol (contracts.md, generated schemas and the layout section in every task prompt; registered names only; a separate reviewer agent per PR with a naming and schema lens).
 - §5 / §29: the verification rule. A task is closed only after CI is green and a non-author reviewer agent confirms each acceptance criterion, with the evidence in the closing comment.
 - §27: `@vitest/browser`, axe-core, the Tauri CLI, the Tauri updater plugin (ships with the desktop shell), MinIO (test-only CI service, never shipped) and a named license entry for pillow (MIT-CMU / HPND) in `deps/allowlist-python.json`.
+- §27: a named license entry for torch (`Apache-2.0 WITH LLVM-exception`, part of PyTorch's compound license) in `deps/allowlist-python.json` (M1-04).
 - §29: the node-over-ssh test runs nightly (`nightly.yml`), not as a required PR job.
 - Contracts: the names v1.1 invented are accepted (contracts.md §15 is no longer provisional). The theme token group key `type` is renamed `typography`, because `type` collides with the document header field (§7).
 - Small contract gaps are left on purpose to the tasks that build them, each listed in its backlog task body:

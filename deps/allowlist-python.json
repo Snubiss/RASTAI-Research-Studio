@@ -28,7 +28,7 @@
       },
       "torch": {
         "license": "Apache-2.0 WITH LLVM-exception",
-        "reason": "Part of PyTorch's compound license (it vendors LLVM code). The exception only widens Apache-2.0. torch is a direct foundation package (spec §27 PyTorch row), so ADR-0012 decision 5 does not cover it: OWNER APPROVAL PENDING, requested on PR #168. Once given, record it here and in spec §27 and contracts §2.5 as pillow's is, before merge."
+        "reason": "Part of PyTorch's compound license (it vendors LLVM code). The exception only widens Apache-2.0. torch is a direct foundation package (spec §27 PyTorch row), so ADR-0012 decision 5 does not cover it; this entry is the explicit exception (spec §27, owner approval of 2026-10-11)."
       }
     }
   },
