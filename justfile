@@ -188,39 +188,39 @@ check-no-typescript: env-cpu
 # buf.gen.yaml runs the Rust plugins from your PATH, grpcio-tools from the cpu environment and protoc-gen-es from
 # node_modules, so it needs both environments. rastai-codegen's binaries join after buf in M1-12.
 # Regenerate every generated folder: today the protobuf code of proto/ for Rust, Python and JavaScript.
-codegen: env-cpu env-js
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # Compare whole version lines, so 0.5.0 never passes for 0.5.01. `|| true` turns a missing tool into the
-    # install line below instead of "command not found".
-    require_version() {
-        local installed
-        installed="$($1 --version 2>/dev/null || true)"
-        if [ "$installed" != "$2" ]; then
-            echo "$1 $2 is required, but found: ${installed:-nothing}. The justfile header says how to install it."
-            exit 1
-        fi
-    }
-    require_version buf "{{buf_version}}"
-    require_version protoc-gen-prost "{{protoc_gen_prost_version}}"
-    require_version protoc-gen-tonic "{{protoc_gen_tonic_version}}"
+codegen: env-cpu env-js proto-tools
     buf generate
 
-# It runs the same generators as `codegen`, so it needs the same tools and both environments.
+# It runs the same generators as `codegen`, so it needs the same tools and both environments. Checking the tool
+# versions first means a wrong plugin shows up as an install hint, not as generated code that differs.
 # Checked-in generated code equals a fresh codegen run into a temporary tree.
-codegen-check: env-cpu env-js
+codegen-check: env-cpu env-js proto-tools
     "{{check_python}}" tools/checks/check-generated
 
-# buf breaking can't see inside arguments_json and the other _json strings; check-schema-diff covers those (M1-58).
-# buf lint, and buf breaking against the proto files where this branch left `base` (contracts 4).
-proto-check base=proto_base:
+# buf and the Rust protoc plugins at the pinned versions; `codegen` and `codegen-check` run them all.
+[private]
+proto-tools: (require-version "buf" buf_version) (require-version "protoc-gen-prost" protoc_gen_prost_version) \
+    (require-version "protoc-gen-tonic" protoc_gen_tonic_version)
+
+# The one version check every proto recipe uses. Compare whole version lines, so 0.5.0 never passes for 0.5.01.
+# `|| true` turns a missing tool into the install hint below instead of "command not found".
+[private]
+require-version tool version:
     #!/usr/bin/env bash
     set -euo pipefail
-    installed_version="$(buf --version 2>/dev/null || true)"
-    if [ "$installed_version" != "{{buf_version}}" ]; then
-        echo "buf {{buf_version}} is required, but found: ${installed_version:-no buf}. The justfile header says how."
+    installed="$("{{tool}}" --version 2>/dev/null || true)"
+    if [ "$installed" != "{{version}}" ]; then
+        echo "{{tool}} {{version}} is required, but found: ${installed:-nothing}."
+        echo "The justfile header says how to install it."
         exit 1
     fi
+
+# buf breaking can't see inside arguments_json and the other _json strings; check-schema-diff covers those (M1-58).
+# It needs only buf, not the plugins, so it checks buf's version alone.
+# buf lint, and buf breaking against the proto files where this branch left `base` (contracts 4).
+proto-check base=proto_base: (require-version "buf" buf_version)
+    #!/usr/bin/env bash
+    set -euo pipefail
     buf lint
     # The merge base, not the tip of base: a field main added after this branch started isn't a removal here.
     merge_base="$(git merge-base HEAD "{{base}}")"

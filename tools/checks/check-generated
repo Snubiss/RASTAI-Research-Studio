@@ -99,9 +99,16 @@ def files_in(folder: Path) -> set[str]:
     files = set()
     for path in folder.rglob("*"):
         relative = path.relative_to(folder)
-        if path.is_file() and not SKIPPED_FOLDER_NAMES & set(relative.parts):
+        if path.is_file() and not is_in_skipped_folder(relative):
             files.add(relative.as_posix())
     return files
+
+
+def is_in_skipped_folder(relative: Path) -> bool:
+    for part in relative.parts:
+        if part in SKIPPED_FOLDER_NAMES:
+            return True
+    return False
 
 
 if __name__ == "__main__":

@@ -1180,7 +1180,7 @@ export function modelLoad(executor, args) {
 - **Stability travels with the command.** Each wrapper's doc line, `docs/reference/commands.md` and the schema file's `x-rastai-stability` show the descriptor's `stability`; `ListCommands` returns it. All are `preview` until Phase 2 (owner decision N3); `check-schema-diff` (2.8) guards each one from the day it becomes `stable`.
 - **Names registry (M1).** `schemas/names.json` is written from the code by `rastai-names-codegen` (the sources are in the table in 2.8). It is checked in like every generated file, so `check-generated` fails if it is stale, and `check-names` compares it with contracts. Run order matters: the names bin goes last because it reads the catalog and the migrations.
 - **Event schemas (M1).** `schemas/events/<event_type>.json` comes from the core event-type table. The payload's fields come from the descriptor set `just proto-check` already builds with `buf build`, read by `descriptor_set.rs` (question 17). `buf breaking` guards those fields on the wire; the file adds stability and the contracts coupling of `check-schema-diff`.
-- **protobuf-es** output (`packages/proto/`) comes from `buf generate` with target `js+dts` (proto doc). Those `.d.ts` files live only in that generated folder, which `check-no-typescript` allows.
+- **protobuf-es** output (`packages/proto/src/generated/`) comes from `buf generate` with target `js+dts` (proto doc). Those `.d.ts` files live only in that generated folder, which `check-no-typescript` allows.
 
 Order inside `just codegen`: proto first (`buf generate`), then the catalog (rastai-diag must compile before the rest), then formats, then the names registry.
 
