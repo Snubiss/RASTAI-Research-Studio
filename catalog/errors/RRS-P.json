@@ -23,7 +23,7 @@
     "code": "RRS-P0004",
     "severity": "error",
     "title": "Plugin command id outside the plugin's namespace or in a reserved area",
-    "message": "The command id {command_id} is outside the plugin's namespace or in a reserved area.",
+    "message": "The command id {command_id} is outside the namespace of plugin {plugin_id}, or in a reserved area.",
     "basic_text": "This plugin tries to add a command under a name it isn't allowed to use.",
     "fix_text": "The plugin's author must name the command under the plugin's own id.",
     "docs_anchor": "rrs-p0004",

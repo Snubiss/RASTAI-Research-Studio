@@ -51,6 +51,26 @@
     "retired": false
   },
   {
+    "code": "RRS-S0006",
+    "severity": "error",
+    "title": "Database read failed",
+    "message": "A database read failed: {reason}.",
+    "basic_text": "Rastai couldn't read its saved data just now. Your data is not damaged.",
+    "fix_text": "Try again in a moment. If it keeps failing, check the disk.",
+    "docs_anchor": "rrs-s0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-S0007",
+    "severity": "error",
+    "title": "The runtime folder or its daemon.lock isn't private to this user",
+    "message": "The runtime path {path} isn't private to this user: {reason}. Nothing was written to it.",
+    "basic_text": "Rastai's working folder could be reached by another user, so Rastai won't use it.",
+    "fix_text": "Remove it, or set XDG_RUNTIME_DIR to a folder only you can open.",
+    "docs_anchor": "rrs-s0007",
+    "retired": false
+  },
+  {
     "code": "RRS-S1001",
     "severity": "error",
     "title": "Blob hash mismatch; quarantined",
