@@ -77,7 +77,10 @@ RASTAI/
   deny.toml                  cargo-deny: license allowlist, advisories, the §27 crate allowlist, one owning crate per library
   package.json  pnpm-workspace.yaml  pnpm-lock.yaml   JS workspace: apps/*, packages/*, plugins/*/ui
   jsconfig.base.json         checkJs settings for the dev-only checker; each JS package has a jsconfig.json extending it
+  jsconfig.json              extends the base over the whole JS workspace: what `just check-js` checks
+  vitest.config.js           the list of JS test files for `just test-js` (unit tests next to their source)
   .prettierrc.json           prettier settings (dev tooling); ruff settings live in python/pyproject.toml
+  .prettierignore            what prettier skips: prose (*.md, docs/), generated folders, spike/, build output
   buf.yaml  buf.gen.yaml     protobuf lint, `buf breaking`, codegen for Rust, JS (protobuf-es, target js+dts) and Python
   .github/workflows/         ci.yml, nightly.yml, nightly-gpu.yml, release.yml (thin: each step calls a `just` recipe)
 
@@ -119,7 +122,8 @@ RASTAI/
     rastai_lens/             observation readouts: logit lens, attention capture, entropy, SAE runtime, steering, live packets
     rastai_train/            trainer loop, checkpoint/resume, recipes (SFT, DPO, GRPO, GSPO, RM, PPO, LoRA, QLoRA, SAE, JEPA, ...)
     rastai_rl/               RL engine: rollout manager, group advantages, Harbor task importer
-    envs/                    one uv project + uv.lock per backend: cpu/, cuda13/, cuda126/, rocm/ (mps/ later); environments.json
+    envs/                    one uv project + uv.lock per backend: cpu/, cuda13/, cuda126/, rocm/ (mps/ later); environments.json;
+                             tests/ (the cpu environment's smoke test)
 
   apps/
     web/                     the React app in plain JavaScript + JSX (all sections; served by the daemon, opened by Tauri or a browser)
@@ -164,6 +168,7 @@ RASTAI/
     gpu/                     GPU-only tests (nightly on the self-hosted runner)
     crash/                   Rust crate rastai-crash-tests: the kill -9 matrix for daemon, node, jobs and the archiver
     loop/                    the full CPU loop in under 10 minutes (design -> train -> eval -> ONNX -> re-import)
+    workspace/               smoke tests of the JS workspace's checker settings (vitest)
   tools/                     dev tooling only, never shipped
     codegen/                 Rust crate rastai-codegen (bins rastai-formats-codegen, rastai-catalog-codegen,
                              rastai-names-codegen); also runs buf
@@ -2793,7 +2798,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `[workspace.metadata.rastai.allowlist]` in `Cargo.toml` | the §27 crate table as data, read by `check-deps` |
 | `deps/engines/uv.json` | pinned uv version and hashes; the pinned uv ships next to the `rastai` binary and is pushed to paired nodes |
 | `python/envs/environments.json` | per environment: selection rule, supported AMD gfx targets, expected download size |
-| `python/conftest.py`, `tests/conftest.py` | shared pytest fixtures |
+| `python/conftest.py`, `tests/conftest.py` | shared pytest fixtures. `python/conftest.py`: `repo_root`, `fixtures_folder` (`fixtures/`); skips `gpu` tests without a device and `posix_only` tests on Windows |
 | `cache_folder` files (node-local) | `anchors/<base_model_hash12>-<anchor_set_hash12>-<template_hash12>.safetensors`, `drift/<model_hash12>-<prompt_set_hash12>.safetensors`, `tokenized/<dataset_hash12>-<template_hash12>.safetensors`, `images/<dataset_hash12>-<side>.safetensors` |
 | `tools/codegen/rewrite_python_imports`, `tools/fixtures/render_chat_templates.py`, `tools/bench/gateway-load/`, `tools/bench/tokenizer/` | dev tooling, never shipped |
 | `tools/checks/check-colors`, `tools/checks/check-no-typescript`, `tools/checks/check-unsafe`, `tools/checks/check-no-pickle`, `tools/checks/check-dco`, `tools/checks/check-names`, `tools/checks/check-schema-diff` | CI checks (the last two in M1, 12.6) |
@@ -2822,7 +2827,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `.github/workflows/nightly-gpu.yml` | CI | schedule and manual triggers on main only, on the self-hosted runner (labels `gpu-nvidia`; `gpu-amd` from M10), run as a separate OS user `rastai-runner`; secret `HF_READ_TOKEN` (read-only) for gated real-weight parity once the repo is public |
 | `.github/workflows/release.yml` | CI | packaging and signing |
 | `mysql-archive` (M11-E07) | CI job | the archive and the MySQL reader against MySQL 8.4 and 9.7, MariaDB and MinIO |
-| `just check`, `check-names`, `check-schema-diff`, `build`, `test-rust`, `fmt-check`, `lint`, `deny`, `test-python`, `test-python-portable`, `test-js`, `check-js`, `env-cpu`, `env-locks`, `parity`, `test-gpu`, `e2e-surfaces`, `e2e-web`, `dev-web`, `serve-dev`, `test-archive`, `test-crash`, `test-templates`, `loop-cpu`, `codegen`, `codegen-check`, `proto-check`, `wasm`, `wheel`, `check-deps`, `web-embed`, `release-linux`, `fuzz <crate> <target> [seconds]` | `just` recipes | `check` is the gate every PR passes (format, lint, tests, codegen and repo checks, `check-names` and `check-schema-diff` included; 12.6); `check-js` runs `tsc --noEmit` over `jsconfig.json`; `test-python-portable` runs the pure-compute packages with `-m 'not posix_only'`; `test-crash` runs the kill -9 matrix (`tests/crash/`); `test-templates` checks the `rastai plugin new` templates; `loop-cpu` runs `tests/loop/` (the full CPU loop under 10 minutes); `codegen` regenerates every generated folder and `codegen-check` fails if that changes anything; `proto-check` runs buf lint and `buf breaking`; `wasm` builds `rastai-diag` for `wasm32-unknown-unknown` (M1, in `check`) and, from M4, the `rastai-formats` WASM binding; `wheel` builds the `rastai-formats` Python binding; `web-embed` builds `apps/web` for embedding in the binary; `release-linux` builds the AppImage and `.deb` |
+| `just check`, `check-names`, `check-schema-diff`, `build`, `test-rust`, `fmt-check`, `lint`, `deny`, `test-python`, `test-python-portable`, `test-js`, `check-js`, `env-cpu`, `env-js`, `env-locks`, `parity`, `test-gpu`, `e2e-surfaces`, `e2e-web`, `dev-web`, `serve-dev`, `test-archive`, `test-crash`, `test-templates`, `loop-cpu`, `codegen`, `codegen-check`, `proto-check`, `wasm`, `wheel`, `check-deps`, `web-embed`, `release-linux`, `fuzz <crate> <target> [seconds]` | `just` recipes | `check` is the gate every PR passes (format, lint, tests, codegen and repo checks, `check-names` and `check-schema-diff` included; 12.6); `check-js` runs `tsc --noEmit` over `jsconfig.json`; `env-cpu` syncs `.dev/envs/cpu` from the cpu lock with `uv sync --frozen`; `env-js` installs the JS dev tools from `pnpm-lock.yaml`; `test-python-portable` runs the pure-compute packages with `-m 'not posix_only'`; `test-crash` runs the kill -9 matrix (`tests/crash/`); `test-templates` checks the `rastai plugin new` templates; `loop-cpu` runs `tests/loop/` (the full CPU loop under 10 minutes); `codegen` regenerates every generated folder and `codegen-check` fails if that changes anything; `proto-check` runs buf lint and `buf breaking`; `wasm` builds `rastai-diag` for `wasm32-unknown-unknown` (M1, in `check`) and, from M4, the `rastai-formats` WASM binding; `wheel` builds the `rastai-formats` Python binding; `web-embed` builds `apps/web` for embedding in the binary; `release-linux` builds the AppImage and `.deb` |
 | `gpu`, `posix_only`, `fuzz` | pytest markers | GPU-only; needs Unix sockets, flock or `setsid` (skipped on Windows); seeded mutation tests |
 | `tests/e2e/three_surfaces/` | test | M1-49: one action through UI, CLI and MCP; grows each milestone |
 | `tests/e2e/reconnect.spec.js`, `tests/e2e/training-view.spec.js`, `tests/e2e/psychology-latency.spec.js` | tests | resync and Regenerate after a daemon kill; M4-E12; the M4 p95 < 50 ms round trip |

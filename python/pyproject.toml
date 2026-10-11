@@ -1,0 +1,49 @@
+# The uv workspace root for every hand-written Python package (layout: python.md section 1.2).
+# A package joins by having its folder here, python/rastai_<name>/ with its own pyproject.toml, the same way a
+# crate joins Cargo.toml. The locked environments in envs/ are separate uv projects and never members (section 11).
+# This file also holds the ruff and pytest settings for everything under python/ (owner decision 7).
+
+[tool.uv]
+required-version = "==0.13.0"   # the same uv as python/envs/cpu/pyproject.toml
+
+[tool.uv.workspace]
+members = ["rastai", "rastai_*"]
+exclude = ["envs/*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120          # the same width as rustfmt.toml and .prettierrc.json
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, naming, complexity, argument count, banned APIs.
+select = ["E", "W", "F", "I", "B", "UP", "N", "C90", "PLR0913", "TID251"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15        # clippy.toml cognitive-complexity-threshold: small, readable functions (ADR-0023)
+
+[tool.ruff.lint.pylint]
+max-args = 6               # clippy.toml too-many-arguments-threshold
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# No pickle, anywhere (CLAUDE.md hard rules; tools/checks/check-no-pickle greps for the rest from M1-05).
+"pickle".msg = "No pickle: weights are safetensors, checkpoints are safetensors plus JSON."
+"torch.load".msg = "torch.load unpickles. Read safetensors through rastai_models.io instead."
+"torch.save".msg = "torch.save pickles. Write safetensors plus JSON instead."
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+# Collected from python/ only; the repo-level tests/ folders have their own runs (layout: python.md section 12).
+testpaths = ["."]
+addopts = ["--strict-markers", "--import-mode=importlib"]
+markers = [
+    "gpu: needs a CUDA or ROCm device; skipped without one (runs nightly on the GPU runner)",
+    "posix_only: needs Unix sockets, flock or setsid; skipped on Windows",
+    "fuzz: a seeded mutation test of an in-house parser (contracts 12.5)",
+]
+filterwarnings = [
+    # torch warns on import when numpy is missing. numpy is never imported by Rastai code; it arrives in the locks
+    # with torchvision (layout section 4.4), and until then torch's numpy bridge is simply unused.
+    "ignore:Failed to initialize NumPy:UserWarning",
+]
