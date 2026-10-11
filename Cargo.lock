@@ -154,6 +154,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rastai-core"
+version = "0.1.0"
+dependencies = [
+ "rastai-diag",
+ "rastai-proto",
+ "serde_json",
+]
+
+[[package]]
 name = "rastai-diag"
 version = "0.1.0"
 dependencies = [

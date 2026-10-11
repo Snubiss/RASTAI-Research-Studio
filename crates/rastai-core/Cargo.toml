@@ -1,0 +1,24 @@
+[package]
+name = "rastai-core"
+description = "Rastai's shared vocabulary that isn't a document: versions, data paths, ids, principals, scopes, states"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# Synchronous and free of I/O except environment variables and /dev/urandom (layout: rust-control-plane.md
+# section 5.4). M1-20 lands versions, paths, ids, principals, scopes, states and the wire conversions; the command
+# registry, naming and settings (M1-21) bring rastai-formats and serde with them.
+[dependencies]
+rastai-diag = { path = "../rastai-diag" }
+# The state enums, Diagnostic and CommandDescriptor are rastai-proto's (one owner, contracts 2.4 rule 3). Only
+# wire.rs, states.rs and commands/descriptor.rs import it (layout 5.3).
+rastai-proto = { path = "../rastai-proto" }
+
+[dev-dependencies]
+# tests/wire_round_trip.rs reads the golden Diagnostic and CommandDescriptor JSON (fixtures/proto-golden/).
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
