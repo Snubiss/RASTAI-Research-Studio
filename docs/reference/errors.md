@@ -1006,6 +1006,15 @@ Source: `catalog/errors/RRS-C.json`.
 - **Fix:** Change privacy.data_policy for the project, or for your user outside a project, if you want to allow it.
 - **Fix command:** `settings.set`
 
+<a id="rrs-c1010"></a>
+
+### RRS-C1010: The owner token can't be read or created; the daemon refuses to start
+
+- **Severity:** error
+- **Message:** The owner token {path} can't be read or created, so the daemon refuses to start: {reason}.
+- **In plain words:** Rastai couldn't open or write its key file, so it won't start.
+- **Fix:** Check that you own {path} and its folder and can read and write them. If the file is damaged, delete it; the next start writes a new one.
+
 <a id="rrs-c2001"></a>
 
 ### RRS-C2001: Nothing to undo or redo

@@ -221,6 +221,16 @@
     "retired": false
   },
   {
+    "code": "RRS-C1010",
+    "severity": "error",
+    "title": "The owner token can't be read or created; the daemon refuses to start",
+    "message": "The owner token {path} can't be read or created, so the daemon refuses to start: {reason}.",
+    "basic_text": "Rastai couldn't open or write its key file, so it won't start.",
+    "fix_text": "Check that you own {path} and its folder and can read and write them. If the file is damaged, delete it; the next start writes a new one.",
+    "docs_anchor": "rrs-c1010",
+    "retired": false
+  },
+  {
     "code": "RRS-C2001",
     "severity": "info",
     "title": "Nothing to undo or redo",
