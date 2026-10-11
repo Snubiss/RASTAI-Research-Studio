@@ -55,16 +55,12 @@ pub fn check_requirements(requires: &BTreeMap<String, String>, facts: &Environme
             json_pointer: join_pointer(REQUIRES_POINTER, plugin_id),
             ..DiagnosticPath::default()
         });
-        // `found` and `expected` are the values RRS-E1004's message names when the range doesn't read.
-        let values = [
-            ("plugin_id", plugin_id.as_str()),
-            ("range", range.as_str()),
-            ("found", range.as_str()),
-            ("expected", RANGE_EXPECTED),
-        ];
+        // Each code gets exactly the values its message uses (catalog/README.md), so the two arrays differ.
         if let Some(code) = range_problem(range) {
+            let values = [("found", range.as_str()), ("expected", RANGE_EXPECTED)];
             diagnostics.push(diagnostic_at(code, &values, &path));
         } else if !plugin_is_satisfied(plugin_id, range, facts) {
+            let values = [("plugin_id", plugin_id.as_str()), ("range", range.as_str())];
             diagnostics.push(diagnostic_at(CODE_PLUGIN_MISSING, &values, &path));
         }
     }

@@ -45,7 +45,7 @@
     "title": "Job killed by the node",
     "message": "Job {job_id} was killed by the node: {reason}.",
     "basic_text": "This task stopped before it finished.",
-    "fix_text": "",
+    "fix_text": "Check the node's log for the reason, then run it again.",
     "docs_anchor": "rrs-j1003",
     "retired": false
   },
@@ -75,7 +75,7 @@
     "title": "Job token rejected",
     "message": "The token of job {job_id} was rejected.",
     "basic_text": "A task tried to connect with a key Rastai doesn't accept.",
-    "fix_text": "",
+    "fix_text": "Run the task again; if it keeps happening, restart the node.",
     "docs_anchor": "rrs-j2002",
     "retired": false
   },

@@ -1277,6 +1277,7 @@ Source: `catalog/errors/RRS-S.json`.
 - **Severity:** error
 - **Message:** {item_id} can't be pruned: it is pinned, running, or not yet acknowledged and verified by the archive.
 - **In plain words:** Rastai won't free this item's space yet, because it isn't safely archived or is still in use.
+- **Fix:** Unpin it or wait until it stops, or wait until the archive has acknowledged and verified it.
 
 <a id="rrs-s5010"></a>
 
@@ -1852,6 +1853,7 @@ Source: `catalog/errors/RRS-J.json`.
 - **Severity:** error
 - **Message:** Job {job_id} was killed by the node: {reason}.
 - **In plain words:** This task stopped before it finished.
+- **Fix:** Check the node's log for the reason, then run it again.
 
 <a id="rrs-j1004"></a>
 
@@ -1878,6 +1880,7 @@ Source: `catalog/errors/RRS-J.json`.
 - **Severity:** error
 - **Message:** The token of job {job_id} was rejected.
 - **In plain words:** A task tried to connect with a key Rastai doesn't accept.
+- **Fix:** Run the task again; if it keeps happening, restart the node.
 
 <a id="rrs-j2003"></a>
 

@@ -257,7 +257,7 @@
     "title": "Prune refused",
     "message": "{item_id} can't be pruned: it is pinned, running, or not yet acknowledged and verified by the archive.",
     "basic_text": "Rastai won't free this item's space yet, because it isn't safely archived or is still in use.",
-    "fix_text": "",
+    "fix_text": "Unpin it or wait until it stops, or wait until the archive has acknowledged and verified it.",
     "docs_anchor": "rrs-s5009",
     "retired": false
   },

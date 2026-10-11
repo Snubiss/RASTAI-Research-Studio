@@ -308,15 +308,15 @@ catalog/
   "basic_text": "Your disk is almost full, so Rastai can't save this.",
   "fix_text": "Free up space, or let Rastai delete old checkpoints and unused files.",
   "fix_command_id": "storage.gc",
-  "docs_anchor": "storage-disk-full",
+  "docs_anchor": "rrs-s3001",
   "retired": false
 }
 ```
 
-- Placeholders are `{snake_case}` names. The codegen test checks that every placeholder used in Rust call sites exists in the entry, and that the entry uses no placeholder the call doesn't fill (it scans for `diagnostic("RRS-...", &[("name", ...)])` with a plain text search; no macro). The code may be a string literal or a `const` of the same file; a call that builds its values elsewhere is skipped, and its own tests check its message. With it, the `RRS-` source scan checks that every code first-party source names outside its tests is in the catalog (both in `catalog_checks.rs`, M1-13).
+- Placeholders are `{snake_case}` names. The codegen test checks that every placeholder used in Rust call sites exists in the entry, and that the entry uses no placeholder the call doesn't fill (it scans for `diagnostic("RRS-...", &[("name", ...)])` with a plain text search; no macro). The code may be a string literal or a `const` of the same file, and the values an inline array or `&values` where the closest `let values = [...]` above the call is the array; a call that builds its values another way (`error_values(...)`, `borrow_values(...)`) is skipped, and its own tests check its message. With it, the `RRS-` source scan checks that every code first-party source names outside its tests is in the catalog (both in `catalog_checks.rs`, M1-13).
 - The catalog and contracts §10.3 hold the same codes with the same severities; a row marked for a later milestone (the plugins' `RRS-L` (M4) and `RRS-V` (M5)) may wait for its entry (`catalog_checks.rs`, M1-13).
 - `fix_command_id`, when set, must be a command id in the core table or a first-party manifest. Checked by the codegen. *Pending: M1-22 adds this rule to `catalog_checks.rs` with the first rows of the core table; first-party manifests join it when the first one lands.*
-- `docs_anchor`, when set, is a lowercase kebab-case slug (`storage-disk-full`), used once among the error entries and once among the terms. It becomes an HTML id in `docs/reference/errors.md`. Checked by `catalog_checks.rs` (M1-12).
+- `docs_anchor`, when set, is a lowercase kebab-case slug, used once among the error entries and once among the terms. An error entry's anchor is its code in lowercase (`rrs-s3001`), so a link stays valid when the title changes; a term's is its own slug. It becomes an HTML id in `docs/reference/errors.md`. Checked by `catalog_checks.rs` (M1-12).
 - Terms: `{"term_id": "logit_lens", "title": "Logit lens", "basic_text": "...", "advanced_text": "...", "docs_anchor": "..."}`. Each `term_id` is listed once (`catalog_checks.rs`, M1-12).
 
 ### 2.7 `schemas/`

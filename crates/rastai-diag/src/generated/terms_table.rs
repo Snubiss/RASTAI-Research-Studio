@@ -474,6 +474,20 @@ pub const TERMS: &[TermEntry] = &[
         docs_anchor: "teach-it",
     },
     TermEntry {
+        term_id: "template_forced_position",
+        title: "Template-forced position",
+        basic_text: "A spot in a chat where the next word is fixed by the chat's format, not chosen by the model.",
+        advanced_text: "A position whose next token the chat template forces; the model's prediction there is noise, so analyses leave it out.",
+        docs_anchor: "template-forced-position",
+    },
+    TermEntry {
+        term_id: "tombstone",
+        title: "Tombstone",
+        basic_text: "A note the archive keeps that a run was deleted.",
+        advanced_text: "The archive's record that a run was deleted; archive.purge removes the rows themselves.",
+        docs_anchor: "tombstone",
+    },
+    TermEntry {
         term_id: "trust_prompt",
         title: "Trust prompt",
         basic_text: "The question Rastai asks before installing a plugin, listing what it may do.",

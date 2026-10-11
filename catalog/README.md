@@ -31,7 +31,25 @@ Rules the catalog checks enforce (`tools/codegen/tests/catalog_checks.rs`):
 - The catalog and contracts §10.3 hold the same codes with the same severities.
 - Every `RRS-` code that first-party source names outside its tests is in the catalog.
 - A `diagnostic("RRS-...", &[("name", ...)])` call passes exactly the placeholders its entry's message and fix use. A
-  placeholder without a value would show as `{name}`.
+  placeholder without a value would show as `{name}`. The scan also reads `&values` when the closest
+  `let values = [...]` above the call is the array, so give each code its own array.
+
+## Terms
+
+`terms/terms.json` holds the glossary rows (contracts §13) a user may meet in the app, each with a plain
+`basic_text` and a fuller `advanced_text`. A row that names two things (`Suite / test`, `Rollout / group`,
+`Live peek / step mode`, `Basic / Advanced`, `MoE / MLA / ALiBi / AttnRes`) is one term, explained under its first
+name. These rows are left out, because the UI never shows them by name:
+
+| Glossary row | Why it isn't a term |
+|---|---|
+| JSDoc, CommandExecutor, Names registry, Milestone marker, Outbox, Source id, Bus sequence | words for people who write Rastai's code |
+| Chain driver, Static decode step, Durable / ephemeral event, Stability | inner parts of the daemon, the runtime and the wire; the user sees runs, speed and commands, not these |
+| Theme token, Locked token | names for theme authors, who read the theme docs (contracts §5.6) |
+| Origin-bound session | how sign-in is kept safe; the UI only says "signed in" or "signed out" |
+| Section / panel | the app's own layout words, which the UI shows rather than explains |
+
+A task that puts one of these words in front of users adds its term here.
 
 ## "Not available yet" codes
 

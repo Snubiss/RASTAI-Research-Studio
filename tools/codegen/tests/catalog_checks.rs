@@ -70,15 +70,23 @@ const SKIPPED_FOLDERS: [&str; 6] = ["target", "node_modules", ".venv", "__pycach
 const PYTHON_TEST_FILE_START: &str = "test_";
 const PYTHON_TEST_SETUP_FILE: &str = "conftest.py";
 const JAVASCRIPT_TEST_FILE_ENDS: [&str; 2] = [".test.js", ".test.jsx"];
-/// A Rust file's unit tests start at this line; the scans read only what comes before it.
 const RUST_EXTENSION: &str = ".rs";
-const RUST_TEST_MODULE_START: &str = "#[cfg(test)]";
+/// A Rust file's unit-test module is an inline `mod name {` under this attribute; the scans read only what comes
+/// before it. The same attribute on a helper function or on `mod name;` doesn't end the scan.
+const RUST_TEST_ATTRIBUTE: &str = "#[cfg(test)]";
+const RUST_ATTRIBUTE_START: &str = "#[";
+const RUST_COMMENT_START: &str = "//";
+const RUST_MODULE_START: &str = "mod ";
 /// A code is "RRS-", one capital letter and four digits: nine characters.
 const CODE_START: &str = "RRS-";
 const CODE_LENGTH: usize = 9;
-/// rastai-diag's two builders; the placeholder scan reads their calls.
-const DIAGNOSTIC_FUNCTIONS: [&str; 2] = ["diagnostic_at", "diagnostic"];
+/// rastai-diag's two builders, and rastai-formats' migrate wrapper `version_diagnostic`, whose first two arguments
+/// are also the code and the values; the placeholder scan reads their calls.
+const DIAGNOSTIC_FUNCTIONS: [&str; 3] = ["diagnostic_at", "diagnostic", "version_diagnostic"];
+/// Values written inline (`&[("name", x)]`), or passed as a variable (`&values`) declared as an array above the call.
 const VALUES_ARRAY_START: &str = "&[";
+const VALUES_REFERENCE_START: char = '&';
+const ARRAY_START: char = '[';
 
 /// A small contracts 10.3: two core rows and a plugin row marked for a later milestone.
 const SAMPLE_CODES_SECTION: &str = "### 10.3 Codes assigned so far (M1)
@@ -1029,15 +1037,51 @@ fn code_mentions(text: &str, file_name: &str) -> Vec<CodeMention> {
 }
 
 /// The part of a file the scans read. Tests name made-up codes on purpose (an unknown code, one outside every range),
-/// so a Rust file is read up to its `#[cfg(test)]` module, and test files are skipped whole (`is_scanned_file`).
+/// so a Rust file is read up to its unit-test module, and test files are skipped whole (`is_scanned_file`).
+/// Production code after the test module would be missed, but clippy's `items_after_test_module` (a default lint,
+/// an error under `just lint`'s `-D warnings`) already refuses any.
 fn scanned_text(text: &str, file_name: &str) -> String {
     if !file_name.ends_with(RUST_EXTENSION) {
         return text.to_string();
     }
-    match text.find(RUST_TEST_MODULE_START) {
+    match unit_test_module_start(text) {
         Some(test_start) => text[..test_start].to_string(),
         None => text.to_string(),
     }
+}
+
+/// Where the first `#[cfg(test)]` that opens an inline module stands. One on a helper function (production code may
+/// follow it) or on `mod name;` (a module in its own file) is skipped.
+fn unit_test_module_start(text: &str) -> Option<usize> {
+    for (index, _) in text.match_indices(RUST_TEST_ATTRIBUTE) {
+        let item = item_after_attribute(&text[index + RUST_TEST_ATTRIBUTE.len()..]);
+        if is_inline_module(item) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+/// The text from the item an attribute belongs to: past blank space, further attributes (`#[allow(...)]`) and
+/// comment lines.
+fn item_after_attribute(text: &str) -> &str {
+    let mut rest = text.trim_start();
+    while rest.starts_with(RUST_ATTRIBUTE_START) || rest.starts_with(RUST_COMMENT_START) {
+        rest = match rest.split_once('\n') {
+            Some((_, next_lines)) => next_lines.trim_start(),
+            None => "",
+        };
+    }
+    rest
+}
+
+/// True for `mod name {`, a module written in place; `mod name;` ends at its semicolon, before any brace.
+fn is_inline_module(item: &str) -> bool {
+    let Some(after_mod) = item.strip_prefix(RUST_MODULE_START) else {
+        return false;
+    };
+    let header_end = after_mod.find(['{', ';']);
+    header_end.is_some_and(|end| after_mod[end..].starts_with('{'))
 }
 
 /// Source files outside test folders and build output, by extension. Test files (`test_*.py`, `conftest.py`,
@@ -1168,6 +1212,32 @@ fn tests_and_build_output_are_not_scanned() {
     assert_eq!(scanned_text("RRS-E9999", "a/b.py"), "RRS-E9999");
 }
 
+#[test]
+fn a_test_helper_or_a_test_module_file_does_not_hide_the_code_after_it() {
+    let rust = r#"#[cfg(test)]
+mod test_random;
+
+#[cfg(test)]
+pub(crate) fn count(map: &Map) -> usize { 0 }
+
+const CODE: &str = "RRS-E0998";
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+// The unit tests.
+mod tests {
+    const MADE_UP: &str = "RRS-E9999";
+}
+"#;
+    let scanned = scanned_text(rust, "src/a.rs");
+    assert!(scanned.contains("RRS-E0998"), "{scanned}");
+    assert!(!scanned.contains("RRS-E9999"), "{scanned}");
+    assert_eq!(
+        mentions_missing_from_catalog(&code_mentions(&scanned, "src/a.rs"), &[]),
+        ["src/a.rs:7: RRS-E0998 is not in the catalog"]
+    );
+}
+
 // ---- Placeholders at Rust call sites ----
 
 /// One `diagnostic(...)` or `diagnostic_at(...)` call whose code and values are written out at the call site.
@@ -1180,7 +1250,9 @@ struct CallSite {
 
 /// The call sites a plain text search can read whole (layout rust-control-plane.md 2.6, no macro): the code is a
 /// string literal or a `const NAME: &str = "RRS-...";` of the same file, and the values are an inline
-/// `&[("name", ...), ...]`. A call that builds its values elsewhere is skipped; its own tests check its message.
+/// `&[("name", ...), ...]` or `&values` where the closest `let values = ...` above the call is such an array. A call
+/// that builds its values another way (`error_values(...)`, `borrow_values(...)`) is skipped; its own tests check its
+/// message.
 fn call_sites(text: &str, file_name: &str) -> Vec<CallSite> {
     // Each site with its position, so the list comes out in file order whichever function found it.
     let mut sites_by_position = Vec::new();
@@ -1212,13 +1284,44 @@ fn is_part_of_longer_name(text: &str, index: usize) -> bool {
 fn read_call_site(text: &str, arguments: &str, file_name: &str, call_index: usize) -> Option<CallSite> {
     let (code_argument, after_code) = arguments.split_once(',')?;
     let code = resolve_code(code_argument.trim(), text)?;
-    let values = after_code.trim_start().strip_prefix(VALUES_ARRAY_START)?;
+    let values = values_array(after_code.trim_start(), &text[..call_index])?;
     let line = text[..call_index].matches('\n').count() + 1;
     Some(CallSite {
         code,
         value_names: tuple_names(values),
         place: format!("{file_name}:{line}"),
     })
+}
+
+/// The array text after its `[`, for a values argument that is `&[...]` inline or `&name` declared above the call.
+fn values_array<'a>(values_argument: &'a str, text_before_call: &'a str) -> Option<&'a str> {
+    if let Some(inline) = values_argument.strip_prefix(VALUES_ARRAY_START) {
+        return Some(inline);
+    }
+    let variable = values_variable(values_argument)?;
+    declared_array(text_before_call, variable)
+}
+
+/// `values` for an argument `&values` that ends there (`&values,` or `&values)`); anything longer, such as
+/// `&borrow_values(&values)` or `&values[1..]`, is no plain variable.
+fn values_variable(values_argument: &str) -> Option<&str> {
+    let after_reference = values_argument.strip_prefix(VALUES_REFERENCE_START)?;
+    let name_length = after_reference
+        .find(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .unwrap_or(after_reference.len());
+    let next_character = after_reference[name_length..].trim_start().chars().next();
+    let ends_there = next_character == Some(',') || next_character == Some(')');
+    (name_length > 0 && ends_there).then(|| &after_reference[..name_length])
+}
+
+/// The array text after `let name = [` for the closest declaration of `name` above the call. When that closest
+/// declaration is not an array (`let values = error_values(error);`), there is nothing to read: an older array of the
+/// same name further up isn't the one the call passes.
+fn declared_array<'a>(text_before_call: &'a str, variable: &str) -> Option<&'a str> {
+    let declaration = format!("let {variable} = ");
+    let declaration_start = text_before_call.rfind(&declaration)?;
+    let after_declaration = &text_before_call[declaration_start + declaration.len()..];
+    after_declaration.strip_prefix(ARRAY_START)
 }
 
 /// A code argument: a string literal, or the name of a `const` in the same file whose value is one.
@@ -1358,21 +1461,34 @@ fn check() {
     let d = diagnostic("RRS-E1003", &values);
     let e = syntax_diagnostic("RRS-E0001", &[("skipped", x)]);
 }
+fn declared_above() {
+    let values = [("old", x)];
+    let values = [
+        ("found", found.as_str()),
+        ("expected", EXPECTED),
+    ];
+    let f = diagnostic_at("RRS-E1004", &values, &path);
+    let g = version_diagnostic("RRS-E1004", &values, input);
+    let h = diagnostic("RRS-E1004", &borrow_values(&values));
+}
+fn declared_another_way() {
+    let values = error_values(error);
+    let i = diagnostic("RRS-E1004", &values);
+}
 "#;
     let sites = call_sites(text, "src/a.rs");
+    let site = |code: &str, names: &[&str], line: usize| CallSite {
+        code: code.to_string(),
+        value_names: names.iter().map(|name| name.to_string()).collect(),
+        place: format!("src/a.rs:{line}"),
+    };
     assert_eq!(
         sites,
         [
-            CallSite {
-                code: "RRS-E2004".to_string(),
-                value_names: vec!["input_name".to_string(), "other".to_string()],
-                place: "src/a.rs:3".to_string(),
-            },
-            CallSite {
-                code: "RRS-S3001".to_string(),
-                value_names: vec!["operation".to_string()],
-                place: "src/a.rs:4".to_string(),
-            },
+            site("RRS-E2004", &["input_name", "other"], 3),
+            site("RRS-S3001", &["operation"], 4),
+            site("RRS-E1004", &["found", "expected"], 15),
+            site("RRS-E1004", &["found", "expected"], 16),
         ]
     );
 }
