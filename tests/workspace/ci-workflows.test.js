@@ -17,6 +17,7 @@ const PLAN = "docs/plan/implementation-plan.md";
 const INSTALL_SCRIPT = "tools/ci/install-dev-tools";
 const JUSTFILE = "justfile";
 const PYTHON_WORKSPACE = "python/pyproject.toml";
+const GIT_ATTRIBUTES = ".gitattributes";
 const CRATES_FOLDER = "crates/";
 
 // The jobs that run the Python tests without the posix_only ones (plan 8.7).
@@ -33,6 +34,8 @@ const ALIAS_LINE = /^ *- \*([a-z0-9-]+)$/;
 const JUST_RUN_LINE = /^ *(?:- )?run: (just .*)$/;
 // plan 8.4 keeps the required checks on one line of its protection.json.
 const CONTEXTS_LINE = /"contexts": (\[.*\])/;
+// The .gitattributes line that turns off end-of-line conversion for every file.
+const NO_EOL_CONVERSION_LINE = "* -text";
 // One entry of nightly.yml's fuzz matrix.
 const FUZZ_ENTRY_LINE = /^ *- \{ crate: ([a-z0-9-]+), target: ([a-z0-9_]+) \}$/;
 // The name of a `[[bin]]` (a fuzz target) in a cargo-fuzz Cargo.toml.
@@ -243,4 +246,8 @@ test("install-dev-tools checks uv and Node.js against the SHA-256 the justfile h
   const justfileText = readLines(JUSTFILE).join("\n");
   expect(justfileText).toContain(installScriptConstant("UV_SHA256_LINUX"));
   expect(justfileText).toContain(installScriptConstant("NODE_SHA256_LINUX"));
+});
+
+test("every OS checks out the bytes git stores, so the Windows runners see the same snapshots", () => {
+  expect(readLines(GIT_ATTRIBUTES)).toContain(NO_EOL_CONVERSION_LINE);
 });
