@@ -1,0 +1,19 @@
+# rastai_data: dataset tooling, from a dropped file to a training batch (contracts 2.2; layout python.md section 4).
+# M1 builds what TextCNN needs without torchtext: the JSONL and CSV readers, the word vocabulary, splits and the
+# resumable loader. They use the standard library only.
+
+[project]
+name = "rastai-data"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+# None yet. tokenizers, pyarrow, torchvision and PyMySQL join with the files that wrap them (layout section 4.8),
+# and rastai-formats and rastai-plugin with the code that first calls them.
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_data/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""

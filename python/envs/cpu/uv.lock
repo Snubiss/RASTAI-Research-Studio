@@ -331,12 +331,18 @@ wheels = [
 ]
 
 [[package]]
+name = "rastai-data"
+version = "0.1.0"
+source = { editable = "../../rastai_data" }
+
+[[package]]
 name = "rastai-env-cpu"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
+    { name = "rastai-data" },
     { name = "rastai-proto" },
     { name = "tokenizers" },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
@@ -354,6 +360,7 @@ dev = [
 requires-dist = [
     { name = "grpcio", specifier = "==1.84.0" },
     { name = "protobuf", specifier = "==7.36.2" },
+    { name = "rastai-data", editable = "../../rastai_data" },
     { name = "rastai-proto", editable = "../../rastai_proto" },
     { name = "tokenizers", specifier = "==0.23.2" },
     { name = "torch", specifier = "==2.14.1", index = "https://download.pytorch.org/whl/cpu" },
