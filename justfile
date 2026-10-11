@@ -15,7 +15,11 @@
 #     Download https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-unknown-linux-gnu.tar.gz,
 #     check it with `sha256sum`: 1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154,
 #     and put uv and uvx in ~/.local/bin. `just env-cpu` then fetches Python 3.12 itself; uv checks that download.
-#   Node.js 24 from nodejs.org (check the tarball against its SHASUMS256.txt), then pnpm through Node's corepack:
+#   Node.js 24.21.0, which `engines.node` in package.json pins and `engineStrict` in pnpm-workspace.yaml enforces.
+#     Download https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz,
+#     check it with `sha256sum`: fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6,
+#     unpack it into ~/.local/opt and link its bin/node, bin/npm and bin/corepack into ~/.local/bin.
+#   Then pnpm through Node's corepack:
 #     corepack enable --install-directory ~/.local/bin pnpm
 #     package.json `packageManager` pins pnpm 12.7.0 with its sha512, and corepack refuses a download that differs.
 #

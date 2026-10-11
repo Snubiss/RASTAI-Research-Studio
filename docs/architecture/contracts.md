@@ -168,7 +168,7 @@ RASTAI/
     gpu/                     GPU-only tests (nightly on the self-hosted runner)
     crash/                   Rust crate rastai-crash-tests: the kill -9 matrix for daemon, node, jobs and the archiver
     loop/                    the full CPU loop in under 10 minutes (design -> train -> eval -> ONNX -> re-import)
-    workspace/               smoke tests of the JS workspace's checker settings (vitest)
+    workspace/               smoke tests of the JS workspace: checker settings and the pinned Node.js (vitest)
   tools/                     dev tooling only, never shipped
     codegen/                 Rust crate rastai-codegen (bins rastai-formats-codegen, rastai-catalog-codegen,
                              rastai-names-codegen); also runs buf
