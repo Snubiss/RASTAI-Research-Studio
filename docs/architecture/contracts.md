@@ -19,7 +19,7 @@ Conventions in this file:
 
 ### Changes in v1.2
 
-Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR.
+Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR. Item 15 is the catalog and content-hash contract that M1-14 builds on, for the owner's review in its PR.
 
 1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
 2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
@@ -35,6 +35,7 @@ Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass
 12. **Fixes found while marking.** Tutorials and assistant skills are Phase 2 (plan §10 row 45: `tutorial.list`, `tutorial.check`, `rastai.tutorial/1`). `vault_changes` is built in M3 by M3-E02, not M11 (8.3). `archive_cursors` arrives with M11's migration, as plan M1-23 says; the control-plane layout follows. The settings example is `RASTAI_DAEMON__PORT` (11.1), because `gateway.port` isn't a key. 15.6 registers the settings page id `psychology.settings`. 2.5 cites ADR-0037 beside `miniz_oxide` and `torchvision.io.decode_image`. The node layout's build table puts the egress proxy at step 7 (plan §10 row 27).
 13. **Review fixes (PR #164).** `sandbox.list`, `sandbox.kill` and `sandbox.cleanup` are (M5): M5-E10 builds them and M5-E01 registers them, so M7-E01 no longer claims `sandbox.*` (6.4). `checkpoint.resumed` is (M5) with `train.preempted`, because `train.resume` and M5-E14 are M5 (7.3). Row 45 reaches every tutorial and assistant-skill name: the `assistant_skills` key, `assistant.skill@1` (now unsupported until Phase 2, refused with `RRS-P1002`), `core.assistant`, `assistant-skills.js` and `templates/tutorials/` carry "(Phase 2)" (§1, 5.2, 5.5, 15.3, 15.6, 15.8), and its reasoning cites ADR-0017 and spec §31 rather than spec §7. The plugin permission names of spec §24 and ADR-0015 decision 5 get their own table beside the scopes (6.3). A marker in a list cell's notes covers nothing (conventions, 12.6). `gateway.port` is recorded as replaced by `daemon.port` (15.11). Round 2: `gpu` is marked sensitive with `weights.read` and `conversations.read`, reading spec §24's "(sensitive)" as covering its whole line (6.3).
 14. **Frontend-contract check (M1-01a).** The session key of ADR-0034 decision 10 (3.2) reaches the client: the cookie credential is `{kind: "cookie", sessionKey}`, and `exchangeLoginCode` returns the key (12.4, 15.3). `POST /api/login` answers `{"session_key": "<64 lowercase hex>"}`, and the daemon keeps only the BLAKE3 hash of that hex text (3.3, 15.4). The `Credential` and `ConnectOptions` typedefs that carry it are registered (15.3). The layout and flow docs follow: the request gate checks the key (control-plane 8.3a, platform flow 4.1–4.2), a reload signs the window out and the desktop shell signs in again (frontend 2.1, 8.3, 9.3). Open question 24 asks how a second window gets the key; until it is settled, docs follow its default, the opener's `postMessage` (14; frontend 8.4). `TypographyTokens`, `ThemeOptions` and `Renderer`, already in the frontend layout's `@rastai/ui` API, are registered (15.3).
+15. **Codes and hash rules for the JSON core (M1-14).** Three codes whose titles are true for the errors that use them, where M1-14's first draft borrowed codes that misled the user: `RRS-E1006` (a value can't be written as JSON; a bug), `RRS-E5006` (JSON has more values than the import limit; a value costs memory whatever its size in the text, so the reader caps the count as well as the bytes) and `RRS-S3005` (a write failed for a reason other than a full disk, which keeps `RRS-S3002`) (10.3). The content hash's canonical JSON is now written out exactly, with its two differences from RFC 8785 (5.1).
 
 ### Changes in v1.1
 
@@ -780,6 +781,14 @@ The fields of the messages below are fixed here; the node layout §3.2 explains 
 - **Schema id:** `<type>/<schema_version>`, e.g. `rastai.model/1`. `schema_version` is an integer per type, starting at 1.
 - **`$schema` URL:** `https://schemas.<domain>/<type>/<schema_version>.json` (domain open; section 14). The same files are generated into `schemas/<type>/<schema_version>.json`.
 - **Content hash:** BLAKE3 of the canonical JSON (keys sorted, no insignificant whitespace, UTF-8) with `content_hash` itself removed. Written as `blake3:<64 hex>`.
+- **Canonical JSON** (`rastai-formats` `json/canonical.rs`, the only implementation; every content hash depends on it, so a change to these rules changes every hash):
+  - no whitespace between tokens;
+  - object keys sorted by Unicode code point, which is the byte order of their UTF-8, at every level;
+  - strings as UTF-8, escaping only `"`, `\` and the control characters U+0000–U+001F: `\b \t \n \f \r` in short form, the others as `\u00xx` with lowercase hex; nothing else is escaped (`/`, U+007F and U+2028 are written as they are);
+  - `null`, `true` and `false` as they are;
+  - a number the reader holds as an integer (no fraction and no exponent in the text, not `-0`, and it fits u64 or i64) as plain decimal digits, exactly;
+  - any other number as JavaScript's `Number.prototype.toString` writes the f64: the shortest digits that read back to the same f64, plain decimal while the decimal point is within 21 digits of the first digit and down to `0.000001`, exponent form outside that (`1e+21`, `1.5e-7`), and `-0` as `0`. So `1.0`, `1e0` and `10e-1` all become `1`.
+  - **Differences from RFC 8785** (the JSON Canonicalization Scheme), deliberate because only this crate computes hashes: keys are sorted by code point, where RFC 8785 sorts by UTF-16 code unit (the orders differ only between keys that hold characters above U+FFFF and keys that hold U+E000–U+FFFF at the same place); and an integer outside ±2^53 is written exactly, where RFC 8785 first rounds every number to an f64. So the integer `1152921504606846976` (2^60) and the float `1152921504606846976.0` have different canonical text (`1152921504606846976` and `1152921504606847000`) and different hashes.
 - **Timestamps** inside documents are RFC 3339 UTC strings (`2026-10-10T12:00:00Z`).
 - **Migrations:** `schema_version` drives an upgrade chain (`migrate_<type>_v1_to_v2`, ...). Files from a newer version open read-only (§23).
 - **Secrets are never fields.** A field that names a secret holds a keychain account name (`password_secret`), never the value.
@@ -1841,6 +1850,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-E1003` | error | Unknown field |
 | `RRS-E1004` | error | Value is not one of the allowed values |
 | `RRS-E1005` | error | The `type` field doesn't match the file extension |
+| `RRS-E1006` | error | A value can't be written as JSON (a bug: a map whose keys aren't strings) |
 | `RRS-E2001` | error | Reference doesn't resolve |
 | `RRS-E2002` | error | Shapes don't match along a graph edge |
 | `RRS-E2003` | error | Graph has a cycle with no recurrent node |
@@ -1856,6 +1866,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-E5003` | error | File is larger than the import limit |
 | `RRS-E5004` | error | JSON nested deeper than the import limit |
 | `RRS-E5005` | error | Graph has more nodes or parameters than the import limit |
+| `RRS-E5006` | error | JSON has more values than the import limit |
 | `RRS-E6001` | error | Safetensors: file is shorter than the 8-byte header length |
 | `RRS-E6002` | error | Safetensors: header length points past the end of the file |
 | `RRS-E6003` | error | Safetensors: header is over the 100 MB limit |
@@ -1969,6 +1980,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-S3002` | error | Disk full during a write |
 | `RRS-S3003` | error | Storage quota exceeded |
 | `RRS-S3004` | warning | (L2) Database snapshot skipped or failed (not enough space, or the copy failed its check); older snapshots kept |
+| `RRS-S3005` | error | Write failed for a reason other than a full disk (the operating system's reason is attached; a full disk is `RRS-S3002`) |
 | `RRS-S4001` | warning | OS keychain unavailable; fallback store in use |
 | `RRS-S5001` | error | Archive database unreachable; retrying with backoff |
 | `RRS-S5002` | error | Archive schema needs a newer Rastai (`min_writer_version`); this daemon stops writing to it |
