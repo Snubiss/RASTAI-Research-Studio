@@ -17,5 +17,10 @@ serde_json = { workspace = true }
 # Only src/hashing.rs imports it (contracts 2.5; deny.toml names this crate its one owner).
 blake3 = { workspace = true }
 
+[dev-dependencies]
+# tests/commands_described.rs checks that every row of rastai-core's COMMANDS has its types here (layout 4.11). Only
+# the integration tests use it; the library itself never depends on rastai-core (layout 4.10).
+rastai-core = { path = "../rastai-core" }
+
 [lints]
 workspace = true

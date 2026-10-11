@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "One key to set, at the user or project level.",
+      "properties": {
+        "key": {
+          "description": "A dotted key, such as ui.theme.",
+          "type": "string",
+          "x-rastai-cli-position": 0
+        },
+        "level": {
+          "description": "Which settings.json to write: user (the default) or project, the open project's.",
+          "enum": [
+            "user",
+            "project"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "description": "Any JSON value the key allows."
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "title": "SettingsSetArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The key's value now in effect.",
+      "properties": {
+        "key": {
+          "description": "The key that was set.",
+          "type": "string"
+        },
+        "source": {
+          "description": "The layer that value comes from; a higher layer may still override the one written.",
+          "enum": [
+            "default",
+            "user",
+            "project",
+            "environment",
+            "flag"
+          ],
+          "type": "string"
+        },
+        "value": {
+          "description": "The value now in effect for the key."
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "source"
+      ],
+      "title": "SettingsSetResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.settings.set/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Change a setting",
+  "title": "settings.set",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

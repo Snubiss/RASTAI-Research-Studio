@@ -10,4 +10,21 @@ palette entry and a typed JavaScript wrapper in `@rastai/client` (contracts §6.
 Stability is `preview` for every command until the stable commands API 1.0 subset in Phase 2. From the day a command
 is `stable`, `check-schema-diff` fails a breaking change to its schema (contracts §12.6).
 
-No core commands yet: the command table arrives with rastai-core (M1-21, M1-22).
+| Command | Title | Kind | Stability | Since | Arguments | Result |
+|---|---|---|---|---|---|---|
+| `command.list` | List commands | sync | preview | 0.1.0 | `CommandListArgs` | `CommandListResult` |
+| `job.cancel` | Cancel job | sync | preview | 0.1.0 | `JobCancelArgs` | `JobCancelResult` |
+| `job.get` | Show job | sync | preview | 0.1.0 | `JobGetArgs` | `JobGetResult` |
+| `job.list` | List jobs | sync | preview | 0.1.0 | `JobListArgs` | `JobListResult` |
+| `node.list` | List nodes | sync | preview | 0.1.0 | `NodeListArgs` | `NodeListResult` |
+| `node.status` | Show node | sync | preview | 0.1.0 | `NodeStatusArgs` | `NodeStatusResult` |
+| `plugin.list` | List plugins | sync | preview | 0.1.0 | `PluginListArgs` | `PluginListResult` |
+| `settings.get` | Show settings | sync | preview | 0.1.0 | `SettingsGetArgs` | `SettingsGetResult` |
+| `settings.set` | Change a setting | sync | preview | 0.1.0 | `SettingsSetArgs` | `SettingsSetResult` |
+| `system.shutdown` | Stop the daemon | sync | preview | 0.1.0 | `SystemShutdownArgs` | `SystemShutdownResult` |
+| `system.status` | Show status | sync | preview | 0.1.0 | `SystemStatusArgs` | `SystemStatusResult` |
+| `token.create` | Create an API token | sync | preview | 0.1.0 | `TokenCreateArgs` | `TokenCreateResult` |
+| `token.list` | List API tokens | sync | preview | 0.1.0 | `TokenListArgs` | `TokenListResult` |
+| `token.login_code.create` | Create a login code | sync | preview | 0.1.0 | `TokenLoginCodeCreateArgs` | `TokenLoginCodeCreateResult` |
+| `token.revoke` | Revoke an API token | sync | preview | 0.1.0 | `TokenRevokeArgs` | `TokenRevokeResult` |
+| `train.start` | Start training | job | preview | 0.1.0 | `TrainStartArgs` | `TrainStartResult` |

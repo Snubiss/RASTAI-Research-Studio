@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "PluginSummary": {
+      "additionalProperties": false,
+      "description": "One installed plugin: its state, manifest and granted permissions.",
+      "properties": {
+        "diagnostics": {
+          "description": "Why it is incompatible or failed; empty when it loaded.",
+          "items": {
+            "description": "Protobuf JSON of rastai.common.v1.Diagnostic.",
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "granted_permissions": {
+          "description": "The permissions the user granted.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "manifest": {
+          "description": "Its rastai-plugin.json manifest, with the permissions it requests."
+        },
+        "plugin_id": {
+          "description": "The plugin's id.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Where the host found it: preinstalled, installed or dev.",
+          "type": "string"
+        },
+        "state": {
+          "description": "Its plugin state, such as enabled.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Its installed version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "version",
+        "state",
+        "source",
+        "granted_permissions",
+        "manifest"
+      ],
+      "title": "PluginSummary",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "plugin.list takes no arguments.",
+      "properties": {},
+      "required": [],
+      "title": "PluginListArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The installed plugins.",
+      "properties": {
+        "plugins": {
+          "description": "Every installed plugin, enabled or not.",
+          "items": {
+            "$ref": "#/$defs/PluginSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plugins"
+      ],
+      "title": "PluginListResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.plugin.list/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "List plugins",
+  "title": "plugin.list",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

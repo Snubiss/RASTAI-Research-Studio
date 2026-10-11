@@ -2,8 +2,10 @@
 //! (layout 4.9), the names registry reads the document schema ids from it (contracts 12.6), and layer 2 looks up
 //! `FieldKind::Type` references in it.
 //!
-//! Each document type's PR adds its file's descriptions here: the document itself and every part of it.
+//! Each document type's PR adds its file's descriptions here: the document itself and every part of it. The core
+//! commands' argument and result types come from `commands::describe_command_types` (M1-22).
 
+use crate::commands::describe_command_types;
 use crate::describe::types::TypeDescription;
 use crate::documents::lock::describe_lock_types;
 use crate::documents::plugin_manifest::describe_plugin_manifest_types;
@@ -14,7 +16,8 @@ use crate::documents::settings::describe_settings_types;
 use crate::documents::theme::describe_theme_types;
 use crate::header::describe_shared_header;
 
-/// Every described type, the shared header first, then each document type's descriptions in `DOCUMENT_TYPES` order.
+/// Every described type: the shared header first, then each document type's descriptions in `DOCUMENT_TYPES` order,
+/// then the command types.
 pub fn describe_all_types() -> Vec<TypeDescription> {
     let mut all_types = vec![describe_shared_header()];
     all_types.extend(describe_run_record_types());
@@ -24,6 +27,7 @@ pub fn describe_all_types() -> Vec<TypeDescription> {
     all_types.extend(describe_lock_types());
     all_types.extend(describe_plugin_manifest_types());
     all_types.extend(describe_theme_types());
+    all_types.extend(describe_command_types());
     all_types
 }
 

@@ -24,6 +24,8 @@ const SEGMENT_WORD_SEPARATOR: char = '_';
 const CLI_WORD_SEPARATOR: char = '-';
 const MCP_SEPARATOR: &str = "__";
 const FLAG_PREFIX: &str = "--";
+/// A boolean argument also has its "off" flag: `--fail-fast` and `--no-fail-fast` (layout 9.4).
+const NEGATED_FLAG_PREFIX: &str = "--no-";
 // A command id has two or three segments, so CLI words name one in two or three words.
 const MIN_SEGMENTS: usize = 2;
 const MAX_SEGMENTS: usize = 3;
@@ -50,6 +52,23 @@ pub const CLI_MODE_WORDS: &[&str] = &[
     "version",
     "storage rebuild-index",
     "help",
+];
+
+/// The CLI's global flags (contracts 15.1, layout 9.4). Each means the same for every verb, so no command argument
+/// may take one as its flag: `tests/command_table.rs` and the plugin host refuse a field that would.
+pub const GLOBAL_FLAGS: &[&str] = &[
+    "--json",
+    "--detach",
+    "--no-start",
+    "--node",
+    "--project",
+    "--set",
+    "--verbose",
+    "--dry-run",
+    "--idempotency-key",
+    "--arguments-json",
+    "--arguments-file",
+    "--help",
 ];
 
 /// The CLI words of a command: its segments, with `_` written as `-`.
@@ -79,6 +98,11 @@ pub fn command_id_from_cli_words(registry: &CommandRegistry, words: &[String]) -
 /// The CLI flag of an argument field: `fail_fast` -> `--fail-fast`.
 pub fn flag_name(field_name: &str) -> String {
     format!("{FLAG_PREFIX}{}", cli_word(field_name))
+}
+
+/// The "off" flag of a boolean argument field: `fail_fast` -> `--no-fail-fast`.
+pub fn negated_flag_name(field_name: &str) -> String {
+    format!("{NEGATED_FLAG_PREFIX}{}", cli_word(field_name))
 }
 
 /// The MCP tool name of a command: dots as `__` (`eval.suite.edit` -> `eval__suite__edit`), because MCP clients
@@ -204,6 +228,21 @@ mod tests {
         assert_eq!(flag_name("fail_fast"), "--fail-fast");
         assert_eq!(flag_name("suite"), "--suite");
         assert_eq!(flag_name("max_new_tokens"), "--max-new-tokens");
+    }
+
+    #[test]
+    fn a_boolean_flag_has_its_off_form() {
+        assert_eq!(negated_flag_name("fail_fast"), "--no-fail-fast");
+        assert_eq!(negated_flag_name("start"), "--no-start");
+    }
+
+    #[test]
+    fn global_flags_are_the_contract_ones() {
+        assert_eq!(GLOBAL_FLAGS.len(), 12);
+        for flag in GLOBAL_FLAGS {
+            assert!(flag.starts_with(FLAG_PREFIX), "{flag}");
+        }
+        assert!(GLOBAL_FLAGS.contains(&"--dry-run") && GLOBAL_FLAGS.contains(&"--no-start"));
     }
 
     #[test]

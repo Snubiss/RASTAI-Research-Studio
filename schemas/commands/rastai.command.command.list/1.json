@@ -1,0 +1,50 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Which registered commands to list.",
+      "properties": {
+        "basic_only": {
+          "description": "Only the commands shown in Basic mode.",
+          "type": "boolean"
+        },
+        "include_experimental": {
+          "description": "Also list experimental commands.",
+          "type": "boolean"
+        },
+        "section": {
+          "description": "Only this section's commands; empty or absent for every section.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "CommandListArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The registered commands.",
+      "properties": {
+        "commands": {
+          "description": "The registered commands, core commands first, with their argument and result schemas.",
+          "items": {
+            "description": "Protobuf JSON of rastai.commands.v1.CommandDescriptor.",
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "commands"
+      ],
+      "title": "CommandListResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.command.list/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "List commands",
+  "title": "command.list",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

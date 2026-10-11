@@ -2,6 +2,86 @@
   "format_version": 1,
   "schemas": [
     {
+      "content_hash": "blake3:299bcd8c65d0da6313d39379f6e72263cd2c096f4d90e49a1af0631b44eb03b9",
+      "file": "commands/rastai.command.command.list/1.json",
+      "schema_id": "rastai.command.command.list/1"
+    },
+    {
+      "content_hash": "blake3:3f989f7429fd3795dc37a52ef3b99e85defb008ff22bcad5181a02a3f8029657",
+      "file": "commands/rastai.command.job.cancel/1.json",
+      "schema_id": "rastai.command.job.cancel/1"
+    },
+    {
+      "content_hash": "blake3:50e8ba6eb4b1e3c65a7df3036d7c2b4f8a504cea3801e37d3cbd4e0991187a8a",
+      "file": "commands/rastai.command.job.get/1.json",
+      "schema_id": "rastai.command.job.get/1"
+    },
+    {
+      "content_hash": "blake3:72874b00cba6c864d504f925cca71b05a8ea817fd0a85180a805c72cf1dc4327",
+      "file": "commands/rastai.command.job.list/1.json",
+      "schema_id": "rastai.command.job.list/1"
+    },
+    {
+      "content_hash": "blake3:ee8926fdd6492c0991988ce9a68433358261a174f655e8ff75d0f53748dc52a5",
+      "file": "commands/rastai.command.node.list/1.json",
+      "schema_id": "rastai.command.node.list/1"
+    },
+    {
+      "content_hash": "blake3:c1801421bee0134630e0bea04952075eb70cf2461eb661a880b90669c8874eb1",
+      "file": "commands/rastai.command.node.status/1.json",
+      "schema_id": "rastai.command.node.status/1"
+    },
+    {
+      "content_hash": "blake3:35991873faaff5e0f727138dfb86160c4d7048f11adae3455c5df222e351bb1e",
+      "file": "commands/rastai.command.plugin.list/1.json",
+      "schema_id": "rastai.command.plugin.list/1"
+    },
+    {
+      "content_hash": "blake3:99dabeb326b345f82bd44033b10d748929c75f172d6b1ef78a26a83111d456d4",
+      "file": "commands/rastai.command.settings.get/1.json",
+      "schema_id": "rastai.command.settings.get/1"
+    },
+    {
+      "content_hash": "blake3:980bab529761dfade8920ed897a6361787822d065873b72956298f6f2ef1dafe",
+      "file": "commands/rastai.command.settings.set/1.json",
+      "schema_id": "rastai.command.settings.set/1"
+    },
+    {
+      "content_hash": "blake3:8681663514a5d8c1be64ea499c8ec25a2faddf913ad7a687cc462819d3908bb4",
+      "file": "commands/rastai.command.system.shutdown/1.json",
+      "schema_id": "rastai.command.system.shutdown/1"
+    },
+    {
+      "content_hash": "blake3:acf8173a994257aabf66d6bf64899dad10d44eaabe43ac37a234156e958cf148",
+      "file": "commands/rastai.command.system.status/1.json",
+      "schema_id": "rastai.command.system.status/1"
+    },
+    {
+      "content_hash": "blake3:25b0d57e916740338da8f6add1d1eb3171b668a98ef20e3a5259af36de651b20",
+      "file": "commands/rastai.command.token.create/1.json",
+      "schema_id": "rastai.command.token.create/1"
+    },
+    {
+      "content_hash": "blake3:93eae39dfe455531b27393ac10aeda9d1ec6fbe6381c6ce08e3a45cc8925c8a6",
+      "file": "commands/rastai.command.token.list/1.json",
+      "schema_id": "rastai.command.token.list/1"
+    },
+    {
+      "content_hash": "blake3:b1015eddc261011c02cd2de3045788e881e12cfdd028a08a11e1779be887bfa5",
+      "file": "commands/rastai.command.token.login_code.create/1.json",
+      "schema_id": "rastai.command.token.login_code.create/1"
+    },
+    {
+      "content_hash": "blake3:4e637da0b5839adefa9d49484d8c88034485e82b4d1527b940cc19d08f25bceb",
+      "file": "commands/rastai.command.token.revoke/1.json",
+      "schema_id": "rastai.command.token.revoke/1"
+    },
+    {
+      "content_hash": "blake3:7ede5ed805af2556d4f04fe4dd6ff1574d4b883b067c704d4d4e2fd1340f72fa",
+      "file": "commands/rastai.command.train.start/1.json",
+      "schema_id": "rastai.command.train.start/1"
+    },
+    {
       "content_hash": "blake3:71a85ff35052720c58a5943e10fd198efb6ae2f1fa427be069d2941a06a1a1a7",
       "file": "rastai.lock/1.json",
       "schema_id": "rastai.lock/1"

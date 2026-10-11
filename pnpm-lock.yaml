@@ -181,6 +181,15 @@ importers:
 
   packages/catalog: {}
 
+  packages/client:
+    dependencies:
+      '@rastai/formats':
+        specifier: workspace:*
+        version: link:../formats
+      '@rastai/proto':
+        specifier: workspace:*
+        version: link:../proto
+
   packages/formats: {}
 
   packages/proto:

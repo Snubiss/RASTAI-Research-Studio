@@ -1,0 +1,46 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Which token to revoke.",
+      "properties": {
+        "token_id": {
+          "description": "The token to revoke.",
+          "type": "string",
+          "x-rastai-cli-position": 0
+        }
+      },
+      "required": [
+        "token_id"
+      ],
+      "title": "TokenRevokeArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The revoked token. It stops working at once.",
+      "properties": {
+        "revoked_unix_ms": {
+          "description": "When it was revoked.",
+          "type": "integer"
+        },
+        "token_id": {
+          "description": "The revoked token.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token_id",
+        "revoked_unix_ms"
+      ],
+      "title": "TokenRevokeResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.token.revoke/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Revoke an API token",
+  "title": "token.revoke",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

@@ -30,6 +30,8 @@ Rules the catalog checks enforce (`tools/codegen/tests/catalog_checks.rs`):
   here with `"retired": true`.
 - The catalog and contracts §10.3 hold the same codes with the same severities.
 - Every `RRS-` code that first-party source names outside its tests is in the catalog.
+- A `fix_command_id` names a command the fix button can run: a row of rastai-core's command table, or a command
+  contracts §6.4 registers with the milestone that builds it (`storage.gc` (M5)).
 - A `diagnostic("RRS-...", &[("name", ...)])` call passes exactly the placeholders its entry's message and fix use. A
   placeholder without a value would show as `{name}`. The scan also reads `&values` when the closest
   `let values = [...]` above the call is the array, so give each code its own array.

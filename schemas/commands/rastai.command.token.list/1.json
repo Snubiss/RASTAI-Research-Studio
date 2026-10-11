@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "TokenSummary": {
+      "additionalProperties": false,
+      "description": "One API token, never with its text.",
+      "properties": {
+        "created_unix_ms": {
+          "description": "When it was made.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "The token's name.",
+          "type": "string"
+        },
+        "revoked_unix_ms": {
+          "description": "When it was revoked; 0 or absent while it is active.",
+          "type": "integer"
+        },
+        "scopes": {
+          "description": "The scopes it holds.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token_id": {
+          "description": "The token's id.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token_id",
+        "name",
+        "scopes",
+        "created_unix_ms"
+      ],
+      "title": "TokenSummary",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Which tokens to list.",
+      "properties": {
+        "include_revoked": {
+          "description": "Also list revoked tokens.",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "title": "TokenListArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The API tokens.",
+      "properties": {
+        "tokens": {
+          "description": "The tokens, oldest first.",
+          "items": {
+            "$ref": "#/$defs/TokenSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tokens"
+      ],
+      "title": "TokenListResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.token.list/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "List API tokens",
+  "title": "token.list",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

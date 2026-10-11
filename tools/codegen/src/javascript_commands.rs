@@ -5,7 +5,8 @@
 //!
 //! The file imports nothing at run time; its types are JSDoc imports: `CommandExecutor` from `@rastai/client`'s
 //! command-executor.js, `ExecuteOutcome` from its types.js and each argument type from `@rastai/formats`. With no
-//! commands it names none of them, so it type-checks before those files exist (M1-50 writes them).
+//! commands it names none of them. M1-22 wrote the typedefs those two files hold for the first wrappers; M1-50
+//! writes the rest of the client around them.
 
 use std::path::Path;
 
@@ -22,7 +23,7 @@ const COMMANDS_MODULE_FILE: &str = "packages/client/src/generated/commands.js";
 const COMMAND_EXECUTOR_MODULE: &str = "../command-executor.js";
 const CLIENT_TYPES_MODULE: &str = "../types.js";
 const FORMATS_PACKAGE: &str = "@rastai/formats";
-const NO_COMMANDS_LINE: &str = "// No core commands yet: the command table arrives with rastai-core (M1-21, M1-22).\n";
+const NO_COMMANDS_LINE: &str = "// No core commands are registered.\n";
 
 /// Writes commands.js under `output_root`. Returns how many files changed (0 or 1).
 pub fn write_javascript_commands(output_root: &Path, commands: &[CommandDescription]) -> Result<usize, CodegenError> {

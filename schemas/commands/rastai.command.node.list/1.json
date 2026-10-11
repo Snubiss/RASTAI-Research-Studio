@@ -1,0 +1,87 @@
+{
+  "$defs": {
+    "NodeSummary": {
+      "additionalProperties": false,
+      "description": "One node: how the daemon reaches it, its state and its last heartbeat.",
+      "properties": {
+        "address": {
+          "description": "user@host for an SSH node; empty for the embedded one.",
+          "type": "string"
+        },
+        "capabilities": {
+          "description": "The capability flags of its handshake.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "last_heartbeat_unix_ms": {
+          "description": "When its last heartbeat arrived; 0 or absent before the first.",
+          "type": "integer"
+        },
+        "name": {
+          "description": "The node's name.",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "The node's id.",
+          "type": "string"
+        },
+        "protocol_version": {
+          "description": "The node protocol version it speaks.",
+          "type": "integer"
+        },
+        "state": {
+          "description": "Its connection state, such as connected.",
+          "type": "string"
+        },
+        "transport": {
+          "description": "local for the embedded node, ssh for a paired one.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "name",
+        "transport",
+        "state",
+        "protocol_version",
+        "capabilities"
+      ],
+      "title": "NodeSummary",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "node.list takes no arguments.",
+      "properties": {},
+      "required": [],
+      "title": "NodeListArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The known nodes.",
+      "properties": {
+        "nodes": {
+          "description": "Every known node, the embedded one first.",
+          "items": {
+            "$ref": "#/$defs/NodeSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "title": "NodeListResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.node.list/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "List nodes",
+  "title": "node.list",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}
