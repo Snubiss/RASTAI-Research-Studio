@@ -1147,7 +1147,7 @@ crates/rastai-node/
     live.rs                  WatchLive: per-subject bounded queues that drop the oldest item
     environments.rs          uv environments: pick the backend, uv sync --frozen, check, .rastai-ready marker, list, plugin layering
     engines.rs               pinned llama-server builds: download, SHA-256 check, unpack, record
-    hardware.rs              GPUs, driver, CPU, RAM, disk (rastai_store::free_bytes) -> HardwareProfile; environment choice; hardware_profile.json
+    hardware.rs              GPUs, driver, CPU, RAM, disk (rastai_store::free_bytes) -> HardwareProfile; hardware_profile.json (M2-20)
     telemetry.rs             long-running nvidia-smi and periodic rocm-smi readers -> NodeTelemetry
     vram_leases.rs           LeaseTable: decide, grant, deny, reclaim, release, resize (contracts §9.4)
     models.rs                ModelTable: LoadModel, UnloadModel, the model state machine (contracts §9.3); FastEngine (one member today)
@@ -1182,7 +1182,11 @@ crates/rastai-node/
     downloads.rs                  resume after interrupt, gated 401 and 403, disk-space refusal (local HTTP fake); two concurrent
                                   download jobs for one file both finish, the file is fetched once and its hash matches; a lock
                                   held by another process makes the job wait with RRS-N3010
-    handshake.rs                  version mismatch -> incompatible; unknown daemon key refused
+    common/mod.rs                 a test folder, a machine laid out as /sys and /proc from fixtures/hardware/, stand-in tools, a running node
+    handshake.rs                  version mismatch -> RRS-N0001; unknown daemon key -> RRS-N0002; replay -> RRS-N0007; GetHardware and
+                                  telemetry over node.sock; a second node -> RRS-N0003
+    hardware.rs                   each fixtures/hardware/ case gives its expected profile; a hung nvidia-smi -> RRS-H0002 without
+                                  blocking the start
   fuzz/
     fuzz_targets/handshake.rs     arbitrary Handshake requests and signatures never panic and never pair an unknown key (M9-E02, nightly)
 ```
@@ -1191,16 +1195,18 @@ crates/rastai-node/
 
 ```rust
 // node.rs
-pub struct NodeOptions { pub mode: NodeMode, pub paths: DataPaths, pub settings: NodeSettings }
+pub struct NodeOptions { pub mode: NodeMode, pub paths: DataPaths, pub settings: NodeSettings, pub hardware_sources: HardwareSources }
 pub enum NodeMode { Embedded, Standalone }
 
 pub struct NodeState {
     pub node_id: String,
     pub identity: NodeIdentity,
+    pub mode: NodeMode,
     pub paths: DataPaths,                       // files are found through rastai-core's path functions (node_key_path, job_socket_path, ...)
     pub settings: Mutex<NodeSettings>,          // compute.*, nodes.*, sandbox.*, storage.*, hf.*: rastai_core::node_settings()
     pub hardware: Mutex<HardwareProfile>,
     pub telemetry: Mutex<NodeTelemetry>,
+    pub handshakes: Mutex<HandshakeTable>,      // the current DaemonSession and the nonces seen lately (handshake.rs)
     pub jobs: Mutex<JobTable>,
     pub leases: Mutex<LeaseTable>,
     pub models: Mutex<ModelTable>,
@@ -1270,6 +1276,24 @@ pub struct NodeIdentity { pub signing_key: ed25519_dalek::SigningKey, pub public
 pub fn load_or_create_identity(key_path: &Path) -> Result<NodeIdentity, NodeError>;
 pub fn sign_challenge(identity: &NodeIdentity, challenge: &[u8]) -> Vec<u8>;
 pub fn verify_challenge(public_key: &[u8], challenge: &[u8], signature: &[u8]) -> Result<(), NodeError>;
+pub fn public_key_bytes(identity: &NodeIdentity) -> [u8; 32];
+pub fn daemon_id_from_public_key(public_key: &[u8; 32]) -> String;              // daemon_<base32>; node ids come from rastai-core
+pub fn public_key_from_id(id: &str, prefix: &str) -> Option<[u8; 32]>;         // the key a daemon_ or node_ id names
+// public_id is the base32 of the public key; node_<public_id> and daemon_<public_id> are the ids (contracts 8.6)
+
+// handshake.rs
+pub struct DaemonSession { pub daemon_id: String, pub session_token: String, pub hub_socket_path: String }
+pub fn answer_handshake(state: &NodeState, request: &HandshakeRequest) -> HandshakeResponse;   // a refusal is response.diagnostic
+pub fn daemon_challenge_bytes(node_id: &str, daemon_nonce: &[u8], sent_unix_ms: i64, hub_socket_path: &str) -> Vec<u8>;
+pub fn node_challenge_bytes(daemon_id: &str, daemon_nonce: &[u8], session_token: &str) -> Vec<u8>;
+pub fn read_paired_daemons(path: &Path) -> Result<Vec<String>, NodeError>;
+pub fn pin_daemon_key(path: &Path, daemon_id: &str) -> Result<(), NodeError>;  // the daemon's first start; rastai node init (M9)
+
+// hardware.rs: never fails; whatever can't be read is a note and a partial profile
+pub struct HardwareSources { pub sys_root: PathBuf, pub proc_root: PathBuf, pub nvidia_smi: PathBuf, pub rocm_smi: PathBuf, pub tool_timeout: Duration }
+pub struct DetectedHardware { pub profile: HardwareProfile, pub notes: Vec<Diagnostic>, pub nvidia_gpus: Vec<GpuAddress> }
+pub fn system_hardware_sources() -> HardwareSources;                           // /sys, /proc, the tools on PATH, DETECTION_TOOL_TIMEOUT_SECONDS
+pub async fn detect_hardware(sources: &HardwareSources) -> DetectedHardware;
 ```
 
 Who calls what:
@@ -1288,21 +1312,25 @@ Who calls what:
 
 ```rust
 pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
+    refuse_second_node(&options).await?;       // RRS-N0003 with the running node's pid, before anything is touched
     let identity = load_or_create_identity(&node_key_path(&options.paths))?;
-    let hardware = detect_hardware(&options.paths).await?;   // also compares with hardware_profile.json (7.9)
-    let state = build_node_state(options, identity, hardware).await?;
+    let detected = detect_hardware(&options.hardware_sources).await;   // notes logged; compares with hardware_profile.json (M2-20)
+    log_hardware_notes(&detected);
+    let hardware_sources = options.hardware_sources.clone();
+    let state = Arc::new(build_node_state(options, identity, detected.profile));
     serve_worker_host(&state)?;                 // first, so live jobs can re-Register
     reattach_jobs(&state).await;                // section 7.4
     reattach_llama_servers(&state).await;       // pid, boot id, start ticks and /health with the saved key; re-adopt, never reload (7.8)
     adopt_and_sweep_sandboxes(&state).await;    // only after reattach (section 5.3)
-    start_telemetry(&state);
+    start_telemetry(&state, &hardware_sources, detected.nvidia_gpus);
     start_heartbeat_loop(&state);
-    serve_node_services(&state).await           // NodeService + SandboxService on node.sock, until shutdown
+    serve_node_services(state).await            // NodeService + SandboxService on node.sock, until shutdown
 }
 ```
 
 - The embedded node and the standalone node run the same function. The only difference is `NodeMode`, which picks where logs go and whether `UpdateNode` is allowed (standalone only; the embedded node updates with the app).
-- A second `rastai node serve` on the same machine fails at `bind_local_socket` with `RRS-N0003` (socket in use and answering).
+- A second `rastai node serve` on the same machine fails with `RRS-N0003` (node.sock in use and answering), naming the running node's process id from the socket's peer credentials. `refuse_second_node` checks first, so the second node starts no tool and binds nothing; `bind_local_socket` refuses a live socket too, which covers a race between two starts.
+- M1-42 builds the identity, detection, telemetry and NodeService steps; the others join the list with their tasks (M1-43, M1-45, M3, M5).
 
 ### 7.4 Jobs in process groups
 
@@ -1450,7 +1478,8 @@ sequenceDiagram
 **Telemetry** (`telemetry.rs`):
 - NVIDIA: one long-running `nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits -l 5` child, read line by line, plus `nvidia-smi --query-compute-apps=pid,gpu_bus_id,used_memory --format=csv,noheader,nounits` every 5 s for per-process VRAM. A long-running reader avoids one process spawn per sample.
 - AMD: `rocm-smi --showuse --showmemuse --showtemp --showpower --showpids --json` every 5 s.
-- The result is `NodeTelemetry` in `NodeState`, sent in every heartbeat and in `GetHardware`. If the tool is missing or dies, telemetry shows "unavailable" for that GPU and leases fall back to total VRAM from the hardware profile; jobs are not affected.
+- The result is `NodeTelemetry` in `NodeState`, sent in every heartbeat and in `GetHardware`. If the tool is missing or dies, telemetry shows "unavailable" for that GPU (it is left out of `NodeTelemetry.gpus`) and leases fall back to total VRAM from the hardware profile; jobs are not affected. A dead long-running reader starts again after 30 s.
+- Only the backend's vendor is sampled: NVIDIA on a box with both (flows/platform.md 1.2), so the two vendors' driver indexes never meet in one list. rocm-smi gives memory in percent, so its bytes come from the profile's VRAM total. Its `--showpids` rows aren't read yet: their layout needs a recording from a ROCm box (M10's AMD runner).
 
 **Leases** (`vram_leases.rs`, states from contracts §9.4):
 
@@ -1549,14 +1578,21 @@ pub struct LlamaServerProcess { pub job_id: String, pub pid: u32, pub process_gr
 **Handshake and heartbeats** (`handshake.rs`, `hub_client.rs`, `heartbeat.rs`)
 - `NodeService.Handshake`: protocol version 1 plus capability flags. The flags are the list in contracts 8.6: `generate.inspectable`, `generate.fast`, `lens.live`, `sandbox.engine` (an engine socket was found), `transfer.resume`, `self_update` (standalone only) and `gym`. The request also carries the daemon's resolved `tokenization_overrides` (6.8). A version the node can't speak returns `RRS-N0001`; the daemon moves the node to `incompatible` and offers `node.update`.
 - Both sides sign the other's random challenge with Ed25519 (`identity.rs`). The node accepts only daemon keys pinned in `<data>/node/paired_daemons.json`; any other key gets `RRS-N0002`. A request whose `sent_unix_ms` is more than 5 minutes off the node's clock, or whose `daemon_nonce` the node has seen before, gets `RRS-N0007`. A key file or `paired_daemons.json` that can't be read or written, is damaged, or is open to group or others gets `RRS-N0006`; the node never makes a new key in place of a damaged one. The embedded node also checks socket peer credentials. The node returns a session token (random, in memory) that the daemon sends as gRPC metadata on later calls and the node sends on `NodeHubService` calls.
+- **Order of the checks** (M1-42): the version first, so an older daemon always learns the node's version and can offer `node.update`; then the pinned key and the signature; freshness last, so a caller without a paired key can't fill the node's memory of used nonces (kept 10 minutes, at most 4096). A refusal still names the node and its versions, but carries no hardware and no token.
+- **Signed bytes**: the domain string `rastai-node-handshake-v1`, then the fields of designer flow C3a in order, each text or byte field preceded by its length (4 bytes, big-endian), the time as 8 big-endian bytes. `daemon_challenge_bytes` and `node_challenge_bytes` build them for both sides. The session token is 32 random bytes in base32; the node signs its BLAKE3 hash, never the token.
+- **`paired_daemons.json`** is `{"format_version": 1, "daemon_ids": ["daemon_<base32>"]}`, mode 0600. A daemon id is its public key, so the list pins keys. `pin_daemon_key` adds one: the daemon's first start does it for the embedded node (flows/platform.md 2.2), `rastai node init --daemon-key` on a box (M9).
+- **Capability flags in M1:** none. Each flag joins with the milestone that builds it (M3, M4, M5, M7, M9).
+- **Not checked yet:** the session token on later NodeService calls. Its gRPC metadata key is a wire name, so it lands in a contract PR with the daemon's node link. Until then every caller of `node.sock` has already passed the same-user check.
 - Heartbeat every `nodes.heartbeat_seconds` (5), and at once on any state change (section 7.5). A failed heartbeat is retried on the next tick. Jobs never stop because the daemon is gone.
 
 **Hardware detection** (`hardware.rs`)
 - NVIDIA: `nvidia-smi --query-gpu=index,pci.bus_id,name,driver_version,memory.total,compute_cap --format=csv,noheader,nounits` (the spike's query plus bus id and compute capability).
-- AMD: `rocm-smi --showproductname --showmeminfo vram --showbus --json`, and the gfx target from `/sys/class/kfd/kfd/topology/nodes/*/properties`.
+- AMD: the GPU nodes of `/sys/class/kfd/kfd/topology/nodes/*/properties` in node order (HIP's device order): the gfx target from `gfx_target_version`, the PCI address from `location_id` and `domain`, VRAM from the device's `mem_info_vram_total`. `rocm-smi --showproductname --showmeminfo vram --showbus --json` adds the product names. A box without rocm-smi (an iGPU on an NVIDIA box) is normal and gives no note: its GPUs are named by their PCI ids. An AMD display device without a kfd node offers no compute and is listed without an architecture.
+- Display devices come from `/sys/bus/pci/devices/*/class` (PCI class `0x03`), so a GPU whose tool fails stays listed, with no architecture, and nothing schedules on it.
+- GPU indexes are each driver's own (nvidia-smi's index, the kfd order for AMD), the numbers `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` take. A box with both vendors lists both; `vendor` tells the lists apart, and the node computes on one (NVIDIA wins).
 - CPU from `/proc/cpuinfo`, RAM from `/proc/meminfo`, free disk from `rastai_store::free_bytes` (the one `statvfs` call in the workspace, ADR-0033). The node doesn't call `df` or `libc` itself.
 - Every detection tool runs under `DETECTION_TOOL_TIMEOUT_SECONDS` (5). A tool that fails or times out leaves a partial profile and `RRS-H0002` (warning); no usable GPU gives `RRS-H0001` (info) and the `cpu` environment.
-- Output: `HardwareProfile`. The numerical self-test is the `doctor_selftest` Python job; this file only reads.
+- Output: `DetectedHardware`, the `HardwareProfile` with its notes. `backend` is `cpu` when no GPU is listed and empty otherwise until `environments.rs` picks (M2-16); free disk is 0 until `rastai_store::free_bytes` lands (M1-25). The numerical self-test is the `doctor_selftest` Python job; this file only reads. Tests read the recorded machines in `fixtures/hardware/`.
 
 **Downloads** (`downloads.rs`, `hf_cache.rs`) — node-native job kind `download`:
 - In-house HF Hub client over `rastai-transport` `http_client.rs`: `GET /api/models/<repo>/revision/<revision>` for the commit and file list, then `GET /<repo>/resolve/<commit>/<file>` with `Range` to resume.

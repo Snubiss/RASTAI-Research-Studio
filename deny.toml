@@ -81,7 +81,9 @@ deny = [
   # cpufeatures (under blake3, M1-14) reads CPU features through libc on ARM Linux and Android. tokio and the crates
   # under its sockets (mio, socket2, tokio-util), and hyper-util under tonic and rastai-transport's HTTP client, make
   # their system calls through it (M1-41). tokio's `signal` feature, which the daemon's SIGTERM and SIGINT handling
-  # needs, installs its handlers through signal-hook-registry and reads errno through errno (M1-26).
+  # needs, installs its handlers through signal-hook-registry and reads errno through errno (M1-26). tokio's
+  # `process` feature, which rastai-node runs nvidia-smi and rocm-smi with (M1-42), reaps children through the same
+  # signal-hook-registry (SIGCHLD).
   { crate = "libc", wrappers = [
     "rastai-store",
     "cpufeatures",

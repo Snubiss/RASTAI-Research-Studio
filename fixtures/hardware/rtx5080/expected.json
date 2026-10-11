@@ -1,0 +1,18 @@
+{
+  "cpu_model": "AMD Ryzen 9 7900X 12-Core Processor",
+  "cpu_count": 2,
+  "ram_total_bytes": 66226421760,
+  "driver_version": "595.91.07",
+  "backend": "",
+  "gpus": [
+    {
+      "index": 0,
+      "name": "NVIDIA GeForce RTX 5080",
+      "architecture": "sm_120",
+      "vram_bytes": 17094934528,
+      "vendor": "nvidia",
+      "driver_version": "595.91.07"
+    }
+  ],
+  "notes": []
+}
