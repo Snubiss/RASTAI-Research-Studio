@@ -12,6 +12,11 @@ packages/catalog/
 **/src/generated/
 pnpm-lock.yaml
 
+# Golden document files are compared byte for byte. Some are deliberately invalid JSON
+# (a trailing comma, too-deep nesting), and their .expected.json files pin each problem's
+# line and column, so reformatting them would change what the tests check.
+fixtures/documents/
+
 # History and local output.
 spike/
 target/

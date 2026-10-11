@@ -13,8 +13,8 @@ use serde_json::Value;
 use crate::documents::DocumentType;
 use crate::header::SCHEMA_VERSION_KEY;
 use crate::json::positions::PositionMap;
+use crate::json::positions::diagnostic_path;
 use crate::migrate::chain_table::{MigrationStep, find_step};
-use crate::validate::diagnostic_path;
 
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
 const CODE_NEWER_VERSION: &str = "RRS-E4001";
