@@ -1988,7 +1988,7 @@ python/envs/
     pyproject.toml
     uv.lock
   tests/                      the cpu environment's smoke test (test_cpu_environment.py), run by `just test-python`, and
-                              by `just test-python-portable` on macOS and Windows until the pure-compute packages land
+                              by `just test-python-portable` on macOS and Windows with the pure-compute packages' tests
   cuda13/                     default for NVIDIA (driver 580 or newer)
     pyproject.toml
     uv.lock

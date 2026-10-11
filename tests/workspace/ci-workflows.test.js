@@ -19,10 +19,21 @@ const JUSTFILE = "justfile";
 const PYTHON_WORKSPACE = "python/pyproject.toml";
 const GIT_ATTRIBUTES = ".gitattributes";
 const CRATES_FOLDER = "crates/";
+const PYTHON_FOLDER = "python/";
 
 // The jobs that run the Python tests without the posix_only ones (plan 8.7).
 const PORTABLE_PYTHON_JOBS = ["test-python-macos", "test-python-windows"];
 const PORTABLE_PYTHON_COMMAND = "just test-python-portable";
+// The pure-compute packages whose tests those jobs run, once each package exists (plan 8.7).
+const PURE_COMPUTE_PACKAGES = ["rastai_formats", "rastai_models", "rastai_data", "rastai_train"];
+
+// The `checks` job runs `just check`, whose codegen-check and proto-check need buf and the Rust protoc plugins, and
+// whose proto-check reads the merge base with origin/main, so it needs the history.
+const CHECKS_JOB = "checks";
+const CHECKS_TOOLS = ["just", "uv", "node", "cargo-deny", "buf", "protoc-gen-prost", "protoc-gen-tonic"];
+const INSTALL_TOOLS_LINE = /^ *run: tools\/ci\/install-dev-tools (.*)$/;
+const FULL_HISTORY_LINE = "fetch-depth: 0";
+const PROTOC_PLUGIN_CACHE_LINES = ["~/.cargo/bin/protoc-gen-prost", "~/.cargo/bin/protoc-gen-tonic"];
 
 // A job id: a key indented by exactly two spaces. `jobs:` is the last top-level key of ci.yml, so after it every
 // such key is a job.
@@ -147,6 +158,34 @@ function ciJustCommands() {
   return commands;
 }
 
+/**
+ * The lines of one ci.yml job.
+ * @param {string} job
+ * @returns {string[]}
+ */
+function ciJobLines(job) {
+  const lines = jobBlocks(readLines(CI_WORKFLOW)).get(job);
+  if (!lines) {
+    throw new Error(`no job ${job} in ${CI_WORKFLOW}`);
+  }
+  return lines;
+}
+
+/**
+ * The tools a job's `run: tools/ci/install-dev-tools ...` step names.
+ * @param {string[]} jobLines
+ * @returns {string[]}
+ */
+function installedTools(jobLines) {
+  for (const line of jobLines) {
+    const match = line.match(INSTALL_TOOLS_LINE);
+    if (match) {
+      return match[1].split(" ");
+    }
+  }
+  throw new Error("the job never runs tools/ci/install-dev-tools");
+}
+
 /** @returns {string[]} "<crate>/<target>" for every [[bin]] in crates/<crate>/fuzz/Cargo.toml */
 function fuzzTargetsInCrates() {
   const targets = [];
@@ -235,6 +274,29 @@ test("the macOS and Windows Python jobs leave out the posix_only tests", () => {
   expect(recipe).toContain('-m "not posix_only"');
 });
 
+test("test-python-portable runs the tests of every pure-compute package that exists", () => {
+  const portableFolders = justfileVariable("portable_test_folders").split(" ");
+  for (const folder of portableFolders) {
+    expect(existsSync(new URL(`${PYTHON_FOLDER}${folder}`, REPO_ROOT_URL)), folder).toBe(true);
+  }
+  for (const packageName of PURE_COMPUTE_PACKAGES) {
+    const testsFolder = `${packageName}/tests`;
+    if (existsSync(new URL(`${PYTHON_FOLDER}${testsFolder}`, REPO_ROOT_URL))) {
+      expect(portableFolders).toContain(testsFolder);
+    }
+  }
+});
+
+test("the checks job installs every tool just check needs and fetches the history proto-check reads", () => {
+  const jobLines = ciJobLines(CHECKS_JOB);
+  expect(installedTools(jobLines)).toEqual(CHECKS_TOOLS);
+  const trimmedLines = jobLines.map((line) => line.trim());
+  expect(trimmedLines).toContain(FULL_HISTORY_LINE);
+  for (const cacheLine of PROTOC_PLUGIN_CACHE_LINES) {
+    expect(trimmedLines).toContain(cacheLine);
+  }
+});
+
 test("nightly.yml fuzzes every cargo-fuzz target in crates/", () => {
   expect(fuzzTargetsInNightly()).toEqual(fuzzTargetsInCrates());
 });
@@ -254,13 +316,17 @@ test("install-dev-tools installs the versions the repo pins elsewhere", () => {
   expect(installScriptConstant("NODE_VERSION")).toBe(packageFile.engines.node);
   expect(installScriptConstant("UV_VERSION")).toBe(findValue(PYTHON_WORKSPACE, /^required-version = "==([^"]+)"/));
   expect(installScriptConstant("CARGO_DENY_VERSION")).toBe(justfileVariable("cargo_deny_version"));
+  expect(installScriptConstant("BUF_VERSION")).toBe(justfileVariable("buf_version"));
+  expect(installScriptConstant("PROTOC_GEN_PROST_VERSION")).toBe(justfileVariable("protoc_gen_prost_version"));
+  expect(installScriptConstant("PROTOC_GEN_TONIC_VERSION")).toBe(justfileVariable("protoc_gen_tonic_version"));
   expect(readLines(JUSTFILE)).toContain(`#   cargo install --locked just@${installScriptConstant("JUST_VERSION")}`);
 });
 
-test("install-dev-tools checks uv and Node.js against the SHA-256 the justfile header gives", () => {
+test("install-dev-tools checks uv, Node.js and buf against the SHA-256 the justfile header gives", () => {
   const justfileText = readLines(JUSTFILE).join("\n");
   expect(justfileText).toContain(installScriptConstant("UV_SHA256_LINUX"));
   expect(justfileText).toContain(installScriptConstant("NODE_SHA256_LINUX"));
+  expect(justfileText).toContain(installScriptConstant("BUF_SHA256_LINUX"));
 });
 
 test("every OS checks out the bytes git stores, so the Windows runners see the same snapshots", () => {

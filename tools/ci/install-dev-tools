@@ -4,13 +4,18 @@
 # It also works on a developer's machine, as a shortcut for the install steps in the justfile header.
 #
 # Usage: tools/ci/install-dev-tools <tool>...
-#   tools: just, uv, node (with pnpm through corepack), cargo-deny
+#   tools: just, uv, node (with pnpm through corepack), cargo-deny, buf, protoc-gen-prost, protoc-gen-tonic
+#
+# protoc-gen-prost and protoc-gen-tonic have no prebuilt downloads, so they're built with `cargo install --locked`
+# into ~/.cargo/bin, as the justfile header says; cargo checks each crate against the crates.io index's checksum.
+# A build takes minutes, so a plugin already on PATH at its pinned version is kept: the `checks` job restores the
+# built plugins from its cache before running this.
 #
 # cargo-fuzz isn't here: its prebuilt Linux download is a musl build, cargo-fuzz builds the fuzz targets for the
 # platform it was built for, and the sanitizers don't work on musl. The nightly job uses `cargo install` instead.
 #
 # The versions are the ones the repo pins elsewhere (the justfile, package.json, python/pyproject.toml);
-# tests/workspace/ci-workflows.test.js fails if they drift apart. Each tool has one prebuilt download per CI runner:
+# tests/workspace/ci-workflows.test.js fails if they drift apart. Each download is for the CI runners that use it:
 # Linux x86_64, macOS arm64 and Windows x86_64 (Git Bash). Any other platform stops with a message, never a guess.
 
 set -euo pipefail
@@ -23,6 +28,9 @@ JUST_VERSION="1.58.0"
 UV_VERSION="0.13.0"
 NODE_VERSION="24.21.0"
 CARGO_DENY_VERSION="0.20.2"
+BUF_VERSION="1.73.0"
+PROTOC_GEN_PROST_VERSION="0.5.0"
+PROTOC_GEN_TONIC_VERSION="0.5.0"
 
 # The SHA-256 of each download, copied from the release's own checksum file when the pin was made. A download that
 # differs (a replaced release asset, a tampered mirror) stops the install.
@@ -35,10 +43,14 @@ UV_SHA256_WINDOWS="088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba6
 NODE_SHA256_LINUX="fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
 NODE_SHA256_MACOS="6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"
 CARGO_DENY_SHA256_LINUX="9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+BUF_SHA256_LINUX="8f2986298ad08f0cc1bf999b9797b7c383adf32d7edf0f73d6f1e1a701baeac1"
+
+# Every tool this script knows, for the usage messages.
+KNOWN_TOOLS="just, uv, node, cargo-deny, buf, protoc-gen-prost, protoc-gen-tonic"
 
 main() {
     if [ "$#" -eq 0 ]; then
-        fail "name at least one tool: just, uv, node, cargo-deny"
+        fail "name at least one tool: $KNOWN_TOOLS"
     fi
     PLATFORM="$(detect_platform)"
     WORK_DIR="$(mktemp -d)"
@@ -56,7 +68,10 @@ install_tool() {
         uv) install_uv ;;
         node) install_node ;;
         cargo-deny) install_cargo_deny ;;
-        *) fail "unknown tool: $1 (tools: just, uv, node, cargo-deny)" ;;
+        buf) install_buf ;;
+        protoc-gen-prost) install_with_cargo protoc-gen-prost "$PROTOC_GEN_PROST_VERSION" ;;
+        protoc-gen-tonic) install_with_cargo protoc-gen-tonic "$PROTOC_GEN_TONIC_VERSION" ;;
+        *) fail "unknown tool: $1 (tools: $KNOWN_TOOLS)" ;;
     esac
 }
 
@@ -164,21 +179,54 @@ install_cargo_deny() {
     "$INSTALL_DIR/cargo-deny" --version
 }
 
+# buf runs only in the Linux `checks` job (codegen-check and proto-check). Its release asset is the program itself,
+# not an archive.
+install_buf() {
+    require_linux buf
+    local url="https://github.com/bufbuild/buf/releases/download/v$BUF_VERSION/buf-Linux-x86_64"
+    local file
+    file="$(download_and_check "$url" "$BUF_SHA256_LINUX")"
+    cp "$file" "$INSTALL_DIR/buf"
+    chmod 755 "$INSTALL_DIR/buf"
+    "$INSTALL_DIR/buf" --version
+}
+
+# Builds a crate's program into ~/.cargo/bin, unless the program found on PATH already prints the pinned version
+# (a cached build, or an earlier install on a developer's machine).
+install_with_cargo() {
+    local name="$1" version="$2"
+    local installed_version
+    installed_version="$("$name" --version 2>/dev/null || true)"
+    if [ "$installed_version" = "$version" ]; then
+        echo "$name $version is already installed" >&2
+        return
+    fi
+    cargo install --locked "$name@$version"
+    "$name" --version
+}
+
 require_linux() {
     if [ "$PLATFORM" != "linux" ]; then
         fail "$1 has a pinned download for Linux only"
     fi
 }
 
-# Downloads a release archive, stops unless its SHA-256 is the pinned one, unpacks it into a fresh folder and
-# prints that folder.
-download_and_unpack() {
+# Downloads a file into WORK_DIR, stops unless its SHA-256 is the pinned one, and prints the file's path.
+download_and_check() {
     local url="$1" expected_sha256="$2"
     local file="$WORK_DIR/${url##*/}"
-    local folder="$file.unpacked"
     echo "Downloading $url" >&2
     curl --fail --silent --show-error --location --retry 3 --output "$file" "$url"
     check_sha256 "$file" "$expected_sha256"
+    echo "$file"
+}
+
+# Downloads a release archive, checks its SHA-256, unpacks it into a fresh folder and prints that folder.
+download_and_unpack() {
+    local url="$1" expected_sha256="$2"
+    local file
+    file="$(download_and_check "$url" "$expected_sha256")"
+    local folder="$file.unpacked"
     mkdir -p "$folder"
     case "$file" in
         *.tar.gz) tar -xzf "$file" -C "$folder" ;;
