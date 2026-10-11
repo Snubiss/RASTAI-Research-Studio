@@ -138,7 +138,7 @@ fn scratch_folder(test_name: &str) -> PathBuf {
 fn run(program: &Path, arguments: &[&str]) -> String {
     let output = Command::new(program)
         .args(arguments)
-        .current_dir(find_repo_root())
+        .current_dir(find_repo_root().unwrap())
         .output()
         .unwrap_or_else(|error| panic!("{} doesn't run ({error}); {IGNORE_REASON}", program.display()));
     assert!(
@@ -159,7 +159,7 @@ fn parse_printed_json(printed: &str) -> Value {
 #[test]
 #[ignore = "needs `just env-js` and `just env-cpu`; `just codegen-check` runs it"]
 fn generated_javascript_passes_the_jsdoc_check() {
-    let repo_root = find_repo_root();
+    let repo_root = find_repo_root().unwrap();
     let folder = scratch_folder("jsdoc");
     fs::write(folder.join("catalog.js"), render_catalog_javascript(&awkward_catalog())).unwrap();
     fs::write(folder.join("use-catalog.js"), JAVASCRIPT_CONSUMER).unwrap();
@@ -197,7 +197,7 @@ fn generated_python_reads_back_the_catalog() {
     let folder = scratch_folder("python");
     let module_path = folder.join("generated.py");
     fs::write(&module_path, render_catalog_python(&catalog)).unwrap();
-    let python = find_repo_root().join(CPU_PYTHON);
+    let python = find_repo_root().unwrap().join(CPU_PYTHON);
     let printed = run(&python, &["-I", "-c", PYTHON_PRINTER, module_path.to_str().unwrap()]);
     assert_eq!(parse_printed_json(&printed), expected_json(&catalog));
     fs::remove_dir_all(&folder).unwrap();
