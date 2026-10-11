@@ -43,11 +43,15 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install just and cargo-fuzz
-        run: tools/ci/install-dev-tools just cargo-fuzz
+      - name: Install just
+        run: tools/ci/install-dev-tools just
       - name: Install the nightly toolchain the justfile pins for fuzzing
         # cargo-fuzz builds with sanitizer flags, which need nightly. The justfile's fuzz_toolchain is the one pin.
         run: rustup toolchain install "$(just --evaluate fuzz_toolchain)" --profile minimal
+      - name: Install cargo-fuzz
+        # Built from crates.io, as the justfile header says, so it targets this runner's gnu host; cargo checks the
+        # crate against the index's checksum. The justfile's cargo_fuzz_version is the one pin.
+        run: cargo install --locked "cargo-fuzz@$(just --evaluate cargo_fuzz_version)"
       - name: Restore the cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -57,7 +61,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             crates/${{ matrix.crate }}/fuzz/target
-          key: fuzz-${{ matrix.crate }}-${{ matrix.target }}-${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', matrix.crate)) }}
+          key: fuzz-${{ matrix.crate }}-${{ matrix.target }}-${{ hashFiles('crates/*/fuzz/Cargo.lock') }}
           restore-keys: fuzz-${{ matrix.crate }}-${{ matrix.target }}-
       - name: just fuzz
         run: just fuzz "${{ matrix.crate }}" "${{ matrix.target }}" "$FUZZ_SECONDS"

@@ -238,7 +238,6 @@ test("install-dev-tools installs the versions the repo pins elsewhere", () => {
   expect(installScriptConstant("NODE_VERSION")).toBe(packageFile.engines.node);
   expect(installScriptConstant("UV_VERSION")).toBe(findValue(PYTHON_WORKSPACE, /^required-version = "==([^"]+)"/));
   expect(installScriptConstant("CARGO_DENY_VERSION")).toBe(justfileVariable("cargo_deny_version"));
-  expect(installScriptConstant("CARGO_FUZZ_VERSION")).toBe(justfileVariable("cargo_fuzz_version"));
   expect(readLines(JUSTFILE)).toContain(`#   cargo install --locked just@${installScriptConstant("JUST_VERSION")}`);
 });
 

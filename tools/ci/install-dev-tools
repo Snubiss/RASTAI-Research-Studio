@@ -4,7 +4,10 @@
 # It also works on a developer's machine, as a shortcut for the install steps in the justfile header.
 #
 # Usage: tools/ci/install-dev-tools <tool>...
-#   tools: just, uv, node (with pnpm through corepack), cargo-deny, cargo-fuzz
+#   tools: just, uv, node (with pnpm through corepack), cargo-deny
+#
+# cargo-fuzz isn't here: its prebuilt Linux download is a musl build, cargo-fuzz builds the fuzz targets for the
+# platform it was built for, and the sanitizers don't work on musl. The nightly job uses `cargo install` instead.
 #
 # The versions are the ones the repo pins elsewhere (the justfile, package.json, python/pyproject.toml);
 # tests/workspace/ci-workflows.test.js fails if they drift apart. Each tool has one prebuilt download per CI runner:
@@ -20,11 +23,9 @@ JUST_VERSION="1.58.0"
 UV_VERSION="0.13.0"
 NODE_VERSION="24.21.0"
 CARGO_DENY_VERSION="0.20.2"
-CARGO_FUZZ_VERSION="0.13.2"
 
 # The SHA-256 of each download, copied from the release's own checksum file when the pin was made. A download that
-# differs (a replaced release asset, a tampered mirror) stops the install. cargo-fuzz publishes no checksum file, so
-# its value is the hash of the release asset taken when it was pinned (2026-10-11).
+# differs (a replaced release asset, a tampered mirror) stops the install.
 JUST_SHA256_LINUX="4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
 JUST_SHA256_MACOS="50ae3e996c974a0bf32ea7d10f495070df33f1b43e0616b2769e3d4821ed8f48"
 JUST_SHA256_WINDOWS="759f16fb7aa17c5c8b9594b6d4a8c1a6630dfd042cf2b3ff84841454d3d188dc"
@@ -34,11 +35,10 @@ UV_SHA256_WINDOWS="088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba6
 NODE_SHA256_LINUX="fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
 NODE_SHA256_MACOS="6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"
 CARGO_DENY_SHA256_LINUX="9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
-CARGO_FUZZ_SHA256_LINUX="b5b704018b63e0f151c17a057ac53b5111e1db545d1b9f72fee79f08a545931c"
 
 main() {
     if [ "$#" -eq 0 ]; then
-        fail "name at least one tool: just, uv, node, cargo-deny, cargo-fuzz"
+        fail "name at least one tool: just, uv, node, cargo-deny"
     fi
     PLATFORM="$(detect_platform)"
     WORK_DIR="$(mktemp -d)"
@@ -56,8 +56,7 @@ install_tool() {
         uv) install_uv ;;
         node) install_node ;;
         cargo-deny) install_cargo_deny ;;
-        cargo-fuzz) install_cargo_fuzz ;;
-        *) fail "unknown tool: $1 (tools: just, uv, node, cargo-deny, cargo-fuzz)" ;;
+        *) fail "unknown tool: $1 (tools: just, uv, node, cargo-deny)" ;;
     esac
 }
 
@@ -163,18 +162,6 @@ install_cargo_deny() {
     folder="$(download_and_unpack "$release_url/$name.tar.gz" "$CARGO_DENY_SHA256_LINUX")"
     copy_program "$folder/$name" cargo-deny
     "$INSTALL_DIR/cargo-deny" --version
-}
-
-# cargo-fuzz runs only in the Linux nightly fuzz job.
-install_cargo_fuzz() {
-    require_linux cargo-fuzz
-    local asset="cargo-fuzz-$CARGO_FUZZ_VERSION-x86_64-unknown-linux-musl.tar.gz"
-    local folder
-    folder="$(download_and_unpack \
-        "https://github.com/rust-fuzz/cargo-fuzz/releases/download/$CARGO_FUZZ_VERSION/$asset" \
-        "$CARGO_FUZZ_SHA256_LINUX")"
-    copy_program "$folder" cargo-fuzz
-    "$INSTALL_DIR/cargo-fuzz" --version
 }
 
 require_linux() {
