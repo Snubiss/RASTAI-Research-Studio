@@ -1,0 +1,25 @@
+[package]
+name = "rastai-codegen"
+description = "Rastai's dev-only code generators: the error and term catalog in Rust, JavaScript, Python and docs"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# Dev tooling only, never shipped (layout: rust-control-plane.md section 4.9). Its outputs are checked in, and
+# `just codegen-check` fails when a fresh run would change them. rastai-formats-codegen and rastai-names-codegen join
+# as more bins here (M1-16, M1-57), with rastai-core once it exists.
+[[bin]]
+name = "rastai-catalog-codegen"
+path = "src/bin/rastai_catalog_codegen.rs"
+
+[dependencies]
+# The strict JSON reader: a key written twice in a catalog entry is an error, never a silent overwrite.
+rastai-formats = { path = "../../crates/rastai-formats" }
+# Severity, so the generator and the tables it writes name the same three levels.
+rastai-diag = { path = "../../crates/rastai-diag" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

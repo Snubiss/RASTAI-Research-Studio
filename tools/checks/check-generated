@@ -2,8 +2,9 @@
 """check-generated: checked-in generated code equals a fresh codegen run (contracts 2.4 rule 2, `just codegen-check`).
 
 Generated folders are never edited by hand and aren't reviewed, so CI proves them instead: every generator
-writes into a temporary tree and each of its output folders must match the checked-in one file for file.
-Each codegen task adds its row to GENERATORS: buf for proto/ (M1-08), then the rastai-codegen binaries (M1-12).
+writes into a temporary tree and each of its outputs, a folder or a single file, must match the checked-in one byte
+for byte. Each codegen task adds its row to GENERATORS: buf for proto/ (M1-08), then the rastai-codegen binaries
+(M1-12 on).
 """
 
 import subprocess
@@ -22,8 +23,11 @@ ERROR_OUTPUT_LINES = 20
 
 @dataclass(frozen=True)
 class Generator:
-    """One codegen step: the command (run from the repository root) and the folders it owns, relative to the
-    repository root. The command writes those folders under OUTPUT_ROOT_PLACEHOLDER instead of in place."""
+    """One codegen step: the command (run from the repository root) and the outputs it owns, relative to the
+    repository root. The command writes those outputs under OUTPUT_ROOT_PLACEHOLDER instead of in place.
+
+    An output is a folder the generator owns whole, or a single file in a folder that also holds other things
+    (generated.py beside a hand-written __init__.py, errors.md beside the other reference pages)."""
 
     name: str
     command: list[str]
@@ -42,6 +46,30 @@ GENERATORS: list[Generator] = [
             "packages/proto/src/generated",
         ],
     ),
+    # --locked: Cargo.lock is checked in and never silently changes. --quiet keeps cargo's build lines out of the
+    # report; the generator's own errors still reach it.
+    Generator(
+        name="rastai-catalog-codegen (catalog/)",
+        command=[
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "-p",
+            "rastai-codegen",
+            "--bin",
+            "rastai-catalog-codegen",
+            "--",
+            "--output",
+            OUTPUT_ROOT_PLACEHOLDER,
+        ],
+        outputs=[
+            "crates/rastai-diag/src/generated",
+            "packages/catalog/src/generated",
+            "python/rastai_plugin/rastai_plugin/catalog/generated.py",
+            "docs/reference/errors.md",
+        ],
+    ),
 ]
 
 
@@ -57,8 +85,8 @@ def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
         output_root = Path(temporary_folder)
         for generator in generators:
             problems.extend(run_generator(root, generator, output_root))
-            for folder in generator.outputs:
-                problems.extend(compare_folders(root, output_root, folder))
+            for output in generator.outputs:
+                problems.extend(compare_output(root, output_root, output))
     return problems
 
 
@@ -72,6 +100,25 @@ def run_generator(root: Path, generator: Generator, output_root: Path) -> list[s
         return []
     error_lines = result.stderr.strip().splitlines()[-ERROR_OUTPUT_LINES:]
     return [f"{generator.name} failed (exit {result.returncode}):"] + error_lines
+
+
+def compare_output(root: Path, output_root: Path, output: str) -> list[str]:
+    """Problems for one output: a single file when either side has a file there, otherwise a folder."""
+    if (root / output).is_file() or (output_root / output).is_file():
+        return compare_file(root, output_root, output)
+    return compare_folders(root, output_root, output)
+
+
+def compare_file(root: Path, output_root: Path, path: str) -> list[str]:
+    checked_in = root / path
+    regenerated = output_root / path
+    if not checked_in.is_file():
+        return [f"{path}: missing; run `just codegen` and commit the result"]
+    if not regenerated.is_file():
+        return [f"{path}: codegen no longer writes it; delete it"]
+    if checked_in.read_bytes() != regenerated.read_bytes():
+        return [f"{path}: differs from a fresh codegen run; never edit it, run `just codegen`"]
+    return []
 
 
 def compare_folders(root: Path, output_root: Path, folder: str) -> list[str]:

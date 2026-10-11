@@ -1,0 +1,10 @@
+{
+  "name": "@rastai/catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The generated error and term catalog (catalog/ and the first-party plugin catalogs). Never edited by hand: run `just codegen`.",
+  "exports": {
+    ".": "./src/index.js"
+  }
+}

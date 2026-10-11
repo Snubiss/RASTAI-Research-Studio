@@ -61,6 +61,7 @@ def test_installed_versions_match_the_pins(repo_root: Path) -> None:
 def test_workspace_packages_are_installed(repo_root: Path) -> None:
     workspace_packages = read_workspace_packages(read_project(repo_root / CPU_PROJECT_FILE))
     assert "rastai-proto" in workspace_packages
+    assert "rastai-plugin" in workspace_packages
     for name in workspace_packages:
         importlib.metadata.distribution(name)  # raises PackageNotFoundError when `just env-cpu` didn't install it
 

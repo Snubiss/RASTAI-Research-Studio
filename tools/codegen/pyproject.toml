@@ -1,6 +1,7 @@
 # Not a package: the settings for the Python codegen tools in this folder (layout rust-node-gateway-proto.md 3.4).
 # ruff uses the same rules as python/ (owner decision 7); the tools have no .py ending, so they're named here.
-# pytest runs tests/ with the same options as python/. The Rust crate rastai-codegen joins this folder in M1-12.
+# pytest runs tests/ with the same options as python/ and collects only test_*.py, so the Rust crate rastai-codegen
+# that shares this folder (Cargo.toml, src/, tests/*.rs; M1-12) is left to cargo.
 
 [tool.ruff]
 extend = "../../python/pyproject.toml"

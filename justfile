@@ -36,8 +36,8 @@
 # CI installs the same versions with tools/ci/install-dev-tools (prebuilt downloads, each checked against its SHA-256);
 # it also works here, for example `tools/ci/install-dev-tools just uv node`.
 #
-# Later tasks add their recipes here: the rastai-codegen steps of codegen (M1-12), check-names (M1-57) and
-# check-schema-diff (M1-58).
+# Later tasks add their recipes here: check-names (M1-57) and check-schema-diff (M1-58), and the other rastai-codegen
+# bins join `codegen` (M1-16, M1-57).
 
 # `deny` refuses any other cargo-deny version, so every machine reads deny.toml the same way.
 cargo_deny_version := "0.20.2"
@@ -49,7 +49,8 @@ cargo_fuzz_version := "0.13.2"
 buf_version := "1.73.0"
 protoc_gen_prost_version := "0.5.0"
 protoc_gen_tonic_version := "0.5.0"
-# `proto-check` runs `buf breaking` against the proto files where this branch left this one.
+# The branch this one merges into. `proto-check` runs `buf breaking` against its proto files at the merge base, and
+# `codegen-check` refuses a catalog code that was there and is now gone.
 proto_base := "origin/main"
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
@@ -206,16 +207,22 @@ check-no-typescript: env-cpu
 # ---- Code generation (layout rust-control-plane.md 2.5; rust-node-gateway-proto.md 3.4) ----
 
 # buf.gen.yaml runs the Rust plugins from your PATH, grpcio-tools from the cpu environment and protoc-gen-es from
-# node_modules, so it needs both environments. rastai-codegen's binaries join after buf in M1-12.
-# Regenerate every generated folder: today the protobuf code of proto/ for Rust, Python and JavaScript.
+# node_modules, so it needs both environments. The rastai-codegen bins run after buf, in the order of layout
+# rust-control-plane.md 4.9: the catalog first, because every other crate's build needs rastai-diag's tables.
+# Regenerate every generated folder: the protobuf code of proto/, then the error and term catalog of catalog/.
 codegen: env-cpu env-js proto-tools
     buf generate
+    cargo run --quiet --locked -p rastai-codegen --bin rastai-catalog-codegen
 
 # It runs the same generators as `codegen`, so it needs the same tools and both environments. Checking the tool
 # versions first means a wrong plugin shows up as an install hint, not as generated code that differs.
-# Checked-in generated code equals a fresh codegen run into a temporary tree.
-codegen-check: env-cpu env-js proto-tools
+# The second line runs rastai-codegen's #[ignore]d tests, the ones a plain `cargo test` on a CI runner can't: the
+# catalog's merge-base check (a code present on `base` is never deleted; it needs git history, like proto-check)
+# and the outputs check (generated JavaScript passes tsc and generated Python imports; it needs both environments).
+# Checked-in generated code equals a fresh codegen run, and the generators' outputs work in their languages.
+codegen-check base=proto_base: env-cpu env-js proto-tools
     "{{check_python}}" tools/checks/check-generated
+    RASTAI_BASE_REF="{{base}}" cargo test --quiet --locked -p rastai-codegen -- --ignored
 
 # buf and the Rust protoc plugins at the pinned versions; `codegen` and `codegen-check` run them all.
 [private]
