@@ -1,0 +1,20 @@
+[package]
+name = "rastai-formats"
+description = "Rastai documents: the strict JSON reader, canonical JSON and content hashes, semver, byte access"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# rlib only: the WASM and Python builds are their own binding crates (layout: rust-control-plane.md section 4.1).
+# It must build for wasm32-unknown-unknown (`just wasm`), so no tokio and nothing that needs an operating system.
+# rastai-diag joins with layer 1 (M1-15), which turns FormatsError into a Diagnostic.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Only src/hashing.rs imports it (contracts 2.5; deny.toml names this crate its one owner).
+blake3 = { workspace = true }
+
+[lints]
+workspace = true

@@ -67,7 +67,11 @@ deny = [
   { crate = "tokenizers", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (tokenizer.rs)" },
   { crate = "minijinja", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (chat templates)" },
   { crate = "rusqlite", wrappers = ["rastai-store"], reason = "one owner: rastai-store (sqlite.rs)" },
-  { crate = "libc", wrappers = ["rastai-store"], reason = "one owner: rastai-store (disk_space.rs, ADR-0033)" },
+  # cpufeatures (under blake3, M1-14) reads CPU features through libc on ARM Linux and Android.
+  { crate = "libc", wrappers = [
+    "rastai-store",
+    "cpufeatures",
+  ], reason = "one owner: rastai-store (disk_space.rs, ADR-0033)" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },
   { crate = "keyring", wrappers = ["rastai-server"], reason = "one owner: rastai-server (secrets.rs)" },
