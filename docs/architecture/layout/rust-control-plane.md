@@ -122,7 +122,8 @@ RASTAI/
       check-schema-diff      (M1) schemas/commands/ and schemas/events/ against the base branch: contracts update required,
                              breaking change to a stable item refused (2.8, 11.1)
     hooks/
-      pre-push               POSIX sh git hook: runs `just check` and refuses the push if it fails (2.5, plan 3.6)
+      pre-push               POSIX sh git hook: runs `just check` and refuses the push if it fails, the tree is not
+                             clean, or a pushed ref is not HEAD (2.5, plan 3.6)
   fixtures/                  shared test inputs (contracts §12.5)
   tests/
     crash/                   Rust crate `rastai-crash-tests` (publish = false): the kill -9 matrix (flows/platform.md 6.5),
