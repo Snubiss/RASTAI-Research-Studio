@@ -77,16 +77,28 @@ pub fn candidate_ports(preferred_port: u16) -> Vec<u16> {
     ports
 }
 
-/// The first of `ports` that binds on `address`, or `RRS-C1001` when none does.
+/// The first of `ports` that binds on `address`, or `RRS-C1001` when every one is taken. Only a port in use moves on
+/// to the next one: any other bind error (an address this machine doesn't have, a port this user may not open) would
+/// fail the same way on every port, so it stops the search and is reported with its own reason.
 pub async fn bind_tcp(address: IpAddr, ports: &[u16]) -> Result<TcpListener, ServerError> {
     for port in ports {
-        if let Ok(listener) = TcpListener::bind(SocketAddr::new(address, *port)).await {
-            return Ok(listener);
+        let socket_address = SocketAddr::new(address, *port);
+        match TcpListener::bind(socket_address).await {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => continue,
+            Err(error) => return Err(listen_address_error(socket_address, &error)),
         }
     }
     Err(ServerError::NoFreePort {
         tried_ports: ports.to_vec(),
     })
+}
+
+fn listen_address_error(address: SocketAddr, error: &io::Error) -> ServerError {
+    ServerError::ListenAddressUnusable {
+        address,
+        reason: error.to_string(),
+    }
 }
 
 /// The port actually bound: the preferred one may be 0 (the operating system picks), which tests use.
@@ -206,8 +218,27 @@ impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, Daem
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// TEST-NET-1 (RFC 5737): reserved for documentation, so no test machine has it.
+    const ADDRESS_NOT_ON_THIS_MACHINE: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+    #[tokio::test]
+    async fn an_address_this_machine_lacks_is_reported_as_such_not_as_no_free_port() {
+        let result = bind_tcp(ADDRESS_NOT_ON_THIS_MACHINE, &[47820, 47821]).await;
+        let refused = result.err().unwrap();
+        assert_eq!(refused.code(), "RRS-C0002");
+        match refused {
+            ServerError::ListenAddressUnusable { address, reason } => {
+                // The search stopped at the first port: the next one would fail the same way.
+                assert_eq!(address, SocketAddr::new(ADDRESS_NOT_ON_THIS_MACHINE, 47820));
+                assert!(!reason.is_empty());
+            }
+            other => panic!("expected ListenAddressUnusable, got {other:?}"),
+        }
+    }
 
     #[test]
     fn the_preferred_port_comes_first_then_the_range() {

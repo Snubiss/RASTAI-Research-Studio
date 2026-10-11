@@ -15,6 +15,7 @@ mod on_unix {
     use rastai_core::paths::{DataPaths, daemon_port_path, daemon_socket_path, owner_token_path, rastai_db_path};
     use rastai_server::daemon::{DaemonOptions, start_daemon};
     use rastai_server::http::listeners::{FIRST_DEFAULT_PORT, LAST_DEFAULT_PORT, bind_tcp};
+    use rastai_store::data_dir_lock::take_daemon_lock;
     use tokio::net::TcpListener;
 
     use crate::common::{
@@ -113,8 +114,22 @@ mod on_unix {
         remove_test_folder(&paths);
     }
 
+    /// Whether one port of 47820–47829 can be bound right now. A real daemon or other services may hold all ten.
+    async fn a_default_port_is_free() -> bool {
+        for port in FIRST_DEFAULT_PORT..=LAST_DEFAULT_PORT {
+            if TcpListener::bind((LOOPBACK, port)).await.is_ok() {
+                return true;
+            }
+        }
+        false
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_busy_port_falls_back_into_the_range_and_daemon_port_says_which() {
+        if !a_default_port_is_free().await {
+            eprintln!("skipped: every port of 47820-47829 is in use on this machine");
+            return;
+        }
         let paths = test_paths("fallback");
         let busy = TcpListener::bind((LOOPBACK, 0)).await.unwrap();
         let busy_port = busy.local_addr().unwrap().port();
@@ -151,6 +166,19 @@ mod on_unix {
         stop_test_daemon(running).await;
         let running = start_test_daemon(&paths).await;
         stop_test_daemon(running).await;
+        remove_test_folder(&paths);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_lock_is_kept_while_something_still_holds_the_server() {
+        let paths = test_paths("stillheld");
+        let running = start_test_daemon(&paths).await;
+        // Stands in for a connection task that outlived the grace period and still holds the store.
+        let still_held = running.server.clone();
+        stop_test_daemon(running).await;
+        let refused = take_daemon_lock(&paths).err().unwrap();
+        assert_eq!(refused.code(), "RRS-S0001");
+        drop(still_held);
         remove_test_folder(&paths);
     }
 

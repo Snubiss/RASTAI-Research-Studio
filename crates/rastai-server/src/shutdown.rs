@@ -3,11 +3,17 @@
 //! writer commits what is queued, and the daemon lock is released last, so a new daemon can't start while this one
 //! still writes. Stopping the daemon never stops jobs; `job.cancel` does. (Detaching from workers and closing event
 //! streams join with the node links, M1-47, and the bus, M1-28.)
+//!
+//! Aborting a listener after the grace period doesn't end the connection tasks axum spawned for it, and those still
+//! hold the server, so its store can't be closed. Then the lock is kept until the process exits (`run_daemon`
+//! returns straight after), never released while a handler may still write. M1-28's Subscribe streams are the first
+//! handlers that can outlive the grace period; they should end on the shutdown flag so this path stays rare.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use rastai_diag::logger::{log_info, log_warn};
+use rastai_store::data_dir_lock::DaemonLock;
 use rastai_store::store::close_store;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -49,8 +55,12 @@ pub async fn wait_for_shutdown(running: RunningDaemon) -> Result<(), ServerError
     wait_for_flag(server.shutdown.subscribe()).await;
     finish_serving(serve_tasks).await;
     remove_runtime_files(&server.paths);
-    close_server(server).await;
-    drop(daemon_lock);
+    let store_closed = close_server(server).await;
+    if store_closed {
+        drop(daemon_lock);
+    } else {
+        keep_lock_until_exit(daemon_lock);
+    }
     log_info("daemon stopped", &[]);
     Ok(())
 }
@@ -74,16 +84,28 @@ async fn finish_serving(serve_tasks: Vec<JoinHandle<()>>) {
     }
 }
 
-/// Closes the store once nothing else holds the server. A handler task still holding it would keep the writer
-/// alive; then the writer finishes its queue on its own when that task ends, and only the wait is skipped.
-async fn close_server(server: Arc<Server>) {
+/// Closes the store once nothing else holds the server, and says whether it did. A handler task still holding the
+/// server keeps the writer alive; then the writer finishes its queue on its own when that task ends.
+async fn close_server(server: Arc<Server>) -> bool {
     match Arc::try_unwrap(server) {
-        Ok(server) => close_store(server.store).await,
-        Err(_still_shared) => log_warn(
-            "the server was still in use at shutdown; not waiting for the store",
-            &[],
-        ),
+        Ok(server) => {
+            close_store(server.store).await;
+            true
+        }
+        Err(_still_shared) => {
+            log_warn(
+                "the server was still in use at shutdown; the store stays open and the daemon lock is kept until exit",
+                &[],
+            );
+            false
+        }
     }
+}
+
+/// Never releases the lock in this process: a handler still holding the store may write, and a new daemon must not
+/// start on the same data until it can't. The operating system releases the lock when the process exits.
+fn keep_lock_until_exit(daemon_lock: DaemonLock) {
+    std::mem::forget(daemon_lock);
 }
 
 #[cfg(unix)]

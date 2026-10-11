@@ -141,9 +141,10 @@ fn log_level(name: &str) -> LogLevel {
 /// the daemon runs without a node: the commands that need one answer their "not available yet" code.
 fn start_embedded_node() {}
 
-/// Until the daemon key exists (`rastai_node::identity`, M1-42), the cookie's daemon id prefix is the start of a
-/// hash of the owner token's hash: stable for this installation, different on another machine, and it says nothing
-/// about the token.
+/// Until the daemon key exists, the cookie's daemon id prefix is the start of a hash of the owner token's hash:
+/// stable for this installation, different on another machine, and it says nothing about the token. M1-47 loads
+/// `daemon.key` here (`load_or_create_identity`, from `rastai_node::identity`, M1-42), keeps it in the server's
+/// `identity` field and takes this prefix from the daemon id instead.
 fn daemon_id_prefix(owner_token_hash: &str) -> String {
     let hash = hash_bytes(owner_token_hash.as_bytes());
     let hex = match hash.split_once(HASH_ALGORITHM_SEPARATOR) {
