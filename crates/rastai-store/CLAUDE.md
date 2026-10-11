@@ -7,7 +7,7 @@ are in `docs/architecture/contracts.md` §8.2 (tables and columns) and §15.1 (c
 
 - **The only SQLite user.** No other crate opens `rastai.db` or `vault.db`, and `src/sqlite.rs` is the only file
   that imports rusqlite. The SQL text lives with its table in `src/index/`; callers pass row structs and filters,
-  never SQL, so the functions that run SQL are `pub(crate)`.
+  never SQL, so the functions that run SQL, the migration types and `open_database_for_writing` are `pub(crate)`.
 - **Writes only through the writer thread** (`write_index`), one thread per database file, never a
   `Mutex<Connection>` (spike 07). Reads are blocking functions on a pooled read-only connection; async callers run
   them in `spawn_blocking`.
@@ -20,4 +20,8 @@ are in `docs/architecture/contracts.md` §8.2 (tables and columns) and §15.1 (c
 - **One error enum**, `StoreError` in `src/error.rs`, each variant with an `RRS-S` code from contracts §10.3.
 - **`unsafe`** only in `src/disk_space.rs` (ADR-0033, M1-25); nowhere else.
 - **`src/lib.rs` and `src/index/mod.rs` are lists of `pub mod` lines** (contracts §12.2). Unit tests sit at the
-  bottom of the file they test; the writer and migration tests are in `tests/`.
+  bottom of the file they test; the writer and migration tests are in `tests/`, sharing `tests/common/mod.rs`. A
+  test that needs the crate-private SQL functions (a newer app's migration, a full disk) stays at the bottom of
+  `src/`. Every test removes its temporary folder at its end.
+- **A failed read is `RRS-S0006`, a failed write `RRS-S3005`** (or `RRS-S3002` for a full disk): `sqlite.rs`
+  decides by the connection, a reader's or the writer's.

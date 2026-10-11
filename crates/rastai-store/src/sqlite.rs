@@ -44,24 +44,28 @@ pub(crate) enum SqlValue {
 }
 
 /// The pragmas that differ between `rastai.db` and `vault.db` (layout section 6.3).
-pub struct DatabaseSettings {
+pub(crate) struct DatabaseSettings {
     /// `NORMAL` for the index (the logs restore what a power cut loses), `FULL` for the vault (primary data).
-    pub synchronous: &'static str,
+    pub(crate) synchronous: &'static str,
     /// On for the vault, so a deleted conversation doesn't linger in free pages.
-    pub secure_delete: bool,
+    pub(crate) secure_delete: bool,
 }
 
 /// One numbered migration: `sql` takes the schema from `version - 1` to `version`. It holds no BEGIN or COMMIT;
-/// `open_database_for_writing` runs it in a transaction with its `schema_migrations` row.
-pub struct Migration {
-    pub version: i64,
-    pub sql: &'static str,
+/// `open_database_for_writing` runs it in a transaction with its `schema_migrations` row. Crate-private, like all
+/// SQL: no other crate can hand SQL to a database (layout section 6.6).
+pub(crate) struct Migration {
+    pub(crate) version: i64,
+    pub(crate) sql: &'static str,
 }
 
-/// One open SQLite connection and the file it belongs to.
+/// One open SQLite connection and the file it belongs to. Public only as an opaque handle in the crate's own
+/// signatures: its fields are private and only this crate can open one.
 pub struct SqliteConnection {
     connection: Connection,
     path: PathBuf,
+    // A reader pool's connection: its failures are failed reads (`RRS-S0006`), never failed writes.
+    read_only: bool,
 }
 
 /// An open `BEGIN IMMEDIATE` transaction on a connection. Every write goes through one, so a row and the rows that
@@ -74,15 +78,14 @@ pub struct SqliteTransaction<'a> {
 /// anything is written, then sets WAL and the pragmas and applies the migrations the file doesn't have yet.
 /// A file migrated by a newer app is refused with `RRS-S0002` and left byte for byte as it was.
 ///
-/// Public so a test can model a newer build as this one's migration chain plus one more. Everything else in this
-/// file is the crate's own: no other crate runs SQL (layout section 6.6).
-pub fn open_database_for_writing(
+/// Crate-private: the writer thread owns the one write connection, and no other crate opens one (layout section 6.6).
+pub(crate) fn open_database_for_writing(
     path: &Path,
     settings: &DatabaseSettings,
     migrations: &[Migration],
 ) -> Result<SqliteConnection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    let connection = open_connection(path, flags)?;
+    let connection = open_connection(path, flags, false)?;
     check_schema_version(&connection, migrations)?;
     check_integrity(&connection)?;
     apply_settings(&connection, settings)?;
@@ -93,7 +96,7 @@ pub fn open_database_for_writing(
 /// Opens a read-only connection to a database its writer has already opened (and so created and migrated).
 pub(crate) fn open_database_for_reading(path: &Path) -> Result<SqliteConnection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    open_connection(path, flags)
+    open_connection(path, flags, true)
 }
 
 /// Starts a write transaction. It must end in `commit_transaction` or `rollback_transaction`.
@@ -116,12 +119,23 @@ pub(crate) fn commit_transaction(transaction: SqliteTransaction<'_>) -> Result<(
 
 /// Rolls back. A failure here means SQLite already ended the transaction itself, so there is nothing left to undo.
 pub(crate) fn rollback_transaction(transaction: SqliteTransaction<'_>) {
-    let _ = execute_script(transaction.connection, ROLLBACK);
+    abandon_transaction(transaction.connection);
+}
+
+/// False once SQLite has ended the transaction on its own. A full disk, an I/O error, running out of memory or a
+/// busy file can roll back the whole transaction, not just the statement that failed; every row written in it
+/// since BEGIN is gone, and a later statement would run outside any transaction.
+pub(crate) fn transaction_is_open(transaction: &SqliteTransaction<'_>) -> bool {
+    !transaction.connection.connection.is_autocommit()
 }
 
 /// Runs `work` inside a savepoint of the transaction: its rows are kept when it returns Ok and undone when it
 /// returns an error, while the rest of the transaction carries on. This is what lets one bad write in a writer
 /// batch fail alone (layout section 6.3). `savepoint_name` is one of the crate's own constants, never input.
+///
+/// The error returned is always the work's own, so a full disk stays `RRS-S3002`. If its rows can't be undone
+/// alone, the whole transaction is rolled back instead, so a write that reports a failure never commits; the
+/// caller sees that through `transaction_is_open`.
 pub(crate) fn run_in_savepoint(
     transaction: &SqliteTransaction<'_>,
     savepoint_name: &str,
@@ -130,11 +144,9 @@ pub(crate) fn run_in_savepoint(
     let connection = transaction.connection;
     execute_script(connection, &format!("SAVEPOINT {savepoint_name}"))?;
     match work(transaction) {
-        Ok(()) => execute_script(connection, &format!("RELEASE {savepoint_name}")),
+        Ok(()) => release_savepoint(transaction, savepoint_name),
         Err(error) => {
-            // ROLLBACK TO undoes the rows but keeps the savepoint open; RELEASE then closes it.
-            execute_script(connection, &format!("ROLLBACK TO {savepoint_name}"))?;
-            execute_script(connection, &format!("RELEASE {savepoint_name}"))?;
+            undo_savepoint(transaction, savepoint_name);
             Err(error)
         }
     }
@@ -219,7 +231,7 @@ pub(crate) fn optional_integer_value(number: Option<i64>) -> SqlValue {
 pub(crate) fn unsigned_value(number: u64) -> Result<SqlValue, StoreError> {
     match i64::try_from(number) {
         Ok(number) => Ok(SqlValue::Integer(number)),
-        Err(_) => Err(StoreError::DatabaseCallFailed {
+        Err(_) => Err(StoreError::DatabaseWriteFailed {
             reason: format!("{number} is larger than SQLite's largest integer"),
         }),
     }
@@ -275,7 +287,7 @@ pub(crate) fn read_optional_boolean(row: &[SqlValue], index: usize) -> Result<Op
 
 // ---- Opening ----
 
-fn open_connection(path: &Path, flags: OpenFlags) -> Result<SqliteConnection, StoreError> {
+fn open_connection(path: &Path, flags: OpenFlags, read_only: bool) -> Result<SqliteConnection, StoreError> {
     let connection =
         Connection::open_with_flags(path, flags).map_err(|error| StoreError::DataDirectoryNotWritable {
             path: path.to_path_buf(),
@@ -284,6 +296,7 @@ fn open_connection(path: &Path, flags: OpenFlags) -> Result<SqliteConnection, St
     let connection = SqliteConnection {
         connection,
         path: path.to_path_buf(),
+        read_only,
     };
     connection
         .connection
@@ -340,7 +353,7 @@ fn apply_settings(connection: &SqliteConnection, settings: &DatabaseSettings) ->
         None => String::new(),
     };
     if !mode.eq_ignore_ascii_case(WAL_JOURNAL_MODE) {
-        return Err(StoreError::DatabaseCallFailed {
+        return Err(StoreError::DatabaseWriteFailed {
             reason: format!("SQLite kept journal mode {mode} instead of WAL"),
         });
     }
@@ -374,6 +387,40 @@ fn apply_migration(connection: &SqliteConnection, migration: &Migration) -> Resu
             Err(error)
         }
     }
+}
+
+// ---- Savepoints ----
+
+/// Keeps the savepoint's rows in the transaction. If RELEASE fails, the rows are in an unknown state, so the whole
+/// transaction is rolled back rather than risk committing them under an error.
+fn release_savepoint(transaction: &SqliteTransaction<'_>, savepoint_name: &str) -> Result<(), StoreError> {
+    let connection = transaction.connection;
+    let released = execute_script(connection, &format!("RELEASE {savepoint_name}"));
+    if released.is_err() {
+        abandon_transaction(connection);
+    }
+    released
+}
+
+/// Undoes a failed savepoint's rows and closes it. When SQLite has already ended the whole transaction, the
+/// savepoint went with it and there is nothing to undo.
+fn undo_savepoint(transaction: &SqliteTransaction<'_>, savepoint_name: &str) {
+    if !transaction_is_open(transaction) {
+        return;
+    }
+    let connection = transaction.connection;
+    // ROLLBACK TO undoes the rows but keeps the savepoint open; RELEASE then closes it.
+    let undone = execute_script(connection, &format!("ROLLBACK TO {savepoint_name}"))
+        .and_then(|()| execute_script(connection, &format!("RELEASE {savepoint_name}")));
+    if undone.is_err() {
+        // The failed write's rows may still be there; committing them would contradict the error its caller gets.
+        abandon_transaction(connection);
+    }
+}
+
+/// Ends the transaction without committing. A failure means SQLite already ended it, so it is ignored.
+fn abandon_transaction(connection: &SqliteConnection) {
+    let _ = execute_script(connection, ROLLBACK);
 }
 
 // ---- Conversions ----
@@ -432,7 +479,8 @@ fn unexpected_column(index: usize, expected: &str, found: Option<&SqlValue>) -> 
 }
 
 /// Sorts SQLite's error codes into the catalog's: a full disk, a damaged file and an unwritable file each have
-/// their own code (contracts 10.3); everything else keeps SQLite's words under `RRS-S3005`.
+/// their own code (contracts 10.3). Everything else keeps SQLite's words: under `RRS-S0006` on a reader's
+/// connection, which only reads, and under `RRS-S3005` on the writer's, whose every call is part of a write.
 fn error_from_sqlite(connection: &SqliteConnection, error: rusqlite::Error) -> StoreError {
     let reason = error.to_string();
     match error.sqlite_error_code() {
@@ -444,8 +492,27 @@ fn error_from_sqlite(connection: &SqliteConnection, error: rusqlite::Error) -> S
                 reason,
             }
         }
-        _ => StoreError::DatabaseCallFailed { reason },
+        _ if connection.read_only => StoreError::DatabaseReadFailed { reason },
+        _ => StoreError::DatabaseWriteFailed { reason },
     }
+}
+
+// ---- Test support: a full disk on demand ----
+
+/// How many pages the file has now, for a test that caps it there (`set_max_page_count`).
+#[cfg(test)]
+pub(crate) fn read_page_count(connection: &SqliteConnection) -> i64 {
+    match query_rows(connection, "PRAGMA page_count", &[]) {
+        Ok(rows) => first_integer(&rows).unwrap_or(0),
+        Err(_) => 0,
+    }
+}
+
+/// Caps the file at `page_count` pages. A write that needs more gets SQLITE_FULL, exactly as on a full disk, so
+/// the tests can reach the full-disk path without filling one. SQLite never caps below the file's current size.
+#[cfg(test)]
+pub(crate) fn set_max_page_count(connection: &SqliteConnection, page_count: i64) {
+    let _ = execute_script(connection, &format!("PRAGMA max_page_count = {page_count}"));
 }
 
 #[cfg(test)]
@@ -462,6 +529,8 @@ mod tests {
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_unix_ms INTEGER NOT NULL) STRICT;
          CREATE TABLE notes (note_id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT;";
     const SECOND_MIGRATION: &str = "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;";
+    // Far more than one page (4 KiB), so the row needs new pages.
+    const LARGE_BODY_BYTES: usize = 1 << 20;
 
     fn test_folder(test_name: &str) -> PathBuf {
         let folder = std::env::temp_dir().join(format!("rastai-store-sqlite-{}-{test_name}", std::process::id()));
@@ -481,7 +550,8 @@ mod tests {
 
     #[test]
     fn migrations_apply_once_and_in_order() {
-        let path = test_folder("migrations").join("test.db");
+        let folder = test_folder("migrations");
+        let path = folder.join("test.db");
         let first = [Migration {
             version: 1,
             sql: FIRST_MIGRATION,
@@ -501,11 +571,14 @@ mod tests {
         drop(open_database_for_writing(&path, &TEST_SETTINGS, &both).unwrap());
         let connection = open_database_for_writing(&path, &TEST_SETTINGS, &both).unwrap();
         assert_eq!(read_schema_version(&connection).unwrap(), 2);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
     fn a_failed_savepoint_keeps_the_rest_of_the_transaction() {
-        let path = test_folder("savepoint").join("test.db");
+        let folder = test_folder("savepoint");
+        let path = folder.join("test.db");
         let migrations = [Migration {
             version: 1,
             sql: FIRST_MIGRATION,
@@ -519,11 +592,64 @@ mod tests {
         run_in_savepoint(&transaction, "request", |transaction| insert_note(transaction, "b")).unwrap();
         commit_transaction(transaction).unwrap();
         assert_eq!(count_notes(&connection), 2);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_full_disk_keeps_its_own_error_and_ends_the_transaction() {
+        let folder = test_folder("full-disk");
+        let migrations = [Migration {
+            version: 1,
+            sql: FIRST_MIGRATION,
+        }];
+        let connection = open_database_for_writing(&folder.join("test.db"), &TEST_SETTINGS, &migrations).unwrap();
+        set_max_page_count(&connection, read_page_count(&connection));
+        let transaction = begin_transaction(&connection).unwrap();
+        run_in_savepoint(&transaction, "request", |transaction| insert_note(transaction, "a")).unwrap();
+
+        // A body far larger than a page needs new pages, which the cap refuses.
+        let too_large = run_in_savepoint(&transaction, "request", |transaction| {
+            let sql = "INSERT INTO notes (note_id, body) VALUES ('b', ?1)";
+            execute(transaction, sql, &[text_value(&"x".repeat(LARGE_BODY_BYTES))]).map(|_| ())
+        });
+
+        // The disk-full code, not the savepoint's "no such savepoint" (RRS-S3005).
+        assert_eq!(too_large.unwrap_err().code(), "RRS-S3002");
+        assert!(!transaction_is_open(&transaction));
+        rollback_transaction(transaction);
+        assert_eq!(count_notes(&connection), 0);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_reader_failure_is_a_failed_read_and_a_writer_failure_a_failed_write() {
+        let folder = test_folder("read-or-write");
+        let path = folder.join("test.db");
+        let migrations = [Migration {
+            version: 1,
+            sql: FIRST_MIGRATION,
+        }];
+        let writer = open_database_for_writing(&path, &TEST_SETTINGS, &migrations).unwrap();
+        let reader = open_database_for_reading(&path).unwrap();
+        // A table that isn't there fails the same generic way an I/O error or the busy timeout does.
+        let missing_table = "SELECT note_id FROM no_such_table";
+
+        let read_error = query_rows(&reader, missing_table, &[]).unwrap_err();
+        let write_error = query_rows(&writer, missing_table, &[]).unwrap_err();
+
+        assert_eq!(read_error.code(), "RRS-S0006");
+        assert_eq!(write_error.code(), "RRS-S3005");
+        drop(reader);
+        drop(writer);
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
     fn a_file_that_is_not_a_database_is_damaged() {
-        let path = test_folder("not-a-database").join("test.db");
+        let folder = test_folder("not-a-database");
+        let path = folder.join("test.db");
         std::fs::write(&path, vec![7u8; 8192]).unwrap();
         let migrations = [Migration {
             version: 1,
@@ -533,6 +659,7 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.code(), "RRS-S0003");
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]

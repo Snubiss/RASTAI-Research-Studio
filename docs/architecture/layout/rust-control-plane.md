@@ -1621,6 +1621,7 @@ crates/rastai-store/
     fuzz_targets/
       event_frame.rs          read_next_frame on arbitrary bytes never panics and never reads past a frame
   tests/
+    common/mod.rs             test_paths(), remove_test_folder(): fresh data folders per test, removed at its end
     writer_thread.rs
     index_migrations.rs
     event_log_fixtures.rs
@@ -1669,7 +1670,7 @@ pub enum IndexWrite {
     UpsertJob(JobRow),
     UpsertDocument(DocumentRow),
     RecordUndoStep(UndoStepRow),
-    SetUndoPosition { document_id: String, position: u32 },
+    SetUndoPosition { document_id: String, position: u32 },   // (M4) with document.undo; documents has no column for it yet (#188)
     ClearUndoSteps { document_id: String },
     UpsertNode(NodeRow),
     UpsertPlugin(PluginRow),
@@ -1832,6 +1833,8 @@ fn run_index_writer(connection: SqliteConnection, requests: std::sync::mpsc::Rec
 ```
 
 - A savepoint per request means one bad write fails only its own caller; the rest of the batch commits.
+- Some errors (a full disk, an I/O error, out of memory) make SQLite roll back the whole transaction, not only the write that hit them. The batch stops there and every caller in it gets that write's own error (`RRS-S3002` for a full disk), since none of their rows was committed (`transaction_is_open` in `sqlite.rs`).
+- A reader's failure on a healthy file (an I/O error, the busy timeout) is `RRS-S0006`, a failed read; the writer connection's failures are failed writes (`RRS-S3005`, or `RRS-S3002` for a full disk).
 - Callers `await` the oneshot, so a command returns only after its rows are committed.
 - The thread exits when every `IndexWriter` clone is dropped; `close_store` drops them and joins.
 
@@ -1912,6 +1915,7 @@ pub fn free_bytes(path: &Path) -> Result<u64, StoreError> {
 | Internal | `rastai-proto` | `EventRecord`, `BlobRef`, payload messages | `event_log/frame.rs`, `indexer.rs` |
 | Internal | `rastai-diag` | diagnostics | |
 | External | rusqlite (bundled SQLite) | both databases | `sqlite.rs` |
+| External | serde_json | the JSON list columns (`tokens.scopes`, `nodes.capabilities`, `plugins.granted_permissions`) | `index/kept_tables.rs` |
 | External | prost | decode and encode `EventRecord` frame bodies | `event_log/frame.rs` |
 | External | tokio (`sync` feature only) | oneshot replies from the writer threads | `writer_thread.rs` |
 | External | libc | one `statvfs` call (ADR-0033) | `disk_space.rs` |
@@ -1937,8 +1941,8 @@ There is no `blake3` here: hashing goes through `rastai_formats::hashing`, so BL
 | Free space | `tests/disk_space.rs` | `free_bytes` on a temp directory equals `df -B1 --output=avail` on the CI runner within one block; a missing path gives the typed error and `check_free_space` then fails with `RRS-S3001` (ADR-0033) |
 | Config files | `tests/config_files.rs` | a write leaves the old file or the new one, never a truncated one (a test hook stops between fsync and rename); the folder is fsynced |
 | Outbox | `tests/vault_changes.rs` | with recording off no rows are added; with it on, every changed row adds exactly one `vault_changes` row in the same transaction; a `DeleteConversation` adds `delete` rows for every message; `TrimVaultChanges` keeps later rows |
-| Writer thread | `tests/writer_thread.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07, and far fewer transactions than writes by `writer_batch_count`); one bad write in a batch fails alone; a `Batch` lands whole or not at all |
-| Migrations | `tests/index_migrations.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged |
+| Writer thread | `tests/writer_thread.rs`; bottom of `writer_thread.rs` and `sqlite.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07, and far fewer transactions than writes by `writer_batch_count`); one bad write in a batch fails alone; a `Batch` lands whole or not at all; a full disk (`PRAGMA max_page_count`) fails every write of its batch with `RRS-S3002` and commits none; a reader's failure is `RRS-S0006` |
+| Migrations | `tests/index_migrations.rs`; bottom of `store.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged (in `store.rs`, because modelling the newer app takes the crate-private migration functions) |
 | Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first |
 | Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
 | Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |

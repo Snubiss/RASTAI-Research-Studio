@@ -16,14 +16,14 @@ use crate::writer_thread::{IndexWriter, start_index_writer};
 
 /// `rastai.db` is an index: WAL with synchronous NORMAL never corrupts the file, and a power cut loses only commits
 /// the event logs restore. Deleted rows hold nothing private, so no secure_delete (layout section 6.3).
-pub const INDEX_DATABASE_SETTINGS: DatabaseSettings = DatabaseSettings {
+pub(crate) const INDEX_DATABASE_SETTINGS: DatabaseSettings = DatabaseSettings {
     synchronous: "NORMAL",
     secure_delete: false,
 };
 
 /// The migration chain of `rastai.db`, oldest first. A migration is never edited once released; a change is a new
 /// one at the end.
-pub const INDEX_MIGRATIONS: &[Migration] = &[Migration {
+pub(crate) const INDEX_MIGRATIONS: &[Migration] = &[Migration {
     version: 1,
     sql: include_str!("index/migrations/0001_initial.sql"),
 }];
@@ -72,4 +72,61 @@ fn create_data_folder(folder: &Path) -> Result<(), StoreError> {
         path: folder.to_path_buf(),
         reason: error.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    // The migration a newer app would have added; this build doesn't know it.
+    const NEWER_MIGRATION_SQL: &str = "CREATE TABLE added_by_a_newer_app (note TEXT NOT NULL) STRICT;";
+
+    fn test_paths(test_name: &str) -> DataPaths {
+        let root = std::env::temp_dir().join(format!("rastai-store-store-{}-{test_name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        DataPaths {
+            config: root.join("config"),
+            data: root.join("data"),
+            cache: root.join("cache"),
+            state: root.join("state"),
+            runtime: root.join("runtime"),
+        }
+    }
+
+    fn close(store: Store) {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        runtime.block_on(close_store(store));
+    }
+
+    // Here rather than in tests/index_migrations.rs: a newer app is modelled with the crate's own migration
+    // functions, which are crate-private so that no other crate can run SQL or open a second write connection.
+    #[test]
+    fn a_newer_schema_version_is_refused_and_the_file_is_unchanged() {
+        let paths = test_paths("newer-schema");
+        close(open_store(&paths).unwrap());
+        let database_path = rastai_db_path(&paths);
+        // A newer app is this one plus a migration: it migrates the file to version 2 and closes it cleanly.
+        let newer_migrations = [
+            Migration {
+                version: 1,
+                sql: INDEX_MIGRATIONS[0].sql,
+            },
+            Migration {
+                version: 2,
+                sql: NEWER_MIGRATION_SQL,
+            },
+        ];
+        drop(open_database_for_writing(&database_path, &INDEX_DATABASE_SETTINGS, &newer_migrations).unwrap());
+        let bytes_before = std::fs::read(&database_path).unwrap();
+
+        let error = open_store(&paths).err().unwrap();
+
+        assert_eq!(error.code(), "RRS-S0002");
+        assert_eq!(std::fs::read(&database_path).unwrap(), bytes_before);
+        if let Some(root) = paths.data.parent() {
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 }

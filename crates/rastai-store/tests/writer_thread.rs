@@ -6,7 +6,6 @@
 
 use std::time::{Duration, Instant};
 
-use rastai_core::paths::DataPaths;
 use rastai_store::index::documents::{DocumentRow, UndoStepRow, get_document, list_undo_steps};
 use rastai_store::index::journal::{JournalStartedRow, find_journal_by_idempotency_key, get_journal};
 use rastai_store::index::kept_tables::{
@@ -19,6 +18,9 @@ use rastai_store::store::{Store, close_store, open_store};
 use rastai_store::writer_thread::{IndexWriter, write_index, writer_batch_count};
 use tokio::runtime::Runtime;
 
+mod common;
+use common::{remove_test_folder, test_paths};
+
 // The spike's load (07): 256 clients at once, each writing one after another.
 const CONCURRENT_WRITERS: usize = 256;
 const WRITES_PER_WRITER: usize = 20;
@@ -30,18 +32,6 @@ const PERCENTILE: usize = 99;
 // transaction among the writes already queued: under this load a batch carries 130 to 240 writes on average
 // (measured on 1, 2, 4 and 24 cores). At one write per batch the writes have convoyed.
 const MINIMUM_WRITES_PER_BATCH: u64 = 8;
-
-fn test_paths(test_name: &str) -> DataPaths {
-    let root = std::env::temp_dir().join(format!("rastai-store-writer-{}-{test_name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    DataPaths {
-        config: root.join("config"),
-        data: root.join("data"),
-        cache: root.join("cache"),
-        state: root.join("state"),
-        runtime: root.join("runtime"),
-    }
-}
 
 fn multi_thread_runtime() -> Runtime {
     tokio::runtime::Builder::new_multi_thread().build().unwrap()
@@ -141,7 +131,8 @@ fn write_concurrently(runtime: &Runtime, store: &Store) -> Vec<Duration> {
 #[test]
 fn concurrent_writers_commit_without_convoying() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("convoy")).unwrap();
+    let paths = test_paths("convoy");
+    let store = open_store(&paths).unwrap();
     let batches_before = writer_batch_count(&store.index);
     let latencies = write_concurrently(&runtime, &store);
     let batches = writer_batch_count(&store.index) - batches_before;
@@ -158,12 +149,14 @@ fn concurrent_writers_commit_without_convoying() {
         batches * MINIMUM_WRITES_PER_BATCH <= write_count as u64,
         "{write_count} writes took {batches} transactions: the writes are not batched"
     );
+    remove_test_folder(&paths);
 }
 
 #[test]
 fn one_bad_write_among_concurrent_writes_fails_alone() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("bad-write")).unwrap();
+    let paths = test_paths("bad-write");
+    let store = open_store(&paths).unwrap();
     // An undo step for a document that doesn't exist breaks its foreign key; the writes around it are good.
     let outcomes = runtime.block_on(async {
         let mut tasks = Vec::new();
@@ -195,12 +188,14 @@ fn one_bad_write_among_concurrent_writes_fails_alone() {
         }
     }
     assert_eq!(runs.len(), 31);
+    remove_test_folder(&paths);
 }
 
 #[test]
 fn a_batch_lands_whole_or_not_at_all() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("batch")).unwrap();
+    let paths = test_paths("batch");
+    let store = open_store(&paths).unwrap();
     let good = IndexWrite::Batch(vec![
         IndexWrite::UpsertDocument(document_row("doc_a")),
         IndexWrite::RecordUndoStep(undo_step("doc_a", 1)),
@@ -219,6 +214,7 @@ fn a_batch_lands_whole_or_not_at_all() {
     assert_eq!(get_document(&reader, "doc_b").unwrap(), None);
     drop(reader);
     runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
 }
 
 #[test]
@@ -248,12 +244,14 @@ fn close_store_commits_every_queued_write() {
     assert_eq!(list_runs(&reader, &RunFilter::default()).unwrap().len(), 64);
     drop(reader);
     runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
 }
 
 #[test]
 fn runs_and_jobs_read_back_and_the_ack_never_moves_back() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("runs")).unwrap();
+    let paths = test_paths("runs");
+    let store = open_store(&paths).unwrap();
     let mut run = run_row("run_a", 5);
     run.acked_sequence = 40;
     write(&runtime, &store, IndexWrite::UpsertRun(run.clone()));
@@ -297,12 +295,14 @@ fn runs_and_jobs_read_back_and_the_ack_never_moves_back() {
     assert_eq!(get_run(&reader, "run_missing").unwrap(), None);
     drop(reader);
     runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
 }
 
 #[test]
 fn journal_rows_are_found_by_key_and_unfinished_ones_are_closed() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("journal")).unwrap();
+    let paths = test_paths("journal");
+    let store = open_store(&paths).unwrap();
     let started = |journal_id: &str, key: &str, started_unix_ms: i64| JournalStartedRow {
         journal_id: journal_id.to_string(),
         command_id: "train.start".to_string(),
@@ -341,12 +341,14 @@ fn journal_rows_are_found_by_key_and_unfinished_ones_are_closed() {
     assert_eq!(interrupted.idempotency_key, "");
     drop(reader);
     runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
 }
 
 #[test]
 fn a_new_undo_step_drops_the_redo_steps_above_it() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("undo")).unwrap();
+    let paths = test_paths("undo");
+    let store = open_store(&paths).unwrap();
     write(&runtime, &store, IndexWrite::UpsertDocument(document_row("doc_a")));
     for position in 1..=3 {
         write(
@@ -375,12 +377,14 @@ fn a_new_undo_step_drops_the_redo_steps_above_it() {
     assert!(list_undo_steps(&reader, "doc_a").unwrap().is_empty());
     drop(reader);
     runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
 }
 
 #[test]
 fn the_kept_tables_read_back() {
     let runtime = multi_thread_runtime();
-    let store = open_store(&test_paths("kept")).unwrap();
+    let paths = test_paths("kept");
+    let store = open_store(&paths).unwrap();
     let project = ProjectRow {
         project_id: "prj_a".to_string(),
         path: "/home/user/projects/a".to_string(),
@@ -426,4 +430,5 @@ fn the_kept_tables_read_back() {
     assert_eq!(token.revoked_unix_ms, Some(11));
     drop(reader);
     runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
 }

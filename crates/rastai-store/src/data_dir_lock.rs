@@ -111,6 +111,13 @@ mod tests {
         }
     }
 
+    /// Every folder of `test_paths` shares one parent, the test's own folder.
+    fn remove_test_folder(paths: &DataPaths) {
+        if let Some(root) = paths.runtime.parent() {
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
     #[test]
     fn a_second_daemon_lock_is_refused_while_the_first_is_held() {
         let paths = test_paths("second");
@@ -127,7 +134,10 @@ mod tests {
         }
         drop(first);
         // Released with the handle, so the next daemon gets it.
-        assert!(take_daemon_lock(&paths).is_ok());
+        let next = take_daemon_lock(&paths);
+        assert!(next.is_ok());
+        drop(next);
+        remove_test_folder(&paths);
     }
 
     #[cfg(unix)]
@@ -136,8 +146,10 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let paths = test_paths("private");
-        let _lock = take_daemon_lock(&paths).unwrap();
+        let lock = take_daemon_lock(&paths).unwrap();
         let mode = std::fs::metadata(&paths.runtime).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, PRIVATE_FOLDER_MODE);
+        drop(lock);
+        remove_test_folder(&paths);
     }
 }

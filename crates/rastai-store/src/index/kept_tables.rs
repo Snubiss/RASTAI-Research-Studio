@@ -214,7 +214,7 @@ pub fn get_plugin(reader: &IndexReader, plugin_id: &str) -> Result<Option<Plugin
 fn word_list_value(words: &[String]) -> Result<SqlValue, StoreError> {
     match serde_json::to_string(words) {
         Ok(json) => Ok(SqlValue::Text(json)),
-        Err(error) => Err(StoreError::DatabaseCallFailed {
+        Err(error) => Err(StoreError::DatabaseWriteFailed {
             reason: format!("a list of words can't be written as JSON: {error}"),
         }),
     }

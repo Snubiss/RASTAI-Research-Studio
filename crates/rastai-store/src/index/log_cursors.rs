@@ -62,5 +62,9 @@ mod tests {
         let reader = open_index_reader(&pool).unwrap();
         assert_eq!(get_log_cursor(&reader, "daemon:events").unwrap(), Some(5));
         assert_eq!(get_log_cursor(&reader, "daemon:other").unwrap(), None);
+        drop(reader);
+        drop(pool);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 }
