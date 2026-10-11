@@ -1865,6 +1865,17 @@ export const CATALOG = [
     retired: false,
   },
   {
+    code: "RRS-J3006",
+    severity: "error",
+    title: "Another worker is already writing this run's event log",
+    message: "Another process is writing the event log {path}, so this worker stopped before writing to it.",
+    basic_text: "This task is already running, so Rastai didn't start a second copy of it.",
+    fix_text: "Wait for the running copy to finish, or cancel it, then try again.",
+    fix_command_id: "",
+    docs_anchor: "rrs-j3006",
+    retired: false,
+  },
+  {
     code: "RRS-M0001",
     severity: "error",
     title: "A graph node has no implementation; the design is view only",
