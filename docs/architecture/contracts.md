@@ -1990,7 +1990,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-C0008` | error | Update in progress; try again in a moment |
 | `RRS-C0009` | error | A settings file doesn't parse; fix the file first (it is never overwritten) |
 | `RRS-C0401` | warning | Events missed outside the daemon's bus buffer; the client refetches state |
-| `RRS-C0501` | error | No home folder for the data folders (set `HOME` or `RASTAI_HOME`) |
+| `RRS-C0501` | error | No home folder for the data folders (set `RASTAI_HOME`, or `HOME` on Linux and macOS and `USERPROFILE` on Windows) |
 | `RRS-C0502` | error | The operating system's random source can't be read |
 | `RRS-C1001` | error | No free port in 47820–47829 |
 | `RRS-C1002` | error | Not signed in, or unknown credential |

@@ -74,6 +74,7 @@ pub const CATALOG_PREFIXES: &[CatalogPrefix] = &[
         ranges: &[
             range(1, 399, "dispatch, arguments and settings files"),
             range(400, 499, "event stream"),
+            range(500, 599, "the process's environment (home folder, random source)"),
             range(1000, 1999, "auth, scopes, Host/Origin, sessions, data policy"),
             range(2000, 2999, "undo"),
             range(3000, 3999, "MCP"),
