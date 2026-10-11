@@ -149,6 +149,8 @@ mod tests {
         assert_eq!(texts, CONTRACT_PREFIXES);
     }
 
+    // The tests that call new_id are Unix only: other platforms have no random source yet (random.rs).
+    #[cfg(unix)]
     #[test]
     fn new_ids_have_the_contract_form() {
         for prefix in ALL_PREFIXES {
@@ -163,7 +165,16 @@ mod tests {
     fn ids_round_trip_through_base32() {
         let random = [0xA5, 0x00, 0xFF, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE];
         let id = format_id(IdPrefix::Run, NOON_UNIX_MS, &random);
+        assert_eq!(
+            split_id(&id, id_prefix_text(IdPrefix::Run)).unwrap().len(),
+            ID_BODY_LENGTH
+        );
         assert_eq!(decode_id(&id, IdPrefix::Run), (NOON_UNIX_MS, random.to_vec()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_ids_carry_the_time_they_were_made() {
         let made_now = new_id(IdPrefix::Job).unwrap();
         let (time, random_part) = decode_id(&made_now, IdPrefix::Job);
         assert!((time - now_unix_ms()).abs() < 60_000, "{made_now}");
@@ -192,12 +203,20 @@ mod tests {
         assert_eq!(sorted, ids);
     }
 
+    #[cfg(unix)]
     #[test]
     fn ids_made_one_after_another_sort_in_order() {
         let first = new_id(IdPrefix::Run).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(2));
         let second = new_id(IdPrefix::Run).unwrap();
         assert!(first < second, "{first} then {second}");
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn new_id_fails_without_a_random_source() {
+        let error = new_id(IdPrefix::Run).unwrap_err();
+        assert!(matches!(error, CoreError::RandomUnavailable { .. }), "{error:?}");
     }
 
     #[test]
