@@ -1521,7 +1521,7 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 | Internal | `rastai-diag` | diagnostics | |
 | Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver | |
 | Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `commands/descriptor.rs`, `commands/registry.rs` (it holds descriptors), `proto_json.rs` |
-| External | serde, serde_json | settings values, proto JSON values | `settings.rs`, `proto_json.rs` |
+| External | serde, serde_json | settings values, the default layer, proto JSON values | `settings.rs`, `settings_defaults.rs`, `proto_json.rs` |
 
 ### 5.4 Boundary rules
 

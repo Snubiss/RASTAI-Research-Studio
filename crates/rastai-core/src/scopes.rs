@@ -1,10 +1,12 @@
 //! Permission scopes (contracts 6.3): what a principal may do, and the text form commands, tokens and manifests use.
 //!
 //! The 17 fixed scopes are written as contracts 6.3 lists them (`conversations.read`). A third-party plugin's own
-//! scope is written `plugin:<plugin_id>`: the colon can't appear in a fixed scope or a plugin id
-//! (`[a-z][a-z0-9_]*`, contracts 6.1), so the two kinds can never be read as each other.
+//! scope is written `plugin:<plugin_id>`: the colon can't appear in a fixed scope or a plugin id (one snake_case
+//! command-id segment, contracts 6.1), so the two kinds can never be read as each other.
 
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
+
+use crate::commands::naming::is_plugin_id;
 
 const PLUGIN_SCOPE_PREFIX: &str = "plugin:";
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
@@ -113,17 +115,6 @@ pub fn scopes_allow(held: &[Scope], needed: &Scope) -> bool {
     held.contains(needed)
 }
 
-/// A plugin id as contracts 6.1 defines it: `[a-z][a-z0-9_]*`.
-fn is_plugin_id(text: &str) -> bool {
-    let mut characters = text.bytes();
-    match characters.next() {
-        Some(first) if first.is_ascii_lowercase() => {
-            characters.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
-        }
-        _ => false,
-    }
-}
-
 fn unknown_scope(text: &str) -> Diagnostic {
     let names: Vec<String> = FIXED_SCOPES.iter().map(scope_name).collect();
     let expected = format!("one of: {}, or {PLUGIN_SCOPE_PREFIX}<plugin_id>", names.join(", "));
@@ -183,6 +174,8 @@ mod tests {
             "plugin:Acme",
             "plugin:1x",
             "plugin:a.b",
+            "plugin:acme_",
+            "plugin:my__tools",
             "x:y",
         ] {
             let refusal = parse_scope(text).unwrap_err();

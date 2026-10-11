@@ -6,7 +6,7 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_proto::commands::v1::CommandDescriptor;
 use rastai_proto::common::v1::Stability;
 
-use crate::commands::naming::check_command_id;
+use crate::commands::naming::{check_command_id, check_plugin_id};
 use crate::commands::table::COMMANDS;
 use crate::principal::{Principal, PrincipalKind, principal_label};
 use crate::scopes::{parse_scope, scopes_allow};
@@ -49,11 +49,18 @@ pub fn load_core_commands() -> CommandRegistry {
 /// of the plugin from loading (layout 10.2). The refusals come back in `Err`, one diagnostic per skipped command:
 /// an id outside the plugin's namespace or in a core area (`RRS-P0004`), a malformed id or an unknown scope
 /// (`RRS-E1004`), or an id the plugin lists twice (`RRS-E2005`).
+///
+/// A plugin id that isn't one (`RRS-E1004`) refuses every command and leaves the registry as it was. The empty id
+/// matters most: core commands carry it, so letting it through would remove every core command and then add
+/// core-area ids that no contract row stands behind.
 pub fn add_plugin_commands(
     registry: &mut CommandRegistry,
     plugin_id: &str,
     commands: Vec<CommandDescriptor>,
 ) -> Result<(), Vec<Diagnostic>> {
+    if let Err(refusal) = check_plugin_id(plugin_id) {
+        return Err(refuse_every_command(refusal, commands.len()));
+    }
     remove_plugin_commands(registry, plugin_id);
     let mut refusals = Vec::new();
     for mut command in commands {
@@ -69,8 +76,12 @@ pub fn add_plugin_commands(
     if refusals.is_empty() { Ok(()) } else { Err(refusals) }
 }
 
-/// Removes every command of a plugin, when it is disabled, uninstalled or reloaded.
+/// Removes every command of a plugin, when it is disabled, uninstalled or reloaded. The empty id does nothing:
+/// it marks the core commands, which no plugin can remove.
 pub fn remove_plugin_commands(registry: &mut CommandRegistry, plugin_id: &str) {
+    if plugin_id.is_empty() {
+        return;
+    }
     registry.commands.retain(|command| command.plugin_id != plugin_id);
 }
 
@@ -130,6 +141,13 @@ fn check_plugin_command(
         return Err(diagnostic(CODE_DUPLICATE_ID, &[("id", &command.command_id)]));
     }
     Ok(())
+}
+
+/// One copy of the refusal per command, so the result still has one diagnostic per skipped command. An empty
+/// list still gets one, because a bad plugin id must never come back as `Ok`.
+fn refuse_every_command(refusal: Diagnostic, command_count: usize) -> Vec<Diagnostic> {
+    let refusal_count = if command_count == 0 { 1 } else { command_count };
+    vec![refusal; refusal_count]
 }
 
 fn filter_allows(filter: &CommandFilter, command: &CommandDescriptor) -> bool {
@@ -209,6 +227,34 @@ mod tests {
             .map(|command| command.command_id.as_str())
             .collect();
         assert_eq!(ids, ["psychology.step"]);
+    }
+
+    #[test]
+    fn a_bad_plugin_id_leaves_the_registry_untouched() {
+        for plugin_id in ["", "acme_", "my__tools", "Acme"] {
+            let mut registry = load_core_commands();
+            registry.commands.push(plugin_command("system.status", "read"));
+            let before = registry.clone();
+            let commands = vec![
+                plugin_command("model.load_evil", "read"),
+                plugin_command("acme.run", "read"),
+            ];
+            let refusals = add_plugin_commands(&mut registry, plugin_id, commands).unwrap_err();
+            let codes: Vec<&str> = refusals.iter().map(|refusal| refusal.code.as_str()).collect();
+            assert_eq!(codes, ["RRS-E1004", "RRS-E1004"], "{plugin_id:?}");
+            assert_eq!(registry, before, "{plugin_id:?}");
+            let refusals = add_plugin_commands(&mut registry, plugin_id, Vec::new()).unwrap_err();
+            assert_eq!(refusals.len(), 1, "{plugin_id:?}");
+        }
+    }
+
+    #[test]
+    fn removing_the_empty_plugin_id_keeps_the_core_commands() {
+        let mut registry = load_core_commands();
+        registry.commands.push(plugin_command("system.status", "read"));
+        let before = registry.clone();
+        remove_plugin_commands(&mut registry, "");
+        assert_eq!(registry, before);
     }
 
     #[test]

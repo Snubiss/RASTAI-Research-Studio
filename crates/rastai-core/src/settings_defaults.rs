@@ -26,7 +26,7 @@ const LOG_MAX_FILE_BYTES: u64 = 10 * MIB;
 const LOG_KEEP_FILES: u64 = 5;
 
 /// Every section and key with its default, as one JSON object (`{"ui": {"theme": "system", ...}, ...}`).
-pub fn default_values() -> Value {
+pub(crate) fn default_values() -> Value {
     let sections = [
         ("ui", ui_defaults()),
         ("daemon", daemon_defaults()),
