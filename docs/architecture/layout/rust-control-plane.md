@@ -1302,7 +1302,7 @@ crates/rastai-core/
       registry.rs             CommandRegistry, load_core_commands(), add_plugin_commands(), remove_plugin_commands(),
                               find_command(), list_commands(), check_scope()
       naming.rs               cli_words(), command_id_from_cli_words(), flag_name(), mcp_tool_name(),
-                              command_id_from_mcp_tool_name(), check_command_id(); the CLI's fixed words:
+                              command_id_from_mcp_tool_name(), javascript_wrapper_name(), check_command_id(); the CLI's fixed words:
                               ALIASES and CLI_MODE_WORDS (read by rastai-cli's modes.rs and by rastai-names-codegen)
       output.rs               CommandOutput (result_json, job_id, warnings)
     wire.rs                   rastai-diag Diagnostic to and from the proto Diagnostic; CommandRow to the proto CommandDescriptor
@@ -1384,6 +1384,7 @@ pub fn command_id_from_cli_words(registry: &CommandRegistry, words: &[String]) -
 pub fn flag_name(field_name: &str) -> String                              // "fail_fast" -> "--fail-fast"
 pub fn mcp_tool_name(command_id: &str) -> String                          // "eval.suite.edit" -> "eval__suite__edit"
 pub fn command_id_from_mcp_tool_name(tool_name: &str) -> String
+pub fn javascript_wrapper_name(command_id: &str) -> String                 // "eval.suite.add_conversation" -> "evalSuiteAddConversation"
 pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnostic>   // form, reserved areas, plugin prefix
 pub const ALIASES: &[(&str, &str)] = &[("doctor", "system.doctor"), ("rerun", "run.rerun")];   // short word -> command id
 /// The CLI's fixed words (contracts §15.1): process modes and local commands, none of them registry commands.
@@ -1519,7 +1520,7 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 |---|---|---|---|
 | Internal | `rastai-diag` | diagnostics | |
 | Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver | |
-| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `commands/descriptor.rs`, `proto_json.rs` |
+| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `commands/descriptor.rs`, `commands/registry.rs` (it holds descriptors), `proto_json.rs` |
 | External | serde, serde_json | settings values, proto JSON values | `settings.rs`, `proto_json.rs` |
 
 ### 5.4 Boundary rules
@@ -2871,7 +2872,7 @@ flowchart LR
 | CLI flag | field name with `_` as `-`, prefixed `--` | `flag_name` | same |
 | MCP tool | dots as `__`: `eval__suite__edit` (contracts §6.1) | `mcp_tool_name` | same |
 | Palette entry | `title`; Basic mode shows `basic` rows; experimental hidden unless `plugins.experimental_apis` | `apps/web` (frontend doc) | frontend tests |
-| Typed JS wrapper | camelCase of the segments taking a `CommandExecutor`: `evalSuiteAddConversation(executor, args)` (contracts §6.1) | `rastai-codegen` `javascript_commands.rs` | `just check-js` over the generated file |
+| Typed JS wrapper | camelCase of the segments taking a `CommandExecutor`: `evalSuiteAddConversation(executor, args)` (contracts §6.1) | `javascript_wrapper_name`, called by `rastai-codegen` `javascript_commands.rs` | `naming_round_trip.rs` (no two ids share a wrapper); `just check-js` over the generated file |
 | Copy as | flags only for CLI; `rastai.connect().execute(...)` for Python; `client.execute(...)` for JavaScript (a `DaemonClient` with a bearer credential; any `CommandExecutor` works); a `tools/call` body for MCP | `apps/web/src/commands/copy-as.js` | `fixtures/command-golden/copy-as.json`, read by both `copy-as.test.js` and `rastai-cli/tests/verbs.rs` |
 
 The copy-as formatter is JavaScript because only the UI copies; the CLI proves it can parse every golden line back. The MCP column is checked against `mcp_tool_name` in `naming_round_trip.rs`. There is no TypeScript column: TypeScript isn't a language the project writes (ADR-0036).

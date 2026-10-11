@@ -1,5 +1,5 @@
-//! `CommandRow`, one row of the core command table (layout rust-control-plane.md 5.2). The table itself, `COMMANDS`,
-//! arrives with M1-21; `wire.rs` turns a row into the proto `CommandDescriptor` the registry holds.
+//! `CommandRow`, one row of the core command table (layout rust-control-plane.md 5.2). The table itself is
+//! `COMMANDS` in table.rs; `wire.rs` turns a row into the proto `CommandDescriptor` the registry holds.
 
 use rastai_proto::commands::v1::CommandKind;
 use rastai_proto::common::v1::Stability;
