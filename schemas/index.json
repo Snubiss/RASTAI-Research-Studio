@@ -22,17 +22,17 @@
       "schema_id": "rastai.command.job.list/1"
     },
     {
-      "content_hash": "blake3:ee8926fdd6492c0991988ce9a68433358261a174f655e8ff75d0f53748dc52a5",
+      "content_hash": "blake3:9a6f306a0f80a283552d260f3a25dd7e6dad3c601d36adb5b3bdaef3393509fb",
       "file": "commands/rastai.command.node.list/1.json",
       "schema_id": "rastai.command.node.list/1"
     },
     {
-      "content_hash": "blake3:c1801421bee0134630e0bea04952075eb70cf2461eb661a880b90669c8874eb1",
+      "content_hash": "blake3:6b74f04b9accc2687f2c42ecad03395ff4bb0c9f4cc2f99987ccc09d54969835",
       "file": "commands/rastai.command.node.status/1.json",
       "schema_id": "rastai.command.node.status/1"
     },
     {
-      "content_hash": "blake3:35991873faaff5e0f727138dfb86160c4d7048f11adae3455c5df222e351bb1e",
+      "content_hash": "blake3:89f74bc8c475ea65237255f4a69e98adc2097abf3bdb433695dbdd9acf69bcf8",
       "file": "commands/rastai.command.plugin.list/1.json",
       "schema_id": "rastai.command.plugin.list/1"
     },
@@ -52,7 +52,7 @@
       "schema_id": "rastai.command.system.shutdown/1"
     },
     {
-      "content_hash": "blake3:acf8173a994257aabf66d6bf64899dad10d44eaabe43ac37a234156e958cf148",
+      "content_hash": "blake3:09e42bff035fc2318a8e8b07b882a51f54a73026bd4e0cef337e86267cba7ad0",
       "file": "commands/rastai.command.system.status/1.json",
       "schema_id": "rastai.command.system.status/1"
     },
@@ -77,7 +77,7 @@
       "schema_id": "rastai.command.token.revoke/1"
     },
     {
-      "content_hash": "blake3:7ede5ed805af2556d4f04fe4dd6ff1574d4b883b067c704d4d4e2fd1340f72fa",
+      "content_hash": "blake3:680283652d6da77b66dede4f2f9be609ac1a6453aaff153e3a4dd01aed035236",
       "file": "commands/rastai.command.train.start/1.json",
       "schema_id": "rastai.command.train.start/1"
     },

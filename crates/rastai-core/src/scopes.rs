@@ -192,6 +192,21 @@ mod tests {
         assert_eq!(token_preset_scopes("everything"), None);
     }
 
+    // rastai-formats describes `TokenCreateArgs.preset` with its own copy of the preset words, because it can't read
+    // this crate; this test keeps the two lists the same.
+    #[test]
+    fn the_described_presets_are_the_ones_with_scopes() {
+        let arguments = rastai_formats::commands::token::describe_token_create_args();
+        let preset = arguments.fields.iter().find(|field| field.name == "preset").unwrap();
+        let rastai_formats::describe::types::FieldKind::Enum(described) = &preset.kind else {
+            panic!("TokenCreateArgs.preset is not an enum: {:?}", preset.kind);
+        };
+        assert_eq!(described, &[CHAT_ONLY_PRESET, MCP_DEFAULT_PRESET]);
+        for word in described {
+            assert!(token_preset_scopes(word).is_some(), "{word} has no scopes");
+        }
+    }
+
     #[test]
     fn a_scope_is_allowed_only_when_held() {
         let held = token_preset_scopes("mcp-default").unwrap();

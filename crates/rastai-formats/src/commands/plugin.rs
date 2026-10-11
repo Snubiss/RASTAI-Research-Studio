@@ -5,12 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::commands::command_type;
-use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, field, list_of};
+use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of};
 
 const LIST_COMMAND_ID: &str = "plugin.list";
 const PLUGIN_SUMMARY_TYPE: &str = "PluginSummary";
 /// Why a plugin can't load travels as catalog diagnostics in their protobuf JSON (contracts 4.1).
 const DIAGNOSTIC_MESSAGE: &str = "rastai.common.v1.Diagnostic";
+/// Where the host found a plugin (contracts 6.5): shipped with the app, installed by the user, or a dev folder.
+const PLUGIN_SOURCES: &[&str] = &["preinstalled", "installed", "dev"];
 
 /// `plugin.list` takes nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,7 +30,7 @@ pub struct PluginSummary {
     pub version: String,
     /// A plugin state of contracts 9.7, such as `enabled`.
     pub state: String,
-    /// Where the host found it: `preinstalled`, `installed` or `dev`.
+    /// Where the host found it, one of `PLUGIN_SOURCES`: `preinstalled`, `installed` or `dev`.
     pub source: String,
     pub granted_permissions: Vec<String>,
     /// The plugin's `rastai-plugin.json` manifest (`rastai.plugin/1`), with the permissions it requests.
@@ -69,7 +71,7 @@ pub fn describe_plugin_summary() -> TypeDescription {
         ),
         field(
             "source",
-            FieldKind::String,
+            enum_of(PLUGIN_SOURCES),
             REQUIRED,
             "Where the host found it: preinstalled, installed or dev.",
         ),

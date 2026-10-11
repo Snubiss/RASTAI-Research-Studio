@@ -10,7 +10,7 @@ Neither validates: rastai-formats validates documents (through the wheel) before
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -62,7 +62,7 @@ class PluginSummary:
     # Its plugin state, such as enabled.
     state: str
     # Where the host found it: preinstalled, installed or dev.
-    source: str
+    source: Literal["preinstalled", "installed", "dev"]
     # The permissions the user granted.
     granted_permissions: list[str]
     # Its rastai-plugin.json manifest, with the permissions it requests.

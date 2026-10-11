@@ -6,6 +6,11 @@
       "properties": {
         "dtype": {
           "description": "bf16, fp16 or fp32.",
+          "enum": [
+            "bf16",
+            "fp16",
+            "fp32"
+          ],
           "type": "string"
         },
         "gpu_indices": {
@@ -25,6 +30,11 @@
         },
         "method": {
           "description": "full, lora or qlora.",
+          "enum": [
+            "full",
+            "lora",
+            "qlora"
+          ],
           "type": "string"
         },
         "micro_batch": {

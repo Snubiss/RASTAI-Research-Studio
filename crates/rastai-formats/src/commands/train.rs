@@ -6,10 +6,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::commands::{command_type, positional};
-use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, field, list_of};
+use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of};
 
 const START_COMMAND_ID: &str = "train.start";
 const TRAINING_PLAN_TYPE: &str = "TrainingPlan";
+/// How a run trains the weights (contracts 6.5); a closed set, so the schema and the generated types limit it.
+const TRAINING_METHODS: &[&str] = &["full", "lora", "qlora"];
+/// The number formats a run trains in (contracts 6.5).
+const TRAINING_DTYPES: &[&str] = &["bf16", "fp16", "fp32"];
 
 /// What to train: a recipe, the design to train and the data to train it on.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,9 +42,9 @@ pub struct TrainStartResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrainingPlan {
     pub recipe: String,
-    /// `full`, `lora` or `qlora`.
+    /// One of `TRAINING_METHODS`: `full`, `lora` or `qlora`.
     pub method: String,
-    /// `bf16`, `fp16` or `fp32`.
+    /// One of `TRAINING_DTYPES`: `bf16`, `fp16` or `fp32`.
     pub dtype: String,
     /// Empty for a CPU run.
     pub gpu_indices: Vec<u32>,
@@ -118,8 +122,8 @@ pub fn describe_train_start_result() -> TypeDescription {
 pub fn describe_training_plan() -> TypeDescription {
     let fields = vec![
         field("recipe", FieldKind::String, REQUIRED, "The recipe id."),
-        field("method", FieldKind::String, REQUIRED, "full, lora or qlora."),
-        field("dtype", FieldKind::String, REQUIRED, "bf16, fp16 or fp32."),
+        field("method", enum_of(TRAINING_METHODS), REQUIRED, "full, lora or qlora."),
+        field("dtype", enum_of(TRAINING_DTYPES), REQUIRED, "bf16, fp16 or fp32."),
         field(
             "gpu_indices",
             list_of(FieldKind::Integer),

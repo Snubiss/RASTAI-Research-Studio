@@ -10,7 +10,7 @@ Neither validates: rastai-formats validates documents (through the wheel) before
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -60,7 +60,7 @@ class NodeSummary:
     # The node's name.
     name: str
     # local for the embedded node, ssh for a paired one.
-    transport: str
+    transport: Literal["local", "ssh"]
     # user@host for an SSH node; empty for the embedded one.
     address: str | None = None
     # Its connection state, such as connected.

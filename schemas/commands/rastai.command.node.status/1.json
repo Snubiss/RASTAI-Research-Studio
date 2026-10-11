@@ -75,6 +75,10 @@
         },
         "transport": {
           "description": "local for the embedded node, ssh for a paired one.",
+          "enum": [
+            "local",
+            "ssh"
+          ],
           "type": "string"
         }
       },

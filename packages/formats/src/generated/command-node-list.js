@@ -17,7 +17,7 @@
  * @typedef {object} NodeSummary
  * @property {string} node_id The node's id.
  * @property {string} name The node's name.
- * @property {string} transport local for the embedded node, ssh for a paired one.
+ * @property {"local" | "ssh"} transport local for the embedded node, ssh for a paired one.
  * @property {string} [address] user@host for an SSH node; empty for the embedded one.
  * @property {string} state Its connection state, such as connected.
  * @property {number} protocol_version The node protocol version it speaks.
