@@ -33,8 +33,16 @@ fmt-check:
 lint:
     cargo clippy --workspace --all-targets --locked -- -D warnings
 
-# --allow unused-wrapper: most owner crates in deny.toml don't exist yet; their wrappers are written ahead.
 # Licenses, advisories, sources, bans and single-owner wrappers (deny.toml).
 deny:
-    @cargo deny --version | grep -qF "cargo-deny {{cargo_deny_version}}" || { echo "cargo-deny {{cargo_deny_version}} is required: cargo install --locked cargo-deny@{{cargo_deny_version}}"; exit 1; }
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Compare the whole version line, so a different cargo-deny (0.19.0, or 0.20.20) is refused, not just a prefix.
+    installed_version="$(cargo deny --version)"
+    if [ "$installed_version" != "cargo-deny {{cargo_deny_version}}" ]; then
+        echo "found '$installed_version', but cargo-deny {{cargo_deny_version}} is required."
+        echo "Install it with: cargo install --locked cargo-deny@{{cargo_deny_version}}"
+        exit 1
+    fi
+    # --allow unused-wrapper: most owner crates in deny.toml don't exist yet; their wrappers are written ahead.
     cargo deny --locked check --allow unused-wrapper

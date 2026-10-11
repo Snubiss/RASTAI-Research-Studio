@@ -27,7 +27,7 @@ version = "0.1.0"          # app, node and worker ship together under one versio
 # Every external crate is declared here once, with an exact version (=), so Cargo.lock and the allowlist agree
 # and an update is a deliberate PR. Member crates write `tokio = { workspace = true }` and turn on only the
 # features they use. The reason and allowed users of each one are in [workspace.metadata.rastai.allowlist] below.
-# Versions are the ones the spike measured with.
+# Versions are the ones layout rust-control-plane.md section 2.2 fixes.
 tokio = { version = "=1.53.0", default-features = false }
 axum = { version = "=0.8.9", default-features = false }
 serde = { version = "=1.0.229", features = ["derive"] }
@@ -57,28 +57,76 @@ cognitive_complexity = "warn"  # 15, from clippy.toml
 # or a crate a member isn't listed for. "*" means every member crate.
 serde                = { category = "foundation", reason = "document and JSON types", users = ["*"] }
 serde_json           = { category = "foundation", reason = "JSON values and text", users = ["*"] }
-tokio                = { category = "foundation", reason = "async runtime", users = ["rastai-server", "rastai-node", "rastai-gateway", "rastai-mcp", "rastai-transport", "rastai-sandbox", "rastai-plugin", "rastai-cli", "rastai-store", "rastai-archive", "rastai-crash-tests"] }
-axum                 = { category = "foundation", reason = "HTTP server routing", users = ["rastai-server", "rastai-gateway"] }
-prost                = { category = "compatibility", reason = "protobuf messages", users = ["rastai-proto", "rastai-store", "rastai-server", "rastai-cli"] }
-tonic                = { category = "compatibility", reason = "gRPC services and channels", users = ["rastai-proto", "rastai-plugin", "rastai-transport", "rastai-gateway", "rastai-node", "rastai-server"] }
-hyper                = { category = "foundation", reason = "HTTP client and the sandbox engine socket", users = ["rastai-transport", "rastai-sandbox"] }
-hyper-util           = { category = "foundation", reason = "HTTP client helpers", users = ["rastai-transport", "rastai-sandbox"] }
-rustls               = { category = "security", reason = "TLS, and SHA-256 and HMAC from its crypto provider", users = ["rastai-transport"] }
+tokio                = { category = "foundation", reason = "async runtime", users = [
+  "rastai-server",
+  "rastai-node",
+  "rastai-gateway",
+  "rastai-mcp",
+  "rastai-transport",
+  "rastai-sandbox",
+  "rastai-plugin",
+  "rastai-cli",
+  "rastai-store",
+  "rastai-archive",
+  "rastai-crash-tests",
+] }
+axum                 = { category = "foundation", reason = "HTTP server routing", users = [
+  "rastai-server",
+  "rastai-gateway",
+] }
+prost                = { category = "compatibility", reason = "protobuf messages", users = [
+  "rastai-proto",
+  "rastai-store",
+  "rastai-server",
+  "rastai-cli",
+] }
+tonic                = { category = "compatibility", reason = "gRPC services and channels", users = [
+  "rastai-proto",
+  "rastai-plugin",
+  "rastai-transport",
+  "rastai-gateway",
+  "rastai-node",
+  "rastai-server",
+] }
+hyper                = { category = "foundation", reason = "HTTP client and the sandbox engine socket", users = [
+  "rastai-transport",
+  "rastai-sandbox",
+] }
+hyper-util           = { category = "foundation", reason = "HTTP client helpers", users = [
+  "rastai-transport",
+  "rastai-sandbox",
+] }
+rustls               = { category = "security", reason = "TLS, and SHA-256 and HMAC from its crypto provider", users = [
+  "rastai-transport",
+] }
 tokio-rustls         = { category = "security", reason = "TLS on tokio streams", users = ["rastai-transport"] }
 webpki-roots         = { category = "security", reason = "TLS root certificates", users = ["rastai-transport"] }
-tower                = { category = "foundation", reason = "the connector tonic needs on Unix sockets", users = ["rastai-transport"] }
+tower                = { category = "foundation", reason = "the connector tonic needs on Unix sockets", users = [
+  "rastai-transport",
+] }
 rusqlite             = { category = "foundation", reason = "SQLite (bundled)", users = ["rastai-store"] }
 libc                 = { category = "foundation", reason = "one statvfs call (ADR-0033)", users = ["rastai-store"] }
-blake3               = { category = "security", reason = "content hashes, blob names", users = ["rastai-formats"] }   # every other crate hashes through rastai_formats::hashing
+# every other crate hashes through rastai_formats::hashing
+blake3               = { category = "security", reason = "content hashes, blob names", users = ["rastai-formats"] }
 miniz_oxide          = { category = "compatibility", reason = "zip inflate (ADR-0037)", users = ["rastai-formats"] }
-ed25519-dalek        = { category = "security", reason = "node and daemon identity, update signatures", users = ["rastai-node"] }   # the daemon signs through rastai_node::identity
+# the daemon signs through rastai_node::identity
+ed25519-dalek        = { category = "security", reason = "node and daemon identity, update signatures", users = [
+  "rastai-node",
+] }
 tokenizers           = { category = "compatibility", reason = "Hugging Face tokenizers", users = ["rastai-gateway"] }
 minijinja            = { category = "compatibility", reason = "chat templates", users = ["rastai-gateway"] }
 keyring              = { category = "security", reason = "OS keychain", users = ["rastai-server"] }
-mysql_async          = { category = "compatibility", reason = "MySQL client for the long-term archive", users = ["rastai-archive"] }
-wasm-bindgen         = { category = "foundation", reason = "the rastai-formats WASM build", users = ["rastai-formats-wasm"] }
-pyo3                 = { category = "foundation", reason = "the rastai-formats wheel", users = ["rastai-formats-python"] }
+mysql_async          = { category = "compatibility", reason = "MySQL client for the long-term archive", users = [
+  "rastai-archive",
+] }
+wasm-bindgen         = { category = "foundation", reason = "the rastai-formats WASM build", users = [
+  "rastai-formats-wasm",
+] }
+pyo3                 = { category = "foundation", reason = "the rastai-formats wheel", users = [
+  "rastai-formats-python",
+] }
 tauri                = { category = "foundation", reason = "desktop shell", users = ["rastai-desktop"] }
 tauri-build          = { category = "foundation", reason = "desktop shell build script", users = ["rastai-desktop"] }
 tauri-plugin-updater = { category = "foundation", reason = "desktop self-update", users = ["rastai-desktop"] }
-libfuzzer-sys        = { category = "dev", reason = "fuzz targets (contracts §12.5)", users = ["*"] }   # dev dependencies of the fuzz crates only
+# dev dependencies of the fuzz crates only
+libfuzzer-sys        = { category = "dev", reason = "fuzz targets (contracts §12.5)", users = ["*"] }
