@@ -55,6 +55,7 @@ RRS_C1006 = "RRS-C1006"
 RRS_C1007 = "RRS-C1007"
 RRS_C1008 = "RRS-C1008"
 RRS_C1009 = "RRS-C1009"
+RRS_C1010 = "RRS-C1010"
 RRS_C2001 = "RRS-C2001"
 RRS_C2002 = "RRS-C2002"
 RRS_C3001 = "RRS-C3001"
@@ -634,6 +635,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Change privacy.data_policy for the project, or for your user outside a project, if you want to allow it.",
         fix_command_id="settings.set",
         docs_anchor="rrs-c1009",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_C1010,
+        severity="error",
+        title="The owner token can't be read or created; the daemon refuses to start",
+        message="The owner token {path} can't be read or created, so the daemon refuses to start: {reason}.",
+        basic_text="Rastai couldn't open or write its key file, so it won't start.",
+        fix_text="Check that you own {path} and its folder and can read and write them. If the file is damaged, delete it; the next start writes a new one.",
+        fix_command_id="",
+        docs_anchor="rrs-c1010",
         retired=False,
     ),
     CatalogEntry(
