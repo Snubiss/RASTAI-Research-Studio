@@ -22,6 +22,9 @@ edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
+# Nothing goes to crates.io: the app, node and worker ship as release builds. It also lets cargo-deny accept the
+# path dependencies between our own crates (deny.toml [bans]), which it allows only for unpublishable crates.
+publish = false
 
 [workspace.dependencies]
 # Every external crate is declared here once, with an exact version (=), so Cargo.lock and the allowlist agree

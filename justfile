@@ -38,9 +38,10 @@ deny:
     #!/usr/bin/env bash
     set -euo pipefail
     # Compare the whole version line, so a different cargo-deny (0.19.0, or 0.20.20) is refused, not just a prefix.
-    installed_version="$(cargo deny --version)"
+    # `|| true` so a machine without cargo-deny gets the install line below instead of "no such command".
+    installed_version="$(cargo deny --version 2>/dev/null || true)"
     if [ "$installed_version" != "cargo-deny {{cargo_deny_version}}" ]; then
-        echo "found '$installed_version', but cargo-deny {{cargo_deny_version}} is required."
+        echo "cargo-deny {{cargo_deny_version}} is required, but found: ${installed_version:-no cargo-deny}"
         echo "Install it with: cargo install --locked cargo-deny@{{cargo_deny_version}}"
         exit 1
     fi

@@ -1,10 +1,11 @@
 [package]
 name = "rastai-diag"
-description = "Diagnostics for Rastai: the Diagnostic type, the compiled error catalog, renderers and the JSON-lines logger"
+description = "Diagnostics for Rastai: the Diagnostic type, compiled error catalog, renderers and JSON-lines logger"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 version.workspace = true
+publish.workspace = true
 
 # The bottom crate: no rastai dependencies, and it must build for wasm32-unknown-unknown (layout section 3.4).
 # serde and serde_json arrive with render_json.rs and logger.rs (M1-11).
