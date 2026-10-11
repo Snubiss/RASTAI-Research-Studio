@@ -2102,7 +2102,7 @@ The seed for `catalog/errors/` (M1-13 writes the JSON files from this list). The
 | `RRS-N2002` | warning | Connection to the node dropped; its streams ended |
 | `RRS-N2003` | info | Node reconnected; jobs reattached |
 | `RRS-N2004` | error | Local socket not reachable: nothing is listening at its path |
-| `RRS-N2005` | error | Socket folder is owned by another user or open to group or others; refused (fix: remove the folder; it is created again with mode 0700) |
+| `RRS-N2005` | error | Socket folder is owned by another user, open to group or others, or not a folder; refused (fix: remove it; it is created again with mode 0700) |
 | `RRS-N2006` | error | The peer of a local socket is another user; connection refused |
 | `RRS-N2007` | error | Local socket can't be created: its folder or the socket file is unusable (a live socket or a non-socket file is in the way) |
 | `RRS-N2008` | error | Local connection failed or timed out mid-request |
