@@ -4,7 +4,8 @@
 //!
 //! A command id is `<area>.<verb>` or `<area>.<noun>.<verb>`. Every segment is snake_case with no leading, trailing
 //! or doubled underscore, which is what makes each rule here lossless: `-` in a CLI word and `__` in an MCP tool
-//! name can only come from one place in the id.
+//! name can only come from one place in the id. A plugin id is the first segment of its commands, so it follows the
+//! same segment rule (`is_plugin_id`), and scopes.rs checks `plugin:<plugin_id>` with that same function.
 
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 
@@ -22,6 +23,8 @@ const MAX_SEGMENTS: usize = 3;
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
 const CODE_PLUGIN_COMMAND_OUTSIDE_NAMESPACE: &str = "RRS-P0004";
 const EXPECTED_ID_FORM: &str = "<area>.<verb> or <area>.<noun>.<verb>, in lowercase snake_case";
+const EXPECTED_PLUGIN_ID_FORM: &str =
+    "a plugin id: lowercase letters and digits in words joined by single underscores, starting with a letter";
 
 /// The reserved core areas (contracts 6.1). No plugin may use one as its id, and every core command sits in one.
 /// `view` holds UI-only actions and `core` is the pseudo plugin id of core sections and panels.
@@ -145,10 +148,13 @@ pub fn javascript_wrapper_name(command_id: &str) -> String {
 
 /// Checks a command id's form (contracts 6.1) and its area. A core command (`plugin_id` empty) must sit in a core
 /// area; a plugin's command must start with the plugin's id, and that id can't be a core area (`RRS-P0004`).
-/// A malformed id is `RRS-E1004`.
+/// A malformed command id or plugin id is `RRS-E1004`.
 // The layout's shape for every check that refuses with one diagnostic (5.2), as in scopes.rs.
 #[allow(clippy::result_large_err)]
 pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnostic> {
+    if !plugin_id.is_empty() {
+        check_plugin_id(plugin_id)?;
+    }
     let segments: Vec<&str> = command_id.split(ID_SEPARATOR).collect();
     let segment_count_ok = (MIN_SEGMENTS..=MAX_SEGMENTS).contains(&segments.len());
     if !segment_count_ok || !segments.iter().all(|segment| is_snake_case_segment(segment)) {
@@ -168,6 +174,24 @@ pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnos
         ));
     }
     Ok(())
+}
+
+/// True for a plugin id as contracts 6.1 defines it: one command-id segment (`acme`, `acme_tools2`), so no
+/// trailing or doubled underscore (`acme_`, `acme__tools`). The empty id of core commands is not a plugin id.
+pub(crate) fn is_plugin_id(text: &str) -> bool {
+    is_snake_case_segment(text)
+}
+
+/// Refuses a text that isn't a plugin id (`RRS-E1004`), including the empty id that marks core commands.
+#[allow(clippy::result_large_err)]
+pub(crate) fn check_plugin_id(plugin_id: &str) -> Result<(), Diagnostic> {
+    if is_plugin_id(plugin_id) {
+        return Ok(());
+    }
+    Err(diagnostic(
+        CODE_VALUE_NOT_ALLOWED,
+        &[("found", plugin_id), ("expected", EXPECTED_PLUGIN_ID_FORM)],
+    ))
 }
 
 /// True for one of the reserved core areas of contracts 6.1.
@@ -311,6 +335,27 @@ mod tests {
         assert_eq!(outside.code, CODE_PLUGIN_COMMAND_OUTSIDE_NAMESPACE);
         let reserved = check_command_id("model.load", "model").unwrap_err();
         assert_eq!(reserved.code, CODE_PLUGIN_COMMAND_OUTSIDE_NAMESPACE);
+    }
+
+    #[test]
+    fn plugin_ids_are_one_segment() {
+        for plugin_id in ["acme", "acme_tools2", "a1_2b"] {
+            assert!(is_plugin_id(plugin_id), "{plugin_id:?}");
+            check_plugin_id(plugin_id).unwrap();
+        }
+        for plugin_id in ["", "acme_", "_acme", "my__tools", "Acme", "1acme", "a.b", "a-b"] {
+            assert!(!is_plugin_id(plugin_id), "{plugin_id:?}");
+            assert_eq!(check_plugin_id(plugin_id).unwrap_err().code, CODE_VALUE_NOT_ALLOWED);
+        }
+    }
+
+    #[test]
+    fn a_malformed_plugin_id_is_named_in_the_refusal() {
+        // The refusal names the plugin id, not the command id: "acme_.run" is only wrong because "acme_" is.
+        let refusal = check_command_id("acme_.run", "acme_").unwrap_err();
+        assert_eq!(refusal.code, CODE_VALUE_NOT_ALLOWED);
+        let refusal = check_command_id("acme.run", "acme_").unwrap_err();
+        assert_eq!(refusal.code, CODE_VALUE_NOT_ALLOWED);
     }
 
     #[test]
