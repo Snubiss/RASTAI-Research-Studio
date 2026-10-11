@@ -60,8 +60,11 @@ impl ByteSource for SliceSource<'_> {
 
 impl ByteSource for FileSource {
     /// A file whose size can't be read reports 0, because `length` has no error (layout 4.3). `read_all_bytes`
-    /// checks every 0 with a one-byte read, so such a file fails with `RRS-D3001` instead of reading as empty. The
-    /// operating system's reason for the size failure is lost; the trait has nowhere to carry it.
+    /// checks every 0 with a one-byte read, so a file that still reads fails with `RRS-D3001` instead of reading as
+    /// empty. A file whose read fails too (a disk error, a stale network handle) still reads as empty, and its
+    /// document then fails as empty JSON (`RRS-E0001` at 1:1): `read_at` reports end-of-file and other failures as
+    /// the same error, so the probe can't tell them apart. The operating system's reasons are lost; the trait has
+    /// nowhere to carry them.
     fn length(&self) -> u64 {
         match self.file.metadata() {
             Ok(metadata) => metadata.len(),
@@ -111,7 +114,8 @@ pub fn read_all_bytes(source: &dyn ByteSource, limits: &ImportLimits) -> Result<
 }
 
 /// A source that says it has no bytes may only have failed to read its size (`FileSource::length`). A one-byte
-/// read tells the two apart: it fails on a really empty source and succeeds on the other.
+/// read tells the two apart when the bytes can still be read: it fails on a really empty source and succeeds on the
+/// other. Any failed probe counts as empty, because `read_at` gives end-of-file no error of its own.
 fn check_really_empty(source: &dyn ByteSource) -> Result<(), FormatsError> {
     let mut probe = [0u8; 1];
     if source.read_at(0, &mut probe).is_ok() {

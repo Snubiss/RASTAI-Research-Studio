@@ -8,8 +8,11 @@
 //! index. A map keyed by full pointer strings stored every parent's path again in every child, so memory grew with
 //! depth times key length; a hostile 16 MiB document with long keys 64 levels deep used over a gigabyte. In the
 //! tree each key is stored once, and memory is linear in the document (ADR-0032 decision 8).
-
-use std::collections::BTreeMap;
+//!
+//! An object's members are a plain list sorted by key, found by binary search. A BTreeMap per object allocated a
+//! whole node of 11 slots even for one member, so a document of one-member objects took twice what serde_json's own
+//! tree takes (1.42 GiB for `[{"a":0},{"a":0},...]` at 8 MB); the list holds just its members (limits.rs has the
+//! measured costs).
 
 use crate::json::pointer::{ROOT_POINTER, parse_array_index, unescape_pointer_token};
 
@@ -42,10 +45,17 @@ pub(crate) struct PositionNode {
 pub(crate) enum PositionChildren {
     /// A string, number, `true`, `false` or `null`.
     Leaf,
-    /// An object's members, by unescaped key.
-    Members(BTreeMap<String, PositionNode>),
+    /// An object's members, sorted by unescaped key. Keys are unique: the reader refuses a repeated one.
+    Members(Vec<MemberPosition>),
     /// An array's elements, in order.
     Elements(Vec<PositionNode>),
+}
+
+/// One object member: its unescaped key and its value's node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MemberPosition {
+    pub(crate) key: String,
+    pub(crate) node: PositionNode,
 }
 
 /// How far a pointer got down the tree.
@@ -54,6 +64,20 @@ struct PointerWalk {
     deepest: Option<TextPosition>,
     /// True when every token of the pointer was found.
     complete: bool,
+}
+
+/// An object's member list ready for lookup: sorted by key, and trimmed to its length so no spare capacity stays
+/// allocated for the life of the map.
+pub(crate) fn finish_members(mut members: Vec<MemberPosition>) -> PositionChildren {
+    members.sort_unstable_by(|left, right| left.key.cmp(&right.key));
+    members.shrink_to_fit();
+    PositionChildren::Members(members)
+}
+
+/// An array's element list, trimmed to its length like `finish_members`.
+pub(crate) fn finish_elements(mut elements: Vec<PositionNode>) -> PositionChildren {
+    elements.shrink_to_fit();
+    PositionChildren::Elements(elements)
 }
 
 /// The map of a whole document, from the root value's node.
@@ -86,7 +110,7 @@ pub(crate) fn position_count(map: &PositionMap) -> usize {
 fn count_nodes(node: &PositionNode) -> usize {
     let children_count: usize = match &node.children {
         PositionChildren::Leaf => 0,
-        PositionChildren::Members(members) => members.values().map(count_nodes).sum(),
+        PositionChildren::Members(members) => members.iter().map(|member| count_nodes(&member.node)).sum(),
         PositionChildren::Elements(elements) => elements.iter().map(count_nodes).sum(),
     };
     1 + children_count
@@ -126,9 +150,15 @@ fn find_child<'a>(node: &'a PositionNode, escaped_token: &str) -> Option<&'a Pos
     let token = unescape_pointer_token(escaped_token)?;
     match &node.children {
         PositionChildren::Leaf => None,
-        PositionChildren::Members(members) => members.get(&token),
+        PositionChildren::Members(members) => find_member(members, &token),
         PositionChildren::Elements(elements) => elements.get(parse_array_index(&token)?),
     }
+}
+
+/// The member with this key, by binary search over the key-sorted list.
+fn find_member<'a>(members: &'a [MemberPosition], key: &str) -> Option<&'a PositionNode> {
+    let index = members.binary_search_by(|member| member.key.as_str().cmp(key)).ok()?;
+    Some(&members[index].node)
 }
 
 #[cfg(test)]
@@ -146,14 +176,18 @@ mod tests {
         }
     }
 
+    // Members are given in any order, as in a document; finish_members sorts them.
     fn object(position: TextPosition, members: Vec<(&str, PositionNode)>) -> PositionNode {
-        let mut children = BTreeMap::new();
-        for (key, member) in members {
-            children.insert(key.to_string(), member);
+        let mut children = Vec::new();
+        for (key, node) in members {
+            children.push(MemberPosition {
+                key: key.to_string(),
+                node,
+            });
         }
         PositionNode {
             position,
-            children: PositionChildren::Members(children),
+            children: finish_members(children),
         }
     }
 
@@ -187,6 +221,22 @@ mod tests {
         // A leaf has no children, so a pointer past it falls back to the leaf.
         assert_eq!(find_position(&map, "/inputs/0/range/x"), Some(at(3, 6)));
         assert_eq!(position_count(&map), 6);
+    }
+
+    #[test]
+    fn members_given_in_any_order_are_all_found() {
+        // Keys in reverse order, as a document may write them; binary search needs them sorted.
+        let keys = ["z", "y", "m", "b", "a", ""];
+        let mut members = Vec::new();
+        for (index, key) in keys.iter().enumerate() {
+            members.push((*key, leaf(at(2, index as u32 + 1))));
+        }
+        let map = position_map_from_root(object(at(1, 1), members));
+        for (index, key) in keys.iter().enumerate() {
+            assert_eq!(position_of(&map, &format!("/{key}")), Some(at(2, index as u32 + 1)));
+        }
+        assert_eq!(position_of(&map, "/c"), None);
+        assert_eq!(position_count(&map), keys.len() + 1);
     }
 
     #[test]
