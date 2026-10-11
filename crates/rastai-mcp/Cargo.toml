@@ -1,0 +1,31 @@
+[package]
+name = "rastai-mcp"
+description = "Rastai's in-house MCP: JSON-RPC 2.0 messages, the MCP server side as plain data, and the stdio bridge"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# M1-29 lands the server side and the bridge (layout: rust-control-plane.md section 7, build-order step 1). The
+# client (client/, the harness tools of M7-E02) arrives with its task, and with it tokio's `process` and `sync`.
+[dependencies]
+rastai-diag = { path = "../rastai-diag" }
+# Principal, scopes and check_scope, the MCP naming rule, the command registry, ids and time.
+rastai-core = { path = "../rastai-core" }
+# The strict JSON reader every incoming message goes through (jsonrpc.rs).
+rastai-formats = { path = "../rastai-formats" }
+# CommandDescriptor, the registry's row type (server/tools.rs).
+rastai-proto = { path = "../rastai-proto" }
+# HTTP/1.1 over daemon.sock for the bridge (bridge.rs).
+rastai-transport = { path = "../rastai-transport" }
+serde_json = { workspace = true }
+# The bridge reads stdin and writes stdout line by line.
+tokio = { workspace = true, features = ["io-util", "io-std"] }
+
+[dev-dependencies]
+# tests/bridge.rs runs the bridge against a fake /mcp on a Unix socket, in #[tokio::test]s.
+tokio = { workspace = true, features = ["io-util", "io-std", "net", "rt", "macros", "time"] }
+
+[lints]
+workspace = true

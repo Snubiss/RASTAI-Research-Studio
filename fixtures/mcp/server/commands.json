@@ -1,0 +1,71 @@
+[
+  {
+    "command_id": "system.status",
+    "title": "System status",
+    "summary": "Daemon, nodes, versions and protocol versions.",
+    "section": "system",
+    "scope": "read",
+    "kind": "sync",
+    "experimental": false,
+    "arguments_schema": { "type": "object", "properties": {}, "additionalProperties": false },
+    "result_schema": {
+      "type": "object",
+      "properties": { "app_version": { "type": "string" }, "node_count": { "type": "integer" } },
+      "required": ["app_version", "node_count"]
+    }
+  },
+  {
+    "command_id": "job.get",
+    "title": "Get a job",
+    "summary": "One job's state, progress and outcome.",
+    "section": "job",
+    "scope": "read",
+    "kind": "sync",
+    "experimental": false,
+    "arguments_schema": {
+      "type": "object",
+      "properties": { "job_id": { "type": "string" } },
+      "required": ["job_id"],
+      "additionalProperties": false
+    },
+    "result_schema": null
+  },
+  {
+    "command_id": "train.start",
+    "title": "Start training",
+    "summary": "Start a run: a recipe, a model or design, and a dataset.",
+    "section": "train",
+    "scope": "training",
+    "kind": "job",
+    "experimental": false,
+    "arguments_schema": {
+      "type": "object",
+      "properties": { "recipe": { "type": "string" }, "dataset_id": { "type": "string" } },
+      "required": ["recipe", "dataset_id"],
+      "additionalProperties": false
+    },
+    "result_schema": null
+  },
+  {
+    "command_id": "system.shutdown",
+    "title": "Shut down the daemon",
+    "summary": "Stop the daemon gracefully; jobs keep running and are reattached on the next start.",
+    "section": "system",
+    "scope": "system.admin",
+    "kind": "sync",
+    "experimental": false,
+    "arguments_schema": null,
+    "result_schema": null
+  },
+  {
+    "command_id": "system.env.list",
+    "title": "List environments",
+    "summary": "The uv environments and their lock hashes.",
+    "section": "system",
+    "scope": "read",
+    "kind": "sync",
+    "experimental": true,
+    "arguments_schema": null,
+    "result_schema": null
+  }
+]

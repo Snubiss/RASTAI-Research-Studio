@@ -1,0 +1,2 @@
+{"session": {"token_preset": "mcp-default"}}
+{"note": "a revision the server doesn't speak gets its newest one, which the client may refuse", "client": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2099-01-01", "capabilities": {}}}, "server": {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-11-25", "capabilities": {"tools": {"listChanged": false}}, "serverInfo": {"name": "rastai", "title": "Rastai Research Studio", "version": "<app_version>"}}}}

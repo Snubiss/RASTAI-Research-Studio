@@ -15,6 +15,7 @@ members = [
   "crates/rastai-core",
   "crates/rastai-store",
   "crates/rastai-transport",
+  "crates/rastai-mcp",
   "tools/codegen",
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.

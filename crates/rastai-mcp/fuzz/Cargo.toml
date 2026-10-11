@@ -1,0 +1,42 @@
+# The cargo-fuzz crate for rastai-mcp (contracts 12.5, ADR-0037): one target per in-house parser of untrusted
+# input. Every MCP message comes from an outside client (an agent, through `rastai mcp` or `/mcp`), so the JSON-RPC
+# decoder has one. It is its own workspace (the root Cargo.toml excludes this folder) because it builds only on the
+# nightly toolchain `just fuzz` pins. Run the target with: just fuzz rastai-mcp jsonrpc_decode 60
+[package]
+name = "rastai-mcp-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly, like every external crate (root Cargo.toml); a dev dependency of the fuzz crates only.
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.rastai-mcp]
+path = ".."
+
+# The owner principal for the session the target answers with.
+[dependencies.rastai-core]
+path = "../../rastai-core"
+
+# CommandDescriptor, for the one tool the session lists.
+[dependencies.rastai-proto]
+path = "../../rastai-proto"
+
+# Reads back the arguments of a tool call. The same exact version as the root Cargo.toml.
+[dependencies.serde_json]
+version = "=1.0.151"
+
+# An independent workspace for the fuzz targets.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "jsonrpc_decode"
+path = "fuzz_targets/jsonrpc_decode.rs"
+test = false
+doc = false
+bench = false
