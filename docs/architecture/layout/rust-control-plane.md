@@ -2016,17 +2016,19 @@ crates/rastai-mcp/
     lib.rs
     error.rs                  McpError
     protocol_versions.rs      SUPPORTED_PROTOCOL_VERSIONS (MCP revision dates, newest first), pick_protocol_version()
-    jsonrpc.rs                JsonRpcId, JsonRpcMessage, parse_message() (strict JSON, size cap), message_json()
+    jsonrpc.rs                JsonRpcId, JsonRpcMessage, parse_message() (strict JSON, size cap), message_json(),
+                              error_reply(), diagnostic_reply()
     server/
       session.rs              McpSession, new_session(), initialize and initialized handling
       handle.rs               handle_message() -> McpStep
-      tools.rs                McpTool, tool_from_command(), tools_list_result(), tool_call_reply()
+      tools.rs                McpTool, tool_from_command(), tools_for_principal(), tools_list_result(), tool_call_reply()
     client/
       connection.rs           McpConnection enum, initialize(), list_tools(), call_tool(), close_connection()
       line_channel.rs         LineChannel: newline-delimited JSON over two tokio channels; any byte stream adapts to it
       stdio_process.rs        start a local stdio MCP server as a child process and adapt it to a LineChannel
       http_connection.rs      Streamable HTTP client over rastai-transport's HTTP client
-    bridge.rs                 run_stdio_bridge(): `rastai mcp`, stdin and stdout to POST /mcp on daemon.sock
+    bridge.rs                 run_stdio_bridge(): `rastai mcp`, stdin and stdout to POST /mcp on daemon.sock;
+                              run_bridge(), the same over any line stream (the tests)
   fuzz/                       cargo-fuzz crate, own workspace, nightly
     fuzz_targets/
       jsonrpc_decode.rs       parse_message on arbitrary text never panics; oversize input refused before parsing
@@ -2052,6 +2054,8 @@ pub enum JsonRpcMessage {
 }
 pub fn parse_message(text: &str) -> Result<JsonRpcMessage, McpError>      // RRS-C3001 on malformed input
 pub fn message_json(message: &JsonRpcMessage) -> String
+pub fn error_reply(id: Option<JsonRpcId>, error: &McpError) -> JsonRpcMessage     // the diagnostic in `data`
+pub fn diagnostic_reply(id: Option<JsonRpcId>, json_rpc_code: i64, diagnostic: &Diagnostic) -> JsonRpcMessage
 
 // server/
 pub struct McpSession { pub session_id: String, pub protocol_version: String, pub principal: Principal,
@@ -2067,9 +2071,11 @@ pub enum McpStep {
 }
 pub struct ToolOutcome { pub ok: bool, pub result_json: String, pub job_id: String, pub diagnostics: Vec<Diagnostic> }
 
-pub fn new_session(principal: Principal) -> McpSession
+pub fn new_session(principal: Principal) -> Result<McpSession, McpError>     // a random id: RRS-C0502 without one
 pub fn handle_message(session: &mut McpSession, message: JsonRpcMessage, tools: &[McpTool]) -> McpStep
 pub fn tool_from_command(command: &CommandDescriptor) -> McpTool             // the registry's generated descriptor
+pub fn tools_for_principal(registry: &CommandRegistry, principal: &Principal, include_experimental: bool) -> Vec<McpTool>
+pub fn tools_list_result(tools: &[McpTool]) -> serde_json::Value
 pub fn tool_call_reply(request_id: JsonRpcId, outcome: &ToolOutcome) -> JsonRpcMessage
 
 // client/
@@ -2091,12 +2097,16 @@ pub async fn close_connection(connection: McpConnection)
 
 // bridge.rs
 pub struct DaemonEndpoint { pub socket_path: PathBuf }
-pub async fn run_stdio_bridge(daemon: &DaemonEndpoint, token: &str) -> Result<(), McpError>
+pub async fn run_stdio_bridge(daemon: &DaemonEndpoint, token: &str)       // ends when the client closes stdin
+pub async fn run_bridge(daemon: &DaemonEndpoint, token: &str, input: impl AsyncBufRead + Unpin,
+                        output: &mut (impl AsyncWrite + Unpin))
 ```
 
 - **Server methods:** `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Anything else gets JSON-RPC error `-32601`. `resources/*` for `ui://` panels comes with two-way MCP Apps, which is deferred (§33).
-- **Tool list:** one tool per command the session's principal may run (`scopes_allow`), named by `mcp_tool_name`. `inputSchema` is the command's `arguments_schema_json`; `outputSchema` its `result_schema_json`; `annotations.readOnlyHint` is true for `read`-scope commands. Experimental commands are listed only when `plugins.experimental_apis` is on.
+- **Tool list:** one tool per command the session's principal may run (`tools_for_principal`, through `check_scope`), named by `mcp_tool_name`. A `tools/call` names only a listed tool; any other name is JSON-RPC `-32602` with `RRS-C0001`, and nothing is executed. `inputSchema` is the command's `arguments_schema_json`; `outputSchema` its `result_schema_json`; `annotations.readOnlyHint` is true for `read`-scope commands. Experimental commands are listed only when `plugins.experimental_apis` is on.
 - **Tool results:** `structuredContent` is the command's result object and `content` holds the same JSON as one text item. A `job` command returns `{job_id}` at once, with a text note to poll `job.get`. A failed command returns `isError: true` with each diagnostic rendered by `render_basic` and its code, so an agent can act on the code.
+- **Errors:** every JSON-RPC error carries its diagnostic (`render_json`) as `data`: `-32700` and `-32600` for a malformed message, `-32601` for an unknown method, `-32602` for bad params or an unknown tool, `-32000` for a Rastai diagnostic (`RRS-C3002`, the daemon unreachable, a refusal from the request gate).
+- **The bridge:** a line that isn't a valid message is answered by the bridge itself (`RRS-C3001`); without a token every request is answered `RRS-C3002` and the daemon is never contacted. Messages go one at a time, in order. After a 404 to its session id it replays the client's `initialize` (and `notifications/initialized`) once, then retries the message once.
 - **Transport:** Streamable HTTP on `/mcp`. Every reply is a single `application/json` body in the prototype (no command needs server-pushed progress yet). `GET /mcp` answers 405. The session id travels in `Mcp-Session-Id`; sessions idle for 24 h are dropped.
 - **Callers:** `rastai-server/src/http/mcp_endpoint.rs` (server side), `rastai-cli` (`rastai mcp` → `run_stdio_bridge`), `rastai-node` (gym and Pass@k tools: `connection_from_lines` over `ExecInSandbox`, `connect_http` for remote MCP servers the harness allows).
 
@@ -2107,9 +2117,10 @@ pub async fn run_stdio_bridge(daemon: &DaemonEndpoint, token: &str) -> Result<()
 pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: &str, body: &str) -> McpHttpReply {
     let message = match parse_message(body) {
         Ok(message) => message,
-        Err(error) => return malformed_request_reply(error),            // RRS-C3001
+        Err(error) => return mcp_http_reply(Some(error_reply(None, &error))),   // RRS-C3001
     };
-    let tools = tools_for_principal(server, &principal);                // registry filtered by scopes
+    // `registry` and `experimental` (setting_bool of plugins.experimental_apis) are read under their locks (8.2).
+    let tools = tools_for_principal(&registry, &principal, experimental);    // registry filtered by scopes
     let mut session = take_or_create_session(server, session_id, &principal);
     let step = handle_message(&mut session, message, &tools);
     let reply = match step {
@@ -2134,7 +2145,7 @@ pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: 
 | Internal | `rastai-formats` | the strict JSON reader for incoming messages | |
 | Internal | `rastai-transport` | HTTP client for remote servers and for the bridge over `daemon.sock` | |
 | Internal | `rastai-diag` | diagnostics, `render_basic` | |
-| External | tokio (`process`, `io-util`, `sync`, `time`) | child processes, line I/O, timeouts | `client/stdio_process.rs`, `client/line_channel.rs` |
+| External | tokio (`process`, `io-util`, `io-std`, `sync`, `time`) | child processes, line I/O, timeouts; the bridge's stdin and stdout | `client/stdio_process.rs`, `client/line_channel.rs`, `bridge.rs` |
 | External | serde_json | message values | `jsonrpc.rs` |
 
 ### 7.5 Boundary rules

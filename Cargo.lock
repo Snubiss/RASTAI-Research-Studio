@@ -551,6 +551,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rastai-mcp"
+version = "0.1.0"
+dependencies = [
+ "rastai-core",
+ "rastai-diag",
+ "rastai-formats",
+ "rastai-proto",
+ "rastai-transport",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rastai-proto"
 version = "0.1.0"
 dependencies = [
