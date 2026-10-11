@@ -1,0 +1,56 @@
+{
+  "format_version": 1,
+  "examples": [
+    {
+      "command_id": "system.status",
+      "arguments": {},
+      "cli": "rastai system status",
+      "python": "rastai.connect().execute(\"system.status\", {})",
+      "javascript": "await client.execute(\"system.status\", {})",
+      "mcp": { "name": "system__status", "arguments": {} }
+    },
+    {
+      "command_id": "token.login_code.create",
+      "arguments": {},
+      "cli": "rastai token login-code create",
+      "python": "rastai.connect().execute(\"token.login_code.create\", {})",
+      "javascript": "await client.execute(\"token.login_code.create\", {})",
+      "mcp": { "name": "token__login_code__create", "arguments": {} }
+    },
+    {
+      "command_id": "system.crash_report.list",
+      "arguments": {},
+      "cli": "rastai system crash-report list",
+      "python": "rastai.connect().execute(\"system.crash_report.list\", {})",
+      "javascript": "await client.execute(\"system.crash_report.list\", {})",
+      "mcp": { "name": "system__crash_report__list", "arguments": {} }
+    },
+    {
+      "command_id": "chat.continue",
+      "arguments": { "max_new_tokens": 64 },
+      "cli": "rastai chat continue --max-new-tokens 64",
+      "python": "rastai.connect().execute(\"chat.continue\", {\"max_new_tokens\": 64})",
+      "javascript": "await client.execute(\"chat.continue\", { max_new_tokens: 64 })",
+      "mcp": { "name": "chat__continue", "arguments": { "max_new_tokens": 64 } }
+    },
+    {
+      "command_id": "chat.regenerate",
+      "arguments": { "from_token_index": 12 },
+      "cli": "rastai chat regenerate --from-token-index 12",
+      "python": "rastai.connect().execute(\"chat.regenerate\", {\"from_token_index\": 12})",
+      "javascript": "await client.execute(\"chat.regenerate\", { from_token_index: 12 })",
+      "mcp": { "name": "chat__regenerate", "arguments": { "from_token_index": 12 } }
+    },
+    {
+      "command_id": "eval.test",
+      "arguments": { "suite": "evals/facts.rrseval", "model": "ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N" },
+      "cli": "rastai eval test --suite evals/facts.rrseval --model ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N",
+      "python": "rastai.connect().execute(\"eval.test\", {\"suite\": \"evals/facts.rrseval\", \"model\": \"ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N\"})",
+      "javascript": "await client.execute(\"eval.test\", { suite: \"evals/facts.rrseval\", model: \"ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N\" })",
+      "mcp": {
+        "name": "eval__test",
+        "arguments": { "suite": "evals/facts.rrseval", "model": "ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N" }
+      }
+    }
+  ]
+}
