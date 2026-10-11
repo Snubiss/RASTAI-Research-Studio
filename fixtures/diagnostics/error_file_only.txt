@@ -1,0 +1,4 @@
+error[RRS-S3001]: Not enough free disk space
+ --> runs/run_01/events.log
+  = Saving needs 4096 bytes on /home, but only 1024 are free.
+  = fix: Free up space, or let Rastai delete old checkpoints and unused files.

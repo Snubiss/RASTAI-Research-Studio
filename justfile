@@ -14,8 +14,8 @@ cargo_deny_version := "0.20.2"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# The gate every PR passes: format, lint, tests and dependency policy.
-check: fmt-check lint test-rust deny
+# The gate every PR passes: format, lint, tests, the browser build and dependency policy.
+check: fmt-check lint test-rust wasm deny
 
 # Build every crate in the workspace. --locked: Cargo.lock is checked in and never silently changes.
 build:
@@ -28,6 +28,11 @@ test-rust:
 # Fails if any file isn't formatted by rustfmt (rustfmt.toml: 120 columns).
 fmt-check:
     cargo fmt --all --check
+
+# The crates that also run in the browser must build for wasm32-unknown-unknown (layout section 3.4).
+# For now that is rastai-diag; the rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
+wasm:
+    cargo build -p rastai-diag --target wasm32-unknown-unknown --locked
 
 # clippy with the workspace lints (Cargo.toml) and thresholds (clippy.toml); every warning fails.
 lint:

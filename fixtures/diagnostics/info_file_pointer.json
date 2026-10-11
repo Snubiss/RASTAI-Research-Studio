@@ -1,0 +1,14 @@
+{
+  "title": "File from a newer schema version; opened read-only",
+  "basic_text": "This file was saved by a newer Rastai, so it opens read-only.",
+  "source_file": "textcnn_source.txt",
+  "diagnostic": {
+    "code": "RRS-E4001",
+    "severity": "info",
+    "message": "schema version 2 is newer than this build's 1",
+    "path": "designs/textcnn.rrsmodel#/schema_version",
+    "fix_text": "",
+    "fix_command_id": "",
+    "fix_arguments_json": ""
+  }
+}

@@ -1,0 +1,2 @@
+Your disk is almost full, so Rastai can't save this.
+Fix: Free up space, or let Rastai delete old checkpoints and unused files.

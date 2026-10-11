@@ -1,0 +1,13 @@
+{
+  "title": "Model is being evicted; generation stopped",
+  "basic_text": "",
+  "diagnostic": {
+    "code": "RRS-H3004",
+    "severity": "info",
+    "message": "another job needed the GPU memory",
+    "path": "",
+    "fix_text": "",
+    "fix_command_id": "",
+    "fix_arguments_json": ""
+  }
+}

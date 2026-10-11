@@ -1,0 +1,19 @@
+{
+  "requires": ["psychology"],
+  "type": "rastai.model",
+  "schema_version": 1,
+  "name": "textcnn",
+  "inputs": [
+    {
+      "name": "title",
+      "range": [0, 64],
+      "kind": "tokens"
+    },
+    {
+      "name": "body",
+        "range": [0, 128],
+      "kind": "tokens"
+    }
+  ],
+  "layers": []
+}

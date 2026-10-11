@@ -1,0 +1,14 @@
+{
+  "title": "File requires a plugin that isn't installed or enabled",
+  "basic_text": "This design uses the Psychology plugin, which isn't installed.",
+  "source_file": "textcnn_source.txt",
+  "diagnostic": {
+    "code": "RRS-E3001",
+    "severity": "warning",
+    "message": "needs plugin \"psychology\"",
+    "path": "designs/textcnn.rrsmodel:2:3",
+    "fix_text": "install or enable the plugin",
+    "fix_command_id": "plugin.install",
+    "fix_arguments_json": "{\"plugin_id\":\"psychology\"}"
+  }
+}

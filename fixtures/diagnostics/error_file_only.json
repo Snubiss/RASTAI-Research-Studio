@@ -1,0 +1,13 @@
+{
+  "title": "Not enough free disk space",
+  "basic_text": "Your disk is almost full, so Rastai can't save this.",
+  "diagnostic": {
+    "code": "RRS-S3001",
+    "severity": "error",
+    "message": "Saving needs 4096 bytes on /home, but only 1024 are free.",
+    "path": "runs/run_01/events.log",
+    "fix_text": "Free up space, or let Rastai delete old checkpoints and unused files.",
+    "fix_command_id": "storage.gc",
+    "fix_arguments_json": ""
+  }
+}

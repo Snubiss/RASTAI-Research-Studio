@@ -1,8 +1,18 @@
 //! rastai-diag: the `Diagnostic` type every crate returns, the compiled catalog, the renderers and the
 //! JSON-lines logger (layout: rust-control-plane.md section 3).
 //!
-//! This file is a list of `pub mod` lines. The modules arrive with M1-11; until then the crate is an empty
-//! member that proves the workspace builds and that its shared settings reach every crate.
+//! This file is a list of `pub mod` lines (contracts 12.2), plus the M1-03 test that the crate inherits the
+//! workspace package fields.
+
+pub mod catalog;
+pub mod diagnostic;
+pub mod generated;
+pub mod logger;
+pub mod path;
+pub mod render_basic;
+pub mod render_json;
+pub mod render_text;
+pub mod terms;
 
 #[cfg(test)]
 mod tests {

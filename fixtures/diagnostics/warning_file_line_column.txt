@@ -1,0 +1,6 @@
+warning[RRS-E3001]: File requires a plugin that isn't installed or enabled
+ --> designs/textcnn.rrsmodel:2:3
+  |
+2 |   "requires": ["psychology"],
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^ needs plugin "psychology"
+  = fix: install or enable the plugin
