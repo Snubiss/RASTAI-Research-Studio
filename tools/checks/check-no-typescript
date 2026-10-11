@@ -16,7 +16,9 @@ from repo_files import list_files, parse_root_argument, report
 TYPESCRIPT_SUFFIXES = (".ts", ".tsx", ".mts", ".cts")
 # The generated folders of the frontend layout 1.1 and contracts 12.4. A path is generated when it starts with
 # one of GENERATED_FOLDERS or contains GENERATED_FOLDER_PART (each package's and plugin UI's src/generated/).
-GENERATED_FOLDERS = ("packages/proto/", "packages/catalog/")
+# @rastai/proto isn't a whole generated folder: its index.js and golden test are hand-written, so only its
+# src/generated/ is exempt, through GENERATED_FOLDER_PART.
+GENERATED_FOLDERS = ("packages/catalog/",)
 GENERATED_FOLDER_PART = "/src/generated/"
 
 

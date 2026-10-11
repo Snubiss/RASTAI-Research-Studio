@@ -26,8 +26,10 @@ from repo_files import (
 CHECKED_FOLDER_PATTERNS = ["apps/*/src/*", "packages/*/src/*", "plugins/*/ui/src/*"]
 # The one place color values live (contracts 5.6).
 TOKEN_FOLDER = "packages/ui/src/tokens/"
-# Generated folders hold no hand-written colors and aren't reviewed (frontend layout 1.1).
-GENERATED_FOLDERS = ("packages/proto/", "packages/catalog/")
+# Generated folders hold no hand-written colors and aren't reviewed (frontend layout 1.1). @rastai/proto's
+# hand-written index.js and golden test are checked; only its src/generated/ is exempt, through
+# GENERATED_FOLDER_PART.
+GENERATED_FOLDERS = ("packages/catalog/",)
 GENERATED_FOLDER_PART = "/src/generated/"
 JAVASCRIPT_SUFFIXES = (".js", ".jsx", ".mjs")
 CSS_SUFFIXES = (".css",)

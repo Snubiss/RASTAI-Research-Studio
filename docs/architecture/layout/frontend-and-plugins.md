@@ -121,7 +121,7 @@ These extend contracts §12.4 and ADR-0036. The owner reviews every line, so the
 - prettier formats; `tools/checks/check-no-typescript` fails on any `.ts`, `.tsx` or `.d.ts` outside generated folders; `check-colors` fails on a color literal outside `@rastai/ui/src/tokens/` (2.10); `check-imports` enforces the import rules of each section below.
 
 **Generated code**
-- Lives in generated folders only: `packages/proto/`, `packages/catalog/`, `packages/formats/src/generated/`, `packages/client/src/generated/`, a plugin's `ui/src/generated/`. Each is `.js` with JSDoc `@typedef`s, or `.js` plus `.d.ts` declarations (protobuf-es generates with target `js+dts`).
+- Lives in generated folders only: `packages/proto/src/generated/` (the package's `index.js` and golden test are hand-written), `packages/catalog/`, `packages/formats/src/generated/`, `packages/client/src/generated/`, a plugin's `ui/src/generated/`. Each is `.js` with JSDoc `@typedef`s, or `.js` plus `.d.ts` declarations (protobuf-es generates with target `js+dts`).
 - Never edited by hand and not part of review. `just codegen` regenerates it; CI fails if that changes anything.
 
 A short example of the style, from 2.3:

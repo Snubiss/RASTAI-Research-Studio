@@ -1,6 +1,6 @@
 // The shared state enums (contracts 4.1). Each state machine mirrors contracts section 9, which names the
 // transitions; the flow docs draw them. Values follow the order section 9 lists them in, after the zero value.
-// Field numbers are never reused, so a new state is always added at the end.
+// Enum values are never reused or renumbered, so a new state is always added at the end.
 syntax = "proto3";
 
 package rastai.common.v1;

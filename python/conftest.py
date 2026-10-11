@@ -16,7 +16,7 @@ REPO_ROOT = PYTHON_FOLDER.parent
 # The shared test inputs of contracts 12.5. Tests read from it and never write into it.
 FIXTURES_FOLDER = REPO_ROOT / "fixtures"
 # A workspace package's import package: python/<name>/<name>/__init__.py (python/CLAUDE.md).
-WORKSPACE_PACKAGE_INIT_FILES = "rastai*/rastai*/__init__.py"
+WORKSPACE_PACKAGE_INIT_PATTERN = "rastai*/rastai*/__init__.py"
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -30,8 +30,12 @@ def import_workspace_packages() -> None:
     its path below python/. If `rastai_proto` isn't imported yet, pytest imports the folder python/rastai_proto/ for
     it, which has no __init__.py, as a namespace package, and that hides the real package (python/rastai_proto/
     rastai_proto/) from the test. With the real packages already in sys.modules, pytest uses them.
+
+    A package that fails to import stops the whole run here, before any test is collected, with that package's
+    import error. That is on purpose: a broken package (for example a native wheel that wasn't built) should be
+    the first thing a run reports, not a namespace-package mix-up in some other package's tests.
     """
-    for init_file in sorted(PYTHON_FOLDER.glob(WORKSPACE_PACKAGE_INIT_FILES)):
+    for init_file in sorted(PYTHON_FOLDER.glob(WORKSPACE_PACKAGE_INIT_PATTERN)):
         package_folder = init_file.parent
         if package_folder.name == package_folder.parent.name:
             importlib.import_module(package_folder.name)

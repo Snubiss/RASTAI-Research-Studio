@@ -1,0 +1,3 @@
+# Golden protobuf messages are compared byte for byte, so git never treats them as text: no line-ending
+# conversion on any checkout (an autocrlf clone, the Windows CI job) and no text diffs.
+*.binpb binary

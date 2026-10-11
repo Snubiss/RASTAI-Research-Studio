@@ -65,3 +65,17 @@ def test_every_kind_of_color_literal_fails(write_tree, run_check):
 def test_the_real_repository_passes(run_check):
     result = run_check("check-colors")
     assert result.returncode == 0, result.stdout
+
+
+def test_color_in_the_proto_package_entry_fails(write_tree, run_check):
+    # @rastai/proto's index.js is hand-written, so only its src/generated/ is exempt.
+    root = write_tree(
+        {
+            "packages/proto/src/generated/colors_pb.js": 'export const EXAMPLE = "#ffffff";\n',
+            "packages/proto/src/index.js": f'export const BACKGROUND = "{SPIKE_CANVAS_BACKGROUND}";\n',
+        }
+    )
+    result = run_check("check-colors", "--root", str(root))
+    assert result.returncode == 1
+    assert f"packages/proto/src/index.js:1: color literal `{SPIKE_CANVAS_BACKGROUND}`" in result.stdout
+    assert "1 problem(s)" in result.stdout
