@@ -27,10 +27,10 @@
    - Paths are built only in `rastai-core/src/paths.rs` (XDG on Linux; the macOS and Windows mappings are in contracts §8.1). `RASTAI_HOME` overrides everything.
    - Sandboxes go through any Docker-API engine (ADR-0031).
    - Every compute backend is chosen by hardware detection. No code hard-codes `cuda`. Code outside detection and environment selection never branches on the GPU vendor.
-3. **CI from day one:** CPU tests on Linux, plus CPU tests on macOS and Windows runners. GPU tests run nightly on the owner's box (self-hosted runner), or by hand until it's set up.
+3. **CI from day one:** CPU tests on Linux, plus CPU tests on macOS and Windows runners. GPU tests run nightly on the owner's box (self-hosted runner), or by hand until it's set up. *(Note since acceptance, 2026-10-10: the runner is `nightly-gpu.yml`, scheduled and manual triggers on main only, run as a separate OS user `rastai-runner`, labels `gpu-nvidia` and, from M10, `gpu-amd`; a read-only HF token for gated weights once the repo is public (owner decision 12).)*
 4. **`rastai doctor` checks numbers, not just kernels.** Its 20 s self-test runs matmuls at several sizes and a tiny forward pass, compares them with a CPU reference, and fails the GPU with `RRS-H1xxx` if they disagree beyond tolerance. A failed GPU is not offered as a compute target.
 5. **Rastai never sets `HSA_OVERRIDE_GFX_VERSION`** or any similar override. Unsupported GPUs are reported plainly, with CPU and SSH pairing offered instead.
-6. **AMD tier-1 testing waits for a discrete RDNA3+ card.** Its model decides the ROCm target architecture and whether 4-bit kernels are available. Until then QLoRA on ROCm is marked unavailable in the capability matrix.
+6. **AMD tier-1 testing waits for a discrete RDNA3+ card.** Its model decides the ROCm target architecture and whether 4-bit kernels are available. Until then QLoRA on ROCm is marked unavailable in the capability matrix. *(Note since acceptance, 2026-10-10: the owner buys the card before M10, which holds the AMD parity gate; M2 closes on NVIDIA alone (owner decision 11).)*
 7. **Blackwell gaps** in external kernels are expected (§28 risk 7). The 3090 (sm_86) is the fallback test GPU.
 8. **Agent-gym training runs on Linux only** for now (§0.6).
 

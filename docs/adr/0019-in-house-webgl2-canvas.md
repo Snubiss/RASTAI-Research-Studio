@@ -1,6 +1,8 @@
 # ADR-0019: An in-house WebGL2 renderer for the Designer canvas and all visuals
 
-**Status:** Accepted, 2026-10-10
+**Status:** Accepted, 2026-10-10. Decision 5 superseded in part by [ADR-0036](0036-frontend-plain-javascript.md), 2026-10-10.
+
+**Superseded in part:** decision 5's language. A renderer is a plain JavaScript class with short JSDoc on its public methods, still the one case where classes are allowed because it owns a WebGL context (ADR-0036 decision 5). The rest of decision 5 stands.
 
 ## Context
 
@@ -23,10 +25,16 @@
 2. **Drawing model:** instanced draws per primitive kind (nodes, edges, glyphs, cubes, chart marks), with per-instance data in typed arrays uploaded as buffers. The draw-call count doesn't grow with the graph.
 3. **Text:** a glyph atlas drawn once with Canvas2D and sampled in the shader. Canvas2D is used only for atlas building, never for scene drawing.
 4. **WebGL2 is required.** If it's unavailable, the view shows `RRS-U1xxx` with a fix ("open in a browser") and falls back to the table view. Every chart has a table behind it anyway (accessibility, §7).
-5. **API shape:** a renderer is a TS class, because it owns a WebGL context (the one case where contracts §12.4 allows classes). React components own a renderer and pass it plain data. No scene-graph framework.
+5. **API shape:** a renderer is a TS class, because it owns a WebGL context (the one case where contracts §12.4 allows classes). React components own a renderer and pass it plain data. No scene-graph framework. *("TS class" superseded: a plain JavaScript class, ADR-0036.)*
 6. **Level of detail:** hierarchy collapse keeps visible nodes near the 1,000 target, and the 3D view switches between summaries zoomed out and heads and features zoomed in.
 7. **Reduced motion** (`ui.reduced_motion`) disables camera animation and 3D auto-rotation.
 8. **WebGPU is optional and later.** It's not used until every webview Tauri ships supports it.
+
+*Note since acceptance (2026-10-10), the theme token contract (contracts §5.6, owner decision 20):*
+- *Renderers never pick colors. `canvasColors(tokens)` gives the graph renderer its colors and `vizColors(tokens)` the charts; `GraphRenderer.setColors(colors)` and `setColors` on every viz class update uniforms and buffers in place, so a theme switch never recreates a WebGL context.*
+- *The glyph atlas takes its font from the tokens (`createGlyphAtlas(gl, font)`); a font change rebuilds the atlas texture only.*
+- *`tools/checks/check-colors` fails CI on a color literal in `packages/canvas/src/`, `packages/viz/src/`, `apps/web/src/sections/` and plugin UIs. The spike's hard-coded `#101318` background is gone from renderer code; it seeds the built-in dark theme's `canvas_background` token.*
+- *The decisions are unchanged.*
 
 **Checked by:** a Playwright test per renderer that draws a fixture scene and checks pixel coverage by read-back; a nightly performance test on the GPU runner with the spike's scenes (1,000 nodes plus the flow view) that fails below 60 fps in Chrome.
 
@@ -55,6 +63,6 @@
 ## Links
 
 - Spec: [§7](../spec/rastai_spec_v5.md#7-ux-system), [§9](../spec/rastai_spec_v5.md#9-psychology-first-party-plugin) (visuals), [§11](../spec/rastai_spec_v5.md#11-model-designer), [§27](../spec/rastai_spec_v5.md#27-build-in-house-policy-and-dependency-register-new)
-- Contracts: [§1 port map](../architecture/contracts.md#1-repository-tree), [§2.3 TS packages](../architecture/contracts.md#2-component-inventory), [§12.4 TypeScript](../architecture/contracts.md#12-naming-and-code-conventions)
+- Contracts: [§1 port map](../architecture/contracts.md#1-repository-tree), [§2.3 apps and JavaScript packages](../architecture/contracts.md#23-apps-and-javascript-packages), [§5.6 theme tokens](../architecture/contracts.md#56-theme-tokens), [§12.4 JavaScript](../architecture/contracts.md#124-javascript-react-jsx-jsdoc)
 - Spike: [06 canvas in webviews](../../spike/results/06_canvas_webviews.md)
-- Related: [ADR-0006](0006-ui-transport-http-only.md), [ADR-0012](0012-build-in-house-policy.md), [ADR-0023](0023-owner-code-style.md)
+- Related: [ADR-0006](0006-ui-transport-http-only.md), [ADR-0012](0012-build-in-house-policy.md), [ADR-0023](0023-owner-code-style.md), [ADR-0036](0036-frontend-plain-javascript.md)

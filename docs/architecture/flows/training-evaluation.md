@@ -1,6 +1,6 @@
 # Training and Evaluation: Logic Flows
 
-**Status:** v1.1 draft, 2026-10-10. Pre-build. Built on spec v5.3 (§10, §12, §13, §15, §19, §22, §26), the spike (`spike/README.md`, experiments 03, 03b and 04; `spike/src/rastai_spike/training.py`, `lora.py`, `evaluation.py`) and `docs/architecture/contracts.md` v1. Names come from contracts.md. Where contracts.md is silent, this doc uses the names the layout docs already chose (`layout/python.md`, `layout/rust-control-plane.md`, `layout/rust-node-gateway-proto.md`, `layout/frontend-and-plugins.md`), the ADRs, and the defaults in the implementation plan's conflict table (plan §10). Names nobody defines yet are listed in [section 16](#16-new-names).
+**Status:** v1.2 draft, 2026-10-10. Pre-build. Built on spec v5.4 (§10, §12, §13, §15, §19, §22, §26), the spike (`spike/README.md`, experiments 03, 03b and 04; `spike/src/rastai_spike/training.py`, `lora.py`, `evaluation.py`) and `docs/architecture/contracts.md` v1.1, which is the only list of shared names: this doc keeps no "New names" section. Where contracts.md is silent, this doc uses the names the layout docs already chose (`layout/python.md`, `layout/rust-control-plane.md`, `layout/rust-node-gateway-proto.md`, `layout/frontend-and-plugins.md`), the ADRs, and contracts §16's answers to the plan's §10 conflict table. Owner decisions of 2026-10-10 applied here: the MySQL dataset source and the long-term archive (ADR-0035), image decoding through torchvision, anchors on by default for DPO, the judge trust bar, blind votes as a project document, and the Teach it default model.
 
 This doc covers how files become a dataset, how a training run lives and survives interruption, how Teach it and the RLHF chain string runs together, how the Evaluation plugin tests a model, and how results leave the app (export) or come in (log import).
 
@@ -21,7 +21,6 @@ This doc covers how files become a dataset, how a training run lives and survive
 13. [Export](#13-export)
 14. [The runs table and log import](#14-the-runs-table-and-log-import)
 15. [Open questions](#15-open-questions)
-16. [New names](#16-new-names)
 
 ---
 
@@ -50,11 +49,11 @@ This doc covers how files become a dataset, how a training run lives and survive
 
 Diagrams draw this as one arrow from the job to the daemon. Ephemeral events (`job.progress`, `job.log_line`) go over `WatchLive` and may drop.
 
-**Commands.** Every action enters as `CommandService.Execute` and is journaled in `command_journal`. Plugin commands (`eval.*`, `psychology.*`) fall through the daemon's `dispatch` to the plugin host, then `NodeService.HandleCommand`, then `WorkerService.HandleCommand` on the plugin module. A plugin command that needs a job returns it in `CommandReply.follow_up_jobs[]` (platform flow 3.3). The daemon, not the plugin, then creates the run (`run.json`, `runs` row, lineage), starts the job as the plugin principal and returns its `job_id` in `ExecuteResponse`. One component creates runs (section 15, question 6).
+**Commands.** Every action enters as `CommandService.Execute` and is journaled in `command_journal`. Plugin commands (`eval.*`, `psychology.*`) fall through the daemon's `dispatch` to the plugin host, then `NodeService.HandleCommand`, then `WorkerService.HandleCommand` on the plugin module. A plugin command that needs a job returns it in `CommandReply.follow_up_jobs[]` (platform flow 3.3). The daemon, not the plugin, then creates the run (`run.json`, `runs` row, lineage), starts the job as the plugin principal and returns its `job_id` in `ExecuteResponse`. One component creates runs (section 15, settled list).
 
-**Calls from jobs and plugin modules.** A job or plugin module that runs a command calls `WorkerHostService.ExecuteCommand`, which the node forwards to `NodeHubService.ExecuteCommand`. Diagrams draw it as one arrow to the daemon. A `GatewayGenerate` or `TokenizeChat` call naming a local model that isn't loaded makes the node load it under an evictable lease first (`model.state_changed` events), as `model.load` would; section 16 lists this as a contract addition. `TokenizeChat` is the node gateway RPC from `layout/python.md` §14 (plan §10 row 9): conversations in, `token_ids[]` and a `target_mask` per conversation out.
+**Calls from jobs and plugin modules.** A job or plugin module that runs a command calls `WorkerHostService.ExecuteCommand`, which the node forwards to `NodeHubService.ExecuteCommand`. Diagrams draw it as one arrow to the daemon. A `GatewayGenerate` or `TokenizeChat` call naming a local model that isn't loaded makes the node load it under an evictable lease first (`model.state_changed` events), as `model.load` would (contracts §4.5). `TokenizeChat` is the node gateway RPC from `layout/python.md` §14 (plan §10 row 9): conversations in, `token_ids[]` and a `target_mask` per conversation out.
 
-**Error codes.** Codes in `RRS-D`, `RRS-T` and `RRS-V` are proposed here with exact numbers (section 16), except `RRS-V0101`, which `layout/frontend-and-plugins.md` already assigned. Codes from other areas are exact where the owning docs agree on them: `RRS-S3001` (not enough free disk space), `RRS-S3002` (disk full during a write), `RRS-H3001` (not enough GPU memory for a lease), `RRS-H3004` (model evicted, info), `RRS-G1004` (tokenizer mismatch with llama-server), `RRS-G1006` (template can't produce a training mask), `RRS-C0401` (event gap), `RRS-C1009` (the project's data policy forbids this, plan §10 row 37), `RRS-U0006` (file too large to upload from the browser). The rest are written as a range plus a meaning, for example `RRS-H3xxx` (GPU out of memory) or `RRS-J1xxx` (job killed), because their numbers still collide between docs (plan §10 row 8).
+**Error codes.** Every code in this doc is in contracts §10.3 with its number. This area owns `RRS-D` (data), `RRS-T` (training) and `RRS-V` (evaluation). Codes from other areas: `RRS-S3001` (not enough free disk space), `RRS-S3002` (disk full during a write), `RRS-H3001` (not enough GPU memory for a lease), `RRS-H3004` (model evicted, info), `RRS-H3006` (out of GPU memory while loading), `RRS-H3007` (out of GPU memory inside a job step), `RRS-J0002` (worker didn't register), `RRS-J1001` (job killed by a signal), `RRS-J1002` (killed by the kernel's out-of-memory killer), `RRS-J1003` (killed by the node), `RRS-N2001` (node unreachable), `RRS-G0006` (the model's node is unreachable), `RRS-G1004` (tokenizer mismatch with llama-server), `RRS-G1006` (template can't produce a training mask), `RRS-G2002` and `RRS-G2004` (API provider error, connection dropped), `RRS-C0401` (event gap), `RRS-C1005` (scope or permission not granted), `RRS-C1009` (the one data-policy refusal, raised by `check_data_policy`), `RRS-L2003` (SAE labels stale), `RRS-L4001` (analysis ran without SAEs) and `RRS-U0006` (file too large to upload from the browser). Withdrawn draft numbers are in contracts §10.2.
 
 **Signatures** follow contracts §12 and the layout docs: plain functions, dataclasses, one base class per extension point, constants at the top of the file. Where a layout doc already gives a signature, this doc repeats it rather than inventing another.
 
@@ -62,7 +61,7 @@ Diagrams draw this as one arrow from the job to the daemon. Ephemeral events (`j
 
 ## 2. Data import
 
-Runs when the user drops a file or folder on the app, picks an HF dataset, or runs `rastai dataset import <path>`. The commands are `dataset.import` (job), then `dataset.edit` and `converter.generate` in the preview, then `dataset.check` (job).
+Runs when the user drops a file or folder on the app, picks an HF dataset, writes a MySQL query (section 2.5), or runs `rastai dataset import <path>`. The commands are `dataset.import` (job), then `dataset.edit` and `converter.generate` in the preview, then `dataset.check` (job).
 
 ### 2.1 Import and preview
 
@@ -100,15 +99,15 @@ sequenceDiagram
 
 Not obvious:
 - **Path or blob.** The UI never reads local paths (`layout/frontend-and-plugins.md` 2.1 and 9.3: Tauri's drag-drop handler is off, so HTML5 drop events reach the page). The same rules hold in Tauri, a plain browser and the remote UI over an SSH tunnel:
-  - a dropped file up to `MAX_BROWSER_UPLOAD_BYTES` (256 MiB) is uploaded with `PUT /api/blobs`, and the source has kind `blob` (new);
+  - a dropped file up to `MAX_BROWSER_UPLOAD_BYTES` (256 MiB) is uploaded with `PUT /api/blobs`, and the source has kind `blob`;
   - a larger drop shows "Open from disk", which picks the same file through `file.browse` and imports it by path: kind `path`, read in place, never copied;
   - a dropped folder takes the "Open from disk" route too, so a folder of documents is never uploaded file by file;
   - `rastai dataset import <path>` always imports by path.
-- **Which node.** Converters run next to the data (§22). A local path goes to the embedded node. An HF dataset goes to the node that will train, which pulls it directly. Private local data moves to a remote node only under the `trusted-remote` or `any` data policy (§24).
+- **Which node.** Converters run next to the data (§22). A local path goes to the embedded node. An HF dataset goes to the node that will train, which pulls it directly. A MySQL source goes to the node that will train and reads the server from there (section 2.5). Private local data, and rows read from a database, move to a remote node only under the `trusted-remote` or `any` data policy (§24).
 - **Source hash.** The node hashes files in Rust. A folder's `content_hash` is BLAKE3 over its sorted `<relative path> <file hash>` lines, the same rule as the model hash.
 - **The sample** is the first 1,000 rows plus 1,000 seeded random rows. First rows alone are often unrepresentative (examples, headers, sorted data).
 - **Only the daemon writes project documents.** The job returns the draft as a blob. `documents`, undo steps and `document.changed` stay in one place.
-- **Formats in the prototype (§14):** JSONL, JSON arrays, CSV/TSV, Parquet, HF datasets (including streaming), text and Markdown folders, Alpaca, ShareGPT and OpenAI chat formats, DPO pair files. The readers are `rastai_data/readers/` (`layout/python.md` 4.1). Anything else fails with `RRS-D1001` and a fix button that runs `plugin.suggest`.
+- **Formats in the prototype (§14):** JSONL, JSON arrays, CSV/TSV, Parquet, HF datasets (including streaming), text and Markdown folders, Alpaca, ShareGPT and OpenAI chat formats, DPO pair files, image folders and Parquet image columns (decoded through torchvision, section 2.5), and a MySQL or MariaDB query (section 2.5). The readers are `rastai_data/readers/` (`layout/python.md` 4.1). Anything else fails with `RRS-D1001` and a fix button that runs `plugin.suggest`.
 - **The converter** is a `rastai.converter/1` document (`rastai_data.generate_converter(preview, task)`): a column mapping, templates and filters. Known formats start from the built-in files in `rastai_data/converters/known_formats/`.
 - `dataset.from_conversations` skips this flow. It writes `examples[]` references (kind `sft`, `conversation_id`, the answer's message id) instead of copying rows, and `dataset.snapshot` materializes them with their exact token IDs (section 2.3). `examples[]` is only for this command; `psychology.branch.prefer` writes inline rows (section 7.1).
 
@@ -174,7 +173,7 @@ flowchart TD
   K --> L["dataset.check_finished with counts and the report hash"]
   L --> M["rastai-server writes the check results into the .rrsdata"]
   S1["dataset.snapshot, or train.start when no snapshot matches the dataset hash"] --> S2["daemon writes referenced conversations as rastai.conversation/1 files into the job inputs"]
-  S2 --> S3["data_import job: PutBlob every source file, examples materialized into one JSONL blob"]
+  S2 --> S3["data_import job: PutBlob every source file, a MySQL source streamed into one JSONL or Parquet blob, examples materialized into one JSONL blob"]
   S3 --> S4["artifact kind dataset_snapshot, recorded in the .rrsdata snapshot field"]
 ```
 
@@ -186,10 +185,10 @@ Not obvious:
 - **Near duplicates:** in-house MinHash, 128 permutations over word 5-grams, LSH with 16 bands of 8 rows (candidate threshold about 0.71). Candidates are confirmed when their MinHash estimate is at least `NEAR_DUPLICATE_THRESHOLD` (0.8, `layout/python.md` 4.2). A pair at 0.8 becomes a candidate with about 95% probability, a pair at 0.9 with more than 99.9%. Flagged and kept by default; one click drops them.
 - **Leakage** uses the same MinHash index across splits, plus every test input in the project's `.rrseval` suites, so a suite can't be trained on by accident. Leaks give `RRS-D2002` (warning) with counts; the fix drops the leaked rows from train, which keeps every evaluation honest.
 - **PII:** rules for emails, phone numbers, card numbers (Luhn check), IBANs (mod-97 check), IP addresses, private-key blocks and common API-key prefixes (`sk-`, `ghp_`, `hf_`, `AKIA`). Flags only (`RRS-D2003`, warning). `dataset.export` redacts when `gateway.redact_pii_on_export` is on. Names and street addresses aren't detected in the prototype (no NER model); the report says so.
-- **The snapshot** freezes what a run trains on. `dataset.snapshot` (job kind `data_import`, `layout/python.md` 7.4) copies every local source file into the blob store, so the bytes survive the user editing or deleting the file. HF sources are already pinned by `revision` and stay in the HF cache, never copied (§19). It also materializes `examples[]` references into one JSONL blob with each message's token IDs; the daemon exports those conversations from `vault.db`, because `rastai_data` never reads it. `train.start` runs the snapshot first when none matches the dataset's content hash. The run record's `dataset_hashes[]` lists the `.rrsdata` content hash and the snapshot's hash.
+- **The snapshot** freezes what a run trains on. `dataset.snapshot` (job kind `data_import`, `layout/python.md` 7.4) copies every local source file into the blob store, so the bytes survive the user editing or deleting the file. HF sources are already pinned by `revision` and stay in the HF cache, never copied (§19). A `mysql` source is read through a server-side cursor into one JSONL or Parquet blob (`snapshot_format`), so the rows are frozen as of that read (section 2.5). It also materializes `examples[]` references into one JSONL blob with each message's token IDs; the daemon exports those conversations from `vault.db`, because `rastai_data` never reads it. `train.start` runs the snapshot first when none matches the dataset's content hash. The run record's `dataset_hashes[]` lists the `.rrsdata` content hash and the snapshot's hash. With an archive configured (M11), the snapshot blob is one of the blobs it keeps (contracts 8.7: pinned checkpoints, LoRA adapters, dataset snapshots).
 - **Tokenized rows are a cache,** not part of the snapshot: `cache_folder/tokenized/<dataset_hash12>-<template_hash12>.safetensors` on each node (`layout/python.md` 15). Deleting it costs one re-tokenization.
 
-Persisted: durable: the report blob (`dataset_report`), `dataset.check_finished`, the `.rrsdata` `checks` results; for a snapshot, the source-file blobs, the examples blob, the `dataset_snapshot` artifact and a new `.rrsdata` `snapshot{artifact_id, content_hash, row_count}` field. Blobs land in `blobs/.incoming/` and are renamed into place, so a crash leaves no partial blob. Node-local and safe to delete: the tokenized cache.
+Persisted: durable: the report blob (`dataset_report`), `dataset.check_finished`, the `.rrsdata` `checks` results; for a snapshot, the source-file blobs, the examples blob, the `dataset_snapshot` artifact and the `.rrsdata` `snapshot{artifact_id, content_hash, row_count}` field. Blobs land in `blobs/.incoming/` and are renamed into place, so a crash leaves no partial blob. Node-local and safe to delete: the tokenized cache.
 
 Tests:
 - MinHash recall of at least 0.95 at Jaccard 0.9 on a synthetic near-duplicate set, and no false pairs below Jaccard 0.5; the same signatures under two `PYTHONHASHSEED` values (`test_minhash.py`).
@@ -211,8 +210,68 @@ Tests:
 | Disk full writing the snapshot | worker | `RRS-S3002` | `.incoming` file removed |
 | Data policy forbids the move | daemon's policy check (plan §10 row 37) | `RRS-C1009` | nothing |
 | Dropped file over 256 MiB | UI (`FileDrop`), before any upload | `RRS-U0006` with the fix "Open from disk" (`file.browse`, imports by path) | nothing |
-| kill -9 of the job | node, exit by signal | `RRS-J1xxx` (job killed), Retry | events up to the last fsync; no document change |
+| kill -9 of the job | node, exit by signal | `RRS-J1001` (job killed), Retry | events up to the last fsync; no document change |
 | Source changed after the check | daemon at `train.start` (hash differs) | `RRS-D3003`, fix `dataset.check` | nothing |
+| MySQL server unreachable, login rejected, or the query fails | `mysql_reader.py` in the job (section 2.5) | `RRS-D3005` (server unreachable or login rejected) or `RRS-D3006` (the query fails), with the reason (host, authentication or SQL error text) | import run `failed`; no partial blob |
+| MySQL column type with no row in the type-mapping table | `mysql_reader.py` | `RRS-D3008` naming the column and its type | import run `failed` |
+| MySQL connection without TLS to a remote host | daemon, when validating the `MysqlConnection` | `RRS-D3007` (the shared `MysqlConnection` TLS check in `rastai-formats`; only loopback or a Unix socket may skip TLS); nothing is started | nothing |
+| MySQL rows changed since the snapshot (rerun) | `run.rerun` re-derives the snapshot | `RRS-D3003` | nothing |
+| Image format `torchvision` can't decode | `image_decode.py` | `RRS-D1001` for that dataset | import run `failed` |
+| Corrupt or truncated image | `image_decode.py` | skipped and counted as a bad row; over 1% gives `RRS-D1002` with `file:line` locations | check report blob |
+
+### 2.5 MySQL sources and image datasets
+
+Two kinds of source need more than a file read. Both use the same `data_import` job and the same preview, check and snapshot steps as a file.
+
+**MySQL source (option C of the archive decision, ADR-0035).** A `.rrsdata` source of kind `mysql` holds a `MysqlConnection` (host and port or a Unix socket, database, user, TLS mode, and the name of a keychain account, never a password), a `query` and a `snapshot_format` (`jsonl` or `parquet`). `dataset.import` takes it instead of a path, an HF id or a blob, from the UI, the CLI or MCP. MySQL and MariaDB are read by the same code.
+
+```mermaid
+sequenceDiagram
+  participant UI as apps/web
+  participant D as rastai-server
+  participant N as rastai-node
+  participant W as rastai_data in a data_import job
+  participant M as MySQL or MariaDB server
+  UI->>D: Execute dataset.import with a MySQL connection and a query
+  D->>D: validate the MysqlConnection, check the project data policy against the target node
+  alt policy forbids it, or TLS is off for a remote host
+    D-->>UI: RRS-C1009 or RRS-D3007, nothing started
+  else allowed
+    D->>N: StartJob kind data_import, network_hosts = the server's host and port (a permission: the credential is released only for it)
+    N->>W: spawn, Register, Hello
+    W->>N: GetSecret for the connection
+    N->>D: NodeHubService.GetSecret, purpose mysql plus the connection name
+    D-->>N: short-lived credential read from the keychain
+    N-->>W: credential, kept in memory only
+    W->>M: connect over TLS, run the query on a read-only session with a server-side cursor
+    M-->>W: rows, streamed in batches
+    W->>W: map column types with the shared table, build the preview sample, close the cursor
+    W-->>D: artifact.created with the preview blob, run completed
+    D->>D: write the draft .rrsdata with the connection and the query
+    D-->>UI: document.changed, preview with task, columns and rows
+  end
+  Note over UI,M: dataset.snapshot later streams the full result into one JSONL or Parquet blob in the same way
+```
+
+Not obvious:
+- **Where it runs.** On the node that will train (the embedded node for local work), by the same "which node" rule as any source. The server must be reachable from that node, and the job's `network_hosts` names only that one host and port. This is a permission, not a network sandbox: the node releases the connection credential (`GetSecret`) only for that host and port, because worker jobs get no network enforcement (node layout section 7.9). Rows read from a database count as project data for the data policy: a remote node needs `trusted-remote` or `any` (`RRS-C1009` otherwise, with the one-click fix).
+- **Credentials.** The `.rrsdata`, `job.json`, logs and events hold the connection name only. The daemon reads the keychain account `mysql.<connection_name>` and hands the password to the node through `NodeHubService.GetSecret` (purpose `mysql:<connection_name>`, short-lived). The reader keeps it in memory and never writes it down. Nodes never get archive credentials (contracts 3.1); this is a different secret for a different database.
+- **One TLS policy** with the archive: `required` by default, and `disabled` validates only for a loopback host or a Unix socket.
+- **The reader** is `rastai_data/readers/mysql_reader.py`, the only file that imports PyMySQL. It opens a read-only session (a mistyped query can't change the owner's data; a SELECT-only MySQL user is still the better practice), uses a server-side cursor, and fetches `FETCH_BATCH_ROWS` rows at a time, so a large table never sits in memory.
+- **One type-mapping table** (MySQL type to Rastai column type) with golden fixtures in `fixtures/mysql/type-mapping/`, checked by both Python here and Rust in the archive. A column type with no row in the table fails the source with `RRS-D3008` naming the column. It never guesses.
+- **The preview sample.** `ORDER BY RAND()` would scan the whole table, so the preview takes the first 1,000 rows plus a seeded reservoir sample of 1,000 over the first `PREVIEW_SCAN_ROWS` rows (100,000), then closes the cursor. The full pass happens in the snapshot (section 15, question 12).
+- **Check and snapshot.** The `.rrsdata` content hash covers the connection and the query, not the rows. So a `mysql` source is always snapshotted first: `dataset.check` reads the frozen blob, never the live server, and `train.start` trains on that blob, so the check, the splits and the run see the same rows. The run record's `dataset_hashes[]` lists both hashes. `run.rerun` re-derives the snapshot from the query; a different hash gives `RRS-D3003`, the same as for a changed local file.
+- **The archive is separate.** The archive and this reader share only the `MysqlConnection` type, the mapping table, the TLS policy and the CI MySQL service. The reader never touches archive tables.
+
+**Image datasets.** `task` `classification` takes an `image` column. Two layouts are read: one folder per class, and HF Parquet image columns (`{bytes, path}`). `readers/image_folder.py` reads the layout; `rastai_data/image_decode.py` decodes. That file is the only one that imports `torchvision.io.decode_image` (owner decision 5; there is no in-house PNG or JPEG decoder). It takes bytes and returns a uint8 `[channels, height, width]` tensor. The job decodes each image once, resizes it to the design's input side and writes `cache_folder/images/<dataset_hash12>-<side>.safetensors`; training reads that file, so decoding cost is paid once per dataset. A format the library can't decode is `RRS-D1001`; a corrupt or truncated file is a bad row and is never half-decoded.
+
+Persisted: the `.rrsdata` with the connection and query (no secret); the snapshot blob; the image cache (node-local, safe to delete). Nothing from the server is kept except the snapshot.
+
+Tests:
+- `rastai_data/tests/test_mysql_reader.py` against the CI MySQL service (the `mysql-archive` job: MySQL 8.4 and 9.7, MariaDB): a large table streams in bounded memory; the type-mapping goldens in `fixtures/mysql/type-mapping/` give the same columns as the Rust test; a write statement fails on the read-only session; a connection cut mid-stream fails the import and leaves no blob (`.incoming` removed); a `tls.mode` of `disabled` for a remote host is refused.
+- The credential never appears in `job.json`, `stdout.log`, `stderr.log`, any event or the `command_journal`.
+- Snapshot determinism: the same query on unchanged rows gives the same snapshot hash.
+- `rastai_data/tests/test_image_decode.py` over `fixtures/images/` (PNG exactly, JPEG within the tolerance constant at the top of the test) and `test_image_folder.py` over `fixtures/datasets/images_tiny/` in both layouts; a truncated image is counted as a bad row.
 
 ---
 
@@ -243,7 +302,7 @@ flowchart TD
   P --> Q["TrainingPlan returned by train.start with dry_run"]
 ```
 
-**The capability matrix** is computed on each node, not in the daemon (`layout/python.md` 5.3 and §14 item 8). The rules live in one place, `rastai_train/capability.py` (`recipe_availability(hardware_profile)`). The `doctor_selftest` job runs them after the numerical self-test, so a kernel that imports but computes wrong counts as missing. The result is stored with the node's hardware profile, and `recipe.list` reads it without starting Python. Third-party recipes declare their needs as data in the manifest (`contributes.recipes[].requirements`, new), and the same rules evaluate them. A new plugin or a driver change reruns the doctor job.
+**The capability matrix** is computed on each node, not in the daemon (`layout/python.md` 5.3 and §14 item 8). The rules live in one place, `rastai_train/capability.py` (`recipe_availability(hardware_profile)`). The `doctor_selftest` job runs them after the numerical self-test, so a kernel that imports but computes wrong counts as missing. The result is stored with the node's hardware profile, and `recipe.list` reads it without starting Python. Third-party recipes declare their needs as data in the manifest (`contributes.recipes[].requirements`), and the same rules evaluate them. A new plugin or a driver change reruns the doctor job.
 
 | Requirement | How the node knows | If missing |
 |---|---|---|
@@ -333,7 +392,7 @@ sequenceDiagram
 
 Not obvious:
 - **Before the job exists**, the daemon does the slow, failure-prone setup: environment (`EnsureEnvironment`), model download (a `download` job if the weights are missing), the dataset snapshot if none matches (section 2.3), and transfer of private data to a remote node. A failure there leaves the run in `created` with a diagnostic, never a half-started job. The launch itself is `scheduler/launch.rs` in `rastai-server`: write `run.json`, build the `JobSpec`, call `StartJob`.
-- **The probe step** runs one forward and backward pass at the planned micro-batch on the longest sequence in the snapshot. On `torch.OutOfMemoryError` the worker halves the micro-batch and doubles gradient accumulation, up to three times. The effective batch never changes. If micro-batch 1 still fails, the run fails with `RRS-H3xxx` (out of memory) and the fix text lists QLoRA, a shorter max length or a smaller rank.
+- **The probe step** runs one forward and backward pass at the planned micro-batch on the longest sequence in the snapshot. On `torch.OutOfMemoryError` the worker halves the micro-batch and doubles gradient accumulation, up to three times. The effective batch never changes. If micro-batch 1 still fails, the run fails with `RRS-H3007` (out of GPU memory inside a job step) and the fix text lists QLoRA, a shorter max length or a smaller rank.
 - **Validation:** when the snapshot has a validation split, `validation.loss` runs at every checkpoint, and `is_best` marks the lowest.
 - **Standard metric names:** `train.loss`, `train.learning_rate`, `train.grad_norm`, `train.tokens_per_second`, `train.samples_seen`, `train.vram_peak_bytes`, `validation.loss`. Recipe metrics use the recipe as prefix (`dpo.reward_margin`, `ppo.kl`).
 - **The dashboard** (simple and advanced views) is two UI layouts over the same `run.metrics` events plus node telemetry from `node.heartbeat`. Charts use `@rastai/viz`.
@@ -395,8 +454,8 @@ stateDiagram-v2
 
 Not obvious:
 - `train.stop` ends a run early with a final checkpoint and counts as `completed` (reason `stopped`). `job.cancel` ends it at the next step boundary without a new checkpoint (`cancelled`).
-- **A worker killed with SIGKILL** can't write its own state, so the daemon writes the run's final state (contracts §4.4, platform flow 5.5). A `KILL` the node sent after a grace period gives job and run `cancelled`. A SIGKILL from anywhere else (the kernel's OOM killer, a user's `kill -9`) gives job and run `failed` with `RRS-J1xxx`. Power loss leaves the job `lost`, then `failed` when the node comes back.
-- **`train.resume` reopens a `failed` or `cancelled` run** that has a complete checkpoint, as well as a `preempted` one. Other flow docs already rely on this (platform flow 6.5 row 15, designer-gym-remote B8). Contracts §9.5 makes `failed` and `cancelled` terminal, so the two `→ resuming` transitions are a contract change (section 16).
+- **A worker killed with SIGKILL** can't write its own state, so the daemon writes the run's final state (contracts §4.4, platform flow 5.5). A `KILL` the node sent after a grace period gives job and run `cancelled`. A SIGKILL from anywhere else (the kernel's OOM killer, a user's `kill -9`) gives job and run `failed` with `RRS-J1001` (`RRS-J1002` for the kernel's OOM killer). Power loss leaves the job `lost`, then `failed` when the node comes back.
+- **`train.resume` reopens a `failed` or `cancelled` run** that has a complete checkpoint, as well as a `preempted` one. Other flow docs rely on this too (platform flow 6.5 row 15, designer-gym-remote B8), and contracts §9.5 has both transitions: `failed` and `cancelled` are terminal only when no complete checkpoint exists, and `completed` is the only state that is always terminal.
 - `verifying` exists only on chain runs (section 6).
 - `train.resume` starts a new job under the same `run_id`. It appends to the same `events.log` after truncating a torn tail, so sequence numbers continue and the log still has one writer at a time.
 - **A full disk pauses the run** (`running → paused`) with the training state still in memory and the lease kept; the job stays `running`. That covers both a checkpoint write (`RRS-T2001`) and an event-log append (`RRS-S3002`, platform flow 6.1). Resume after `storage.gc` retries the write.
@@ -409,21 +468,21 @@ Tests: a unit test drives a fake trainer through every transition and checks the
 
 | Failure | Detected by | User sees | Persisted | Recovery |
 |---|---|---|---|---|
-| kill -9 of the worker | node: exit by a signal it didn't send | `RRS-J1xxx` (killed by a SIGKILL Rastai didn't send), Resume button | events to the last fsync; last complete checkpoint; the daemon writes run `failed` | `train.resume` |
-| Worker ignores `CANCEL` past the grace period | node sends `KILL` | `RRS-J0xxx` (force-stopped) | run `cancelled`, written by the daemon | `train.resume` if a checkpoint exists |
-| GPU OOM at the probe | worker | auto-retry with smaller micro-batches, then `RRS-H3xxx` with peak bytes | `run.state_changed failed` | QLoRA, shorter sequences |
-| GPU OOM mid-run | worker catches the error | `RRS-H3xxx` with step, micro-batch and peak; fix button resumes at half the micro-batch | emergency checkpoint of the last completed step (the failed step never reached `optimizer.step`) | `train.resume` with the override |
-| Host RAM OOM killer | node: SIGKILL plus the cgroup's `oom_kill` count | `RRS-J1xxx` (killed by the kernel's OOM killer) | last checkpoint | resume with fewer dataloader workers |
+| kill -9 of the worker | node: exit by a signal it didn't send | `RRS-J1001` (killed by a SIGKILL Rastai didn't send), Resume button | events to the last fsync; last complete checkpoint; the daemon writes run `failed` | `train.resume` |
+| Worker ignores `CANCEL` past the grace period | node sends `KILL` | `RRS-J1003` (killed by the node) | run `cancelled`, written by the daemon | `train.resume` if a checkpoint exists |
+| GPU OOM at the probe | worker | auto-retry with smaller micro-batches, then `RRS-H3007` with peak bytes | `run.state_changed failed` | QLoRA, shorter sequences |
+| GPU OOM mid-run | worker catches the error | `RRS-H3007` with step, micro-batch and peak; fix button resumes at half the micro-batch | emergency checkpoint of the last completed step (the failed step never reached `optimizer.step`) | `train.resume` with the override |
+| Host RAM OOM killer | node: SIGKILL plus the cgroup's `oom_kill` count | `RRS-J1002` (killed by the kernel's OOM killer) | last checkpoint | resume with fewer dataloader workers |
 | Non-finite loss or gradients | worker: gradients checked before `optimizer.step` | a skipped step is logged; 3 in a row stop the run with `RRS-T3001` | checkpoint of the last good step | resume with a lower learning rate |
 | Disk too full to start | daemon (platform flow 8.1) | `RRS-S3001` with bytes needed and free | nothing started | `storage.gc` |
 | Disk full at a periodic checkpoint | worker: ENOSPC | `RRS-T2001`; the run pauses with its state still in memory | `.partial` folder removed | free space, then Resume |
 | Disk full at the preemption checkpoint | worker: ENOSPC after SIGTERM | `RRS-T2001`, exit 1, run `failed` (it can't wait for space while being stopped; `layout/python.md` 5.4) | `.partial` removed; the previous checkpoint stays | `train.resume` from the previous checkpoint |
 | Disk full on an event-log append | worker: ENOSPC | `RRS-S3002`; run paused (platform flow 6.1) | the 1 MiB reserve file makes room for the diagnostic and the `paused` record | free space, then Resume |
 | Daemon crash or restart | — | the UI reconnects; nothing else | the worker keeps writing; the daemon catches up from `acked_sequence` | automatic reattach |
-| Remote node unreachable | daemon: 3 missed heartbeats | node badge `unreachable`, job `lost`, `RRS-N2xxx` | the worker keeps writing on the node | automatic catch-up on reconnect |
+| Remote node unreachable | daemon: 3 missed heartbeats | node badge `unreachable`, job `lost`, `RRS-N2001` | the worker keeps writing on the node | automatic catch-up on reconnect |
 | Recipe plugin not installed | daemon at validation | `RRS-T0002`, fix `plugin.suggest` | nothing | install, retry |
 | Dataset task doesn't fit the recipe | daemon | `RRS-T0005` | nothing | pick another recipe |
-| Worker never registers (60 s) | node | `RRS-J0xxx` (no Register) | `stderr.log` | check the environment |
+| Worker never registers (60 s) | node | `RRS-J0002` (no Register) | `stderr.log` | check the environment |
 
 ### 4.4 Multi-GPU on one machine
 
@@ -439,7 +498,7 @@ Tests: `tests/gpu/`: DDP on the 5080 and the 3090 gives the same loss curve as o
 
 ## 5. Checkpoints, preemption and the resume contract
 
-Checkpoints run on a timer and on demand (`train.checkpoint`). Preemption runs when the OS or a provider sends SIGTERM. Resume runs on `train.resume`, or by itself when a node comes back with a `preempted` run and `training.auto_resume` (new) is on.
+Checkpoints run on a timer and on demand (`train.checkpoint`). Preemption runs when the OS or a provider sends SIGTERM. Resume runs on `train.resume`, or by itself when a node comes back with a `preempted` run and `training.auto_resume` is on.
 
 ### 5.1 Writing a checkpoint, and SIGTERM
 
@@ -503,16 +562,16 @@ Not obvious:
   | `job.cancel` | `SignalJob CANCEL` (`WorkerService.Control CANCEL`) | exit at the next step boundary, no new checkpoint, exit 3 | `cancelled` | `cancelled` |
   | `train.checkpoint` | `SignalJob CHECKPOINT_NOW` | checkpoint, keep training | `running` | `running` |
   | `SignalJob TERMINATE`, or SIGTERM from the OS (shutdown, spot notice, `kill`) | SIGTERM to the process group | sets `control.preempt_requested`, checkpoint if it fits the budget, exit 75 | `preempted` | `cancelled` (reason `preempted`) |
-  | `SignalJob KILL` (a `CANCEL` or `TERMINATE` grace period ran out) | SIGKILL from the node | nothing | `cancelled`, written by the daemon; resumable if a checkpoint exists | `cancelled`, `RRS-J0xxx` (force-stopped) |
-  | SIGKILL the node didn't send (OOM killer, `kill -9`), or power loss | SIGKILL, or none | nothing | `failed`, written by the daemon; resumable | `failed`, `RRS-J1xxx`; `lost` first after power loss |
+  | `SignalJob KILL` (a `CANCEL` or `TERMINATE` grace period ran out) | SIGKILL from the node | nothing | `cancelled`, written by the daemon; resumable if a checkpoint exists | `cancelled`, `RRS-J1003` (killed by the node) |
+  | SIGKILL the node didn't send (OOM killer, `kill -9`), or power loss | SIGKILL, or none | nothing | `failed`, written by the daemon; resumable | `failed`, `RRS-J1001` (`RRS-J1002` for the OOM killer); `lost` first after power loss |
 
 - **`STOP` and `TERMINATE` are different signals.** `STOP` is a control message: the run finishes normally with a final checkpoint. `TERMINATE` is SIGTERM, the preemption path, and keeps that meaning in every version. `KILL` is the only immediate SIGKILL.
 - **Exit code 75** (`EXIT_PREEMPTED`, contracts §9.1, `layout/python.md` 7.2) tells the node "preempted, resumable".
-- **The preemption budget** is `training.checkpoint.preemption_budget_seconds` (new, default 25 s). The worker compares it with how long the last checkpoint took. A LoRA checkpoint is small (52 MB for the spike's rank-16 adapter on Gemma 3 1B), so it almost always fits.
+- **The preemption budget** is `training.checkpoint.preemption_budget_seconds` (default 25 s). The worker compares it with how long the last checkpoint took. A LoRA checkpoint is small (52 MB for the spike's rank-16 adapter on Gemma 3 1B), so it almost always fits.
 - **A full disk during the preemption checkpoint** can't wait for space: the worker deletes the `.partial` folder, reports `RRS-T2001` and exits 1, so the node marks the run `failed` instead of relaunching it forever (`layout/python.md` 5.4). The previous checkpoint is still there for `train.resume`.
 - **Stopping the daemon must not preempt training.** The systemd user unit uses `KillMode=process` (node layout 7.4), so `systemctl --user stop rastai` leaves workers running for reattach. A real system shutdown still sends SIGTERM to every process, and that is the preemption path.
 - **Checkpoint frequency follows the risk of interruption.** The daemon writes the policy into `JobSpec.checkpoint_policy_json`, and the worker follows it. The base is `training.checkpoint.interval_minutes` (15) on the local box. Paired SSH nodes use half of it (network drops and remote reboots are likelier). Phase 3 spot machines use 5 minutes, plus the provider's notice. The interval is never shorter than 20× the last checkpoint's write time, which keeps overhead under 5%. Short runs such as Teach it only checkpoint at the end.
-- **Retention:** keep the last 3, the best and any pinned (`training.checkpoint.keep_last`). LoRA adapters always sync back from a remote node; full checkpoints stay on the node and are fetched on demand (§22).
+- **Retention:** keep the last 3, the best and any pinned (`training.checkpoint.keep_last`). LoRA adapters always sync back from a remote node; full checkpoints stay on the node and are fetched on demand (§22). With an archive configured (M11), pinned checkpoints and LoRA adapters are copied to its blob target; intermediate checkpoints never are (contracts 8.7).
 
 Persisted: durable: the checkpoint folder (`weights.safetensors` or `adapter.safetensors`, `optimizer.safetensors`, `rng.safetensors`, `resume.json`), `checkpoint.saved` with file hashes, `train.preempted`, the `checkpoints` row. Nothing is pickled.
 
@@ -586,9 +645,9 @@ Tests:
 Used by `teach.start`, `rlhf.start` and `sweep.start`. A chain strings ordinary runs together. The chain driver in `rastai-server` (`scheduler/chains.rs`, `layout/rust-control-plane.md`) starts each step when the previous one ends. Each step is one Python job (`layout/python.md` 5.3, "Chains live in the daemon").
 
 Rules:
-- A chain is a run (kind `teach`, `rlhf` or `sweep`) with no job of its own. Its `run.json` lists the steps (new `chain` field), each with a child run id assigned when the chain is created.
+- A chain is a run (kind `teach`, `rlhf` or `sweep`) with no job of its own. Its `run.json` lists the steps (the `chain` field), each with a child run id assigned when the chain is created.
 - Each step is an ordinary run (`train`, `eval`, `lens`) whose `parent_run_id` is the chain. "Each step is also a recipe on its own" (§10) holds because a step is exactly the run the user could have started by hand.
-- The chain driver is the only writer of the chain run's `events.log` (`chain.step_started`, `chain.step_finished`, `run.state_changed`; new event types). This extends contracts §7.1, where the writer is always a job; plan §10 row 18 adopts "one writer: the job, or the chain driver for chain runs".
+- The chain driver is the only writer of the chain run's `events.log` (`chain.step_started`, `chain.step_finished`, `run.state_changed`). Contracts §7.1 and §16 row 18 give the rule: one writer of a run log, the job, or the chain driver for chain runs.
 - The next action is a pure function of the chain record and the children's states, so restarts and tests are simple. `start_next_chain_step(server, finished_run_id)` reads the chain and calls it:
 
 ```rust
@@ -694,7 +753,7 @@ sequenceDiagram
 ```
 
 Not obvious:
-- **The prefer half is inference-psychology flow 7.2,** repeated here because Teach it starts from it. `psychology.branch.prefer` appends one row to the inline source (`sources[]` kind `inline`, new) of the project's `data/preferences.rrsdata`, task `dpo`. The file is created on the first pick; the optional `document_id` argument picks another dataset. This doc owns the row shape:
+- **The prefer half is inference-psychology flow 7.2,** repeated here because Teach it starts from it. `psychology.branch.prefer` appends one row to the inline source (`sources[]` kind `inline`) of the project's `data/preferences.rrsdata`, task `dpo`. The file is created on the first pick; the optional `document_id` argument picks another dataset. This doc owns the row shape:
   - `prompt`: the messages both answers continue, and `token_ids`, the rendered context exactly as the gateway sent it (A's prompt tokens);
   - `chosen` and `rejected`: `text`, `token_ids` (the answer's tokens after that context, through the end-of-turn token) and `model_ref` each. A rewound answer's forced first tokens are part of its answer, so the two sides may share a prefix; DPO's log-ratio difference cancels it. An SFT target is a row with `chosen` only;
   - `source`: `branch_pick`;
@@ -714,12 +773,12 @@ Not obvious:
 
   The token IDs above are placeholders. Appending is a JSON Patch in `CommandReply.document_edits`, so undo works like any document edit.
 - **Rows hold copies, not references.** Training reads exactly the token IDs the model produced, with no tokenization step (section 2.3). The pair survives a later conversation delete (inference-psychology flow 9), and it travels inside a `.rrsproj` export, which never includes `vault.db` (platform flow 10.2). `examples[]` references are only for `dataset.from_conversations` (section 2.1).
-- **Blind A/B votes** (`eval.vote`, the `eval.vote` panel beside chat) don't go into the dataset. The Evaluation module appends them to `votes.jsonl` in its plugin data folder (`layout/python.md` 9.1). They feed Elo (section 10.3), not training.
-- **Pinned conversations become tests** through the Evaluation plugin's event handler (new manifest field `contributes.event_handlers[]`). The handler adds the conversation id to `pinned_conversations[]` of the project's pinned suite (`evals/pinned.rrseval`, created on the first pin). At run time `rastai_eval/suites.py` expands each one into a test: the input is the conversation up to the pinned answer, and the reference is that answer. Storing the id, not a copy, keeps the suite small; the suite hash still changes when a pin is added, so results only compare across the same set.
+- **Blind A/B votes** (`eval.vote`, the `eval.vote` panel beside chat) go to a different file from picks: the project's `evals/votes.rrsdata`, an ordinary `dpo` dataset created on the first vote (owner decision 9, contracts §16). The Evaluation module returns a document edit that appends one inline preference row, the way Prefer does, so a vote is journaled and undoable like any edit. The row has `source` `blind_vote`, `chosen_side` (`a` or `b`, the side the voter saw as chosen) and both `model_ref`s, which the panel hides until the vote is in. Teach it and RLHF read `data/preferences.rrsdata` by default, not the votes file, so a vote never trains a model by accident; the user may still pick the votes file as a dataset. Elo reads it like any preference dataset (section 10.3).
+- **Pinned conversations become tests** through the Evaluation plugin's event handler (manifest field `contributes.event_handlers[]`, which receives `HandlerEventArgs`). The handler adds the conversation id to `pinned_conversations[]` of the project's pinned suite (`evals/pinned.rrseval`, created on the first pin). At run time `rastai_eval/suites.py` expands each one into a test: the input is the conversation up to the pinned answer, and the reference is that answer. Storing the id, not a copy, keeps the suite small; the suite hash still changes when a pin is added, so results only compare across the same set.
 
-Persisted: durable: the `.rrsdata` and `.rrseval` documents in the project (`documents`, `undo_steps`), the `pinned` flag in `vault.db`, lineage `pair_from` (message → pair). Votes: `<plugin data>/votes.jsonl`, written only by the Evaluation module.
+Persisted: durable: the `.rrsdata` and `.rrseval` documents in the project (`documents`, `undo_steps`), the `pinned` flag in `vault.db`, lineage `pair_from` (message → pair). Votes are rows of `evals/votes.rrsdata`, so they sit in the same tables and, being project documents, travel in a `.rrsproj` export.
 
-Tests: `tests/e2e/branch_prefer.spec.ts` (inference-psychology 7.2: one inline row appended, its token IDs equal the messages' `token_ids`, undo removes it, lineage shows replay → pair → dataset); a test that deleting the conversation afterwards leaves the row and a `.rrsproj` export carries it; a unit test that an edited target is re-tokenized and marked `edited`; a Playwright test that pins a conversation and finds it in `evals/pinned.rrseval`.
+Tests: `tests/e2e/branch_prefer.spec.js` (inference-psychology 7.2: one inline row appended, its token IDs equal the messages' `token_ids`, undo removes it, lineage shows replay → pair → dataset); a test that deleting the conversation afterwards leaves the row and a `.rrsproj` export carries it; a unit test that an edited target is re-tokenized and marked `edited`; a test that `eval.vote` appends a `blind_vote` row with `chosen_side` to `evals/votes.rrsdata`, writes a `command_journal` entry, and that undo removes the row; a Playwright test that pins a conversation and finds it in `evals/pinned.rrseval`.
 
 ### 7.2 Recipe, anchors and placement
 
@@ -745,20 +804,24 @@ flowchart TD
 
 Not obvious:
 - **Anchors** are the base model's own answers to a fixed set of unrelated questions (`templates/evals/`, the default anchor set), mixed in at one anchor per taught example (`ANCHORS_PER_EXAMPLE`). In the spike they cut drift on unseen prompts by 83–87% with no loss of the new facts. They are stored as token IDs, never decoded text, so retokenization can't change them.
-- **Where anchors are kept.** ADR-0028 makes them a blob (artifact kind `anchor_answers`), keyed by the base model hash, the anchor set hash and the chat template hash, so a run record can name the exact anchors it trained on (`dataset_hashes[]`). Each node also keeps a copy at `cache_folder/anchors/<base_model_hash12>-<anchor_set_hash12>-<template_hash12>.safetensors` (`layout/python.md` 15), so a warm node skips the blob fetch. The spike took 57 s to generate them one at a time; batched greedy generation is faster, and ADR-0028 doesn't count it in the Teach it time. `training.anchors_default` turns them off; Verify still reports drift.
+- **Where anchors are kept.** ADR-0028 makes them a blob (artifact kind `anchor_answers`), keyed by the base model hash, the anchor set hash and the chat template hash, so a run record can name the exact anchors it trained on (`dataset_hashes[]`). Each node also keeps a copy at `cache_folder/anchors/<base_model_hash12>-<anchor_set_hash12>-<template_hash12>.safetensors` (`layout/python.md` 15), so a warm node skips the blob fetch. The spike took 57 s to generate them one at a time; batched greedy generation is faster, and ADR-0028 doesn't count it in the Teach it time. `training.anchors_default` (true, for SFT and for DPO) turns them off; Verify still reports drift.
 - **Defaults** (ADR-0028): LoRA rank 16, alpha 32 on every linear projection, float32 masters with bf16 compute, loss on answer tokens only, gradient checkpointing on, 8 epochs.
-- **Anchors with DPO** are an SFT term next to the DPO loss. The spike only measured anchors with SFT; the DPO case needs its own GPU test before it ships as the default (section 15).
+- **Anchors with DPO** are on by default too (owner decision 16), as an SFT term next to the DPO loss. The spike only measured anchors with SFT, so the DPO case sits behind its own GPU test, `tests/gpu/test_dpo_anchor_drift.py`, which must pass before L2. It reuses the Teach it bar of spike 03b: the taught facts are still learned, and drift on unseen prompts is at least 50% lower with anchors than without. The weight of the SFT term is a recipe setting that test fixes.
 - **DPO's reference model** is the same base with the adapter switched off. Reference log-probs for every row are computed once in `preparing` and kept in memory (one number per side per row). A resume recomputes them.
 - **"LoRA on the resident base while chat keeps serving" means two processes.** The chat model stays loaded in its `serve_inspectable` job under its evictable lease. Teach it trains in its own `train` job with its own copy of the base weights under a pinned lease. The spike held the same two copies (chat model plus training copy, 4.69 GiB peak, `results/03_teach_it_lora.md`); the second process adds its own CUDA context, a few hundred MB, which `tests/gpu/test_teach_it_budget.py` holds within 10% of the spike's peak. Two processes buy two things:
   - a training OOM or crash can't take chat down;
   - lease classes stay simple: chat is evictable, training is pinned.
 
-  Sharing one base between the two processes (CUDA IPC) is an open question for larger models (section 15).
-- **When both don't fit**, the pinned request reclaims the chat model's evictable lease after the 10 s grace (inference-psychology flow 4.6, `RRS-H3004`, info). The UI says "Chat paused while Teach it trains", and the daemon reloads the chat model when the chain ends.
+  Sharing one base between the two processes through read-only CUDA IPC is on the M5 completion list behind a measurement gate (contracts glossary, "Teach it"). The gate is a measurement on the 5080 with a 4B model: how much VRAM it saves and whether chat speed and training speed hold. Until it passes, the processes keep separate copies.
+- **The default model is the First Run model, 1B** (Gemma 3 1B class). Teach it and the offline analyses of its Verify step (model diff, SAE fit check) keep it unless the user picks another model. At 1B the chat copy and the training copy fit together (the spike held both under an 8 GiB cap), so chat rarely pauses.
+- **When both don't fit**, the pinned request reclaims the chat model's evictable lease after the 10 s grace (inference-psychology flow 4.6, `RRS-H3004`, info). A chat pause is never silent:
+  - the confirm step says "Chat will pause while Teach it trains" before anything starts, when the lease check shows both won't fit;
+  - while it lasts, the chat panel shows "Chat paused while Teach it trains";
+  - the daemon reloads the chat model when the chain ends, and the banner goes away.
 
 Persisted: durable: the teach dataset document, the `anchor_answers` blob (pinned to its base model hash), `lease.state_changed` events for any reclaim. Node-local and safe to delete: the anchor cache file.
 
-Tests: unit tests for the recipe choice over example mixes; `rastai_train/tests/test_anchors.py` (anchors are token IDs; the second call hits the cache; the mix ratio holds); `crates/rastai-node/tests/leases.rs` (a pinned request reclaims an evictable lease) and a daemon test that the evicted chat model is reloaded when the chain ends.
+Tests: unit tests for the recipe choice over example mixes; `rastai_train/tests/test_anchors.py` (anchors are token IDs; the second call hits the cache; the mix ratio holds); `tests/gpu/test_dpo_anchor_drift.py` (the DPO case above, before L2); `crates/rastai-node/tests/leases.rs` (a pinned request reclaims an evictable lease) and a daemon test that the evicted chat model is reloaded when the chain ends.
 
 ### 7.3 The Teach it chain
 
@@ -806,11 +869,11 @@ Not obvious:
   - drift on `eval.drift_prompt_set`.
 
   Taught rows show that the model learned, not that it generalizes. The Basic view says so and invites a few held-out phrasings.
-- **No judge configured** (`eval.judge_default` empty): judge tests are skipped with `RRS-V1001`, and the verdict rests on drift and the model diff. In the spike, keyword checks missed both a style change and an invented fact.
+- **No judge configured** (`eval.judge_default` empty), **or a judge that isn't trusted yet** (fewer than `eval.judge_min_labels` hand-labeled examples, section 9.3): judge tests are skipped with `RRS-V1001`, and the verdict rests on drift and the model diff. The Basic view says "label 10 examples to turn the judge on". In the spike, keyword checks missed both a style change and an invented fact.
 - **Before and after answers go through the gateway** (`layout/python.md` 9.3), so the template and the token logging are the gateway's. "Before" comes from the base, which is usually the chat model already loaded. "After" comes from `ckpt:<checkpoint_id>`, which the node loads as the base plus the adapter under an evictable lease; the train job has released its memory by then.
 - **Drift needs logits,** so it runs in the eval job itself: one base copy with the adapter off, then on (`set_active_adapter`, the spike's `set_lora_enabled`). The `ckpt` model is idle once its answers are in, so when the eval job grows its lease for drift (`ResizeLease`) the node may evict it (inference-psychology flow 4.5). That keeps Verify inside the same 8 GiB cap as training.
 - **Use the result:** "Chat with it" runs `model.load` with `ckpt:<checkpoint_id>`.
-- **Time (spike, Gemma 3 1B on the 5080 under an 8 GiB cap):** training took about 10 s for 40 rows with anchors, and chat kept serving at about 70 tok/s. Process starts, the eval job and the diff add seconds. The target is under 3 minutes end to end, and the whole loop under 10 minutes from a cold start (§32, weeks 11–12).
+- **Time (spike, Gemma 3 1B on the 5080 under an 8 GiB cap, the default model):** training took about 10 s for 40 rows with anchors, and chat kept serving at about 70 tok/s. Process starts, the eval job and the diff add seconds. The target is under 3 minutes end to end, and the whole loop under 10 minutes from a cold start (§32, weeks 11–12).
 - **No resume for Teach it.** Its runs are seconds long and only checkpoint at the end, so a killed Teach it restarts from scratch.
 
 Failures:
@@ -819,8 +882,8 @@ Failures:
 |---|---|---|---|
 | Not enough VRAM for both | "Chat paused while Teach it trains" (info) | paused, reloaded after | lease events |
 | No rows | `RRS-T0003` | serving | nothing |
-| GPU OOM in the train job | `RRS-H3xxx`, chain `failed`, fix: shorter max length or a smaller rank | serving (separate process) | chain and train logs |
-| kill -9 of the train job | `RRS-J1xxx`, Teach it again | serving | chain and train logs |
+| GPU OOM in the train job | `RRS-H3007`, chain `failed`, fix: shorter max length or a smaller rank | serving (separate process) | chain and train logs |
+| kill -9 of the train job | `RRS-J1001`, Teach it again | serving | chain and train logs |
 | Eval step errored | the eval code (`RRS-V…`); the adapter is kept and usable | serving | adapter checkpoint |
 | Psychology disabled, or no SAEs loaded | diff or fit-check step skipped (info) | serving | chain log |
 | Cancel | chain `cancelled`; the running child gets `STOP` (train) or `CANCEL` (eval, lens) | serving | partial results |
@@ -884,7 +947,7 @@ CLI exit codes. ADR-0020 item 4 (accepted) stands, per plan §10 row 35 and M5-E
 | 1 | `failed`: a test missed its threshold |
 | 2 | `errored`, `cancelled` or refused (`ok: false`: invalid suite, unknown model, missing metric plugin). A usage error caught before sending also exits 2 (`EXIT_USAGE`). In every case the suite gave no verdict |
 | 3 | `EXIT_DAEMON_UNAVAILABLE`: the daemon can't be reached or started, so the command never ran |
-| 4 | `EXIT_NOT_PERMITTED`: `RRS-C1xxx` (scope `eval` missing), so the command never ran |
+| 4 | `EXIT_NOT_PERMITTED`: `RRS-C1005` (scope `eval` missing), so the command never ran |
 
 `rastai eval test` never exits 5 (`EXIT_ERRORED`). A CI job that must tell `errored` from refused or `cancelled` reads `--json`.
 
@@ -894,10 +957,10 @@ Not obvious:
 - **Drift always runs alongside** when a base model is known (ADR-0020 item 6, `layout/python.md` 9.4), even if the suite didn't ask for it.
 - **Generation settings for tests:** greedy, seed 0, `pin_attention_kernel` set (in the spike, fast kernels flipped bf16 near-ties). A rerun on the same hardware gives the same answers.
 - **If the CLI dies** the evaluation keeps running and its results are stored. A CLI that loses its stream re-subscribes with `after_bus_sequence`; on `RRS-C0401` it reads the final state with `job.get`.
-- **Before and after.** With `baseline_model` (new argument), the job also answers every test with the baseline. It reuses the baseline's stored result for the same suite hash when there is one.
-- **Results per checkpoint:** the result file is a blob registered as an `eval_result` artifact with lineage `evaluated_by` from the checkpoint (new relation). `eval.result.list --model ckpt:<id>` reads that lineage through `artifact.list`. The plugin keeps no database of its own.
+- **Before and after.** With `baseline_model` (an `EvalTestArgs` field), the job also answers every test with the baseline. It reuses the baseline's stored result for the same suite hash when there is one.
+- **Results per checkpoint:** the result file is a blob registered as an `eval_result` artifact with lineage `evaluated_by` from the checkpoint. `eval.result.list --model ckpt:<id>` reads that lineage through `artifact.list`. The plugin keeps no database of its own.
 
-Persisted: durable: the eval run's `run.json` and `events.log` (`run.state_changed`, `eval.test_result`, `eval.suite_finished`, `gateway.request_logged`); the result file (`rastai.eval_result/1`, artifact kind `eval_result`) with every answer, its token IDs, scores, pass flags, judge transcript hashes (`judge_transcript`), the judge agreement rate, generation settings and the hardware fingerprint; lineage `evaluated_by`.
+Persisted: durable: the eval run's `run.json` and `events.log` (`run.state_changed`, `eval.test_result`, `eval.suite_finished`, `gateway.request_logged`), which the archive keeps as event records and as `eval_results` rows when configured (M11); the result file (`rastai.eval_result/1`, artifact kind `eval_result`) with every answer, its token IDs, scores, pass flags, judge transcript hashes (`judge_transcript`), the judge agreement rate, generation settings and the hardware fingerprint; lineage `evaluated_by`.
 
 Tests: `plugins/evaluation/tests/`: the CLI exits 0, 1, 2 and 2 for a passing suite, a failing suite, an invalid suite and an unreachable judge, on a tiny CPU model with a scripted gateway; `test_suite_job.py` (state order, `errored` vs `failed`) on the plugin test host (`rastai plugin test`, mock worker); the regression diff of two stored results matches a golden file.
 
@@ -908,7 +971,7 @@ stateDiagram-v2
   [*] --> created
   created --> resolving : eval job started
   resolving --> generating : suite, model and judges resolved
-  resolving --> errored : model missing, metric plugin missing or judge not trusted
+  resolving --> errored : model missing, metric plugin missing or judge agreement below the bar
   generating --> judging : answers stored, suite has judge tests
   generating --> scoring : no judge tests
   judging --> scoring : verdicts stored
@@ -927,7 +990,7 @@ stateDiagram-v2
 ```
 
 Not obvious:
-- **Any errored test makes the suite `errored`.** A suite can't claim a pass when a test couldn't run.
+- **Any errored test makes the suite `errored`.** A suite can't claim a pass when a test couldn't run. Skipped tests (an untrusted judge, section 9.3) are listed in the result; a suite where every test was skipped is `errored`, because nothing was checked.
 - **`pass_rule`** in the suite is `all` (default) or `min_fraction` with a value.
 - **The eval job holds no model while generating and judging.** Answers and verdicts come through the gateway, so a local judge and the model under test can use the GPU first. The job grows its lease (`ResizeLease`) only in `scoring`, when a metric needs logits, and the node may then evict idle evictable models.
 
@@ -944,16 +1007,17 @@ Tests: a unit test walks a fake suite through every state, including errored fro
 | Model or checkpoint not found | plugin module | `RRS-V0003` | 2 | nothing |
 | Generated-text tests with only cheap checks | plugin module (suite validation) | `RRS-V0101` warning: keyword checks miss real regressions (spike); fix button adds a judge or drift | — | warning in the results |
 | Metric plugin missing | plugin module | `RRS-V2001`, fix `plugin.suggest` | 2 | nothing |
-| API judge under a `local-only` project | plugin module | `RRS-V1003` | 2 | nothing |
-| Scope `eval` missing on the token | daemon | `RRS-C1xxx` | 4 | journal entry |
-| Judge agreement below the bar | eval job, resolving | `RRS-V1002` with the rate | 2 | the calibration artifact |
-| Plugin lacks `gateway.spend` for a paid API | daemon, at `GatewayGenerate` | `RRS-P2xxx` (permission missing) | 2 | results so far |
+| API judge under a `local-only` project | plugin module, through `check_data_policy` | `RRS-C1009` | 2 | nothing |
+| Scope `eval` missing on the token | daemon | `RRS-C1005` | 4 | journal entry |
+| Judge has fewer than `eval.judge_min_labels` hand labels, or none | eval job, resolving | `RRS-V1001` warning; that judge's tests are skipped and counted, their transcripts kept | — | the skipped count in the result |
+| Judge agreement below the bar (0.8 on at least 10 labels) | eval job, resolving | `RRS-V1002` with the rate | 2 | the calibration artifact |
+| Plugin lacks `gateway.spend` for a paid API | daemon, at `GatewayGenerate` | `RRS-C1005` (permission not granted) | 2 | results so far |
 | Judge times out or returns no verdict | eval job | retried once with a format reminder, then the test is errored with `RRS-V1004` | 2 | results so far, transcript kept |
-| Model under test fails to load or runs out of memory | node or eval job | `RRS-H3xxx` | 2 | results so far |
+| Model under test fails to load or runs out of memory | node or eval job | `RRS-H3006` (while loading) or `RRS-H3007` (in a step) | 2 | results so far |
 | Sandbox engine missing | eval job | `RRS-V2002` | 2 | results so far |
 | A sandbox sample times out | container time cap | that sample fails; not an error | — | sample blob |
-| Network drop to a remote judge's node or an API | node gateway, after retries | `RRS-G0006` (node unreachable) or `RRS-G2xxx` (API error); the test is errored | 2 | results so far |
-| kill -9 of the eval job | node | `RRS-J1xxx`, run `errored`, rerun | 2 | results so far |
+| Network drop to a remote judge's node or an API | node gateway, after retries | `RRS-G0006` (node unreachable) or `RRS-G2004` (API connection dropped; `RRS-G2002` for a provider error); the test is errored | 2 | results so far |
+| kill -9 of the eval job | node | `RRS-J1001`, run `errored`, rerun | 2 | results so far |
 | `job.cancel` | eval job | run `cancelled` | 2 | results so far |
 | Tests failed | eval job | the table of failures and changes | 1 | full result file |
 
@@ -1070,35 +1134,40 @@ Not obvious:
 
 Persisted: durable: `judge_transcript` blobs referenced from `eval.test_result`. The judge's generations are logged once, by the gateway that ran them: a node gateway's record comes back in `GenerateFinished.gateway_log`, the eval job appends it as `gateway.request_logged`, and the daemon indexes it into `vault.db` `gateway_log` with the run id; an API judge is logged by the daemon gateway directly.
 
-Tests: a fake judge that always prefers the first position makes every pairwise result a tie; a fake judge returning garbage twice gives `RRS-V1004`; a `local-only` project with an API judge is refused with `RRS-V1003` before any request leaves the machine.
+Tests: a fake judge that always prefers the first position makes every pairwise result a tie; a fake judge returning garbage twice gives `RRS-V1004`; a `local-only` project with an API judge is refused with `RRS-C1009` before any request leaves the machine.
 
 ### 9.3 Judge calibration
+
+A judge's verdicts count only after it clears the trust bar: at least 0.8 agreement with the user's hand labels on at least 10 labeled examples (owner decision 15; `eval.judge_min_agreement` and `eval.judge_min_labels`, contracts §9.6 and §11.2).
 
 ```mermaid
 flowchart TD
   A["eval.judge.calibrate, or resolving finds no calibration"] --> B["rastai_eval: key from judge model hash, rubric hash and examples hash"]
   B --> C{"judge_calibration artifact with this key?"}
-  C -->|yes| R["Use its agreement rate"]
-  C -->|no| D{"Suite has hand-labeled examples for this judge?"}
-  D -->|no| W["RRS-V1001 warning: judge uncalibrated, its results are flagged"]
+  C -->|yes| R["Use its agreement rate and label count"]
+  C -->|no| D{"Suite has at least eval.judge_min_labels hand-labeled examples for this judge?"}
+  D -->|no| W["RRS-V1001 warning: judge not trusted yet, its tests are skipped and counted"]
   D -->|yes| E["Run the judge on every example, both orders when pairwise"]
   E --> F["Agreement rate: verdicts matching the hand labels over examples"]
   F --> G["Store a judge_calibration artifact"]
   G --> R
-  R --> H{"Rate at least eval.judge_min_agreement?"}
-  H -->|yes| OK["Judge trusted, its rate shown next to every verdict"]
-  H -->|no| X["RRS-V1002: the suite is errored, judge not trusted"]
+  R --> H{"At least eval.judge_min_labels labels, and rate at least eval.judge_min_agreement?"}
+  H -->|yes| OK["Judge trusted, its rate and label count shown next to every verdict"]
+  H -->|"too few labels"| W
+  H -->|"enough labels, rate too low"| X["RRS-V1002: the suite is errored, judge not trusted"]
 ```
 
 Not obvious:
-- **Hand labels live in the suite** (new field `judges[].calibration{examples[], min_agreement}`), so a suite carries its own proof.
-- **The calibration key** changes when the judge model, rubric or examples change, so a stale calibration is never reused.
+- **Hand labels live in the suite** (`judges[].calibration{examples[], min_agreement}`), so a suite carries its own proof.
+- **The calibration key** changes when the judge model, rubric or examples change, so a stale calibration is never reused. Adding a label changes the examples hash, so it recalibrates.
 - **Lookup is a scan** of `judge_calibration` artifacts. There are few, and the plugin needs no database.
-- `eval.judge_min_agreement` (new setting) defaults to 0.8; a suite's `min_agreement` overrides it.
+- **The bar has two parts, and each fails differently.** Too few labels is a missing proof: `RRS-V1001` (warning). The judge still runs, and its transcripts are kept so the user can read them and label more, but its verdicts don't count toward `passed` or `failed`: those tests are `skipped`, and the result and the Basic view say how many. Enough labels with a rate below the bar is a measured problem: `RRS-V1002` (error), and the suite is `errored`.
+- **Settings.** `eval.judge_min_agreement` defaults to 0.8 and `eval.judge_min_labels` to 10. A suite's `min_agreement` can only raise the bar: the effective rate is the larger of the suite's value and `eval.judge_min_agreement`. A lower value is a validation warning and is ignored.
+- **A suite with only skipped tests** is `errored` (section 8.2), never a pass.
 
-Persisted: durable: the calibration run's results blob (artifact kind `judge_calibration`) with every verdict and the rate.
+Persisted: durable: the calibration run's results blob (artifact kind `judge_calibration`) with every verdict, the rate and the label count.
 
-Tests: a fake judge that agrees on 9 of 10 examples passes at 0.8 and fails at 0.95; changing one rubric character forces recalibration.
+Tests: a fake judge that agrees on 9 of 10 examples passes at 0.8 and fails at 0.95; one that agrees on 9 of 9 is still not trusted (`RRS-V1001`, its tests skipped, transcripts kept); changing one rubric character or adding one label forces recalibration; a suite whose only tests are skipped judge tests ends `errored`; a suite with `min_agreement` 0.5 and a judge at 0.7 agreement still gets `RRS-V1002`.
 
 ### 9.4 Pass@k in the sandbox
 
@@ -1161,9 +1230,10 @@ flowchart TD
 ```
 
 Not obvious:
-- **Which suites:** `train.start` takes `eval_suite_ids` (new argument), which the launch dialog fills with the project's suites. They are stored in `run.json`.
-- **Auto-run never evicts chat.** Its jobs set `ResourceRequest.may_reclaim_evictable = false` (new field), and the node applies the same flag to the model loads their gateway calls cause, so they wait for free memory instead. Evals the user starts, including a chain's Verify step, may reclaim.
+- **Which suites:** `train.start` takes `eval_suite_ids`, which the launch dialog fills with the project's suites. They are stored in `run.json`.
+- **Auto-run never evicts chat.** Its jobs set `ResourceRequest.may_reclaim_evictable = false` (an optional bool; unset means true), and the node applies the same flag to the model loads their gateway calls cause, so they wait for free memory instead. Evals the user starts, including a chain's Verify step, may reclaim.
 - **Coalescing** keeps a long run from piling up evals: only the newest checkpoint per suite waits in the queue.
+- **Handler deliveries** are tracked in `plugin_event_deliveries`. M5 builds only what auto-run and pins need (queue, deliver once, retry on restart); backlog views, per-plugin limits and redelivery tools are L2 (contracts 8.2).
 
 Persisted: as section 8.1, plus lineage `evaluated_by` from each checkpoint.
 
@@ -1191,7 +1261,7 @@ Tests: golden-file tests for every class, including a suite edited between runs.
 
 ```mermaid
 flowchart TD
-  A["eval.elo.fit over a set of models"] --> B["rastai_eval: collect pairs from preference datasets, votes.jsonl and pairwise verdicts"]
+  A["eval.elo.fit over a set of models"] --> B["rastai_eval: collect pairs from preference datasets, including evals/votes.rrsdata, and from pairwise verdicts"]
   B --> C["Keep pairs whose two sides are both in the set"]
   C --> D{"Comparison graph connected?"}
   D -->|no| D1["RRS-V2004 warning: each connected group gets its own scale"]
@@ -1230,12 +1300,12 @@ def elo_with_intervals(comparisons: list[Comparison], seed: int) -> list[EloRati
 ```
 
 Not obvious:
-- **Sources:** branch-pick rows in preference datasets (section 7.1) whose `chosen.model_ref` and `rejected.model_ref` differ, blind A/B votes in the Evaluation module's `votes.jsonl`, and pairwise judge verdicts in stored results.
+- **Sources:** branch-pick rows in preference datasets (section 7.1) whose `chosen.model_ref` and `rejected.model_ref` differ, blind A/B votes (rows of `evals/votes.rrsdata` with `source` `blind_vote`), and pairwise judge verdicts in stored results. The votes file is read like any preference dataset, so no Elo code knows about votes.
 - **The virtual tie** is a prior, not data: it's counted once per model, and the result lists it with the pair counts, so a model with three comparisons doesn't look as certain as one with three hundred. The bootstrap interval shows the rest of that uncertainty.
 
-Persisted: durable: the `elo_fit` artifact. Votes stay in `votes.jsonl`; branch picks stay in their datasets.
+Persisted: durable: the `elo_fit` artifact. Votes stay in `evals/votes.rrsdata`; branch picks stay in their datasets. An undone vote drops out of the next fit, because the fit reads the documents as they are.
 
-Tests: `test_elo.py`: synthetic players with known strengths recover their order and ratings within the bootstrap interval; shuffling the comparison order gives identical ratings; the seeded bootstrap repeats; a disconnected set gives `RRS-V2004`.
+Tests: `test_elo.py`: synthetic players with known strengths recover their order and ratings within the bootstrap interval; shuffling the comparison order gives identical ratings; the seeded bootstrap repeats; a disconnected set gives `RRS-V2004`; a vote row in a `votes.rrsdata` fixture counts as one comparison, and undoing it removes it from the next fit.
 
 ### 10.4 Benchmarks
 
@@ -1257,11 +1327,11 @@ Not obvious:
 - **A benchmark is just a generated suite.** It runs through the same `eval.test` path (section 8), so results are stored per checkpoint and diff like any suite.
 - **Task files are data** (`layout/python.md` 9.5). `benchmarks/yaml_subset.py` reads mappings, lists, scalars, quoted and block strings; YAML anchors and tags are rejected. `!function` entries (Python code references) are rejected and never run. Each is `RRS-V3001` for that task; the rest of the folder imports.
 - **Templates support `{{field}}` substitution only** (`benchmarks/prompt_fill.py`). Jinja blocks (`{% %}`) and filters are rejected with `RRS-V3001`, so an unsupported task fails visibly instead of running wrong. The filled prompt then goes through the gateway like any test input, so the model's own chat template still comes from the gateway.
-- **Task metrics map onto metric ids:** multiple-choice log-likelihood tasks use `eval.choice_loglikelihood` (new first-party metric, scored from logits in the eval job: the choice is the answer whose `TokenizeChat` target tokens have the highest summed log-probability); exact-match tasks use `eval.exact_match` or `eval.regex`.
+- **Task metrics map onto metric ids:** multiple-choice log-likelihood tasks use `eval.choice_loglikelihood` (first-party metric, scored from logits in the eval job: the choice is the answer whose `TokenizeChat` target tokens have the highest summed log-probability); exact-match tasks use `eval.exact_match` or `eval.regex`.
 
 Persisted: durable: the generated `.rrseval` in the project's `evals/`, the task dataset's `.rrsdata`, and each model's eval results as in section 8.1.
 
-Tests: `test_yaml_subset.py` and `test_lm_eval_import.py` over `fixtures/benchmarks/`: a task folder with one multiple-choice and one exact-match task imports to a golden suite; `!function` and a Jinja filter each give `RRS-V3001`; two models run on the same benchmark share one suite hash.
+Tests: `test_yaml_subset.py` and `test_lm_eval_import.py` over `fixtures/benchmarks/`: a task folder with one multiple-choice and one exact-match task imports to a golden suite; `!function` and a Jinja filter each give `RRS-V3001`; two models run on the same benchmark share one suite hash; seeded mutation tests marked `fuzz` (contracts 12.5) feed truncated and flipped task files to `yaml_subset.py`, which only ever returns data or `RRS-V3001`.
 
 ---
 
@@ -1282,8 +1352,8 @@ flowchart LR
 ```
 
 Not obvious:
-- **Inputs** (`RlhfStartArgs`, new): the base `model_ref`, a preference dataset or an existing `reward_model_checkpoint_id`, a prompt dataset (default: the prompts of the preference pairs), an optional reward-function plugin instead of a reward model, PPO settings, and `accept_weak_reward_model`.
-- **The gate** is `training.rlhf_reward_model_min_accuracy` (new, default 0.65) on the reward model's held-out pairs. The fix button reruns `rlhf.start` with the trained reward model's checkpoint and `accept_weak_reward_model`, so nothing is retrained.
+- **Inputs** (`RlhfStartArgs`): the base `model_ref`, a preference dataset or an existing `reward_model_checkpoint_id`, a prompt dataset (default: the prompts of the preference pairs), an optional reward-function plugin instead of a reward model, PPO settings, and `accept_weak_reward_model`.
+- **The gate** is `training.rlhf_reward_model_min_accuracy` (default 0.65) on the reward model's held-out pairs. The fix button reruns `rlhf.start` with the trained reward model's checkpoint and `accept_weak_reward_model`, so nothing is retrained.
 
 - **The chain's state** follows section 6: `running` through the reward-model and PPO steps, `verifying` through eval and diff (ADR-0021).
 
@@ -1358,9 +1428,9 @@ def set_active_adapter(model: torch.nn.Module, adapter_name: str | None) -> None
 - **Starting defaults** (to tune, not measured): KL coefficient β 0.05, γ 1.0, GAE λ 0.95, ratio clip 0.2, value clip 0.2, 2 PPO epochs per iteration.
 - **Reward hacking guard:** mean KL above `max_kl` for 3 iterations in a row stops the run with a checkpoint and `RRS-T3002`.
 - **Resume:** checkpoints are written only at iteration boundaries, so there is never a half-used rollout buffer to save. They hold the policy adapter and the value head (`adapter.safetensors`), never a second copy of the base (ADR-0022 item 6). `recipe_state` holds the KL coefficient (when adaptive), the reward normalization statistics and the iteration number.
-- **A reward-function plugin** instead of a reward model is a `RewardFunction` (new base class name) found in the registry; `rastai_rl/rewards.py` calls it on the decoded response.
+- **A reward-function plugin** instead of a reward model is a `RewardFunction` (a base class in `rastai_plugin`) found in the registry; `rastai_rl/rewards.py` calls it on the decoded response.
 
-Failures: too few pairs (`RRS-T0003`); reward source plugin missing (`RRS-T0002`, fix `plugin.suggest`); KL blow-up (`RRS-T3002`); non-finite values (`RRS-T3001`); GPU OOM (`RRS-H3xxx`, fix: smaller rollout batch or shorter responses); node gateway unreachable (retries, then a checkpoint and exit 1 with `RRS-J3xxx`, `layout/python.md` 6.3); preemption and kill -9 as in section 5.
+Failures: too few pairs (`RRS-T0003`); reward source plugin missing (`RRS-T0002`, fix `plugin.suggest`); KL blow-up (`RRS-T3002`); non-finite values (`RRS-T3001`); GPU OOM (`RRS-H3007`, fix: smaller rollout batch or shorter responses); node gateway unreachable (retries, then a checkpoint and exit 1 with `RRS-G0006`, `layout/python.md` 6.3); preemption and kill -9 as in section 5.
 
 Persisted: durable: `run.metrics` per iteration, a `gateway.request_logged` event for every rollout (indexed into `vault.db` `gateway_log`), rollout trace blobs (`rollout_trace`), checkpoints (policy adapter, value head, optimizer, RNG, prompt position, `recipe_state`).
 
@@ -1427,7 +1497,7 @@ Not obvious:
 - **The probe set** defaults to the drift prompt set plus a seeded sample of the training rows.
 - **"Unexpected" changes** are flagged by a plain rule: a feature whose firing frequency changed by at least 2× (and fires on at least 0.1% of tokens) but never fired on the training rows. These are the side effects worth a look.
 - **Routing shift** (MoE only): Jensen-Shannon divergence between base and tuned expert-usage distributions per layer, plus experts that became dead or overloaded.
-- **No SAEs loaded:** the diff runs without feature frequencies and says so (`RRS-L4xxx`, info).
+- **No SAEs loaded:** the diff runs without feature frequencies and says so (`RRS-L4001`, info).
 - **Eval deltas** come from the Evaluation plugin through a command, never an import. The Psychology plugin's manifest needs `commands:[eval]` for that call; without it, or with Evaluation disabled, the diff leaves the eval section empty and says why.
 
 Persisted: durable: the `model_diff` artifact (`rastai.model_diff/1`), lineage `diff_of`.
@@ -1443,7 +1513,7 @@ flowchart TD
   C --> D["Per SAE: loss increase when the SAE reconstruction is spliced in"]
   D --> E{"Tuned FVU minus base FVU above the limit?"}
   E -->|no| OK["Labels stay current"]
-  E -->|yes| ST["Labels shown as stale, RRS-L2xxx warning"]
+  E -->|yes| ST["Labels shown as stale, RRS-L2003 warning"]
   ST --> OF["Offer: fine-tune these SAEs, with a time estimate"]
   OF -->|accepted| TR["train.start recipe sae, warm start from the base SAE weights"]
   TR --> RE["Fit check again on the new SAEs"]
@@ -1451,7 +1521,7 @@ flowchart TD
 ```
 
 Not obvious:
-- **The limit is relative to the base,** because base FVU already varies from 3% to 24% across layers for Gemma Scope 2 (spike). The default is `psychology.sae_fit_max_fvu_increase` (new) = 0.05.
+- **The limit is relative to the base,** because base FVU already varies from 3% to 24% across layers for Gemma Scope 2 (spike). The default is `psychology.sae_fit_max_fvu_increase` = 0.05.
 - **SAE fine-tuning** trains on activations of the tuned model (training rows plus general text). It keeps the dictionary size and starts from the base SAE weights, so feature indices stay aligned and labels can carry over. A feature whose decoder direction moved below 0.7 cosine similarity to its base direction is flagged "label needs review", with fresh top-activating examples.
 - **New SAEs are registered for the tuned model's hash.** Psychology loads them whenever that checkpoint is loaded.
 
@@ -1520,7 +1590,7 @@ Not obvious:
   A mismatch keeps the export but marks it `RRS-T4003`.
 - **QLoRA merges** dequantize the 4-bit base to bf16 first. The merged model differs slightly from what was trained (training saw the quantized base), so its check uses a looser tolerance and says so.
 - **Ollama templates.** Ollama uses Go templates, not Jinja. Families with a known template get a `TEMPLATE` line from the table. Others get none, and Ollama falls back to the GGUF's `tokenizer.chat_template`; that gives `RRS-T4006` (warning), because the fallback only works for templates Ollama recognizes.
-- **Push** prepares the folder in the `export` job, then the node uploads it as a node-native `transfer` job from wherever the files are (full checkpoints stay remote; §22). The HF token comes from `NodeHubService.GetSecret` (purpose `hf_upload`, new) for this job only and is never written down. Upload retries per file. Files whose SHA-256 the Hub already has are skipped, so a retry after a network drop resumes at file granularity. Repos are created private unless the user says otherwise. The egress badge shows during upload.
+- **Push** prepares the folder in the `export` job, then the node uploads it as a node-native `transfer` job from wherever the files are (full checkpoints stay remote; §22). The HF token comes from `NodeHubService.GetSecret` (purpose `hf_upload`) for this job only and is never written down. Upload retries per file. Files whose SHA-256 the Hub already has are skipped, so a retry after a network drop resumes at file granularity. Repos are created private unless the user says otherwise. The egress badge shows during upload.
 
 Provenance (§13), with the keys from `layout/python.md` 15:
 
@@ -1571,7 +1641,7 @@ Tests: one unit test per rule: permissive base and datasets; a non-commercial da
 | Exported GGUF's tokenizer disagrees with the gateway | `RRS-G1004` at load, then `RRS-T4003` on the export | export kept, marked |
 | Disk too full to start | `RRS-S3001` with bytes needed (platform flow 8.1 runs before `checkpoint.export`) | nothing |
 | Disk full mid-write | `RRS-S3002` | `.partial` export folder removed |
-| kill -9 of the export job | `RRS-J1xxx`, Retry | nothing registered; the partial output folder is removed by GC |
+| kill -9 of the export job | `RRS-J1001`, Retry | nothing registered; the partial output folder is removed by GC |
 
 Tests: `tests/crash/`: kill -9 the export job mid-write; no `checkpoint_export` or `gguf` artifact is registered and a retry produces the same file hashes.
 
@@ -1612,8 +1682,8 @@ sequenceDiagram
 | `rastai_spool` | `./rastai-runs/<run_id>.jsonl` | the SDK's own offline spool: `rastai.log()` writes it when no daemon is reachable (`layout/python.md` 15). With a daemon, a notebook run goes straight in through `run.external.start`, `run.external.log` and `run.external.finish` |
 
 Not obvious:
-- **An imported run is an ordinary run** of kind `imported`, with `parent_run_id` pointing at the import run and a new `source{kind, location, original_run_id}` field in its record. It overlays and diffs like a native run.
-- **Rebuildable:** an imported run's rows come from the import run's `run.imported` events and blobs, so `rastai storage rebuild-index` restores it.
+- **An imported run is an ordinary run** of kind `imported`, with `parent_run_id` pointing at the import run and a `source{kind, location, original_run_id}` field in its record. It overlays and diffs like a native run.
+- **Rebuildable:** an imported run's rows come from the import run's `run.imported` events and blobs, so `rastai storage rebuild-index` restores it. With an archive configured (M11), the same command also pulls pruned runs back from the archive (ADR-0035 amends ADR-0002 decision 7).
 - **Idempotent:** the source id is a hash of the source path and the original run id. Importing the same folder twice adds nothing.
 - **CRC32C** is a small in-house table; Python's `zlib` only has CRC-32.
 - **These formats are internal to their tools.** Versions we haven't tested fail with `RRS-D4001` naming the version, instead of guessing.
@@ -1624,193 +1694,58 @@ Not obvious:
 
 **Sweeps:** `sweep.start` is a chain (section 6) with one child `train` run per trial. Grid or seeded random sampling over declared settings; at most as many trials run at once as there are free GPUs that fit the plan; children get the sweep id as a tag.
 
-Failures: folder unreadable (`RRS-D3001`); format version untested (`RRS-D4001`); a corrupt record (`RRS-D4002`: that source run is skipped and counted, the rest import); kill -9 (`RRS-J1xxx`; runs already announced by `run.imported` stay, and a rerun skips them).
+Failures: folder unreadable (`RRS-D3001`); format version untested (`RRS-D4001`); a corrupt record (`RRS-D4002`: that source run is skipped and counted, the rest import); kill -9 (`RRS-J1001`; runs already announced by `run.imported` stay, and a rerun skips them).
 
 Persisted: durable: the import run's `events.log` with one `run.imported` per source run, metrics and config blobs, `runs` and `run_metrics` rows (rebuildable).
 
-Tests: `fixtures/run-logs/` (new) with one small run per source and expected metric tables; imported values equal their source values (plan M5-E12); a re-import adds nothing; a truncated tfevents file imports every complete record and reports `RRS-D4002`; `rastai.log()` spools while the daemon is down and the spool imports later; `tests/loop/`: train, rerun and compare on CPU with bit-identical metrics in deterministic mode.
+Tests: `fixtures/run-logs/` with one small run per source and expected metric tables; imported values equal their source values (plan M5-E12); a re-import adds nothing; a truncated tfevents file imports every complete record and reports `RRS-D4002`; seeded mutation tests marked `fuzz` (contracts 12.5) corrupt the TFRecord, W&B, Trackio and spool readers' input and expect only data or `RRS-D4001`/`RRS-D4002`, never a crash or a read past a record; `rastai.log()` spools while the daemon is down and the spool imports later; `tests/loop/`: train, rerun and compare on CPU with bit-identical metrics in deterministic mode.
+
+### 14.2 Runs and metrics to MySQL: the archive
+
+There is no separate exporter. "Export runs and metrics to MySQL" is the long-term archive (ADR-0035, contracts 8.7, milestone M11): SQLite stays the live store, and each daemon replicates to the owner's own MySQL or MariaDB one way and idempotently.
+
+```mermaid
+flowchart LR
+  EV["events.log frames and the rastai.db index"] --> AR["rastai-archive: archive.sync"]
+  AR -->|"idempotent upserts"| TB["typed tables: runs, run_tags, jobs, checkpoints, run_metrics, eval_results, artifacts, lineage"]
+  TB --> VW["stable views v_runs and v_metrics"]
+  VW --> US["the owner's SQL, notebooks and BI tools"]
+```
+
+Not obvious:
+- **Configure and sync** with `archive.configure` (Settings > Storage > Archive) and `archive.sync` (`rastai archive sync`). Sync also runs after the indexer's commit, every `archive.interval_seconds` (60) and at daemon start.
+- **What lands for runs:** the run record (`runs.record_json`), tags, each job's final state, checkpoint metadata, every `run_metrics` point (`source_id`, `run_id`, `sequence`, `name`, `step`, `value`), eval results per test, and artifact and lineage metadata. Imported runs (section 14.1) are ordinary runs and are archived like the rest.
+- **The views are the contract.** `v_runs` and `v_metrics` change only by adding columns, so an owner's queries keep working while the tables evolve. Every row carries `source_id`, so several machines can write into one database and the views show them together.
+- **Policy.** A `local-only` project's runs are skipped and listed in `archive.status` with `RRS-C1009` and its one-click fix. TLS is required except over loopback or a Unix socket.
+- **Pruned runs** show in `run.list` as stubs until restored. Opening one restores it (`archive.restore`), and `rastai storage rebuild-index` pulls pruned runs back. `train.resume` on a pruned run restores it first; only pinned checkpoints are archived, so without a pinned one it ends with `RRS-T2004`.
+- **Delete is separate from prune.** `run.delete` writes a tombstone to the archive; `archive.purge`, with admin credentials, removes the rows physically.
+- **No bytes in MySQL.** Checkpoint, adapter and snapshot bytes go to the blob target (a folder first), with a `blob_objects` row only after the bytes are in place.
+
+Persisted: the archive is a copy. Nothing in this flow reads it back except restore and rebuild.
+
+Tests: the `mysql-archive` CI job (M11-E07); here, the run from `tests/loop/` is archived and the archive's `v_metrics` rows equal the local `run_metrics` rows, a re-sync adds nothing, an imported run appears in `v_runs`, and the views' column lists match a golden file that only grows.
 
 ---
 
 ## 15. Open questions
 
-Each has the default these flows use until the owner decides.
+Each has the default these flows use until the owner decides. Row numbers are stable: settled rows are removed, not renumbered.
 
 | # | Question | Default used here |
 |---|---|---|
-| 1 | **Share one base between the chat serve job and the Teach it train job?** A second copy costs 2 GiB for a 1B model but 8 GiB for a 4B model, which forces chat to pause on a 16 GB card. | Separate copies (crash isolation, simple leases). Revisit with read-only CUDA IPC sharing of the frozen base if 4B Teach it on the 5080 matters. |
-| 2 | **Anchors with DPO** are unmeasured; the spike only ran SFT. | Anchors on by default for DPO too, as an SFT term beside the DPO loss, behind a GPU test in the style of spike 03b before L2. |
-| 3 | **Judge trust bar:** default `eval.judge_min_agreement` and the minimum number of hand labels. | 0.8 agreement and at least 10 labeled examples. |
 | 4 | **Auto-run cost on long runs:** one eval per checkpoint per suite. | Coalesce to the newest checkpoint (section 10.1). Add "every Nth checkpoint" only if it hurts. |
-| 5 | **`rastai eval test` exit codes.** ADR-0020 item 4 says 0 passed, 1 failed, 2 errored; the CLI-wide table (`layout/rust-control-plane.md` 9.5) gives 5 to `errored`. | Closed: ADR-0020 stands (plan §10 row 35). 0 passed, 1 failed, 2 errored, cancelled or refused; `eval.test` maps its own outcomes (section 8.1). |
-| 6 | **How a plugin command starts a job.** Platform flow 3.3 returns `CommandReply.follow_up_jobs[]` and the daemon creates the run; `layout/python.md` 9.1 has `rastai_eval` job commands call `host.start_job` (`WorkerHostService.StartJob`). | `follow_up_jobs` only, so one component creates runs and `ExecuteResponse.job_id` is filled for the CLI. `WorkerHostService.StartJob` is not in the prototype (plan §10 row 31). |
-| 7 | **Where anchor answers live.** ADR-0028 says a blob; `layout/python.md` caches them in the node's `cache_folder`. | Both: the blob (`anchor_answers`) is the record a run names in `dataset_hashes[]`; the cache file is a node-local copy (section 7.2). |
-| 8 | **`train.resume` on `failed` and `cancelled` runs.** Contracts §9.5 makes both terminal, but platform flow 6.5 and designer-gym-remote B8 resume failed runs. | Allow it when a complete checkpoint exists: add `failed → resuming` and `cancelled → resuming` to §9.5 (section 4.2). |
 | 9 | **Restoring evicted models** after Teach it reclaims chat's lease. | The daemon reloads whatever the chain evicted when the chain ends. |
-| 10 | **Run kinds and artifact kinds** aren't enumerated in contracts. | The lists in section 16, which extend `layout/python.md` 15's artifact kinds. |
-| 11 | **Vendored third-party `.proto` subsets** (TensorBoard, W&B) need a home that `buf` compiles but that isn't Rastai's wire. | `proto/third_party/{tensorboard,wandb}/`, excluded from `buf breaking`; the same root as designer-gym-remote's `proto/third_party/onnx/`. |
+| 12 | **Preview sampling from a MySQL query.** `ORDER BY RAND()` scans the whole table. | First 1,000 rows plus a seeded reservoir sample of 1,000 over the first `PREVIEW_SCAN_ROWS` (100,000) rows, then close the cursor (section 2.5). |
 
-Settled since the first draft, with the answer used above: training tokenization is `WorkerHostService.TokenizeChat` (plan §10 row 9); chain runs are written by the chain driver (plan §10 row 18); K-quants come from the pinned `llama-quantize` (`layout/python.md` 5.3); benchmark templates are `{{field}}` substitution only (`layout/python.md` 9.5); `rastai_data` keeps the Python `tokenizers` package for plain text (`layout/python.md` 4.5); `rastai eval test` exits per ADR-0020 (plan §10 row 35); a data-policy refusal is `RRS-C1009` (plan §10 row 37); a branch pick is an inline row with copied token IDs, and `examples[]` references are only for `dataset.from_conversations` (section 7.1, inference-psychology flow 7.2; the plan's §10 table has no row for this yet, and M1-01 should add one).
-
----
-
-## 16. New names
-
-Names used above that neither contracts.md nor a layout doc, an ADR or the plan defines yet. Per contracts, each lands in contracts.md in its own PR (plan M5-E01, the Training and Evaluation contracts epic) before code uses it. Names this doc takes from other docs are listed last, with their source, so the M1-01 fold-in can check them.
-
-**Commands and arguments** (types in `rastai-formats/src/commands/`)
-
-| Name | Meaning |
-|---|---|
-| `eval.checkpoint.evaluate` | eval plugin command run by its `checkpoint.saved` handler (auto-run) |
-| `TrainStartArgs.eval_suite_ids[]` | suites auto-run on the run's checkpoints |
-| `TrainStartResult.plan` / `TrainingPlan` | resolved defaults: recipe, method, dtype, GPU, micro-batch, accumulation, sequence length, memory estimate, time estimate |
-| `TeachStartArgs` | `model_ref`, `dataset_id` or picked examples, `suite_ids[]`, `anchors`, `recipe` (`auto`/`sft`/`dpo`) |
-| `RlhfStartArgs` | `model_ref`, `preference_dataset_id` or `reward_model_checkpoint_id`, `prompt_dataset_id`, `reward_function`, `ppo_settings`, `accept_weak_reward_model` |
-| `EvalTestArgs.baseline_model` | model ref answered alongside for before/after |
-| `CheckpointExportArgs` | `checkpoint_id`, `format` (`gguf`/`safetensors`/`ollama`), `merge_adapter`, `gguf_type` (`f32`/`f16`/`bf16`/`q8_0`, or a K-quant such as `q4_k_m`) |
-| `CheckpointPushArgs` | `checkpoint_id`, `repo_id`, `private`, `include`, `confirm_license` |
-| `RunImportLogsArgs` | `source_kind` (`wandb`/`tensorboard`/`trackio`/`rastai_spool`), `location` |
-
-**Wire**
-
-| Name | Meaning |
-|---|---|
-| `ResourceRequest.may_reclaim_evictable` | false for auto-run evals, so they never evict chat |
-| `GetSecret` purpose `hf_upload` | short-lived HF token for `checkpoint.push`, beside the node layout's `hf_download` |
-
-**Events** (durable)
-
-| Name | Emitter | Payload |
-|---|---|---|
-| `chain.step_started` | daemon chain driver | chain run id, step index and name, child run id |
-| `chain.step_finished` | daemon chain driver | step index, child outcome, gate result |
-| `run.imported` | worker (`data_import`, mode `run_logs`) | source kind, source id, imported run id, config and metrics blob refs |
-
-**Contract changes**
-
-| Change | Where |
-|---|---|
-| The chain driver is the one writer of a chain run's `events.log` (plan §10 row 18) | contracts §7.1 |
-| `failed → resuming` and `cancelled → resuming` on `train.resume` when a complete checkpoint exists | contracts §9.5 |
-| `WorkerHostService.GatewayGenerate` and `TokenizeChat` on a local model that isn't loaded load it first under an evictable lease, as `model.load` does | contracts §4.5 |
-
-**Documents** (`rastai-formats`)
-
-| Name | Meaning |
-|---|---|
-| `.rrsdata` source kind `blob` | an uploaded file in the blob store (a drag-drop up to 256 MiB, in Tauri and in a browser) |
-| `.rrsdata` source kind `inline` with `rows[]` | rows stored in the document itself; Prefer this branch appends to it |
-| `.rrsdata` preference row | `source` (`branch_pick`), `prompt{messages[], token_ids[]}`, `chosen{text, token_ids[], model_ref}`, `rejected{text, token_ids[], model_ref}` (absent for SFT), `edited`, `conversation_id`, `chosen_message_id`, `rejected_message_id` (lineage only) |
-| `.rrsdata` `snapshot{artifact_id, content_hash, row_count}` | the `dataset_snapshot` a run trains on |
-| `.rrseval` `tests[].expectation.kind` values | `text`, `keywords`, `pattern`, `reference`, `check_command`, `held_out_text`, `none` |
-| `.rrseval` `judges[].calibration{examples[], min_agreement}` | hand labels for judge calibration |
-| `.rrseval` `pass_rule` values | `all` (default), `min_fraction` |
-| `rastai.eval_result/1` | the result file of an eval run (artifact kind `eval_result`) |
-| `rastai.model_diff/1`, `rastai.sae_fit_check/1` | Psychology analysis reports |
-| `run.json` `chain{steps[]}` | chain steps with assigned child run ids |
-| `run.json` `source{kind, location, original_run_id}` | on imported runs |
-| Plugin manifest `contributes.event_handlers[]{event_type, command_id}` | runs a plugin command when a durable event is indexed |
-| Plugin manifest `contributes.recipes[].requirements{min_compute_capability, dtypes[], kernels[], min_gpu_count, platforms[], needs_sandbox, needs_reward}` | a third-party recipe's needs, evaluated by `capability.py` in the doctor job |
-
-**Kinds and relations**
-
-| Name | Values |
-|---|---|
-| Run kinds | `train`, `teach`, `rlhf`, `sweep`, `eval`, `lens`, `data_import`, `data_check`, `export`, `imported` |
-| Recipe ids | `classification`, `pretraining`, `sft`, `dpo`, `grpo` (setting `sequence_level_ratio`; GSPO is `true`), `reward_model`, `ppo`, `sae`, `jepa`, `synthetic_qa`; method `full`/`lora`/`qlora` is a setting |
-| Artifact kinds, added to `layout/python.md` 15's list | `anchor_answers`, `judge_calibration`, `elo_fit`, `model_diff`, `sae_fit_check` |
-| Lineage relations | `evaluated_by` (checkpoint or model → eval run), `exported_as` (checkpoint → export artifact) |
-| Training metric names | `train.loss`, `train.learning_rate`, `train.grad_norm`, `train.tokens_per_second`, `train.samples_seen`, `train.vram_peak_bytes`, `validation.loss`, `validation.pairwise_accuracy`; recipe metrics as `<recipe>.<name>` |
-| Metric id | `eval.choice_loglikelihood` (first-party, for multiple-choice benchmarks) |
-| Tensor names | `reward_head.weight`, `reward_head.bias` (in a reward model's `adapter.safetensors`) |
-
-**Settings**
-
-| Key | Default |
-|---|---|
-| `training.auto_resume` | true (preempted runs resume when their node returns) |
-| `training.checkpoint.preemption_budget_seconds` | 25 |
-| `training.rlhf_reward_model_min_accuracy` | 0.65 |
-| `eval.judge_min_agreement` | 0.8 |
-| `psychology.sae_fit_max_fvu_increase` | 0.05 |
-
-**Code names** shown in signatures, owned by their package and listed so the layout docs can pick them up: `RewardFunction` (base class for the reward-function extension point, in `rastai_plugin`); `epoch_order` (`rastai_data/loaders.py`); `preempt_at_step_boundary` (`rastai_train/loop.py`); `JobControl.preempt_requested` (the SIGTERM flag, beside `stop_requested` and `cancel_requested` in `layout/python.md`'s `JobControl`); `TrainingMemoryEstimate`, `estimate_training_memory`, `largest_micro_batch` (`rastai-server` `modelspec_analysis/memory.rs`); `ChainStep`, `ChainAction`, `next_chain_action` (`rastai-server` `scheduler/chains.rs`).
-
-**Paths**
-
-| Path | Holds |
-|---|---|
-| `<project>/data/converters/<name>.json` | generated declarative converters (`rastai.converter/1`) |
-| `<project>/evals/pinned.rrseval` | the project's pinned suite, created on the first pin |
-| `<project>/evals/teach-<run_id>.rrseval` | the generated Teach it Verify suite |
-| `fixtures/run-logs/` | one small run per log source |
-| `proto/third_party/{tensorboard,wandb}/` | vendored `.proto` subsets for log import, beside `proto/third_party/onnx/` |
-
-**Error codes** (proposed numbers in this doc's areas)
-
-| Code | Severity | Meaning |
-|---|---|---|
-| `RRS-D0001` | error | no task matches the columns |
-| `RRS-D1001` | error | file format not recognized; no converter |
-| `RRS-D1002` | error | more than 1% of rows failed conversion |
-| `RRS-D1003` | error | Python converter raised |
-| `RRS-D2001` | info | exact duplicates dropped (count attached) |
-| `RRS-D2002` | warning | train/test leakage found |
-| `RRS-D2003` | warning | possible PII found |
-| `RRS-D3001` | error | source missing or not readable |
-| `RRS-D3002` | error | HF dataset gated or download failed |
-| `RRS-D3003` | error | source changed since the check (hash differs) |
-| `RRS-D4001` | error | run-log format version not supported (new range 4000–4999: run log import) |
-| `RRS-D4002` | warning | corrupt run-log record; that source run skipped |
-| `RRS-T0001` | info | recipe not available on this node (reason attached) |
-| `RRS-T0002` | error | recipe, reward-function or required plugin not installed |
-| `RRS-T0003` | error | no usable rows for this recipe |
-| `RRS-T0004` | error | no method fits the memory budget |
-| `RRS-T0005` | error | dataset task doesn't match the recipe |
-| `RRS-T0201` | error | reward model accuracy below the RLHF gate |
-| `RRS-T0202` | warning | reward model base differs from the policy base (extra VRAM) |
-| `RRS-T2001` | error | checkpoint write failed: disk full; run paused (or failed during preemption) |
-| `RRS-T2002` | warning | checkpoint files don't match their recorded hashes; falling back to an older one |
-| `RRS-T2003` | warning | resuming on a different environment or hardware |
-| `RRS-T2004` | error | no complete checkpoint to resume from |
-| `RRS-T2005` | error | checkpoint belongs to a different run (recipe, dataset or base model differ) |
-| `RRS-T3001` | error | non-finite loss or gradients, repeatedly |
-| `RRS-T3002` | error | policy KL above `max_kl`; stopped early |
-| `RRS-T4001` | error | no GGUF mapping for this family, or opaque nodes |
-| `RRS-T4002` | warning | dataset license needs confirmation before publishing |
-| `RRS-T4003` | warning | export check failed (tokens or logits differ) |
-| `RRS-T4004` | error | HF token can't write this repo |
-| `RRS-T4005` | error | HF push failed after retries |
-| `RRS-T4006` | warning | no Ollama template for this family; Ollama falls back to the GGUF's chat template |
-| `RRS-V0001` | error | suite has no tests |
-| `RRS-V0003` | error | model or checkpoint not found |
-| `RRS-V1001` | warning | judge uncalibrated or not configured |
-| `RRS-V1002` | error | judge agreement below the bar |
-| `RRS-V1003` | error | judge would send data off the machine under `local-only` |
-| `RRS-V1004` | error | judge timed out or gave no parseable verdict |
-| `RRS-V2001` | error | metric plugin not installed |
-| `RRS-V2002` | error | sandbox engine unavailable |
-| `RRS-V2003` | info | test needs logits the model under test can't give (API model) |
-| `RRS-V2004` | warning | Elo comparison graph is disconnected |
-| `RRS-V3001` | warning | benchmark task uses an unsupported YAML feature, field, `!function` or Jinja; task skipped |
-
-`RRS-V0101` (suite checks generated text only with keyword or regex metrics, warning) is `layout/frontend-and-plugins.md`'s number; this doc's first draft called it `RRS-V0002`, which is withdrawn. `RRS-D3004` (data policy forbids the move) is withdrawn too: the one data-policy refusal is `RRS-C1009` (plan §10 row 37).
-
-Codes in other areas: exact where the owning docs agree (`RRS-S3001`, `RRS-S3002`, `RRS-H3001`, `RRS-H3004`, `RRS-G0006`, `RRS-G1004`, `RRS-G1006`, `RRS-C0401`, `RRS-C1009`, `RRS-U0006`), by range otherwise: `RRS-H3xxx` (GPU out of memory), `RRS-J0xxx` (job didn't register, or force-stopped after a grace period), `RRS-J1xxx` (job killed or crashed), `RRS-J3xxx` (reattach failed), `RRS-N2xxx` (node unreachable), `RRS-G2xxx` (API provider error), `RRS-P2xxx` (plugin permission missing), `RRS-C1xxx` (scope missing), `RRS-L2xxx` (SAE labels stale), `RRS-L4xxx` (analysis ran without SAEs).
-
-**Taken from other docs** (not new here; listed for the fold-in check)
-
-| Names | Source |
-|---|---|
-| `WorkerHostService.TokenizeChat`, `target_mask`, `tokenize_chat_rows`, `TrainingExample` | `layout/python.md` 4.2, 14–15 (plan §10 row 9) |
-| `target_mask.rs`, `RRS-G1006`, `check_tokenizer_parity`, `RRS-G1004`, `hf_upload.rs`, `GenerateFinished.gateway_log`, `gateway.request_logged`, `KillMode=process` | `layout/rust-node-gateway-proto.md` 6.6, 6.8, 7.4, 7.8 |
-| `.rrsdata` `examples[]` (used by `dataset.from_conversations` only), `data/preferences.rrsdata`, `psychology.branch.prefer` `document_id` | inference-psychology flow 7.2 and 10 |
-| `MAX_BROWSER_UPLOAD_BYTES`, `FileDrop`, `file.browse`, `RRS-U0006`, Tauri's drag-drop handler off | `layout/frontend-and-plugins.md` 2.1, 8.4, 9.3 |
-| `RRS-C1009` (one data-policy refusal) | plan §10 row 37 |
-| model ref `job:<job_id>`, `PolicyServer`, `run_rl_training`, `RolloutBatch`, `sequence_level_ratio`, `train`, `optimizer_step`, `write_checkpoint`, `make_loader`, `BatchLoader.position`, `Recipe.restore_state`, `JobEvents`, `JobControl`, `recipe_availability`, `export_checkpoint`, `pass_at_k`, `bits_per_byte`, `fit_bradley_terry`, `elo_with_intervals`, `pairwise_verdict`, `diff_results`, `run.external.*`, source `rastai_spool`, `votes.jsonl`, `cache_folder` files, `distributed.store`, `rastai.converter/1`, provenance keys, artifact kinds `dataset_snapshot`, `dataset_report`, `eval_result`, `judge_transcript`, `checkpoint_export`, `gguf`, `adapter`, `sae`, `rollout_trace` | `layout/python.md` |
-| metric ids `eval.exact_match` … `eval.reward_model_score`, `RRS-V0101`, the `eval.verify` and `eval.vote` panels, the plugin's permissions | `layout/frontend-and-plugins.md` 15.2 |
-| `scheduler/chains.rs`, `start_next_chain_step`, `scheduler/launch.rs`, `modelspec_analysis/memory.rs`, `estimate_memory_bytes`, `estimate_time_seconds`, CLI `EXIT_*` codes | `layout/rust-control-plane.md` |
-| `RRS-S3001`, `RRS-S3002`, the event-log disk-full reserve, the free-space check | platform flow 6.1 and 8.1 |
-| `policy` and `reward` adapters, `set_active_adapter` | ADR-0022 |
-| anchor answers as a blob | ADR-0028 |
+Settled, with the answer used above:
+- **Sharing one base between chat and Teach it** (was 1): separate copies in the prototype; read-only CUDA IPC sharing is on M5's completion list behind a measurement gate (section 7.2).
+- **Anchors with DPO** (was 2): on by default, as an SFT term beside the DPO loss, behind `tests/gpu/test_dpo_anchor_drift.py` before L2 (owner decision 16, section 7.2).
+- **Judge trust bar** (was 3): 0.8 agreement on at least 10 hand-labeled examples before a judge's verdicts count (owner decision 15, section 9.3).
+- **`rastai eval test` exit codes** (was 5): ADR-0020 stands (plan §10 row 35; contracts §16).
+- **How a plugin command starts a job** (was 6): `follow_up_jobs` only; no `WorkerHostService.StartJob` in the prototype (plan §10 row 31).
+- **Where anchor answers live** (was 7): both. The `anchor_answers` blob is the record a run names in `dataset_hashes[]`; the cache file is a node-local copy (section 7.2).
+- **`train.resume` on `failed` and `cancelled` runs** (was 8): allowed with a complete checkpoint (contracts §9.5, section 4.2).
+- **Run kinds and artifact kinds** (was 10): enumerated in contracts §9.5 and §15.7.
+- **Vendored third-party `.proto` subsets** (was 11): `proto/third_party/{onnx,tensorboard,wandb}/`, compiled by `buf` and excluded from `buf breaking` (contracts §1).
+- **Votes storage:** `evals/votes.rrsdata`, a project document read by Elo like any preference dataset (owner decision 9; section 7.1).
+- **Earlier answers:** training tokenization is `WorkerHostService.TokenizeChat` (plan §10 row 9); chain runs are written by the chain driver (plan §10 row 18); K-quants come from the pinned `llama-quantize` (`layout/python.md` 5.3); benchmark templates are `{{field}}` substitution only (`layout/python.md` 9.5); `rastai_data` keeps the Python `tokenizers` package for plain text (`layout/python.md` 4.5); a data-policy refusal is `RRS-C1009` (plan §10 row 37); a branch pick is an inline row with copied token IDs, and `examples[]` references are only for `dataset.from_conversations` (section 7.1, contracts §16).

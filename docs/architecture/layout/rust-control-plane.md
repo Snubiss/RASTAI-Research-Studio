@@ -1,6 +1,8 @@
-# Layout: the Rust control plane (`rastai-formats`, `rastai-core`, `rastai-store`, `rastai-diag`, `rastai-mcp`, `rastai-server`, `rastai-cli`) and the workspace root
+# Layout: the Rust control plane (`rastai-formats`, `rastai-core`, `rastai-store`, `rastai-diag`, `rastai-mcp`, `rastai-server`, `rastai-cli`, `rastai-archive`) and the workspace root
 
-**Status:** v1, 2026-10-10. Pre-build design. Built on spec v5.3 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names in `docs/architecture/contracts.md`. Names from contracts are used exactly. Names this doc adds are listed in section 16; changes it needs in contracts are in section 15.
+**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`), the owner decisions of 2026-10-10 and contracts v1.1 (`docs/architecture/contracts.md`). Every shared name comes from contracts, which is the only list of names; this doc keeps no "New names" list. Names that stay inside one crate (files, private functions, constants) are this doc's.
+
+**Changes in v1.1:** the new `rastai-archive` crate (section 14, M11); `archive_cursors`, `runs.archive_state` and the `vault_changes` outbox in `rastai-store`; settings live only in files (no `settings` table); `unsafe` for one `statvfs` call (ADR-0033); `miniz_oxide` behind `zip/inflate.rs` and a fuzz target for every in-house parser of untrusted input; plain JavaScript codegen output (ADR-0036); `stability` on commands and event types; origin-bound sessions in the request gate (ADR-0034); 31 plugin capabilities; the one layer-placement planner and per-op golden files; (L2) tags.
 
 This doc covers:
 - the workspace root: Cargo workspace, `justfile`, lint and `cargo-deny` config, `catalog/`, `schemas/` (section 2);
@@ -11,11 +13,14 @@ This doc covers:
 - `crates/rastai-mcp` (section 7);
 - `crates/rastai-server` (section 8);
 - `crates/rastai-cli` (section 9);
-- four cross-cutting designs: the command registry and its generated surfaces (10), daemon HTTP API versioning (11), the plugin host (12), event indexing and the `rastai.db` rebuild (13).
+- four cross-cutting designs: the command registry and its generated surfaces (10), daemon HTTP API versioning (11), the plugin host (12), event indexing and the `rastai.db` rebuild (13);
+- `crates/rastai-archive`, the optional long-term archive built in M11 (section 14).
 
-It does not cover `rastai-proto`, `rastai-transport`, `rastai-sandbox`, `rastai-gateway` or `rastai-node` (`layout/rust-node-gateway-proto.md`), the Python packages (`layout/python.md`), or the TS packages and plugin SDKs (`layout/frontend-and-plugins.md`). The runtime behavior of startup, `Execute`, undo, the request gate, event durability, the rebuild, plugin install and GC is drawn in `flows/platform.md`; this doc gives the code that implements it and cites the flow sections instead of redrawing them.
+It does not cover `rastai-proto`, `rastai-transport`, `rastai-sandbox`, `rastai-gateway` or `rastai-node` (`layout/rust-node-gateway-proto.md`), the Python packages (`layout/python.md`), or the JS packages and plugin SDKs (`layout/frontend-and-plugins.md`). The runtime behavior of startup, `Execute`, undo, the request gate, event durability, the rebuild, plugin install and GC is drawn in `flows/platform.md`; this doc gives the code that implements it and cites the flow sections instead of redrawing them.
 
 Every crate section has the same parts: tree, public API, dependencies, boundary rules, tests, ported spike code, build-order step.
+
+**(L2)** marks a part designed now but built only after the core loop reaches L2 (ADR-0017, contracts conventions). The minimal durable path comes first: event logs, reattach, atomic writes.
 
 ---
 
@@ -28,10 +33,11 @@ Every crate section has the same parts: tree, public API, dependencies, boundary
 | `rastai-diag` | every Rust process, WASM | `Diagnostic`, the compiled catalog, the text renderer, the JSON-lines logger | step 1, first crate written |
 | `rastai-formats` | daemon, node, CLI, browser (WASM), Python (PyO3) | every document type, the 4 validation layers, migrations, canonical JSON and content hashes, safetensors, GGUF, streaming zip (ZIP64), importers, type descriptions | step 1 (header, run record, resume, settings, manifest, first command args); grows every step |
 | `rastai-core` | daemon, node, CLI | command table and registry, ids, principals, scopes, shared state enums, settings resolution, data paths, protobuf JSON for wire types stored in documents | step 1 |
-| `rastai-store` | daemon, node | `rastai.db`, `vault.db`, blob store, event-log reader and writer, the indexer, the rebuild | step 1 (`rastai.db`, logs, blobs); step 3 (`vault.db`) |
+| `rastai-store` | daemon, node, CLI (offline rebuild) | `rastai.db`, `vault.db`, blob store, event-log reader and writer, the indexer, the rebuild, atomic config-file writes, free disk space | step 1 (`rastai.db`, logs, blobs); step 3 (`vault.db` with the `vault_changes` outbox table) |
 | `rastai-mcp` | daemon (`/mcp`), CLI (`rastai mcp` bridge), node (gym tools) | MCP server and client, JSON-RPC 2.0 | step 1 (server, bridge); step 7 (client) |
-| `rastai-server` | daemon | HTTP API, `Execute`, the bus, scheduling, `NodeHubService`, plugin host, import/export, ModelSpec analysis, secrets | step 1; grows every step |
+| `rastai-server` | daemon | HTTP API, request gate and sessions, `Execute`, the bus, scheduling, `NodeHubService`, plugin host, import/export, ModelSpec analysis (the one layer-placement planner), data-policy check, secrets, the archiver task | step 1; grows every step |
 | `rastai-cli` | the `rastai` binary | process modes, generated verbs, local commands | step 1 |
+| `rastai-archive` | daemon | optional long-term archive: one-way, idempotent replication to the owner's MySQL or MariaDB; blob targets; prune, restore, verify, purge | M11, after the 90-day plan |
 
 ```mermaid
 flowchart TD
@@ -41,8 +47,11 @@ flowchart TD
   SRV --> NODE
   SRV --> GW["rastai-gateway (other doc)"]
   SRV --> MCP
+  SRV --> ARCH["rastai-archive"]
   SRV --> STORE["rastai-store"]
-  MCP --> TR["rastai-transport (other doc)"]
+  ARCH --> STORE
+  ARCH --> TR["rastai-transport (other doc)"]
+  MCP --> TR
   MCP --> CORE["rastai-core"]
   MCP --> PROTO
   STORE --> CORE
@@ -56,14 +65,14 @@ flowchart TD
   CG --> FMT
 ```
 
-Arrows mean "may depend on" (contracts §2.4). `rastai-server` is the composition root and also reaches the lower crates directly; those edges are left out. Every crate depends on `rastai-diag`; only the `rastai-formats` edge is drawn. The two binding crates and `rastai-codegen` are new (section 16). The `rastai-store` → `rastai-proto` edge is a contract change (section 15): the store decodes `EventRecord` to index it. So is `rastai-mcp` → `rastai-proto`: MCP tools are built from the registry's generated `CommandDescriptor`.
+Arrows mean "may depend on" (contracts §2.1, §2.4). `rastai-server` is the composition root and also reaches the lower crates directly; those edges are left out. Every crate depends on `rastai-diag`; only the `rastai-formats` edge is drawn. `rastai-archive` also uses `rastai-core`, `rastai-formats` and `rastai-proto` (edges left out). The store never imports the archive (contracts §2.4 rule 7): the archive reads through the store's reader API and writes its cursors through the store's writer thread.
 
 ### 1.2 Conventions for these crates
 
 These restate contracts §12 and `layout/rust-node-gateway-proto.md` §2, so the whole Rust tree reads the same way.
 
 - **`src/lib.rs` is a list of `pub mod` lines** and nothing else. Each crate's public API is the `pub fn`s and `pub struct`s of its modules.
-- **One error enum per crate** in `src/error.rs` (`FormatsError`, `CoreError`, `StoreError`, `McpError`, `ServerError`, `CliError`), each with `fn code(&self) -> &'static str` returning a catalog code. `rastai-diag` has none: its functions can't fail. No `anyhow`, no `thiserror`.
+- **One error enum per crate** in `src/error.rs` (`FormatsError`, `CoreError`, `StoreError`, `McpError`, `ArchiveError`, `ServerError`, `CliError`), each with `fn code(&self) -> &'static str` returning a catalog code. `rastai-diag` has none: its functions can't fail. No `anyhow`, no `thiserror`.
 - **Free functions over plain structs**: `append_event(&mut writer, &record)`, not `writer.append(...)` chains. Methods only for tiny accessors.
 - **Closed sets are enums with a `match`** (`Document`, `IndexWrite`, `McpConnection`, `Mode`). Traits only for small synchronous interfaces with a few implementations: this doc adds two, `ByteSource` and `ByteSink` in `rastai-formats`; `LogSink` belongs to the gateway.
 - **No `async fn` in traits behind `dyn`.** Async polymorphism is an enum.
@@ -71,7 +80,7 @@ These restate contracts §12 and `layout/rust-node-gateway-proto.md` §2, so the
 - **One wrapper file per external library** (contracts §2.4 rule 8); each crate section has a table naming it.
 - **Constants at the top of each file**, with the reason or measurement in a comment.
 - **Generated code** sits in a `generated/` folder, starts with a `// Generated by rastai-codegen. Do not edit.` line, and is checked in.
-- **`unsafe` is forbidden** (workspace lint, section 2.3). Section 4.12 says why the spike's `mmap` is dropped; the one proposed exception is `statvfs` (section 6.4).
+- **`unsafe` is forbidden** (workspace lint, section 2.3) with one exception: the `statvfs` call in `crates/rastai-store/src/disk_space.rs` (ADR-0033, section 6.4). Section 4.12 says why the spike's `mmap` is dropped.
 
 ---
 
@@ -87,21 +96,27 @@ RASTAI/
   rust-toolchain.toml        pinned stable toolchain (1.99, the spike's), components rustfmt + clippy, wasm32 target
   rustfmt.toml               max_width = 120, edition = "2024" (matches the spike's line length)
   clippy.toml                too-many-lines-threshold = 60, too-many-arguments-threshold = 6, cognitive-complexity-threshold = 15
-  deny.toml                  cargo-deny: licenses, advisories, sources, bans (2.4)
+  deny.toml                  cargo-deny: licenses, advisories, sources, bans, single-owner wrappers (2.4)
   justfile                   every build, test, codegen and release task (2.5)
   catalog/                   error and term catalog sources (2.6)
   schemas/                   generated JSON Schemas (2.7)
   tools/
     codegen/                 Rust crate `rastai-codegen` (dev only): bins rastai-formats-codegen, rastai-catalog-codegen (4.9)
     checks/
-      check-deps             reads `cargo metadata`, compares each crate's direct deps with the allowlist table
-      check-imports          (frontend doc) public-API rule for TS and Python
+      check-deps             reads `cargo metadata`, compares each member crate's direct deps with the allowlist table
+      check-imports          (frontend doc) the wrapper-file and public-API rules for JS and Python
       check-generated        regenerate everything into a temp tree, diff, fail on any change
-      check-unsafe           fails if any file outside the ADR exception list contains `unsafe` (the list is empty)
+      check-unsafe           fails if any file outside the ADR exception list contains `unsafe`; the list has one file,
+                             crates/rastai-store/src/disk_space.rs (ADR-0033)
       check-no-pickle        greps Python for `pickle` and `torch.load` (contracts §12.3)
-  fixtures/                  shared test inputs (contracts §12.5); this doc adds fixtures/mcp/, fixtures/data-dirs/ (section 14)
+      check-colors           (frontend doc) color literals in canvas, viz, sections and plugin UIs (contracts §5.6)
+      check-no-typescript    (frontend doc) any .ts, .tsx or .d.ts outside generated folders (ADR-0036)
+      check-dco              (CI) Signed-off-by on every commit
+      check-schema-diff      Phase 2: breaking changes in schemas/commands/ for stable commands (section 11.1)
+  fixtures/                  shared test inputs (contracts §12.5)
   tests/
-    crash/                   Rust crate `rastai-crash-tests` (publish = false): the kill -9 matrix (flows/platform.md 6.5)
+    crash/                   Rust crate `rastai-crash-tests` (publish = false): the kill -9 matrix (flows/platform.md 6.5),
+                             including the archiver rows 20–24 (section 14.9)
 ```
 
 ### 2.2 `Cargo.toml` (workspace)
@@ -123,14 +138,18 @@ members = [
   "crates/rastai-gateway",
   "crates/rastai-mcp",
   "crates/rastai-node",
+  "crates/rastai-archive",
   "crates/rastai-server",
   "crates/rastai-cli",
   "apps/desktop/src-tauri",
   "tools/codegen",
   "tests/crash",
 ]
-# cargo-fuzz needs its own nightly workspace; the spike is history and never built here.
-exclude = ["crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz", "spike"]
+# cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
+exclude = [
+  "crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz", "crates/rastai-mcp/fuzz",
+  "crates/rastai-transport/fuzz", "crates/rastai-node/fuzz", "crates/rastai-archive/fuzz", "spike",
+]
 
 [workspace.package]
 edition = "2024"
@@ -147,10 +166,13 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 blake3 = "=1.x.y"           # exact version pinned when the crate is first added
+miniz_oxide = "=0.x.y"      # inflate only, behind rastai-formats/src/zip/inflate.rs
+libc = "=0.2.x"             # one statvfs call, rastai-store/src/disk_space.rs (ADR-0033)
+mysql_async = { version = "=0.x.y", default-features = false, features = ["default-rustls-ring"] }   # M11, rastai-archive
 # ... one line per allowlisted crate
 
 [workspace.lints.rust]
-unsafe_code = "deny"           # deny, not forbid, so an ADR can allow one named file; check-unsafe keeps the list honest
+unsafe_code = "deny"           # deny, not forbid, so ADR-0033 can allow one named function; check-unsafe keeps the list honest
 unused_must_use = "deny"
 
 [workspace.lints.clippy]
@@ -173,34 +195,47 @@ cognitive_complexity = "warn"
 |---|---|---|
 | `cargo fmt --check` | `just fmt-check` | one style; `rustfmt.toml` sets 120 columns |
 | clippy with `-D warnings` | `just lint` | the lints above; `too_many_lines` keeps functions small |
-| `unsafe_code = "deny"` + `tools/checks/check-unsafe` | workspace lints | contracts §12.2: `unsafe` only with an ADR naming the file |
-| no `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl` | `deny.toml` `[bans]` | contracts §12.2 and §14 row 1 |
+| `unsafe_code = "deny"` + `tools/checks/check-unsafe` | workspace lints | contracts §12.2: `unsafe` only with an ADR naming the file; today only `rastai-store/src/disk_space.rs` (ADR-0033) |
+| no `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl`, `sqlx` | `deny.toml` `[bans]` | contracts §2.5, §12.2 |
 | no `async-trait` | `deny.toml` `[bans]` | async polymorphism is an enum |
 | every direct dependency in the allowlist table, used only by the listed crates | `tools/checks/check-deps` | §27; one wrapper module per library |
 
 ### 2.4 `deny.toml` and the crate allowlist
 
 `deny.toml` holds what cargo-deny checks well:
-- `[licenses] allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CC0-1.0", "MPL-2.0", "BSL-1.0", "CDLA-Permissive-2.0"]` (the ADR-0015 #7 list); anything else fails. `confidence-threshold = 0.9`.
-- `[advisories]`: the RustSec database; `yanked = "deny"`.
+- `[licenses] allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CC0-1.0", "MPL-2.0", "BSL-1.0", "CDLA-Permissive-2.0"]` (the ADR-0015 #7 list); anything else fails. `confidence-threshold = 0.9`. `mysql_async` is MIT OR Apache-2.0; its transitive crates go through the same check on the M11-E01 PR that adds it.
+- `[advisories]`: the RustSec database; `yanked = "deny"`. This is why `sqlx` is banned: RUSTSEC-2023-0071 reaches it through `rsa` (contracts §2.5).
 - `[sources]`: crates.io only; no git dependencies.
-- `[bans]`: `multiple-versions = "warn"`; `deny = ["anyhow", "thiserror", "reqwest", "memmap2", "openssl", "openssl-sys", "async-trait", "schemars"]`. `wrappers` pins the libraries with one owner: `tokenizers` and `minijinja` only under `rastai-gateway`; `rusqlite` only under `rastai-store`; `pyo3` only under `rastai-formats-python`; `wasm-bindgen` only under `rastai-formats-wasm`; `keyring` only under `rastai-server`; `blake3` only under `rastai-formats`; `ed25519-dalek` only under `rastai-node`.
+- `[bans]`: `multiple-versions = "warn"`; `deny = ["anyhow", "thiserror", "reqwest", "memmap2", "openssl", "openssl-sys", "async-trait", "schemars", "sqlx"]`. `schemars` comes back only by the rule in contracts §5.4 (more than about 20 document types).
+- **Single-owner wrappers** (contracts §2.5 "Enforced owners"). A `[[bans.deny]]` entry with `wrappers = [<owner>]` lets only the owner depend on the crate directly:
+  - `tokenizers`, `minijinja` → `rastai-gateway`
+  - `rusqlite` → `rastai-store`
+  - `pyo3` → `rastai-formats-python`; `wasm-bindgen` → `rastai-formats-wasm`
+  - `keyring` → `rastai-server`
+  - `blake3` → `rastai-formats`
+  - `ed25519-dalek` → `rastai-node`
+  - `mysql_async` → `rastai-archive`
+  - `libc` → `rastai-store`; `miniz_oxide` → `rastai-formats`
+- **`libc` and `miniz_oxide` also arrive under third-party crates** (`libc` under tokio and mio; `miniz_oxide` under `flate2`, which `mysql_async` may pull in). cargo-deny's `wrappers` checks every direct parent, so their entries also list those third-party parents by name, as `Cargo.lock` shows them. A new third-party parent then fails CI and gets a look in review. `check-deps` checks that no other workspace member depends on them directly, and `check-imports` checks the file (`disk_space.rs`, `zip/inflate.rs`).
 
 The §27 table itself lives in `Cargo.toml` as data, so there is one place to read it:
 
 ```toml
 [workspace.metadata.rastai.allowlist]
 # crate = { category, reason, users }. check-deps fails if a member uses a crate not listed, or a crate a member isn't listed for.
-tokio      = { category = "foundation", reason = "async runtime", users = ["rastai-server", "rastai-node", "rastai-gateway", "rastai-mcp", "rastai-transport", "rastai-sandbox", "rastai-plugin", "rastai-cli", "rastai-store"] }
+tokio      = { category = "foundation", reason = "async runtime", users = ["rastai-server", "rastai-node", "rastai-gateway", "rastai-mcp", "rastai-transport", "rastai-sandbox", "rastai-plugin", "rastai-cli", "rastai-store", "rastai-archive"] }
 rusqlite   = { category = "foundation", reason = "SQLite", users = ["rastai-store"] }
+libc       = { category = "foundation", reason = "one statvfs call (ADR-0033)", users = ["rastai-store"] }
 blake3     = { category = "security", reason = "content hashes, blob names", users = ["rastai-formats"] }   # every other crate hashes through rastai_formats::hashing
+miniz_oxide = { category = "compatibility", reason = "zip inflate", users = ["rastai-formats"] }
 ed25519-dalek = { category = "security", reason = "node and daemon identity, update signatures", users = ["rastai-node"] }   # the daemon signs through rastai_node::identity
+mysql_async = { category = "compatibility", reason = "MySQL client for the long-term archive", users = ["rastai-archive"] }
 serde      = { category = "foundation", reason = "document and JSON types", users = ["*"] }
-pyo3       = { category = "foundation", reason = "the rastai-formats wheel (contracts §14 row 1)", users = ["rastai-formats-python"] }
-# ... one row per crate in §27 and contracts §14 row 1
+pyo3       = { category = "foundation", reason = "the rastai-formats wheel", users = ["rastai-formats-python"] }
+# ... one row per crate in §27 (contracts §2.5)
 ```
 
-Dev-only crates (`libfuzzer-sys` for the fuzz crate) are listed with `category = "dev"`; `check-deps` rejects them in non-dev dependency sections.
+Dev-only crates (`libfuzzer-sys` for the fuzz crates) are listed with `category = "dev"`; `check-deps` rejects them in non-dev dependency sections.
 
 ### 2.5 `justfile` recipes
 
@@ -208,14 +243,15 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 
 | Recipe | Runs | Used by |
 |---|---|---|
-| `just check` | `fmt-check lint test-rust codegen-check deny check-deps proto-check` plus the Python and TS checks from their docs | "done" means this passes (§29) |
+| `just check` | `fmt-check lint test-rust codegen-check deny check-deps check-unsafe proto-check` plus the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29) |
 | `just build` | `cargo build --workspace --locked` | dev |
-| `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`) | CI on Linux, macOS, Windows runners (CPU) |
+| `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`; MySQL tests skip themselves without a server) | CI on Linux, macOS, Windows runners (CPU) |
 | `just test-crash` | `cargo test -p rastai-crash-tests -- --test-threads=1` | CI on Linux |
-| `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (formats, store, server) | nightly CI, 10 minutes per target |
-| `just codegen` | `buf generate` (proto doc), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen` | after any catalog, document or command change |
+| `just test-archive` | `rastai-archive` tests and crash rows 20–24 against the MySQL 8.4 and 9.7, MariaDB and MinIO containers (section 14.9) | CI job `mysql-archive` (M11-E07) |
+| `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (the targets of contracts §12.5) | nightly CI, 10 minutes per target |
+| `just codegen` | `buf generate` (proto doc; protobuf-es with target `js+dts`), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen` | after any catalog, document or command change |
 | `just codegen-check` | `tools/checks/check-generated` | CI |
-| `just wasm` | `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --out-dir packages/formats/src/wasm/` | `packages/formats` build, the viewer |
+| `just wasm` | `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir packages/formats/src/wasm/` | `packages/formats` build, the viewer |
 | `just wheel` | `maturin build --release -m crates/rastai-formats/bindings/python/Cargo.toml` into `python/rastai_formats/dist/` | the uv environments |
 | `just deny` | `cargo deny check` | CI |
 | `just check-deps` | `tools/checks/check-deps` | CI |
@@ -231,7 +267,7 @@ catalog/
     RRS-E.json     formats and validation         (owner rastai-formats)
     RRS-P.json     plugins                         (plugin host in rastai-server, SDKs)
     RRS-C.json     commands and API                (rastai-core, rastai-server, rastai-mcp)
-    RRS-S.json     storage and durability          (rastai-store)
+    RRS-S.json     storage and durability          (rastai-store; 5000–5999 rastai-archive)
     RRS-N.json     nodes, transport, remote
     RRS-H.json     hardware and environments
     RRS-J.json     jobs and worker protocol
@@ -243,7 +279,8 @@ catalog/
     RRS-U.json     UI client
   terms/
     terms.json     plain-English definitions shown by the UI (the glossary, contracts §13)
-  README.md        how to add a code: pick the next free number in the owning range, never reuse, retire instead
+  README.md        how to add a code: add it to contracts §10.3 first, pick the next free number in the owning range,
+                   never reuse, retire instead; also maps withdrawn draft numbers (contracts §10.2)
 ```
 
 `RRS-L` and `RRS-V` live in `plugins/psychology/catalog/` and `plugins/evaluation/catalog/` (contracts §10); the catalog codegen reads them too. One entry:
@@ -291,7 +328,9 @@ schemas/
   rastai.eval_result/1.json        step 5 (an eval run's result file)
   rastai.model_diff/1.json         step 4 (Psychology model diff report)
   rastai.sae_fit_check/1.json      step 4 (Psychology SAE fit check report)
-  rastai.theme/1.json              step 8 (plugin theme tokens)
+  rastai.theme/1.json              step 1, M1 (the full token row, contracts §5.6); theme plugins use it from M8
+  rastai.tutorial/1.json           step 1 (built-in tutorials)
+  rastai.icon_set/1.json           M8 (icon-set plugins)
   commands/
     rastai.command.model.load/1.json      arguments and result of each core command (two `$defs`: arguments, result)
     ...
@@ -300,6 +339,8 @@ schemas/
 
 - Old versions stay forever (`rastai.model/1.json` is kept when `/2` appears), because migrations read old files.
 - The `$id` in each file is the stable URL `https://schemas.rastai.dev/<type>/<version>.json` (contracts §14 row 8); nothing serves it until Phase 2.
+- Shared types without a header (`InterventionSet`, `MysqlConnection`) have no file of their own; they appear as `$defs` inside the documents and commands that use them.
+- **`schemas/commands/` is what `buf breaking` can't see.** `arguments_json` and `result_json` are strings to protobuf. The Phase 2 `tools/checks/check-schema-diff` compares these files against the merge base for every `stable` command (section 11.1). Until then every command is `preview`.
 
 ---
 
@@ -403,7 +444,7 @@ error[RRS-E2004]: Input ranges overlap
    = fix: shrink one of the ranges, or merge the two inputs
 ```
 
-- **Callers:** every crate builds diagnostics with `diagnostic()`. `rastai-cli/src/output.rs` renders them (`render_text` with `Color` on a TTY, `render_basic` unless `--verbose`). The WASM build calls `render_basic` for form hints. The plugin host owns the `RuntimeCatalog`. `rastai-server` and `rastai-node` call `init_logger` once in their entry functions; run ids travel into Python as `RASTAI_RUN_ID` (contracts §14 row 2).
+- **Callers:** every crate builds diagnostics with `diagnostic()`. `rastai-cli/src/output.rs` renders them (`render_text` with `Color` on a TTY, `render_basic` unless `--verbose`). The WASM build calls `render_basic` for form hints. The plugin host owns the `RuntimeCatalog`. `rastai-server` and `rastai-node` call `init_logger` once in their entry functions; run ids travel into Python as `RASTAI_RUN_ID` (contracts §15.9). The logger is in-house (spec v5.4 §25); there is no `tracing`.
 - **Log line:** `{"unix_ms":..., "level":"info", "process":"daemon", "message":"...", "run_id":"...", ...fields}` in `<state>/logs/daemon.jsonl` or `node.jsonl`; rotated to `.1.jsonl` ... at `logging.max_file_bytes`, keeping `logging.keep_files`. One `std::sync::Mutex<File>` guards the file; each line is one `write_all`.
 - **Unknown code:** `diagnostic()` with a code missing from the catalog returns severity `Error`, the code itself, and message `"unknown diagnostic code"`, and logs a warning. The codegen test (4.9) makes this unreachable for first-party code: it scans the source for `"RRS-` literals and checks each against the catalog.
 
@@ -442,7 +483,7 @@ Step 1, before any other crate: the first `Execute` returns diagnostics. `Runtim
 
 ## 4. `rastai-formats`: documents, validation, safetensors, GGUF
 
-**Purpose.** The single source of truth for every document type (§15, §23). It parses bytes into typed Rust structs in four validation layers, collects every diagnostic in one pass, migrates old files, writes files back with a content hash, and describes each type as plain data so JSON Schema, TS types and Python dataclasses are generated from it. It also owns the byte-exact formats Rastai writes in-house: safetensors, GGUF and zip. The same code runs in the daemon, the node, the CLI, the browser (WASM) and Python (PyO3).
+**Purpose.** The single source of truth for every document type (§15, §23). It parses bytes into typed Rust structs in four validation layers, collects every diagnostic in one pass, migrates old files, writes files back with a content hash, and describes each type as plain data so JSON Schema, JSDoc typedefs, typed JS command wrappers and Python dataclasses are generated from it. It also owns the byte formats Rastai reads and writes: safetensors (the one header validator, contracts §2.4 rule 10), GGUF and zip (inflate through `miniz_oxide`). The same code runs in the daemon, the node, the CLI, the browser (WASM) and Python (PyO3).
 
 ### 4.1 Tree
 
@@ -457,6 +498,7 @@ crates/rastai-formats/
     byte_source.rs            ByteSource trait (length, read_at) with SliceSource and FileSource;
                               ByteSink trait (write_bytes) with VecSink and FileSink
     hashing.rs                the only blake3 import: hash_bytes, StreamHasher, content_hash_of_value, model_hash
+    crc32.rs                  the one CRC-32/IEEE table (equal to Python's zlib.crc32): zip entries and event-log frames
     semver.rs                 in-house semver: parse a version, parse a range, version_matches
     json/
       reader.rs               strict JSON reader: duplicate keys rejected, depth limit, NaN and Infinity rejected, positions kept
@@ -478,21 +520,25 @@ crates/rastai-formats/
       model.rs                ModelSpec, GraphNode, GraphEdge, BlockDefinition, InputRange, OutputHead, Objective, WeightsSource
       model_ops.rs            the op vocabulary (contracts §5.3) and each op's attribute description
       harness.rs              Harness, HarnessTool, HarnessEnvironment, HarnessReward, HarnessTask
-      data.rs                 DatasetSpec, DataSource, Splits, DataChecks
+      data.rs                 DatasetSpec, DataSource (path, hf, url, blob, inline, mysql), Splits, DataChecks
+      mysql_connection.rs     MysqlConnection (shared type, no header): the one TLS rule for the archive and the MySQL
+                              reader, check_connection_tls() (step 5, with the MySQL reader; M11 for the archive)
       eval.rs                 EvalSuite, EvalTest, Expectation, JudgeSpec, BenchmarkSpec, DriftSpec
-      replay.rs               ReplayManifest (replay.json) and the archive layout constants
+      replay.rs               ReplayManifest (replay.json) and the replay zip layout constants
       plugin_manifest.rs      PluginManifest and its contribution entries (frontend doc 10.1)
       project.rs              Project (project.json) and the folder layout constants
       lock.rs                 LockFile (rastai.lock)
       conversation.rs         ConversationHeader, ConversationMessage, MessagePart; JSONL read and write
       run_record.rs           RunRecord
       resume.rs               ResumeState
-      steering_preset.rs      SteeringPreset
+      steering_preset.rs      SteeringPreset and InterventionSet (the shared type, defined once here)
       layout.rs               WorkspaceLayout
       keybindings.rs          Keybindings
-      settings.rs             SettingsDocument (the keys of contracts §11.2)
+      settings.rs             SettingsDocument (the keys of contracts §11.2, `archive` included); the only settings store is
+                              the files, written atomically by rastai-store's write_config_file
       converter.rs            ConverterDocument (rastai.converter/1): column mapping, templates, filters (step 5)
-      theme.rs                ThemeDocument (rastai.theme/1): name, colors, spacing_px, font_sizes_px, radius_px (step 8)
+      theme.rs                ThemeDocument (rastai.theme/1): the full token row of contracts §5.6 (step 1, M1; 4.2a)
+      tutorial.rs             Tutorial (rastai.tutorial/1): steps, checks, show-me commands (step 1)
       eval_result.rs          EvalResult (rastai.eval_result/1): answers, token ids, scores, pass flags, judge hashes (step 5)
       model_diff.rs           ModelDiffReport (rastai.model_diff/1): feature, lens and routing shifts, eval deltas (step 4)
       sae_fit_check.rs        SaeFitCheckReport (rastai.sae_fit_check/1): reconstruction quality per layer (step 4)
@@ -501,10 +547,10 @@ crates/rastai-formats/
       mod.rs                  describe_arguments(id), describe_result(id), parse_arguments(), result_json()
       system.rs               one <Name>Args and <Name>Result struct + describe fn per command in the area
       ...                     one file per core area of contracts §6.1: settings.rs, token.rs, secret.rs, hf.rs, storage.rs,
-                              artifact.rs, project.rs, file.rs, document.rs, workspace.rs, command.rs, job.rs, model.rs,
-                              chat.rs, conversation.rs, adapter.rs, gateway.rs, train.rs (train, teach, rlhf, sweep), recipe.rs,
-                              run.rs, checkpoint.rs, design.rs, harness.rs, gym.rs, sandbox.rs, plugin.rs, node.rs,
-                              transfer.rs, dataset.rs, converter.rs
+                              archive.rs (M11), artifact.rs, project.rs, file.rs, document.rs, workspace.rs, command.rs,
+                              job.rs, model.rs, chat.rs, conversation.rs, adapter.rs, gateway.rs, train.rs (train, teach,
+                              rlhf, sweep), recipe.rs, run.rs, checkpoint.rs, design.rs, harness.rs, gym.rs, sandbox.rs,
+                              plugin.rs, node.rs, transfer.rs, dataset.rs, converter.rs, tutorial.rs
     validate/
       mod.rs                  read_document(): layers 1 to 3 plus migration, in one pass
       syntax.rs               layer 1: run json::reader, turn its errors into RRS-E0xxx with line and column
@@ -519,6 +565,9 @@ crates/rastai-formats/
         eval.rs               test ids unique, thresholds in range, judge ids referenced exist
         plugin_manifest.rs    plugin id format, command ids inside the plugin's namespace, no reserved areas
         project.rs            folders exist in the listing given, data_policy known
+        theme.rs              color values are #rrggbb; (M8) the accessibility check: WCAG 2.2 AA contrast 4.5:1 for
+                              text, 3:1 for UI parts and the focus ring, 24 px targets
+        mysql_connection.rs   tls.mode disabled only with a loopback host or a Unix socket
       environment.rs          layer 4: EnvironmentFacts in, RRS-E3xxx warnings out
     migrate/
       mod.rs                  the chain runner: read schema_version, apply each step, mark newer files read-only (RRS-E4001)
@@ -526,12 +575,14 @@ crates/rastai-formats/
     zip/
       reader.rs               central directory (ZIP64 too), stored and deflate entries, limits, zip-slip check, before any
                               entry is read; copy_zip_entry streams one entry into a ByteSink
-      inflate.rs              in-house DEFLATE decoder (RFC 1951), streaming
+      inflate.rs              the only miniz_oxide import: streaming inflate in fixed-size chunks, stopped at the declared
+                              uncompressed size; the in-house limits stay around it
       writer.rs               stored-only streaming writer with fixed entry order and timestamps, so archives are
                               reproducible; ZIP64 records when a size, an offset or the entry count needs them
     safetensors/
       dtypes.rs               dtype names and element sizes
-      reader.rs               strict reader (spike port): header checked fully before any tensor is read
+      reader.rs               strict reader (spike port): header checked fully before any tensor is read; the one header
+                              validator for Rust and Python (Python calls check_safetensors_header through the wheel)
       writer.rs               layout planner: sorted names, header padded with spaces to 8 bytes, string metadata
     gguf/
       reader.rs               header-only GGUF v3 reader: key-values and tensor infos, no tensor bytes (node lease sizing)
@@ -554,7 +605,7 @@ crates/rastai-formats/
     python/                   crate rastai-formats-python (cdylib), module rastai_formats._native: the only pyo3 user (4.6)
       Cargo.toml
       src/lib.rs
-  fuzz/                       cargo-fuzz crate, own workspace, nightly
+  fuzz/                       cargo-fuzz crate, own workspace, nightly; one target per in-house parser of untrusted input
     Cargo.toml
     fuzz_targets/
       json_reader.rs
@@ -562,7 +613,7 @@ crates/rastai-formats/
       safetensors_header.rs
       gguf_header.rs
       zip_reader.rs
-      inflate.rs
+      inflate.rs              the miniz_oxide wrapper with its size cap: never writes past the declared size
       conversation_import.rs
   tests/
     documents_corpus.rs       fixtures/documents/<type>/{valid,invalid}: verdicts, codes and paths
@@ -571,6 +622,9 @@ crates/rastai-formats/
     describe_matches_struct.rs every description lists exactly the struct's serde fields, with matching kinds
     migrations.rs             every fixture of an old version opens and upgrades to the current one
     commands_described.rs     every id in rastai-core's COMMANDS has an Args and a Result description
+    op_shapes.rs              shape inference for each op equals the output shapes in fixtures/ops/<op>.json
+    theme_tokens.rs           the built-in light and dark themes of @rastai/ui read as valid rastai.theme/1; a locked key
+                              (--rr-locked-*) or an unknown role is RRS-E1003
     importers.rs              fixtures/conversations/* and fixtures/harness-import/* to their expected outputs
     gguf_writer.rs            header bytes against a golden file; Q8_0 blocks against reference values
     gguf_reader.rs            our writer's output and a llama.cpp-made K-quant fixture read back; truncated and lying headers
@@ -580,7 +634,7 @@ crates/rastai-formats/
 
 ### 4.2 How a document type is written
 
-Each type is a plain struct with serde derives plus one hand-written `describe_<type>()` next to it (contracts §5.4). No proc macros of our own, no schema library.
+Each type is a plain struct with serde derives plus one hand-written `describe_<type>()` next to it (contracts §5.4). No proc macros of our own, no schema library. If more than about 20 document types make the tables a recurring review cost, the owner may allowlist `schemars` instead (owner decision 6); until then the tables stay.
 
 ```rust
 // documents/eval.rs (shortened)
@@ -649,8 +703,37 @@ pub fn enum_of(values: &[&str]) -> FieldKind
 - **Wire types inside documents** (contracts §4, §5.4): `run.json` `job_spec` (`rastai.node.v1.JobSpec`) and `hardware_fingerprint`, replay `hardware_fingerprint` (`rastai.common.v1.HardwareFingerprint`), and conversation message `settings` (`rastai.node.v1.SamplingSettings`) are described as `FieldKind::Proto("<package>.<Message>")`. The struct field is a `serde_json::Value` holding the object, never a re-declared struct, because `rastai-formats` can't depend on `rastai-proto` (WASM). Each consumer treats it the same way:
   - `structure_check.rs` (layer 2): the value must be a JSON object, else `RRS-E1002` at the field's path.
   - `json_schema.rs`: `{"type": "object"}` with a `description` naming the message.
-  - `python_dataclasses.rs` and `typescript_types.rs`: a plain `dict` / `Record<string, unknown>` with a doc comment naming the message, so `rastai_formats` and `@rastai/formats` don't depend on the proto packages.
+  - `python_dataclasses.rs` and `javascript_types.rs`: a plain `dict` in Python and a plain `object` in the JSDoc `@typedef`, each with a comment naming the message, so `rastai_formats` and `@rastai/formats` don't depend on the proto packages.
   - Rust readers decode it with `rastai-core/src/proto_json.rs` (section 5.2) into the generated message; a decode failure is an `RRS-E1xxx` diagnostic at the field's path.
+
+### 4.2a The theme document (owner decision N1)
+
+`theme.rs` holds `ThemeDocument`, the full `rastai.theme/1` row of contracts §5.2 and §5.6. It lands in M1 with the token contract, so the built-in themes, the generated JSDoc type and the CSS variables agree from the first UI commit; theme plugins use it from M8.
+
+```rust
+// documents/theme.rs (shortened)
+const THEME_SCHEMA_ID: &str = "rastai.theme/1";
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ThemeDocument {
+    // the shared header fields ($schema, type, schema_version, id, content_hash, ...) come first, as on every document
+    pub name: String,
+    pub base: ThemeBase,                     // light or dark: missing keys and the locked set come from it
+    pub colors: ThemeColors,                 // one optional "#rrggbb" field per role key of contracts §5.6
+    pub typography: ThemeType,               // contracts §5.2 calls this group `type`, which collides with the header's
+                                             // `type` field; open question 14 (section 17)
+    pub density: ThemeDensity,               // comfortable and compact spacing scales
+    pub radius_px: ThemeRadius,
+    pub motion: ThemeMotion,                 // fast_ms, slow_ms, easing
+    pub focus_ring: ThemeFocusRing,          // width_px, offset_px; its color is the focus_ring role
+    pub elevation: ThemeElevation,           // three shadow levels
+}
+```
+
+- **Role keys are struct fields, not a free map.** `ThemeColors` has one `Option<String>` per role (`background` … `canvas_port`). A typo, an unknown role or a `--rr-locked-*` name is an unknown field, so layer 2 refuses it with `RRS-E1003`. That is how a theme can never set a locked security-UI token (owner decision N7).
+- **Values** are checked in layer 3 (`meaning/theme.rs`): every color is `#rrggbb`. The M8 accessibility check (WCAG 2.2 AA: 4.5:1 for text, 3:1 for UI parts and the focus ring, 24 px targets) lives in the same file, so the theme picker, `plugin lint` and the plugin host all get the same verdict.
+- **One owner.** The role list is defined here once. The codegen writes it into `@rastai/formats` as a JSDoc `@typedef`; `@rastai/ui` reads that, holds the color values of the built-in themes, and maps fields to `--rr-*` variables (frontend doc). `tests/theme_tokens.rs` reads the built-in theme files through `read_document`.
+- **Settings:** `ui.theme` (`system` default, `light`, `dark`, or a plugin theme id from M8) and `ui.density` (`comfortable`, `compact`) are `SettingsDocument` fields (contracts §11.2).
 
 ### 4.3 Public API
 
@@ -672,8 +755,8 @@ pub enum Document {
     Model(ModelSpec), Harness(Harness), Data(DatasetSpec), Eval(EvalSuite), Replay(ReplayManifest),
     PluginManifest(PluginManifest), Project(Project), Lock(LockFile), RunRecord(RunRecord), Resume(ResumeState),
     SteeringPreset(SteeringPreset), Layout(WorkspaceLayout), Keybindings(Keybindings), Settings(SettingsDocument),
-    Converter(ConverterDocument), Theme(ThemeDocument), EvalResult(EvalResult), ModelDiff(ModelDiffReport),
-    SaeFitCheck(SaeFitCheckReport),
+    Converter(ConverterDocument), Theme(ThemeDocument), Tutorial(Tutorial), EvalResult(EvalResult),
+    ModelDiff(ModelDiffReport), SaeFitCheck(SaeFitCheckReport),
 }
 
 /// Plain facts the caller looked up; rastai-formats never queries the machine itself.
@@ -695,6 +778,7 @@ pub fn read_conversation(source: &dyn ByteSource, limits: &ImportLimits) -> Resu
 pub fn write_conversation(conversation: &Conversation) -> Vec<u8>
 
 // commands/mod.rs
+// the only generic helpers: each command handler calls one of these with its own arguments struct
 pub fn parse_arguments<T: DeserializeOwned>(command_id: &str, arguments_json: &str) -> Result<T, Vec<Diagnostic>>
 pub fn result_json<T: Serialize>(result: &T) -> String
 pub fn describe_arguments(command_id: &str) -> Option<TypeDescription>
@@ -713,6 +797,15 @@ pub fn update_stream_hasher(hasher: &mut StreamHasher, bytes: &[u8])
 pub fn finish_stream_hasher(hasher: StreamHasher) -> String
 pub fn content_hash_of_value(document: &serde_json::Value) -> String   // canonical JSON without the content_hash key
 pub fn model_hash(weight_files: &[(String, String)]) -> String         // contracts §8.6: sorted "<name> <hash>" lines
+
+// crc32.rs: one table for zip entries and event-log frames (contracts §7.1)
+pub fn crc32(bytes: &[u8]) -> u32
+pub fn update_crc32(running: u32, bytes: &[u8]) -> u32                // streaming, for zip entries read in chunks
+
+// documents/mysql_connection.rs: one TLS rule for the archive and the MySQL dataset reader (contracts §5.2)
+pub struct MysqlConnection { pub name: String, pub host: String, pub port: u16, pub socket_path: String, pub database: String,
+                             pub user: String, pub password_secret: String, pub tls: MysqlTls }   // a keychain account, never a password
+pub fn check_connection_tls(connection: &MysqlConnection) -> Result<(), Diagnostic>   // `disabled` only for loopback or a socket
 
 // json/patch.rs (undo)
 pub struct JsonPatchOperation { pub op: PatchOp, pub path: String, pub from: String, pub value: serde_json::Value }
@@ -740,7 +833,7 @@ pub struct VecSink { pub bytes: Vec<u8> }               // WASM, tests, small ar
 pub struct FileSink { pub file: std::fs::File }         // native only; the caller created the file
 ```
 
-**Callers:** `rastai-server` (every `file.*`, `document.*`, `design.*` command, the plugin host, `Execute` argument parsing); `rastai-node` (run records, resume state, conversation and harness reads on the node); `rastai-cli` (`rastai validate`); `rastai-store` (run records during a rebuild); `rastai-mcp` (JSON Schemas for tools); `@rastai/formats` through WASM; `rastai_formats` and every Python package through PyO3.
+**Callers:** `rastai-server` (every `file.*`, `document.*`, `design.*` command, the plugin host, `Execute` argument parsing); `rastai-node` (run records, resume state, conversation and harness reads on the node); `rastai-cli` (`rastai validate`); `rastai-store` (run records during a rebuild, `crc32` for event-log frames); `rastai-archive` (`MysqlConnection`, hashing for blob verification); `rastai-mcp` (JSON Schemas for tools); `@rastai/formats` through WASM; `rastai_formats` and every Python package through PyO3.
 
 ### 4.4 The four layers, as code
 
@@ -817,22 +910,29 @@ pub fn copy_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, sink: &mut dyn 
 pub fn read_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, limits: &ImportLimits) -> Result<Vec<u8>, Diagnostic>  // documents only
 pub fn write_zip_stored(destination: &mut dyn ByteSink, entries: &mut dyn Iterator<Item = ZipSource>) -> Result<(), FormatsError>
 pub fn write_small_zip(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, FormatsError>   // in memory, for a few small documents
+
+// zip/inflate.rs: the miniz_oxide wrapper; the reader calls it, nothing else does
+pub struct InflateStream { /* miniz_oxide state, bytes written, declared size */ }
+pub fn new_inflate_stream(declared_uncompressed_bytes: u64) -> InflateStream
+pub fn inflate_chunk(stream: &mut InflateStream, input: &[u8], sink: &mut dyn ByteSink) -> Result<InflateProgress, Diagnostic>
+// RRS-E5002 if the output would pass the declared size; the CRC is checked by reader.rs at the end
 ```
 
-- **Strict safetensors contract (§23, spike):** no duplicate JSON keys; integers must be real integers; byte sizes use `checked_mul`; tensors tile the data section exactly; metadata maps strings to strings. One code per corpus class (section 16.4, `RRS-E6001`–`6017`). The Python reader in `rastai_models/io/` returns the same codes on the same corpus (`layout/python.md` 2.7).
+- **Strict safetensors contract (§23, spike):** no duplicate JSON keys; integers must be real integers; byte sizes use `checked_mul`; tensors tile the data section exactly; metadata maps strings to strings. One code per corpus class (contracts §10.3, `RRS-E6001`–`6017`).
+- **One owner of the header check** (contracts §2.4 rule 10). `rastai_models/io/safetensors_reader.py` calls `check_safetensors_header` through the wheel (4.7) and reads tensor bytes only after it accepts the header, so Python gets the same codes by construction. The corpus test runs through the wheel as well as in Rust (4.11).
 - **GGUF** covers f32, f16, bf16 and Q8_0. K-quants are made by the pinned `llama-quantize` on the node (`layout/python.md` 5.3); the format writer never does them. The tensor side (names, metadata, vocabulary) is in `rastai_models/io/gguf_writer.py`, which calls these two functions through the wheel, so GGUF has one byte encoder.
-- **GGUF header reader** (`gguf/reader.rs`, step 3): reads the magic, version, key-values and tensor infos and stops at `data_start`; it never reads tensor bytes. The node sums `gguf_tensor_bytes` and reads the context length and KV-head keys to size a Fast model's lease. GGUF files are untrusted (downloads), so counts and string and array lengths are checked against `ImportLimits` before anything is allocated. Key-value types that `GgufValue` has no variant for (u8, i16, f64 and the like) are skipped by size, not refused. Codes are in section 16.4 (`RRS-E6501`–`6506`).
-- **Zip** is in-house because §27 lists no zip crate. Reading supports stored and deflate (other tools write deflate: `.mcpb`, `.pt2`, exported projects from other machines). Writing is stored-only: replays are mostly safetensors, which barely compress, and stored archives are reproducible byte for byte. Deflate writing comes if a measurement shows a size problem.
+- **GGUF header reader** (`gguf/reader.rs`, step 3): reads the magic, version, key-values and tensor infos and stops at `data_start`; it never reads tensor bytes. The node sums `gguf_tensor_bytes` and reads the context length and KV-head keys to size a Fast model's lease. GGUF files are untrusted (downloads), so counts and string and array lengths are checked against `ImportLimits` before anything is allocated. Key-value types that `GgufValue` has no variant for (u8, i16, f64 and the like) are skipped by size, not refused. Codes are in contracts §10.3 (`RRS-E6501`–`6506`).
+- **Zip container code is in-house; DEFLATE is not** (owner decision 5). The central directory, ZIP64 records, limits, zip-slip checks and the stored writer are ours. Decompression is `miniz_oxide`, behind `zip/inflate.rs`, so the RFC 1951 decoder (about 400 lines of fiddly bit handling) isn't ours to fuzz and maintain. Reading supports stored and deflate (other tools write deflate: `.mcpb`, `.pt2`, exported projects from other machines). Writing is stored-only: replays are mostly safetensors, which barely compress, and stored archives are reproducible byte for byte. Deflate writing comes only if a measurement shows a size problem.
 - **Zip streams.** Offline `.rrsproj` bundles carry model weights (`weights/`, several GB; flows/platform.md 10.2) and `.rrsreplay` files can carry `activations/*.safetensors`, so nothing builds a whole archive in memory:
   - `write_zip_stored` takes one `ZipSource` at a time. It reads each source twice: once for the CRC-32, then to copy it after a complete local header (no data descriptors, so every unzip tool reads the result). Only the central-directory list (path, CRC, sizes, offset per entry) is kept in memory.
   - **ZIP64:** when any size or offset passes `u32::MAX`, or there are more than 65,535 entries, the writer adds the ZIP64 extra fields, the ZIP64 end-of-central-directory record and its locator. The reader accepts the same.
   - `copy_zip_entry` unpacks one entry into a sink in fixed-size chunks (`project.import` writes `weights/` straight into the `.importing` folder). Inflate stops at the declared size, and the CRC is checked at the end.
   - `read_zip_entry` and `write_small_zip` stay for documents and small archives (`system.bundle`, tests); `read_zip_entry` refuses an entry over the `ImportLimits` file-size cap with `RRS-E5003`.
-- **Zip limits** are checked from the central directory before any entry is inflated: entry count, total uncompressed size, per-entry ratio (zip bomb, `RRS-E5002`), and `..`, absolute paths or backslashes in names (zip slip, `RRS-E5001`). `inflate.rs` also stops at the declared uncompressed size, so a lying header can't exceed it.
+- **Zip limits** are checked from the central directory before any entry is inflated: entry count, total uncompressed size, per-entry ratio (zip bomb, `RRS-E5002`), and `..`, absolute paths or backslashes in names (zip slip, `RRS-E5001`). `inflate.rs` also stops at the declared uncompressed size, so a lying header can't exceed it; the CRC-32 (`crc32.rs`) is checked when the entry ends.
 
 ### 4.6 WASM build: `rastai-formats-wasm`
 
-`crates/rastai-formats/bindings/wasm/src/lib.rs` is the only file that imports `wasm-bindgen`. Every function takes and returns plain strings and byte arrays, so the TS side needs no generated glue beyond what `wasm-bindgen` writes.
+`crates/rastai-formats/bindings/wasm/src/lib.rs` is the only file that imports `wasm-bindgen`. Every function takes and returns plain strings and byte arrays, so the JavaScript side needs no generated glue beyond the `.js` module `wasm-bindgen` writes. `just wasm` passes `--no-typescript`, so no `.d.ts` file appears outside a generated folder (ADR-0036); the hand-written `packages/formats/src/validator.js` wraps these functions with short JSDoc types (frontend doc).
 
 ```rust
 #[wasm_bindgen(js_name = readDocument)]
@@ -882,7 +982,8 @@ fn hash_bytes(data: &[u8]) -> String
 fn model_hash(weight_files: Vec<(String, String)>) -> String
 
 #[pyfunction]
-fn check_safetensors_header(header_bytes: &[u8], data_length: u64) -> PyResult<String>  // optional: one implementation of the strict contract
+fn check_safetensors_header(header_bytes: &[u8], data_length: u64) -> PyResult<String>  // the one strict-contract check; Python
+                                                                                       // reads tensor bytes only after it passes
 
 #[pyfunction]
 fn plan_gguf(metadata_json: &str, tensors_json: &str) -> PyResult<(Vec<u8>, Vec<u64>)>
@@ -898,7 +999,7 @@ fn write_zip_stored(destination_path: &str, entries: Vec<(String, String)>) -> P
 // exception: rastai_formats._native.FormatsValidationError(diagnostics_json)
 ```
 
-- **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai.load()` in notebooks.
+- **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, `check_safetensors_header` before every tensor read, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai_data` (`MysqlConnection` through the generated dataclass, validated by `read_document`), `rastai.load()` in notebooks.
 - **Paths in the binding only.** `write_zip_stored` is the one function here that takes paths. The binding crate opens them; `rastai-formats` itself still only sees a `FileSource` and a `FileSink` (4.10).
 - Built by `just wheel` with maturin (§27 dev tooling) for CPython 3.12, `abi3` off: one wheel per platform in each `envs/<backend>/uv.lock`, by hash. Nothing installs at runtime.
 - The GIL is released (`py.allow_threads`) around anything that can take more than a millisecond (Q8_0 encoding, large documents).
@@ -910,12 +1011,13 @@ fn write_zip_stored(destination_path: &str, entries: Vec<(String, String)>) -> P
 | Internal | `rastai-diag` | diagnostics | |
 | External | serde, serde_json | document structs, JSON values, the canonical and pretty writers | `json/` (the reader is in-house; serde_json holds the values) |
 | External | blake3 | content hashes, model hashes, stream hashing | `hashing.rs` |
+| External | miniz_oxide | DEFLATE decoding for zip entries (ADR-0037) | `zip/inflate.rs` |
 | External (binding crates only) | wasm-bindgen | WASM build | `bindings/wasm/src/lib.rs` |
 | External (binding crates only) | pyo3 | Python build | `bindings/python/src/lib.rs` |
 | Dev | libfuzzer-sys (via cargo-fuzz) | fuzz targets | `fuzz/` |
 | Dev tooling | wasm-bindgen-cli, maturin | build the two artifacts | `justfile` |
 
-`wasm-bindgen`, `pyo3` and `wasm-bindgen-cli` are not yet in §27 (contracts §14 row 1 proposes the first two). Section 15 lists them.
+All of these are on the §27 allowlist (owner decision 1, contracts §2.5).
 
 ### 4.9 Codegen: `tools/codegen` (`rastai-codegen`)
 
@@ -929,19 +1031,21 @@ tools/codegen/
       rastai_formats_codegen.rs   main: load descriptions, then write each output in turn
       rastai_catalog_codegen.rs   main: read catalog JSON, then write each output in turn
     json_schema_files.rs      schemas/<type>/<version>.json and schemas/commands/*, schemas/index.json
-    typescript_types.rs       packages/formats/src/generated/*.ts (one interface per type, string unions for enums,
-                              Proto fields as Record<string, unknown> with a doc comment naming the message)
-    typescript_commands.rs    packages/formats/src/generated/commands.ts (command id to Args and Result type names)
+    javascript_types.rs       packages/formats/src/generated/*.js: one JSDoc @typedef module per type (@property lines,
+                              string-literal unions for enums, Proto fields as a plain object with a line naming the message)
+    javascript_commands.rs    packages/client/src/generated/commands.js: one typed wrapper per core command,
+                              modelLoad(executor, args), each taking a CommandExecutor (contracts §12.4)
     python_dataclasses.rs     python/rastai_formats/generated/*.py (frozen @dataclass per type, from_json/to_json functions;
                               Proto fields as dict with a docstring line naming the message)
     catalog_rust.rs           crates/rastai-diag/src/generated/catalog_table.rs and terms_table.rs
-    catalog_typescript.rs     packages/catalog/src/generated/catalog.ts
+    catalog_javascript.rs     packages/catalog/src/generated/catalog.js (entries plus a JSDoc @typedef for one entry)
     catalog_python.rs         python/rastai_plugin/catalog/generated.py
-    reference_docs.rs         docs/reference/commands.md, errors.md, settings.md
+    reference_docs.rs         docs/reference/commands.md (with each command's stability), errors.md, settings.md
     write_if_changed.rs       write a file only when its bytes differ, so timestamps stay stable
   tests/
     catalog_checks.rs         the catalog rules of 3.5
-    outputs_compile.rs        the generated TS passes `tsc --noEmit`, the generated Python imports (run by just, not cargo)
+    outputs_check.rs          the generated JS passes `just check-js` (tsc --noEmit in checkJs mode), the generated Python
+                              imports (run by just, not cargo)
 ```
 
 ```rust
@@ -951,13 +1055,45 @@ fn main() -> ExitCode {
     let types = rastai_formats::describe::describe_all_types();
     let commands = command_descriptions(&rastai_core::commands::COMMANDS);
     write_json_schema_files(&repo_root, &types, &commands);
-    write_typescript_types(&repo_root, &types);
-    write_typescript_commands(&repo_root, &commands);
+    write_javascript_types(&repo_root, &types);
+    write_javascript_commands(&repo_root, &commands);
     write_python_dataclasses(&repo_root, &types);
     write_reference_docs(&repo_root, &commands);
     ExitCode::SUCCESS
 }
 ```
+
+What the generated JavaScript looks like (never hand-edited, not reviewed; contracts §2.4 rule 2):
+
+```js
+// packages/formats/src/generated/eval.js (generated by rastai-codegen)
+/**
+ * One model test: an input, an expectation and a pass threshold.
+ * @typedef {object} EvalTest
+ * @property {string} test_id Stable id, unique in the suite.
+ * @property {TestInput} input Messages, or a conversation reference.
+ * @property {Expectation} expectation What a passing answer looks like.
+ * @property {string} metric Metric name from the registry, e.g. judge or keyword.
+ * @property {number} pass_threshold Score at or above this passes.
+ */
+export {};
+
+// packages/client/src/generated/commands.js (generated by rastai-codegen)
+/**
+ * Load model. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient or PluginHost
+ * @param {ModelLoadArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function modelLoad(executor, args) {
+  return executor.execute("model.load", args);
+}
+```
+
+- **JSDoc, not TypeScript.** The output is `.js` with `@typedef` and `@param` lines only (ADR-0036). Fields keep the JSON's `snake_case`. The JSDoc stays plain: no conditional or mapped types, no `@template` chains. `just check-js` type-checks the hand-written code against it.
+- **Wrappers take a `CommandExecutor`** (owner decision N5), the one object shape `@rastai/client` defines and both `DaemonClient` and `PluginHost` satisfy, so the same wrapper works in the app, a plugin panel and a script. `@rastai/plugin` re-exports them; `rastai plugin codegen` writes the same kind of file for a plugin's own commands from its `types.json`.
+- **Stability travels with the command.** Each wrapper's doc line and `docs/reference/commands.md` show the descriptor's `stability`; `ListCommands` returns it. All are `preview` until Phase 2 (owner decision N3).
+- **protobuf-es** output (`packages/proto/`) comes from `buf generate` with target `js+dts` (proto doc). Those `.d.ts` files live only in that generated folder, which `check-no-typescript` allows.
 
 Order inside `just codegen`: proto first (`buf generate`), then the catalog (rastai-diag must compile before the rest), then formats.
 
@@ -965,8 +1101,9 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 
 - **Bytes in, typed data out.** Never opens a path. File access is only through a `FileSource` the caller opened. Never touches the network, SQLite or the environment.
 - Never depends on tokio, `rastai-core`, `rastai-proto` or any other rastai crate except `rastai-diag`.
-- Every document type is defined here once. TS, Python and JSON Schema are generated. Nobody else declares a document or command-argument struct (contracts §2.4 rule 3). Plugin command types come from the plugin's `types.json`, read by `read_plugin_types`.
-- **Content hashes are computed only here** (any build). TS and Python never hash documents themselves, because canonical JSON number formatting must match exactly.
+- Every document type is defined here once. JSDoc typedefs, Python dataclasses and JSON Schema are generated. Nobody else declares a document or command-argument struct (contracts §2.4 rule 3). Plugin command types come from the plugin's `types.json`, read by `read_plugin_types`.
+- **Content hashes are computed only here** (any build). JavaScript and Python never hash documents themselves, because canonical JSON number formatting must match exactly.
+- **One owner per check** (contracts §2.4 rule 10): the safetensors header check, GGUF byte encoding, BLAKE3 and document validation live here; Python and the browser call this code through the wheel and WASM and never re-implement it.
 - Untrusted-import limits are checked before allocating (`ImportLimits`), never after.
 - Must build for `wasm32-unknown-unknown` (CI).
 
@@ -984,14 +1121,17 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 | Importers | `tests/importers.rs` + `fixtures/conversations/`, `fixtures/harness-import/` (new) | ChatGPT branches kept; Claude, OpenAI JSONL, ShareGPT; MCP configs both ways |
 | GGUF | `tests/gguf_writer.rs`, `tests/gguf_reader.rs` | header bytes against a golden file; Q8_0 against reference blocks; the reader reads our own output and a K-quant fixture made by the pinned `llama-quantize`, and refuses truncated or oversized headers with `RRS-E65xx`; the GPU test that runs the file in `llama-server` is in `layout/python.md` |
 | ZIP64 | `tests/zip64.rs` (nightly: it writes about 5 GB to a temp dir) | a 5 GB sparse source file goes through `write_zip_stored`, and `copy_zip_entry` into a test-only hashing sink gives the source's BLAKE3; `list_zip_entries` reads the ZIP64 records; the test process's peak RSS stays under 64 MiB; a 70,000-entry archive of empty files also round-trips |
-| Fuzz | `fuzz/fuzz_targets/` | nightly, 10 minutes per target; crashes become corpus files |
-| Parity across builds | `python/rastai_formats/tests/test_parity.py`, `packages/formats/src/validator.test.ts` | the same document and safetensors corpora through the wheel and WASM give identical codes, paths and content hashes |
+| Op goldens | `tests/op_shapes.rs` + `fixtures/ops/<op>.json` | shape inference per op equals the golden output shapes; the same files hold parameter counts and FLOPs, which `rastai-server`'s live stats and the Python compiler must also match (contracts §2.4 rule 10) |
+| Theme | `tests/theme_tokens.rs`, `meaning/theme.rs` unit tests | built-in themes valid; a locked key or unknown role is `RRS-E1003`; a color that isn't `#rrggbb` is refused; (M8) contrast below 4.5:1 for text or 3:1 for UI parts and the focus ring is refused |
+| MySQL connection | bottom of `meaning/mysql_connection.rs` | `tls.mode = disabled` passes for `127.0.0.1`, `::1`, `localhost` and a socket path, and fails for any other host |
+| Fuzz | `fuzz/fuzz_targets/` | the seven targets in the tree (contracts §12.5), nightly, 10 minutes each; crashes become corpus files. A new parser of untrusted input lands with its target in the same PR (ADR-0037) |
+| Parity across builds | `python/rastai_formats/tests/test_parity.py`, `packages/formats/src/validator.test.js` | the same document and safetensors corpora through the wheel and WASM give identical codes, paths and content hashes |
 
 ### 4.12 Ported from the spike
 
 | Spike file | Goes to | Changes on the way |
 |---|---|---|
-| `spike/bakeoff/rust/src/safetensors.rs` | `src/safetensors/reader.rs` | `memmap2` and its `unsafe` block are dropped: the header is read with `read_at`, tensors are read on demand into the caller's buffer (contracts §14 row 1; the daemon only reads headers and streams tensors). String errors become `Diagnostic`s with `RRS-E60xx` codes and a path naming the tensor. The serde duplicate-key visitor is replaced by the in-house JSON reader, which every document uses. `crc-fast` and the `read`/`validate` benchmark commands are dropped; the corpus test replaces `validate_command`. |
+| `spike/bakeoff/rust/src/safetensors.rs` | `src/safetensors/reader.rs` | `memmap2` and its `unsafe` block are dropped: the header is read with `read_at`, tensors are read on demand into the caller's buffer (contracts §2.5 bans `memmap2`; the daemon only reads headers and streams tensors). String errors become `Diagnostic`s with `RRS-E60xx` codes and a path naming the tensor. The serde duplicate-key visitor is replaced by the in-house JSON reader, which every document uses. `crc-fast` and the `read`/`validate` benchmark commands are dropped; the corpus test replaces `validate_command`. |
 | `spike/src/rastai_spike/safetensors_writer.py` (layout rules only) | `src/safetensors/writer.rs` | Same layout: sorted names, header padded with spaces to 8 bytes, string-only metadata. The Python writer itself moves to `rastai_models/io/`. |
 | `spike/bakeoff/fixtures/safetensors/*`, `safetensors_expected.json` | `fixtures/safetensors/`, `expected.json` | Expected strings become codes. `shape_overflows_64_bits` must give `RRS-E6012` in Python too: the spike's Python reader (arbitrary-precision ints) reported a size mismatch instead of an overflow. |
 | Lesson from spike 07 | `json/reader.rs` | Header NaN and trailing garbage are syntax errors in every reader, so all three languages agree on what "valid JSON" means. |
@@ -1000,15 +1140,17 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 
 | Part | First needed (§31) | Why then |
 |---|---|---|
-| `json/`, `hashing.rs`, `header.rs`, `describe/`, `validate/` layers 1–2, `run_record.rs`, `resume.rs`, `settings.rs`, `project.rs`, `lock.rs`, `plugin_manifest.rs`, `semver.rs`, `zip/reader.rs`, `commands/` for the skeleton commands, the PyO3 build, `rastai-codegen` | 1 | the daemon, plugin host and worker protocol v0 (weeks 3–4) |
-| `model.rs` with the TextCNN ops, `model_shapes.rs` for them | 1 | worker v0 trains TextCNN from a ModelSpec |
-| `safetensors/`, `model_hash`, the Gemma and Llama ops | 2 | unified runtime, `model.inspect` |
+| `json/`, `hashing.rs`, `crc32.rs`, `header.rs`, `describe/`, `validate/` layers 1–2, `run_record.rs`, `resume.rs`, `settings.rs`, `project.rs`, `lock.rs`, `plugin_manifest.rs`, `semver.rs`, `commands/` for the skeleton commands, the PyO3 build, `rastai-codegen` with the JavaScript outputs | 1 | the daemon, plugin host and worker protocol v0 (weeks 3–4); `crc32.rs` because event-log frames need it |
+| `theme.rs` (the full token row, value checks), `tutorial.rs` | 1 (M1, owner decision N1) | the token contract lands with the first UI commit |
+| `model.rs` with the TextCNN ops, `model_shapes.rs` for them, their `fixtures/ops/` goldens | 1 | worker v0 trains TextCNN from a ModelSpec |
+| `safetensors/`, `model_hash`, the Gemma and Llama ops, `zip/reader.rs` and `zip/inflate.rs` | 2 | unified runtime, `model.inspect`; zip in M2-22 (plan §10 row 16) |
 | `conversation.rs`, conversation importers, `gguf/reader.rs` | 3 | the conversation tree, `conversation.import`; Fast-model lease sizing |
 | `replay.rs`, `steering_preset.rs`, `zip/writer.rs` (streaming, ZIP64), `model_diff.rs`, `sae_fit_check.rs`, the WASM build | 4 | replays and the web viewer; Psychology reports |
 | `data.rs`, `converter.rs`, `eval.rs`, `eval_result.rs`, `gguf/writer.rs`, `plans.rs` for downloads | 5 | data import, Evaluation, export |
+| `mysql_connection.rs` and its meaning check | 5 (M5-E07) | the MySQL dataset reader; the archive reuses it in M11 |
 | full `meaning/` for ModelSpec (input map, blocks, repeat), MoE/MLA/ALiBi/AttnRes ops, `layout.rs`, `keybindings.rs` | 6 | Designer |
 | `harness.rs`, MCP importers and exporters | 7 | Agent Gym |
-| `plugin_types.rs`, full manifest contributions, `theme.rs` | 8 | plugin SDK, theme contributions |
+| `plugin_types.rs`, full manifest contributions, the theme accessibility check in `meaning/theme.rs`, `rastai.icon_set/1` | 8 | plugin SDK, theme and icon-set plugins |
 | crates.io release, schemas served at stable URLs | Phase 2 | §31 |
 
 ---
@@ -1062,6 +1204,7 @@ crates/rastai-core/
 ```rust
 // commands/descriptor.rs
 use rastai_proto::commands::v1::{CommandDescriptor, CommandKind};   // generated: one owner (contracts §2.4 rule 3)
+use rastai_proto::common::v1::Stability;
 
 /// One row of the core table: the one allowed in-process twin of the proto CommandDescriptor, because a const table
 /// can't hold Strings. Same field names as the message; it leaves out only what registration fills in
@@ -1073,6 +1216,7 @@ pub struct CommandRow {
     pub section: &'static str,
     pub scope: Scope,
     pub kind: CommandKind,                 // the generated enum, not one of our own
+    pub stability: Stability,              // generated enum; every row is Preview until Phase 2 (owner decision N3)
     pub undoable: bool,
     pub basic: bool,                       // shown in Basic mode
     pub default_shortcut: &'static str,    // "" when none
@@ -1083,14 +1227,15 @@ pub struct CommandRow {
 // commands/table.rs
 pub const COMMANDS: &[CommandRow] = &[
     CommandRow { command_id: "system.status", title: "Show status", summary: "Daemon, nodes, versions.", section: "settings",
-                 scope: Scope::Read, kind: CommandKind::Sync, undoable: false, basic: true, default_shortcut: "",
-                 experimental: false, since_version: "0.1.0" },
+                 scope: Scope::Read, kind: CommandKind::Sync, stability: Stability::Preview, undoable: false, basic: true,
+                 default_shortcut: "", experimental: false, since_version: "0.1.0" },
     // one row per core command
 ];
 
 // commands/registry.rs
 /// What the registry holds: the generated proto CommandDescriptor, with arguments_schema_json and result_schema_json
-/// (section 15 row 7). Core rows become descriptors at startup (wire.rs); plugin descriptors are built from manifests.
+/// (contracts §4.2). Core rows become descriptors at startup (wire.rs); plugin descriptors are built from manifests,
+/// and a plugin command is always Preview until plugin API 1.0.
 pub struct CommandRegistry { pub commands: Vec<CommandDescriptor> }
 pub struct CommandFilter { pub section: String, pub include_experimental: bool, pub basic_only: bool }
 
@@ -1246,7 +1391,7 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 |---|---|---|---|
 | Internal | `rastai-diag` | diagnostics | |
 | Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver | |
-| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor` and `CommandKind`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `proto_json.rs` |
+| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `proto_json.rs` |
 | External | serde, serde_json | settings values, proto JSON values | `settings.rs`, `proto_json.rs` |
 
 ### 5.4 Boundary rules
@@ -1262,8 +1407,8 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 | Test | Where | What |
 |---|---|---|
 | Unit | bottom of `ids.rs`, `crockford.rs`, `time.rs`, `scopes.rs`, `states.rs` | ids sort by creation time and round-trip through base32; RFC 3339 for leap years and epoch edges; every transition in contracts §9 allowed and a sample of illegal ones refused |
-| Command table | `tests/command_table.rs` | ids follow contracts §6.1 and sit in a core area; no duplicates; scope, kind and section valid; `since_version` set |
-| Naming | `tests/naming_round_trip.rs` | every id survives `cli_words` → `command_id_from_cli_words` and `mcp_tool_name` → back; the CLI and MCP columns of `fixtures/command-golden/copy-as.json` (frontend doc 2.5) match |
+| Command table | `tests/command_table.rs` | ids follow contracts §6.1 and sit in a core area; no duplicates; scope, kind and section valid; `since_version` set; every row `Stability::Preview` until Phase 2 (a `Stable` row fails until `check-schema-diff` exists) |
+| Naming | `tests/naming_round_trip.rs` | every id survives `cli_words` → `command_id_from_cli_words` and `mcp_tool_name` → back; the CLI and MCP columns of `fixtures/command-golden/copy-as.json` (frontend doc) match |
 | Settings | `tests/settings_precedence.rs` | a later layer overrides single keys, not whole sections; `RASTAI_GATEWAY__PORT=8899` sets `gateway.port`; bad `--set` text gives a diagnostic |
 | Wire | `tests/wire_round_trip.rs` | the rastai-diag `Diagnostic` and `CommandRow` list the proto messages' fields (`CommandRow` minus the five registration fields); `fixtures/proto-golden/common/Diagnostic.binpb` round-trips |
 | Proto JSON | `tests/proto_json_golden.rs` | `JobSpec`, `HardwareFingerprint` and `SamplingSettings` encode to the protobuf-es JSON in `fixtures/proto-golden/` (64-bit integers as strings, enums as names) and decode back; a wrong kind gives `RRS-E1002` at the given path |
@@ -1299,23 +1444,31 @@ crates/rastai-store/
     writer_thread.rs          one std thread per database file: request channel, batching, savepoint per request, oneshot replies
     reader_pool.rs            a few read-only connections per database, each behind a Mutex
     data_dir_lock.rs          take_daemon_lock(): File::try_lock on <runtime>/daemon.lock
-    disk_space.rs             free_bytes(), check_free_space(): the one statvfs call (section 6.4)
+    disk_space.rs             free_bytes(), check_free_space(): the one statvfs call and the only unsafe in the
+                              workspace (ADR-0033, section 6.4)
+    config_files.rs           write_config_file(): temp file, fsync, rename, fsync the folder (contracts §11.1)
+    backups.rs                (L2) daily VACUUM INTO snapshots into <data>/backups/ and the vault salvage
     index/
-      migrations/0001_initial.sql   every rastai.db table: contracts §8.2, the flows/platform.md columns, log_cursors
+      migrations/0001_initial.sql   every rastai.db table of contracts §8.2 (no settings table), including log_cursors,
+                                    plugin_event_deliveries, archive_cursors and runs.archive_state (default 'local'),
+                                    so M11 needs no migration of live data
       writes.rs               IndexWrite enum and apply_index_write(): one match arm per variant
       reads.rs                IndexReader, IndexReaderGuard and open_index_reader()
-      runs.rs                 rows and functions for runs, jobs, run_metrics, run_tags, checkpoints
+      runs.rs                 rows and functions for runs (with archive_state), jobs, run_metrics, run_tags, checkpoints
       artifacts.rs            artifacts, artifact_copies, lineage, models
       documents.rs            documents, undo_steps
       journal.rs              command_journal, including idempotency_key, result_json, job_id
-      config_tables.rs        settings, tokens, nodes, plugins, projects
+      kept_tables.rs          tokens, nodes, plugins, projects (the tables a rebuild copies, 13.2)
       transfers.rs            transfers
       log_cursors.rs          acked sequence of the daemon's own event log
       handler_calls.rs        HandlerCall rows of plugin_event_deliveries: queue, list pending, mark delivered, drop (12.5)
+      archive_cursors.rs      (M11) one position per archive stream; written only after the archive's commit (section 14)
     vault/
-      migrations/0001_initial.sql   conversations, messages, annotations, gateway_log (contracts §8.3) with the added
-                                    gateway_log columns run_id, finish_reason, stop_kind (plan §10 row 33)
+      migrations/0001_initial.sql   conversations, messages, annotations, gateway_log (contracts §8.3) with the
+                                    gateway_log columns run_id, finish_reason, stop_kind, and the vault_changes outbox
       writes.rs               VaultWrite enum and apply_vault_write()
+      changes.rs              the vault_changes outbox: one row per changed row, in the same transaction, only while an
+                              archive is configured (M3-E02)
       reads.rs                VaultReader, VaultReaderGuard, open_vault_reader(), conversation tree and gateway-log queries
       token_ids.rs            token ids as little-endian u32 blobs
       retention.rs            delete gateway_log rows older than gateway.retention_days
@@ -1325,13 +1478,17 @@ crates/rastai-store/
       quarantine.rs           move a mismatched blob to .quarantine/ (RRS-S1001)
       gc.rs                   blob sweep: not in the live set and untouched for BLOB_GC_GRACE_HOURS
     event_log/
-      crc32.rs                in-house CRC-32/IEEE table, equal to Python's zlib.crc32
-      frame.rs                EVENT_LOG_HEADER, encode_frame(), decode_frame_header()
+      frame.rs                EVENT_LOG_HEADER, encode_frame(), decode_frame_header(); checksums through
+                              rastai_formats::crc32 (the one CRC-32 table, contracts §7.1)
       writer.rs               EventLogWriter: create, open for append (truncates a torn tail), append, raw append, sync
       reader.rs               EventLogReader, open_event_log(), read_next_frame() -> FrameRead (flows/platform.md 6.1)
     indexer.rs                apply_event_record(): one EventRecord to its rastai.db rows, inside the writer's transaction;
+                              the one indexing path for live, rebuilt and restored records;
                               vault_writes_for_records(): the vault.db rows a batch carries (gateway.request_logged)
     rebuild.rs                rebuild_index(): flows/platform.md 6.4
+  fuzz/                       cargo-fuzz crate, own workspace, nightly
+    fuzz_targets/
+      event_frame.rs          read_next_frame on arbitrary bytes never panics and never reads past a frame
   tests/
     writer_thread.rs
     index_migrations.rs
@@ -1343,7 +1500,10 @@ crates/rastai-store/
     blob_store.rs
     gc.rs
     vault.rs
+    vault_changes.rs
     secure_delete.rs
+    disk_space.rs
+    config_files.rs
 ```
 
 ### 6.2 Public API
@@ -1384,15 +1544,20 @@ pub enum IndexWrite {
     UpsertPlugin(PluginRow),
     InsertToken(TokenRow),
     RevokeToken { token_id: String, revoked_unix_ms: i64 },
-    SetSetting { scope: String, key: String, value_json: String },
     UpsertProject(ProjectRow),
     UpsertTransfer(TransferRow),
     DeleteCollected(GcDeletion),                        // GC: rows go before files
+    SetArchiveCursor { stream: String, position: i64 }, // (M11) only after the archive committed that position
+    MarkRunsArchived { run_ids: Vec<String> },          // (M11) archive_state local → archived, batched with the cursor
+    ResetArchiveCursors,                                // (M11) archive.configure to a different database
     Batch(Vec<IndexWrite>),                             // several writes, one transaction
 }
+// There is no settings write: settings live only in files (contracts §11.1), written with write_config_file below.
+// Pruning and restoring change rows through ApplyDaemonEvents, because archive.pruned and archive.restored are durable
+// daemon records (6.4); that is what lets a rebuild bring the stubs back.
 pub async fn write_index(writer: &IndexWriter, write: IndexWrite) -> Result<(), StoreError>
 
-pub struct VaultWriter { /* same shape */ }
+pub struct VaultWriter { /* same shape, plus the outbox switch below */ }
 pub enum VaultWrite {
     CreateConversation(ConversationRow),
     AppendMessage(MessageRow),
@@ -1403,8 +1568,14 @@ pub enum VaultWrite {
     AddAnnotation(AnnotationRow),
     AppendGatewayLog(GatewayLogEntry),                  // the generated proto entry; upsert by request_id, so a re-sent record is a no-op
     DeleteGatewayLogBefore { unix_ms: i64 },
+    RestoreConversation(RestoredConversation),          // (M11) archive.restore: conversation, messages, annotations
+    TrimVaultChanges { up_to_change_id: i64 },          // (M11) drop outbox rows the archive acknowledged
     Batch(Vec<VaultWrite>),                             // several writes, one transaction (assistant message + its log row)
 }
+/// The outbox switch. rastai-server turns it on while an archive is configured (archive.enabled) and off otherwise.
+/// When on, apply_vault_write adds one vault_changes row (table_name, row_id, op, project_id) per row it changes,
+/// in the same transaction. A delete always gets its row, so a delete made while the archive is down still reaches it.
+pub fn set_vault_change_recording(writer: &VaultWriter, on: bool)
 /// The vault writer's commit reply. The error is the catalog code as text, so a crate that must not import the store
 /// (rastai-gateway's LogCommit) can hold the receiver.
 pub struct VaultCommit { pub committed: tokio::sync::oneshot::Receiver<Result<(), String>> }
@@ -1430,6 +1601,11 @@ pub fn get_conversation_tree(reader: &VaultReader, conversation_id: &str) -> Res
 pub fn list_conversations(reader: &VaultReader, filter: &ConversationFilter) -> Result<Vec<ConversationRow>, StoreError>
 pub fn list_gateway_log(reader: &VaultReader, filter: &GatewayLogFilter) -> Result<Vec<GatewayLogEntry>, StoreError>
 pub fn list_pending_handler_calls(reader: &IndexReader, plugin_id: &str) -> Result<Vec<HandlerCall>, StoreError>
+// (M11) what rastai-archive reads: the store never imports the archive (contracts §2.4 rule 7)
+pub fn list_archive_cursors(reader: &IndexReader) -> Result<Vec<ArchiveCursorRow>, StoreError>
+pub fn list_journal_rows_after(reader: &IndexReader, after_row_id: i64, limit: u32) -> Result<Vec<JournalRow>, StoreError>
+pub fn list_vault_changes_after(reader: &VaultReader, after_change_id: i64, limit: u32) -> Result<Vec<VaultChangeRow>, StoreError>
+pub fn list_prune_candidates(reader: &IndexReader, finished_before_unix_ms: i64) -> Result<Vec<RunRow>, StoreError>
 // ... one read function per query a command needs; each takes a filter struct, never raw SQL
 
 // index/handler_calls.rs: one row of plugin_event_deliveries (section 12.5)
@@ -1471,24 +1647,33 @@ pub const EVENT_LOG_HEADER: &[u8; 8] = b"RRSEVLG1";
 pub enum FrameRead { Record(EventRecord), EndOfFile, Incomplete { valid_bytes: u64 }, Corrupt { offset: u64 } }
 pub fn open_event_log(path: &Path) -> Result<EventLogReader, StoreError>
 pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreError>
+/// (M11) The archive copies frames verbatim (contracts §7.1): the decoded record plus its exact body bytes and CRC,
+/// so rastai-archive needs no protobuf encoder of its own.
+pub struct RawFrame { pub record: EventRecord, pub body: Vec<u8>, pub crc32: u32 }
+pub enum RawFrameRead { Frame(RawFrame), EndOfFile, Incomplete { valid_bytes: u64 }, Corrupt { offset: u64 } }
+pub fn read_next_raw_frame(reader: &mut EventLogReader) -> Result<RawFrameRead, StoreError>
 pub enum SyncPolicy { Now, Batched }
 pub fn create_event_log(path: &Path) -> Result<EventLogWriter, StoreError>
 pub fn open_event_log_for_append(path: &Path) -> Result<EventLogWriter, StoreError>     // truncates a torn tail (RRS-S2001)
 pub fn append_event(writer: &mut EventLogWriter, record: &mut EventRecord, sync: SyncPolicy) -> Result<u64, StoreError>  // sets sequence
-pub fn append_raw_frame(writer: &mut EventLogWriter, frame_bytes: &[u8]) -> Result<(), StoreError>   // daemon mirror of a remote run
+pub fn append_raw_frame(writer: &mut EventLogWriter, frame_bytes: &[u8]) -> Result<(), StoreError>   // daemon mirror of a remote
+                                                                                                    // run; archive restores
+pub fn frame_bytes_from_body(body: &[u8], crc32: u32) -> Vec<u8>    // length, checksum, body: the inverse of RawFrame
 pub fn sync_event_log(writer: &mut EventLogWriter) -> Result<(), StoreError>
 
-// rebuild.rs, data_dir_lock.rs, disk_space.rs
+// rebuild.rs, data_dir_lock.rs, disk_space.rs, config_files.rs
 pub struct RebuildOptions { pub verify_blobs: bool, pub hf_cache_dir: PathBuf }
 pub struct RebuildReport { pub runs: u64, pub records: u64, pub artifacts: u64, pub documents: u64, pub models: u64,
+                           pub pruned_run_stubs: u64,    // stubs from archive.pruned; the daemon fills them (13.2)
                            pub diagnostics: Vec<Diagnostic> }
 pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError>  // caller holds daemon.lock
 pub fn take_daemon_lock(paths: &DataPaths) -> Result<DaemonLock, StoreError>           // RRS-S0001 when held
-pub fn free_bytes(path: &Path) -> Result<u64, StoreError>
+pub fn free_bytes(path: &Path) -> Result<u64, StoreError>                              // f_bavail × f_frsize (ADR-0033)
 pub fn check_free_space(path: &Path, needed_bytes: u64, margin_bytes: u64) -> Result<(), StoreError>  // RRS-S3001
+pub fn write_config_file(path: &Path, bytes: &[u8]) -> Result<(), StoreError>         // settings, keybindings, layouts
 ```
 
-**Callers:** `rastai-server` (everything: journal, documents, runs, tokens, plugins, settings, vault through its `VaultLogSink`, the indexing loop, GC), `rastai-node` (`EventLogReader` to tail runs, `free_bytes` before downloads), `rastai-cli` (`take_daemon_lock` and `rebuild_index` for `rastai storage rebuild-index`), `tests/crash`.
+**Callers:** `rastai-server` (everything: journal, documents, runs, tokens, plugins, vault through its `VaultLogSink`, the indexing loop, GC, `write_config_file` for `settings.set`, `workspace.keybindings.set` and `workspace.layout.save`), `rastai-node` (`EventLogReader` to tail runs, `free_bytes` before downloads and for telemetry), `rastai-archive` (the reader functions above, `open_blob`, `write_index`, `write_vault`, the event-log writer for restores), `rastai-cli` (`take_daemon_lock` and `rebuild_index` for `rastai storage rebuild-index`), `tests/crash`.
 
 ### 6.3 The writer thread
 
@@ -1533,37 +1718,68 @@ fn run_index_writer(connection: SqliteConnection, requests: std::sync::mpsc::Rec
 | `checkpoint.saved` | `checkpoints` |
 | `artifact.created` | `artifacts`, `artifact_copies` (home node), `lineage` from the payload's parents |
 | `transfer.finished` | `transfers` |
-| `download.finished` | `models` (ref, revision, `model_hash`, `size_bytes` from the payload: the node hashes each file with BLAKE3 and computes the model hash when the download ends, flows/platform.md 1.5; section 15 row 19) |
+| `download.finished` | `models` (ref, revision, `model_hash`, `size_bytes` from the payload: the node hashes each file with BLAKE3 and computes the model hash when the download ends, flows/platform.md 1.5) |
 | `node.state_changed` | `nodes.state` |
 | `plugin.state_changed` | `plugins.state` |
 | `document.changed` | `documents` hash and time |
 | `command.finished` | `command_journal` finished columns |
-| `run.tags_changed` (daemon, new) | `run_tags` for the run, replaced |
-| `pin.changed` (daemon, new) | `pinned` on `runs`, `checkpoints` or `artifacts` |
-| `gateway.request_logged` (worker, new) | `gateway_log` in **`vault.db`**, not `rastai.db`: one `VaultWrite::AppendGatewayLog` per record, keyed by `request_id` so a re-sent record is a no-op. Written by the run tail before the batch's `ApplyRunEvents` (section 13.1), because the index writer can't reach the vault. The entry carries `run_id`, `finish_reason` and `stop_kind` |
-| `conversation.changed` (daemon) | no `rastai.db` rows (the vault already holds the conversation); recorded in the daemon log so plugin event handlers see it (12.5) |
+| `run.tags_changed` (daemon) | `run_tags` for the run, replaced |
+| `pin.changed` (daemon) | `pinned` on `runs`, `checkpoints` or `artifacts` |
+| `lineage.linked` (daemon) | one `lineage` row |
+| `run.deleted` (daemon) | removes the run's rows (`runs`, `jobs`, `run_metrics`, `run_tags`, `checkpoints`); the archive turns the same record into a tombstone (section 14) |
+| `archive.pruned` (daemon, M11) | for each run id: `runs.archive_state = pruned`; the run's `run_metrics` and `checkpoints` rows are deleted, the `runs` row stays as a stub. The files go after the commit (row first, file second) |
+| `archive.restored` (daemon, M11) | for a restored run: `runs.archive_state = archived`. The restored frames themselves were indexed through this same function before the record was written |
+| `archive.status_changed`, `archive.synced`, `archive.purged` (daemon, M11) | no rows (status lives in memory; positions are in `archive_cursors`, written separately) |
+| `gateway.request_logged` (worker) | `gateway_log` in **`vault.db`**, not `rastai.db`: one `VaultWrite::AppendGatewayLog` per record, keyed by `request_id` so a re-sent record is a no-op. Written by the run tail before the batch's `ApplyRunEvents` (section 13.1), because the index writer can't reach the vault. The entry carries `run_id`, `finish_reason` and `stop_kind` |
+| `conversation.changed`, `conversation.deleted` (daemon) | no `rastai.db` rows (the vault holds the conversation); recorded in the daemon log so plugin event handlers see them (12.5) and a removal waiting for an unreachable node survives a restart |
 | everything else | no rows: live state (leases, loaded models, sandboxes) comes from heartbeats, plugin events are the plugin's |
 
 Then the same transaction inserts the batch's `HandlerCall` rows into `plugin_event_deliveries` (section 12.5) and sets `runs.acked_sequence` (run logs) or `log_cursors.acked_sequence` (the daemon log).
 
+A run's `archive_state` moves `local` → `archived` when the archiver's cursor passed its log and rows and its archived blobs are verified (contracts §9.9). The archiver writes that as `IndexWrite::MarkRunsArchived` in the same `Batch` as its `SetArchiveCursor`, so the state and the cursor can't disagree. Neither is rebuilt: a rebuilt run starts `local`, `archive_cursors` starts empty, and the next sync re-sends everything (the upserts absorb it) and marks the runs again.
+
 Models found only by scanning the HF cache (the rebuild, `model.list`) still get `model_hash` lazily from `model.inspect`, since the HF cache names blobs by SHA-256, not BLAKE3.
 
-**Free space** uses `statvfs`, which std doesn't expose. `disk_space.rs` is the one file that calls `libc::statvfs`, which needs `libc` in §27 (it is already in the tree under tokio) and an ADR allowing `unsafe` in that one file. Section 17 lists the alternative.
+**Free space** (ADR-0033). Std has no free-space API, so `disk_space.rs` holds the workspace's only `unsafe`: one `libc::statvfs` call inside one small function marked `#[allow(unsafe_code)]`. Everything else keeps `unsafe_code` denied, and `check-unsafe` fails on `unsafe` in any other file.
+
+```rust
+// disk_space.rs
+// The only `unsafe` in the workspace (ADR-0033): std has no free-space API.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+pub fn free_bytes(path: &Path) -> Result<u64, StoreError> {
+    let c_path = CString::new(path.as_os_str().as_bytes()).map_err(|_| StoreError::BadPath(path.to_path_buf()))?;
+    // SAFETY: c_path is NUL-terminated and outlives the call; statvfs only writes into `stats`.
+    let (result, stats) = unsafe {
+        let mut stats: libc::statvfs = std::mem::zeroed();
+        let result = libc::statvfs(c_path.as_ptr(), &mut stats);
+        (result, stats)
+    };
+    if result != 0 {
+        return Err(StoreError::FreeSpaceUnknown(path.to_path_buf()));
+    }
+    Ok(stats.f_bavail as u64 * stats.f_frsize as u64)     // what an unprivileged user can actually write
+}
+```
+
+- **One free-space path.** `free_bytes` and `check_free_space` serve the daemon and the node (downloads, telemetry, hardware detection); nobody runs `df` (plan §10 row 15).
+- **Unknown is "not enough".** A failed call returns `StoreError::FreeSpaceUnknown`, and `check_free_space` then fails with `RRS-S3001` instead of skipping the check.
+- **Windows** gets a body that returns a typed "not supported yet" error until tier 2 work starts. If ADR-0033 is ever withdrawn, the same signature runs `df -B1 --output=avail` (already on §27); no caller changes.
 
 ### 6.5 Dependencies
 
 | Kind | Name | Used for | Wrapper file |
 |---|---|---|---|
 | Internal | `rastai-core` | paths, ids, states | |
-| Internal | `rastai-formats` | `hashing.rs` for blob and stream hashes; run records during the rebuild | |
-| Internal | `rastai-proto` | `EventRecord`, `BlobRef`, payload messages (section 15: a new edge) | `event_log/frame.rs`, `indexer.rs` |
+| Internal | `rastai-formats` | `hashing.rs` for blob and stream hashes, `crc32.rs` for event-log frames, run records during the rebuild | |
+| Internal | `rastai-proto` | `EventRecord`, `BlobRef`, payload messages | `event_log/frame.rs`, `indexer.rs` |
 | Internal | `rastai-diag` | diagnostics | |
 | External | rusqlite (bundled SQLite) | both databases | `sqlite.rs` |
 | External | prost | decode and encode `EventRecord` frame bodies | `event_log/frame.rs` |
 | External | tokio (`sync` feature only) | oneshot replies from the writer threads | `writer_thread.rs` |
-| External | libc (proposed) | `statvfs` | `disk_space.rs` |
+| External | libc | one `statvfs` call (ADR-0033) | `disk_space.rs` |
 
-Contracts lists `blake3` for this crate. It isn't needed: hashing goes through `rastai_formats::hashing`. With `rastai-node` and `rastai-transport` doing the same (section 15 row 16), BLAKE3 has one wrapper in the workspace and `blake3`'s only allowlisted user is `rastai-formats` (2.4).
+There is no `blake3` here: hashing goes through `rastai_formats::hashing`, so BLAKE3 has one wrapper in the workspace (contracts §2.5).
 
 ### 6.6 Boundary rules
 
@@ -1571,25 +1787,30 @@ Contracts lists `blake3` for this crate. It isn't needed: hashing goes through `
 - Writes only through the writer threads. Never blocks a tokio worker: writes are awaited on a oneshot; reads are blocking functions the caller runs in `spawn_blocking`.
 - Never decides who writes a run's `events.log`. The job, or for chain runs (kind `teach`, `rlhf`, `sweep`) the daemon's chain driver, is the only writer (§19; plan §10 row 18). The store provides the writer functions; it is called for the daemon's own log, the daemon's mirrors of remote runs, and chain runs (`record_chain_event`, section 8.3).
 - Index rows go before files on delete (GC); files go before rows on create (blobs, checkpoints). A crash leaves an unreferenced file, never a dangling row.
-- Never decides policy. Incognito, retention age, quotas and what is pinned are decided by `rastai-server` and handed in as data.
-- Never touches the network, spawns processes or reads settings files.
+- Never decides policy. Incognito, retention age, quotas, what is pinned and whether the outbox records changes are decided by `rastai-server` and handed in as data.
+- **Never imports `rastai-archive`** and never talks to MySQL (contracts §2.4 rule 7). The archive reads through the reader functions and writes its cursors and states through the writer thread.
+- Never touches the network, spawns processes or reads settings files. It writes them only when asked, through `write_config_file`, and keeps no copy in `rastai.db` (there is no settings table).
+- `disk_space.rs` is the only file with `unsafe` and the only one importing `libc` (ADR-0033).
 
 ### 6.7 Tests
 
 | Test | Where | What |
 |---|---|---|
-| Unit | bottom of `crc32.rs`, `frame.rs`, `token_ids.rs`, `incoming.rs` | CRC of `"123456789"` is `0xCBF43926`; frame round trip; token-id blobs round trip |
+| Unit | bottom of `frame.rs`, `token_ids.rs`, `incoming.rs` | frame round trip (the CRC test vector lives with `rastai-formats/src/crc32.rs`); token-id blobs round trip |
+| Free space | `tests/disk_space.rs` | `free_bytes` on a temp directory equals `df -B1 --output=avail` on the CI runner within one block; a missing path gives the typed error and `check_free_space` then fails with `RRS-S3001` (ADR-0033) |
+| Config files | `tests/config_files.rs` | a write leaves the old file or the new one, never a truncated one (a test hook stops between fsync and rename); the folder is fsynced |
+| Outbox | `tests/vault_changes.rs` | with recording off no rows are added; with it on, every changed row adds exactly one `vault_changes` row in the same transaction; a `DeleteConversation` adds `delete` rows for every message; `TrimVaultChanges` keeps later rows |
 | Writer thread | `tests/writer_thread.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07); one bad write in a batch fails alone |
 | Migrations | `tests/index_migrations.rs` | a fresh database equals the migration chain applied to the oldest fixture; a newer `schema_migrations` → `RRS-S0002`, file unchanged |
 | Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first |
 | Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
 | Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |
 | Handler calls | `tests/handler_calls.rs` | pending calls list per plugin in log order; `MarkHandlerDelivered` removes one from the pending list; `DropHandlerCalls` clears a plugin's |
-| Rebuild | `tests/rebuild_index.rs`, `fixtures/data-dirs/` (new) | index a data directory live, rebuild it, compare every rebuildable table row by row |
+| Rebuild | `tests/rebuild_index.rs`, `fixtures/data-dirs/` (new) | index a data directory live, rebuild it, compare every rebuildable table row by row; prune a run with an adapter, rebuild: the adapter's `artifacts` and `lineage` rows remain |
 | Blobs | `tests/blob_store.rs`, `tests/gc.rs` | dedupe touches the existing blob; a flipped byte is quarantined; GC keeps pinned, live and young blobs |
 | Vault | `tests/vault.rs`, `tests/secure_delete.rs` | conversation tree with branches; retention deletes by age; deleted text is absent from the file bytes |
-| Crash | `tests/crash/` rows 2, 6, 9, 10, 11 (flows/platform.md 6.5) | the matrix rows that land in this crate |
-| Fuzz | `crates/rastai-store/fuzz/` (cargo-fuzz, own workspace) | `read_next_frame` on arbitrary bytes never panics and never reads past a frame |
+| Crash | `tests/crash/` rows 2, 6, 9, 10, 11, (L2) 18 and 19 (flows/platform.md 6.5) | the matrix rows that land in this crate; row 22 (prune between the index transaction and the file delete) runs through it from `rastai-archive` |
+| Fuzz | `fuzz/fuzz_targets/event_frame.rs` (cargo-fuzz, own workspace) | `read_next_frame` on arbitrary bytes never panics and never reads past a frame |
 
 ### 6.8 Ported from the spike
 
@@ -1598,18 +1819,20 @@ Contracts lists `blake3` for this crate. It isn't needed: hashing goes through `
 | `spike/bakeoff/rust/src/gateway.rs`: `start_log_writer`, `log_token_ids` (one thread, oneshot commit) | `writer_thread.rs` | Two writers (index, vault) with an enum of writes each; batching with a savepoint per request; errors are replied to the caller instead of `eprintln!`. |
 | `gateway.rs`: `open_log` (`CREATE TABLE IF NOT EXISTS`, WAL, NORMAL) | `sqlite.rs`, `vault/migrations/` | Numbered migrations in `schema_migrations`; `synchronous = FULL` and `secure_delete` for the vault. |
 | `gateway.rs`: token ids stored as JSON text | `vault/token_ids.rs` | Little-endian u32 blobs (contracts §8.3): 4 bytes per token instead of up to 7, and no parsing on replay. |
-| spike lesson: library choice swamps language choice (crc-fast) | `event_log/crc32.rs` | An in-house table CRC-32/IEEE. Frames are small, so the table version is fast enough; `tools/bench/` gets a micro-benchmark before anything faster is considered. |
+| spike lesson: library choice swamps language choice (crc-fast) | `rastai-formats/src/crc32.rs`, called by `event_log/frame.rs` | An in-house table CRC-32/IEEE, one table for frames and zip entries. Frames are small, so the table version is fast enough; `tools/bench/` gets a micro-benchmark before anything faster is considered. |
 
 ### 6.9 Build-order step
 
 | Part | First needed (§31) |
 |---|---|
-| `sqlite.rs`, `writer_thread.rs`, `reader_pool.rs`, `data_dir_lock.rs`, `index/` (journal, runs, jobs, metrics, documents, nodes, plugins, settings, tokens, projects), `event_log/`, `indexer.rs`, the daemon log, `blobs/blob_store.rs` and `incoming.rs`, `disk_space.rs` | 1 (weeks 3–4: kill -9 the daemon mid-run, no lost events) |
+| `sqlite.rs`, `writer_thread.rs`, `reader_pool.rs`, `data_dir_lock.rs`, `index/` (journal, runs, jobs, metrics, documents, the kept tables), `event_log/`, `indexer.rs`, the daemon log, `blobs/blob_store.rs` and `incoming.rs`, `disk_space.rs`, `config_files.rs` | 1 (weeks 3–4: kill -9 the daemon mid-run, no lost events). The minimal durable path first: event logs, reattach, atomic writes |
 | `rebuild.rs` | 1 (the fix offered for `RRS-S0003`) |
-| `vault/`, `retention.rs`, `vault_writes_for_records` | 3 (conversation tree, gateway logs, node-gateway log records) |
+| `vault/` with the `vault_changes` table and `changes.rs`, `retention.rs`, `vault_writes_for_records` | 3 (conversation tree, gateway logs, node-gateway log records; the outbox is M3-E02, 0.5 day) |
 | `artifacts.rs` lineage queries | 4 (branch → pair → dataset lineage) |
-| `blobs/gc.rs`, checkpoint pinning (`PutMode::HardLink`), `handler_calls.rs` | 5 (checkpoints accumulate; Evaluation auto-run) |
+| `blobs/gc.rs`, checkpoint pinning (`PutMode::HardLink`), `handler_calls.rs` (queue, deliver once, retry on restart) | 5 (checkpoints accumulate; Evaluation auto-run) |
 | `transfers.rs` | 9 (remote) |
+| `archive_cursors.rs`, the archive variants of `IndexWrite` and `VaultWrite`, the archive reader functions, the `archive.*` rows of the indexer | M11 (section 14) |
+| (L2) `backups.rs`: daily `VACUUM INTO` snapshots and the vault salvage behind `storage.vault.recover` | after the core loop reaches L2 |
 | SQLCipher for `vault.db` (same schema, no migration) | Phase 2 |
 
 ---
@@ -1639,6 +1862,9 @@ crates/rastai-mcp/
       stdio_process.rs        start a local stdio MCP server as a child process and adapt it to a LineChannel
       http_connection.rs      Streamable HTTP client over rastai-transport's HTTP client
     bridge.rs                 run_stdio_bridge(): `rastai mcp`, stdin and stdout to POST /mcp on daemon.sock
+  fuzz/                       cargo-fuzz crate, own workspace, nightly
+    fuzz_targets/
+      jsonrpc_decode.rs       parse_message on arbitrary text never panics; oversize input refused before parsing
   tests/
     server_transcripts.rs     fixtures/mcp/server/*.jsonl: request lines and the exact expected replies
     client_protocol.rs        client against an in-process fake server over a LineChannel
@@ -1739,7 +1965,7 @@ pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: 
 | Kind | Name | Used for | Wrapper file |
 |---|---|---|---|
 | Internal | `rastai-core` | `Principal`, naming, scopes | |
-| Internal | `rastai-proto` | `CommandDescriptor`, the registry's row type (section 15 row 17) | `server/tools.rs` |
+| Internal | `rastai-proto` | `CommandDescriptor`, the registry's row type (contracts §2.1) | `server/tools.rs` |
 | Internal | `rastai-formats` | the strict JSON reader for incoming messages | |
 | Internal | `rastai-transport` | HTTP client for remote servers and for the bridge over `daemon.sock` | |
 | Internal | `rastai-diag` | diagnostics, `render_basic` | |
@@ -1762,6 +1988,7 @@ pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: 
 | Server transcripts | `tests/server_transcripts.rs`, `fixtures/mcp/server/` (new) | initialize, tools/list for `mcp-default` scopes, a successful call, a call outside the scopes, a malformed line |
 | Client | `tests/client_protocol.rs`, `tests/stdio_process.rs` | handshake, listing, call with timeout, server crash mid-call gives a typed error, stderr noise ignored |
 | Bridge | `tests/bridge.rs` | lines in order; a 404 session after a daemon restart replays `initialize` once and retries |
+| Fuzz | `fuzz/fuzz_targets/jsonrpc_decode.rs` | nightly, 10 minutes (contracts §12.5) |
 | End to end | `tests/e2e/` (flows/platform.md 4.3) | a golden transcript through the real `rastai mcp` against a running daemon |
 
 ### 7.7 Ported from the spike
@@ -1799,17 +2026,23 @@ crates/rastai-server/
                               rastai_node::identity (load_or_create_identity, sign_challenge, verify_challenge), the one Ed25519 wrapper
     secrets.rs                the only keyring import: get, set, delete, list names; kernel keyring and encrypted-file fallbacks
     policy.rs                 check_data_policy(): the one data-policy check (RRS-C1009, plan §10 row 37), called by chat.*,
-                              dataset.import, StartJob on a remote node, NodeHubService.GatewayGenerate and /v1 (routing.rs)
+                              dataset.import, StartJob on a remote node, NodeHubService.GatewayGenerate, /v1 (routing.rs)
+                              and the archiver for every project it would send
+    crash_reports.rs          the panic hook's file and local crash reports; (L2) the per-kind rate limit
+                              (CRASH_REPORT_MIN_INTERVAL_MINUTES)
+    archive_task.rs           (M11) the archiver task: triggers, credentials from secrets.rs, calls into rastai-archive,
+                              records the archive.* events, publishes progress and egress.active (section 14.6)
     http/
       router.rs               build_router(): every route of contracts §3.3, plus rastai-gateway's /v1 routes
       listeners.rs            loopback TCP on 47820–47829 and daemon.sock; TCP_NODELAY on every connection; writes daemon.port
-      gate.rs                 check_request_gate() (flows/platform.md 4.2)
-      sessions.rs             one-time login codes, session cookies, idle expiry
+      gate.rs                 check_request_gate() (flows/platform.md 4.2): loopback Host, Origin, origin-bound sessions,
+                              the Sec-Fetch-Site rule (8.3a)
+      sessions.rs             one-time login codes, sessions bound to the Origin that redeemed them, idle expiry
       connect.rs              Connect protocol: unary and server-streaming envelopes, content-type selection
       connect_json.rs         hand-written proto JSON for the CommandService messages (section 11.3)
       command_endpoints.rs    CommandService.Execute and ListCommands
-      event_endpoint.rs       EventService.Subscribe
-      blob_endpoints.rs       GET /api/blobs/<hash> with Range; PUT /api/blobs
+      event_endpoint.rs       EventService.Subscribe and ListEventTypes
+      blob_endpoints.rs       GET /api/blobs/<hash> with Range; PUT /api/blobs; hardened response headers (8.3b)
       health.rs               GET /api/health
       mcp_endpoint.rs         /mcp (section 7.3)
       plugin_assets.rs        /plugins/<plugin_id>/<version>/ui/*
@@ -1823,6 +2056,7 @@ crates/rastai-server/
       undo.rs                 undoable edits, document.undo and document.redo (flows/platform.md 3.4)
       handlers/
         system.rs             system.*, settings.*, token.*, secret.*, hf.*, storage.*
+        archive.rs            (M11) archive.configure, status, sync, restore, verify, purge
         artifact.rs           artifact.*
         project.rs            project.*, file.*, document.*, workspace.*
         command.rs            command.list
@@ -1840,6 +2074,8 @@ crates/rastai-server/
     events/
       bus.rs                  Bus: the last BUS_BUFFER_EVENTS events, bus_sequence, publish(), events_after(), subscribe()
       daemon_events.rs        record_daemon_event(): append to the daemon log, index, then publish
+      event_types.rs          the core event-type table behind ListEventTypes: type, class, payload, emitter, stability
+                              (every row Preview until Phase 2), since_version; plugin types are added from manifests
     indexing/
       run_tail.rs             one task per open run: WatchRunEvents after the ack, mirror for remote runs, index, publish
       daemon_log_replay.rs    at startup: index daemon-log records after log_cursors.acked_sequence
@@ -1862,23 +2098,33 @@ crates/rastai-server/
       contributions.rs        commands from manifests and types.json into the registry; file types; plugin catalogs
       install.rs              plugin.install plan and apply (flows/platform.md 7.1)
       lifecycle.rs            plugin state transitions and plugin.state_changed
+      plugin_data.rs          creates <data>/plugin-data/<plugin_id>/; (L2) the downgrade guard: plugin-data.json
+                              last_version, RASTAI_PLUGIN_DATA_READ_ONLY and RRS-P3005
       forward.rs              forward_command(): NodeService.HandleCommand to the plugin's Python module
       event_handlers.rs       contributes.event_handlers[]: match_event_handlers(), deliver_handler_calls(), pending calls (12.5)
     gateway_glue/
       vault_log_sink.rs       VaultLogSink: rastai-gateway's LogSink; queues the vault write and returns its commit
       routing.rs              mount the /v1 routes; build the gateway routing table from models, adapters and served presets
     modelspec_analysis/
-      stats.rs                parameter count, weight bytes and FLOPs per token, per graph node and in total
+      stats.rs                parameter count, weight bytes and FLOPs per token, per graph node and in total; per op it
+                              must match fixtures/ops/<op>.json, the golden the Python compiler matches too
       memory.rs               activation and KV-cache memory for batch × sequence, per dtype; the training estimate and
                               largest_micro_batch() (training-evaluation flow 3)
       fits.rs                 fits check per compute target, from node GPU memory
       time_estimate.rs        time ≈ FLOPs ÷ (GPUs × peak FLOPS × MFU) (§22)
-      layer_placement.rs      plan_layer_placement() over PlacementUnits and GpuBudgets → LayerPlacement (designer-gym-remote A8a)
+      layer_placement.rs      plan_layer_placement() over PlacementUnits and GpuBudgets → LayerPlacement (designer-gym-remote
+                              A8a): the only layer-placement planner in the project; its map is the only writer of the
+                              ModelSpec placement{} field (contracts §2.4 rule 10)
     import_export/
       file_routing.rs         file.open: extension to handler and route, including plugin file types
       project_archive.rs      .rrsproj export and import through rastai-formats zip
       conversations.rs        conversation.import and export through rastai-formats importers
-    storage_tasks.rs          storage.gc live set, gateway-log retention timer, free-space checks before work
+    storage_tasks.rs          storage.gc live set, gateway-log retention timer, free-space checks before work;
+                              (L2) the daily database snapshot timer (storage.db_snapshot_days, storage.db_snapshot_hour)
+  fuzz/                       cargo-fuzz crate, own workspace, nightly
+    fuzz_targets/
+      request_gate.rs         header parsing in check_request_gate never panics; every malformed head is refused
+      connect_json.rs         the hand-written Connect JSON decoder on arbitrary bytes
   tests/
     gate.rs                   one request head per branch of flows/platform.md 4.2
     connect_protocol.rs       envelopes and JSON against fixtures/proto-golden/
@@ -1890,10 +2136,15 @@ crates/rastai-server/
     plugin_host.rs            fixture plugins through discovery, negotiation and registration
     plugin_event_handlers.rs  module down when the event fires, then delivered once on enable; re-sent records queue nothing new
     mcp_endpoint.rs           sessions, scope filtering, tool calls through execute_command
-    modelspec_stats.rs        TextCNN and tiny Gemma and Llama configs: parameter counts equal the PyTorch module counts
-    layer_placement.rs        fake GPUs (16 GB + 24 GB): tied embeddings, a unit too big, a dtype gap, a hand-set map over budget
+    modelspec_stats.rs        TextCNN and tiny Gemma and Llama configs: parameter counts equal the PyTorch module counts;
+                              every op's parameter count and FLOPs equal fixtures/ops/<op>.json
+    layer_placement.rs        fake GPUs (16 GB + 24 GB): tied embeddings, a unit too big, a dtype gap, a hand-set map over
+                              budget (checked, never rewritten)
     data_policy.rs            the policy-by-target table of 8.3, one row per cell
     chains.rs                 next_chain_action over child outcomes, gates and optional steps
+    event_types.rs            every durable event type of contracts §7.3 has a row; every row is Preview
+    archive_task.rs           (M11) triggers coalesce; credentials never reach a log or event; a local-only project is
+                              skipped with RRS-C1009 in archive.status
 ```
 
 ### 8.2 The `Server` struct and the thin startup
@@ -1914,6 +2165,7 @@ pub struct Server {
     pub mcp_sessions: Mutex<Vec<McpSession>>,
     pub scheduler: Scheduler,
     pub identity: NodeIdentity,                   // daemon.key, through rastai_node::identity (the one Ed25519 wrapper)
+    pub archiver: ArchiverHandle,                 // (M11) wake-up signal, status and lag; idle when archive.enabled is false
 }
 
 // daemon.rs
@@ -1923,24 +2175,25 @@ pub async fn run_daemon(options: DaemonOptions) -> Result<(), ServerError> {
     let paths = resolve_paths(&read_path_environment());
     let settings = load_settings_layers(&paths, &options)?;
     let _daemon_lock = take_daemon_lock(&paths)?;                 // RRS-S0001
+    ensure_owner_token(&paths)?;                                  // RRS-C1008 when group or others can read it; never rewritten
     let store = open_store(&paths)?;                              // migrations, writer threads
-    ensure_owner_token(&paths)?;                                  // RRS-C1008 when too open
     let identity = load_or_create_identity(&daemon_key_path(&paths))?;   // rastai_node::identity
     let node = start_embedded_node(&paths, &settings, &identity).await?;
     let server = build_server(paths, settings, store, identity);
     discover_plugins(&server)?;                                   // manifests and saved states only, so replayed records match handlers (12.5)
     replay_daemon_log(&server).await?;                            // index records after the cursor
-    connect_to_node(&server, &node).await?;                       // handshake, reconcile, resume run tails
+    connect_to_node(&server, &node).await?;                       // handshake, reconcile (Register before Hello), resume run tails
     load_all_plugins(&server).await;                              // failures disable plugins, never stop the daemon
     resume_chains(&server).await;                                 // index unacked chain records, then next_chain_action
     start_background_tasks(&server);                              // scheduler, heartbeat watch, retention, GC timer,
-                                                                  // pending plugin handler calls (12.5)
+                                                                  // pending plugin handler calls (12.5), (M11) the archiver
+                                                                  // with its catch-up pass, (L2) the snapshot timer
     listen_http(&server).await?;                                  // writes daemon.port; health ok from here
     wait_for_shutdown(&server).await
 }
 ```
 
-This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cli` calls it for `rastai serve`.
+This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cli` calls it for `rastai serve`. The `owner.token` check runs before the databases open, so a refused start leaves nothing half started.
 
 ### 8.3 Module APIs
 
@@ -2069,6 +2322,7 @@ pub fn plan_layer_placement(units: &[PlacementUnit], gpus: &[GpuBudget]) -> Resu
 pub enum PolicyTarget {
     ThisMachine,                               // the embedded node, local llama-server
     PairedNode { node_id: String },            // allowed from trusted-remote
+    ArchiveDatabase { host: String },          // (M11) the owner's MySQL or MariaDB and its blob target; from trusted-remote
     ThirdPartyApi { adapter_name: String },    // allowed only by any (inference flow 1.3)
     ProviderMachine { node_id: String },       // allowed only by any; Phase 3
 }
@@ -2076,11 +2330,74 @@ pub fn check_data_policy(policy: DataPolicy, target: &PolicyTarget) -> Result<()
 pub fn policy_target_for_route(route: &RouteTarget) -> PolicyTarget          // the gateway's resolved route, for chat.* and /v1
 
 // secrets.rs
-pub fn get_secret(account: &str) -> Result<Option<String>, ServerError>         // account names from contracts §8.5
+pub fn get_secret(account: &str) -> Result<Option<String>, ServerError>         // account names from contracts §8.5,
+                                                                                // archive.mysql and archive.objects included
 pub fn set_secret(account: &str, value: &str) -> Result<(), ServerError>
 pub fn delete_secret(account: &str) -> Result<(), ServerError>
 pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 ```
+
+### 8.3a The request gate (ADR-0034)
+
+`http/gate.rs` and `http/sessions.rs` implement flows/platform.md 4.1 and 4.2. The gate is one plain function that runs first on every HTTP request and every `daemon.sock` connection.
+
+```rust
+// http/gate.rs
+const LOOPBACK_HOSTS: &[&str] = &["127.0.0.1", "localhost", "[::1]"];   // any port: SSH tunnels forward other ports
+const LOGIN_PATH: &str = "/api/login";
+const SAFE_METHODS_WITHOUT_ORIGIN: &[&str] = &["GET", "HEAD"];
+const SEC_FETCH_SITES_WITHOUT_ORIGIN: &[&str] = &["same-origin", "none"];
+
+pub struct RequestHead { pub method: String, pub path: String, pub host: String, pub origin: Option<String>,
+                         pub sec_fetch_site: Option<String>, pub cookie_session_id: Option<String>,
+                         pub bearer_token: Option<String> }
+pub enum Listener { LoopbackTcp, DaemonSocket { peer_uid: u32 } }
+
+pub fn check_request_gate(request: &RequestHead, listener: &Listener, auth: &AuthState) -> Result<Option<Principal>, Diagnostic> {
+    if let Listener::DaemonSocket { peer_uid } = listener {
+        return check_socket_peer(*peer_uid);                         // same uid only; the folder is 0700
+    }
+    check_loopback_host(&request.host)?;                             // RRS-C1003: blocks DNS rebinding
+    check_origin_matches_host(request)?;                             // RRS-C1004 when present and not http:// + Host, or null
+    if is_public_path(&request.path) {
+        return Ok(None);                                             // health, plugin UI assets, the web app
+    }
+    if request.path == LOGIN_PATH {
+        return require_origin_for_login(request).map(|_| None);     // the session will record this Origin
+    }
+    match (&request.cookie_session_id, &request.bearer_token) {
+        (Some(session_id), _) => check_session(request, session_id, auth),
+        (None, Some(token)) => check_bearer(token, auth),            // owner token or a scoped token by BLAKE3 hash
+        (None, None) => Err(diagnostic("RRS-C1002", &[])),
+    }
+}
+
+/// A cookie request must come from the origin that redeemed the login code. Browsers send cookies to every port on
+/// 127.0.0.1, so without this a page on another loopback port could forward requests with the owner's cookie.
+fn check_session(request: &RequestHead, session_id: &str, auth: &AuthState) -> Result<Option<Principal>, Diagnostic> {
+    let session = find_live_session(auth, session_id)?;              // RRS-C1002 when unknown or idle for 24 h
+    match &request.origin {
+        Some(origin) if *origin == session.bound_origin => Ok(Some(owner_principal())),
+        Some(_) => Err(diagnostic("RRS-C1004", &[])),               // another loopback port
+        None if allowed_without_origin(request) => Ok(Some(owner_principal())),
+        None => Err(diagnostic("RRS-C1004", &[])),
+    }
+}
+
+/// GET or HEAD with Sec-Fetch-Site same-origin or none: the app's own blob downloads and images, a typed URL.
+/// An <img> on a page from another loopback port arrives as same-site and is refused.
+fn allowed_without_origin(request: &RequestHead) -> bool {
+    let safe_method = SAFE_METHODS_WITHOUT_ORIGIN.contains(&request.method.as_str());
+    let safe_site = request.sec_fetch_site.as_deref().is_some_and(|site| SEC_FETCH_SITES_WITHOUT_ORIGIN.contains(&site));
+    safe_method && safe_site
+}
+```
+
+- **Sessions record their origin.** `POST /api/login` must carry Origin; `redeem_login_code` stores it in the session (`bound_origin`). Sessions live in memory only and expire after `SESSION_IDLE_EXPIRY_HOURS` (24); a restart signs everyone out.
+- **Bearer requests** may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed iframe) is refused.
+- **Cross-origin browser clients are refused in v1.** Two routes are designed for Phase 2 and not built: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand).
+- **`owner.token`** that group or others can read stops the start with `RRS-C1008` and the fix `chmod 600 <path>` (`auth_files.rs`); the daemon never rotates or rewrites it.
+- **Header parsing** is fuzzed (`fuzz/fuzz_targets/request_gate.rs`): a malformed header is a refusal, never a panic.
 
 - **Async handlers, sync helpers.** Handlers are `async fn` because they await the store, nodes or the gateway; everything they call that doesn't wait (stats, argument building, row building) is a plain sync function.
 - **`active_parameter_count`** differs from the total only for MoE designs (§11: total vs active parameters).
@@ -2091,8 +2408,26 @@ pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 |---|---|---|---|
 | `ThisMachine` | yes | yes | yes |
 | `PairedNode` | `RRS-C1009` | yes | yes |
+| `ArchiveDatabase` (M11) | skipped, listed in `archive.status` with `RRS-C1009` | yes | yes |
 | `ThirdPartyApi` | `RRS-C1009` | `RRS-C1009` | yes |
 | `ProviderMachine` (Phase 3) | `RRS-C1009` | `RRS-C1009` | yes |
+
+- **The archive is a remote destination** (contracts §8.7). `archive_task.rs` checks each project's policy before a pass and hands the archiver the list of projects it may send; rows with no project follow `privacy.data_policy`. A `local-only` project is skipped, not failed, so one strict project never stalls the rest. Its `RRS-C1009` fix sets the policy in one click (owner decision 13). Conversations need the project's `archive.include_conversations` as well, and never go for a `local-only` project.
+- **Layer placement has one writer** (contracts §2.4 rule 10). `scheduler/launch.rs` calls `plan_layer_placement` when a ModelSpec loads or compiles on two or more GPUs and the file's `placement{}` is empty, and puts the map into the job's ModelSpec snapshot; `design.stats` returns the same plan, which the user can keep in the file. A map already in `placement{}` is checked against the budgets and never rewritten (`RRS-M5001` when it doesn't fit). Python only applies a map (`apply_placement`); nothing else plans one.
+
+### 8.3b Blob response hardening
+
+A blob can hold HTML or SVG: a user upload through `PUT /api/blobs`, an imported dataset, a model output or a plugin artifact. Served on the daemon's own origin and opened top-level (for example from a link in chat Markdown), it would run script with the owner's cookie, which is full API access. So `blob_endpoints.rs` hardens every response, through one function:
+
+```rust
+// http/blob_endpoints.rs: the one place that decides the headers of a blob response
+const INLINE_MEDIA_TYPES: [&str; 4] = ["image/png", "image/jpeg", "application/octet-stream", "application/json"];
+pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec<(String, String)>
+```
+
+- **Every blob response sets** `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Cross-Origin-Resource-Policy: same-origin` and `Content-Disposition: attachment; filename=<hash>`.
+- **Only the allowlist renders inline.** `INLINE_MEDIA_TYPES` are inert types the UI shows in place; for them alone the attachment disposition is left out.
+- **Everything else is an attachment.** `text/html`, `image/svg+xml` and any unknown type are served as `attachment` with type `application/octet-stream`, whatever the upload claimed.
 
 ### 8.4 Dependencies
 
@@ -2104,10 +2439,10 @@ pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 | External | tokio | runtime, tasks, signals, broadcast | |
 | External | tonic | `NodeHubService` server, `NodeService` clients | `nodes/node_hub.rs`, `nodes/node_links.rs` |
 | External | prost | Connect message encoding | `http/connect.rs` |
-| External | keyring (proposed in contracts §14) | OS keychain | `secrets.rs` |
-
-`ed25519-dalek` is not a dependency of this crate (section 15 row 16): the daemon key is loaded, and challenges signed and verified, by `rastai_node::identity`.
 | External | serde_json | Connect JSON, handler results | `http/connect_json.rs` |
+| External | keyring | OS keychain (§27, owner decision 1) | `secrets.rs` |
+
+`ed25519-dalek` is not a dependency of this crate (contracts §2.5): the daemon key is loaded, and challenges signed and verified, by `rastai_node::identity`. `mysql_async` isn't either: only `rastai-archive` talks to MySQL, and this crate hands it credentials as plain values.
 
 ### 8.5 Boundary rules
 
@@ -2117,6 +2452,8 @@ pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 - Never imports `tokenizers` or `minijinja`: tokenization and chat templates are `rastai-gateway`'s.
 - **Never starts a process for a job.** Every job, even on the local machine, goes through a node over `NodeService` (§16: local and remote never drift). The only in-process work is `daemon_task` jobs (flows/platform.md).
 - Never runs third-party plugin code in-process. Plugin Python runs under the node; plugin UI runs in the browser.
+- **No domain logic waits for the UI** (contracts §2.4 rule 9). Anything stateful or computed that a screen shows (a validation, a statistic, a plan, a filter) is a command here, so the CLI, MCP and scripts get it too.
+- Never imports `mysql_async` and never builds archive SQL; it reads the archive credentials from the keychain and passes them to `rastai-archive` per pass, never into a log, event or journal row.
 - Never listens on a non-loopback interface unless `daemon.listen` says so, and then logs a warning at every start.
 - Every error that leaves the daemon is a catalog `Diagnostic`; HTTP status codes are used only for credential problems (401, 403) and transport errors.
 
@@ -2124,7 +2461,9 @@ pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 
 | Test | Where | What |
 |---|---|---|
-| Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; cargo-fuzz on header parsing (`crates/rastai-server/fuzz/`) |
+| Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET with no Origin and `Sec-Fetch-Site: same-origin` passes, `same-site` → `RRS-C1004`; a cookie POST with no Origin → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards |
+| Blob headers | `tests/blob_headers.rs` | an uploaded HTML blob is served as an attachment with type `application/octet-stream` and the sandbox CSP; the same for SVG and an unknown type; `image/png` is inline but still carries `nosniff` and `Cross-Origin-Resource-Policy: same-origin` |
+| Fuzz | `fuzz/fuzz_targets/request_gate.rs`, `connect_json.rs` | nightly, 10 minutes each (contracts §12.5) |
 | Connect | `tests/connect_protocol.rs` | unary binary and JSON; stream envelopes and the end-of-stream trailer; JSON equals `fixtures/proto-golden/commands/*.json` |
 | Execute | `tests/execute_paths.rs` | each decision branch of flows/platform.md 3.2 with its code; idempotent `train.start`; secret redaction |
 | Dispatch | `tests/dispatch_complete.rs` | a context whose plugin forward returns a sentinel: no core command id may reach it |
@@ -2135,7 +2474,7 @@ pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 | Event handlers | `tests/plugin_event_handlers.rs`, `tests/crash/` | a fixture plugin's module is down when `checkpoint.saved` is indexed: the call stays pending, and on `plugin.state_changed → enabled` it runs exactly once; a re-sent record queues no second call; a call whose command already finished is not run again (idempotency key); kill -9 the daemon between the index commit and the delivery: after restart the handler runs once (a new row for the flows/platform.md 6.5 matrix) |
 | Analysis and policy | `tests/layer_placement.rs`, `tests/data_policy.rs`, `tests/chains.rs` | placement tables on fake GPUs; every cell of the 8.3 policy table; `next_chain_action` over child outcomes, gates and optional steps |
 | MCP | `tests/mcp_endpoint.rs` | tools filtered by token scopes; a call lands in the journal with the token principal |
-| Analysis | `tests/modelspec_stats.rs` | parameter counts match `fixtures/models/<family>/expected_counts.json` (written by a Python test from the real modules) |
+| Analysis | `tests/modelspec_stats.rs` | parameter counts match `fixtures/models/<family>/expected_counts.json` (written by a Python test from the real modules); per-op parameter counts and FLOPs match `fixtures/ops/<op>.json`, the same goldens the Python compiler checks |
 | End to end | `tests/e2e/`, `tests/crash/` | the same command through HTTP, CLI and MCP; the kill -9 matrix |
 
 ### 8.7 Ported from the spike
@@ -2159,8 +2498,10 @@ pub fn list_secret_names() -> Result<Vec<String>, ServerError>
 | `scheduler/chains.rs`, `handlers/train.rs`, `handlers/run.rs`, `storage_tasks.rs` GC, `modelspec_analysis/memory.rs` training estimate, `plugin_host/event_handlers.rs` | 5 (Teach it, RLHF, checkpoints, Evaluation auto-run) |
 | `modelspec_analysis/` (stats, fits, time, `layer_placement.rs`), `handlers/design.rs` | 6 (Designer; placement across the 5080 and the 3090) |
 | `handlers/gym.rs` | 7 |
-| `plugin_host/install.rs` for third-party archives, `handlers/plugin.rs` dev and test | 8 |
+| `plugin_host/install.rs` for third-party archives, `handlers/plugin.rs` dev and test, the M8 capability rows (themes, icon sets, macros, chat templates) | 8 |
 | `nodes/pairing.rs`, SSH `NodeTransport`, `handlers/node.rs` | 9 |
+| `archive_task.rs`, `handlers/archive.rs`, `PolicyTarget::ArchiveDatabase` | M11 (section 14) |
+| (L2) the snapshot timer in `storage_tasks.rs`, the crash-report rate limit, the plugin-data downgrade guard, handler-delivery tools beyond Evaluation auto-run | after the core loop reaches L2 |
 
 ---
 
@@ -2184,6 +2525,8 @@ crates/rastai-cli/
     node_serve.rs             `rastai node serve` -> rastai-node's entry function (other doc)
     node_init.rs              `rastai node init --daemon-key <key>`: create the node identity, pin the daemon key, print the
                               node id (designer-gym-remote C1; run over SSH by node.pair)
+    node_check_update.rs      (L2) `rastai node check-update`: the systemd ExecStartPre watchdog step; calls rastai-node's
+                              rollback check (node layout) and exits; a thin mode, no logic here
     mcp_bridge.rs             `rastai mcp` -> rastai_mcp::run_stdio_bridge with RASTAI_TOKEN
     open_ui.rs                `rastai` and `rastai open`: ensure the daemon, token.login_code.create, open the browser;
                               --print-url prints one DesktopLaunchInfo JSON line instead; --replace-older-daemon stops an
@@ -2223,6 +2566,7 @@ pub enum Mode {
     Serve(ServeFlags),         // `rastai serve [--headless] [--port N]`
     NodeServe(NodeServeFlags), // `rastai node serve`
     NodeInit(NodeInitFlags),   // `rastai node init --daemon-key <key>`
+    NodeCheckUpdate,           // (L2) `rastai node check-update`, run by the node's systemd unit before each start
     Tunnel(TunnelFlags),       // `rastai tunnel <user@host>`
     McpBridge,                 // `rastai mcp`
     Local(LocalCommand),       // `rastai validate <file>...`, `rastai version`, `rastai storage rebuild-index [--verify-blobs]`
@@ -2266,7 +2610,7 @@ pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Va
 
 - Field names map to flags by `flag_name` (`fail_fast` → `--fail-fast`). Flags override `--arguments-json` and `--arguments-file` key by key.
 - **Global flags** are reserved; `tests/command_table.rs` and the plugin host refuse a command field that collides with one: `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`.
-- "Copy as CLI" in the UI (frontend doc 2.5) always writes flags, never positionals, so a copied line is unambiguous. `tests/verbs.rs` parses every CLI line of `fixtures/command-golden/copy-as.json` back to the same arguments.
+- "Copy as CLI" in the UI (frontend doc) always writes flags, never positionals, so a copied line is unambiguous. `tests/verbs.rs` parses every CLI line of `fixtures/command-golden/copy-as.json` back to the same arguments.
 
 ### 9.5 Exit codes
 
@@ -2283,10 +2627,12 @@ pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Va
 
 | Kind | Name | Used for |
 |---|---|---|
-| Internal | `rastai-server`, `rastai-node` | `serve`, `node serve` and `node init` modes |
+| Internal | `rastai-server`, `rastai-node` | `serve`, `node serve`, `node init` and (L2) `node check-update` modes |
 | Internal | `rastai-transport` | the SSH child process for `rastai tunnel` (also the socket client below) |
-| Internal | `rastai-mcp` | `rastai mcp` (section 15: not in contracts' list) |
-| Internal | `rastai-store` | `take_daemon_lock` and `rebuild_index` for the offline rebuild (section 15) |
+| Internal | `rastai-mcp` | `rastai mcp` |
+| Internal | `rastai-store` | `take_daemon_lock` and `rebuild_index` for the offline rebuild |
+
+`rastai-archive` is not a dependency: `rastai archive sync` and the other `archive.*` verbs are generated registry commands that the daemon runs, so the CLI never holds archive credentials.
 | Internal | `rastai-core`, `rastai-formats`, `rastai-transport`, `rastai-proto`, `rastai-diag` | naming, local validation, the socket client, Connect messages, rendering |
 | External | tokio | runtime for the async modes |
 | External | prost | binary Connect for `Subscribe` |
@@ -2320,6 +2666,7 @@ Listed in the tree (9.1). The end-to-end checks that need a real daemon (`rastai
 | `help.rs`, `command_cache.rs` | 1 |
 | `node_serve.rs`, `node_init.rs`, `tunnel.rs` | 9 (standalone nodes, pairing, the headless box; the embedded node needs no mode) |
 | `completion.rs` | 8 (with the plugin SDK verbs) |
+| (L2) `node_check_update.rs` | after the core loop reaches L2, with the node's update watchdog |
 
 ---
 
@@ -2329,11 +2676,11 @@ Listed in the tree (9.1). The end-to-end checks that need a real daemon (`rastai
 
 | Piece | Core command | Plugin command (first- or third-party) |
 |---|---|---|
-| Descriptor (id, title, scope, kind, undoable, basic, shortcut) | one row in `rastai-core/src/commands/table.rs` | one entry in the manifest's `contributes.commands[]` |
-| Argument and result types | `<Name>Args` / `<Name>Result` + `describe_*` in `rastai-formats/src/commands/<area>.rs` | the plugin's `types.json` (frontend doc 10.4) |
+| Descriptor (id, title, scope, kind, stability, undoable, basic, shortcut) | one row in `rastai-core/src/commands/table.rs` | one entry in the manifest's `contributes.commands[]`; stability is always `preview` until plugin API 1.0 |
+| Argument and result types | `<Name>Args` / `<Name>Result` + `describe_*` in `rastai-formats/src/commands/<area>.rs` | the plugin's `types.json` (frontend doc) |
 | Handler | one `match` arm in `rastai-server/src/commands/dispatch.rs` calling `handlers::<area>::<verb>` | the module's `handle_command` (contracts §6.2), reached through `plugin_host::forward_command` |
 | Error codes | `catalog/errors/RRS-<letter>.json` | `RRS-L`/`RRS-V` for first-party, `PLG-<plugin_id>-nnnn` for third-party |
-| Generated files | `just codegen`: `schemas/commands/`, TS types, Python dataclasses, `docs/reference/commands.md` | `rastai plugin codegen` (frontend doc) |
+| Generated files | `just codegen`: `schemas/commands/`, JSDoc typedefs, typed JS wrappers over `CommandExecutor` (`packages/client/src/generated/commands.js`), Python dataclasses, `docs/reference/commands.md` | `rastai plugin codegen` (frontend doc): the plugin's `ui/src/generated/commands.js` |
 
 **Adding a core command** touches exactly those files plus a test. The table row, the types and the catalog codes land first in a contract PR (§29); the handler follows. Three tests keep the pieces in step: `rastai-core/tests/command_table.rs` (row is valid), `rastai-formats/tests/commands_described.rs` (types exist), `rastai-server/tests/dispatch_complete.rs` (an arm exists).
 
@@ -2352,13 +2699,13 @@ flowchart LR
   REG --> BRIDGE["Iframe bridge tools/list, filtered by grant"]
   LIST --> UI["UI palette, menus, keybindings, forms"]
   LIST --> CLI["CLI verbs, help, completion"]
-  LIST --> COPY["Copy as CLI, Python, TS, MCP"]
+  LIST --> COPY["Copy as CLI, Python, JavaScript, MCP"]
   TABLE --> CG["rastai-codegen"]
   FMT --> CG
-  CG --> DOCS["docs/reference/commands.md, schemas/commands/, typed TS and Python wrappers"]
+  CG --> DOCS["docs/reference/commands.md, schemas/commands/, typed JS wrappers and Python dataclasses"]
 ```
 
-- At startup the server copies `COMMANDS` into the registry and fills each row's two schema fields from `describe_arguments` / `describe_result` through `json_schema_for`. The plugin host adds plugin rows as each plugin loads and removes them when it is disabled, then publishes `plugin.state_changed` so UIs refetch `ListCommands` (frontend doc 2.5).
+- At startup the server copies `COMMANDS` into the registry and fills each row's two schema fields from `describe_arguments` / `describe_result` through `json_schema_for`. The plugin host adds plugin rows as each plugin loads and removes them when it is disabled, then publishes `plugin.state_changed` so UIs refetch `ListCommands` (frontend doc).
 - Every surface reads the registry; none keeps its own list. Adding a command or enabling a plugin adds the palette entry, the CLI verb and the MCP tool at once (§13: "every plugin feature becomes an MCP tool and a CLI verb automatically").
 - The UI and CLI read `ListCommands`; MCP and the iframe bridge read the registry in-process. All of them call `Execute` (or `execute_command` in-process), so scope checks, argument checks and the journal are the same for all.
 - What's persisted: nothing. The registry is rebuilt at every start; `<cache>/commands-<version>.json` in the CLI is only a help cache.
@@ -2371,10 +2718,11 @@ flowchart LR
 | CLI verb | segments as words, `_` as `-`: `eval.suite.add_conversation` → `rastai eval suite add-conversation` | `rastai_core::commands::naming::cli_words` | `naming_round_trip.rs` |
 | CLI flag | field name with `_` as `-`, prefixed `--` | `flag_name` | same |
 | MCP tool | dots as `__`: `eval__suite__edit` (contracts §6.1) | `mcp_tool_name` | same |
-| Palette entry | `title`; Basic mode shows `basic` rows; experimental hidden unless `plugins.experimental_apis` | `apps/web` (frontend doc 2.5) | frontend tests |
-| Copy as | flags only for CLI; `rastai.client.connect().execute(...)` for Python; `execute(client, ...)` for TS; a `tools/call` body for MCP | `apps/web/src/commands/copy-as.ts` | `fixtures/command-golden/copy-as.json`, read by both the TS tests and `rastai-cli/tests/verbs.rs` |
+| Palette entry | `title`; Basic mode shows `basic` rows; experimental hidden unless `plugins.experimental_apis` | `apps/web` (frontend doc) | frontend tests |
+| Typed JS wrapper | camelCase of the segments taking a `CommandExecutor`: `evalSuiteAddConversation(executor, args)` (contracts §6.1) | `rastai-codegen` `javascript_commands.rs` | `just check-js` over the generated file |
+| Copy as | flags only for CLI; `rastai.connect().execute(...)` for Python; `client.execute(...)` for JavaScript (a `DaemonClient` with a bearer credential; any `CommandExecutor` works); a `tools/call` body for MCP | `apps/web/src/commands/copy-as.js` | `fixtures/command-golden/copy-as.json`, read by both `copy-as.test.js` and `rastai-cli/tests/verbs.rs` |
 
-The copy-as formatter is TS because only the UI copies; the CLI proves it can parse every golden line back. The MCP column is checked against `mcp_tool_name` in `naming_round_trip.rs`.
+The copy-as formatter is JavaScript because only the UI copies; the CLI proves it can parse every golden line back. The MCP column is checked against `mcp_tool_name` in `naming_round_trip.rs`. There is no TypeScript column: TypeScript isn't a language the project writes (ADR-0036).
 
 ### 10.4 Kinds and what each surface does with them
 
@@ -2402,6 +2750,12 @@ The daemon serves four kinds of API on one port and one socket (contracts §3.3)
 | `/mcp` | MCP revision, negotiated in `initialize` (section 7.2) | add a newer revision to `SUPPORTED_PROTOCOL_VERSIONS` | drop the oldest revision after one minor release |
 | Plugin API | semver `PLUGIN_API_VERSION`, matched against `engines.rastai` | minor bump | major bump; the previous major is kept 12 months (§13), from 1.0 on |
 
+**Stability** (owner decision N3). Every `CommandDescriptor` and `EventTypeDescriptor` carries `stability`: `preview`, `stable` or `deprecated` (contracts §4.1). Every command and event type is `preview` until Phase 2, when the stable commands API 1.0 subset is chosen.
+- `preview` may change between minor releases; clients see the value in `ListCommands` and `ListEventTypes`, and the generated wrappers and `docs/reference/` show it.
+- `stable` follows the "Compatible change" column above with no exceptions.
+- `deprecated` keeps working and is listed with its replacement until it is retired (11.2).
+- **What `buf breaking` can't see.** Command arguments and results cross the wire as `arguments_json` and `result_json`, which are strings to protobuf, so `buf breaking` never sees a field removed from `ModelLoadArgs`. The planned `tools/checks/check-schema-diff` (Phase 2, with the stable subset) compares `schemas/commands/` against the merge base and fails on a breaking change to a `stable` command. Until then `tests/command_table.rs` refuses any row that isn't `preview`.
+
 ### 11.2 Retired commands
 
 `rastai-core/src/commands/table.rs` keeps a second table:
@@ -2418,12 +2772,12 @@ Retired ids are never reused (like catalog codes). `ListCommands` doesn't list t
 ### 11.3 Content types
 
 - `CommandService` accepts `application/proto` (the UI's default, via connect-es) and `application/json` (curl, scripts, the CLI). The JSON codec is hand-written in `http/connect_json.rs` for the six messages involved (`ExecuteRequest`, `ExecuteResponse`, `Diagnostic`, `ListCommandsRequest`, `ListCommandsResponse`, `CommandDescriptor`), because prost has no proto3 JSON mapping and §27 lists no crate for it. `tests/connect_protocol.rs` compares its output with `fixtures/proto-golden/commands/*.json`, which protobuf-es produces.
-- `EventService.Subscribe` accepts only `application/connect+proto` in the prototype. Its payloads are a large `oneof`; a hand-written JSON codec for all of them isn't worth it yet. The CLI uses binary for `Subscribe`. Section 17 lists this.
+- `EventService.Subscribe` accepts only `application/connect+proto` in the prototype. Its payloads are a large `oneof`; a hand-written JSON codec for all of them isn't worth it. The CLI uses binary for `Subscribe`. If a client that can't use protobuf needs the stream, a **generated** proto-JSON codec is added (M9 if needed, else Phase 2; contracts §4).
 - Errors in the Connect envelope (`{"code": "unauthenticated", ...}`) are used only for gate failures; everything else is `ExecuteResponse{ok: false, diagnostics}` with HTTP 200 (flows/platform.md 3.1).
 
 ### 11.4 Discovering versions and handling skew
 
-`GET /api/health` (no auth) gains three additive fields (section 15):
+`GET /api/health` (no auth) carries the version fields of contracts §3.3:
 
 ```json
 { "status": "ok", "version": "0.3.0", "apis": ["rastai.commands.v1", "rastai.events.v1"], "plugin_api": "0.1.0", "node_protocol": 1 }
@@ -2434,7 +2788,7 @@ Retired ids are never reused (like catalog codes). `ListCommands` doesn't list t
 | Web app | no: the daemon serves it (`/`) | none needed; `index.html` is `no-store` so a reload after an update gets the new app |
 | Tauri shell | yes, briefly, during an update | it only loads the daemon URL; nothing to check |
 | CLI | yes: a daemon started before an update keeps running | compares `version`; different → warning `RRS-C0006` ("restart the daemon") and continue; a missing entry in `apis` → error, `EXIT_DAEMON_UNAVAILABLE` |
-| Scripts, SDKs, MCP clients | yes | read `apis` and each descriptor's `since_version`; send `Rastai-Client: <name>/<version>`, which the daemon logs |
+| Scripts, SDKs, MCP clients | yes | read `apis` and each descriptor's `since_version` and `stability`; send `Rastai-Client: <name>/<version>`, which the daemon logs |
 | Nodes | yes | integer protocol version + capability flags in `Handshake` (§20); mismatch → `incompatible` and `node.update` (rust-node doc) |
 
 ---
@@ -2474,49 +2828,62 @@ flowchart TD
 - First-party plugins load first because they provide capabilities (`psychology.lens@1`, `eval.metric@1`) that third-party plugins require.
 - Each plugin's outcome is stored in `plugins.state` and published as `plugin.state_changed` (lifecycle.rs). A failure never stops the loop or the daemon.
 - The module start is asynchronous: commands are registered from the manifest at once, and calls made before the module registers wait up to 30 s (flows/platform.md 2.1, `RRS-P4002`).
+- **Modules without user namespaces** (contracts §8.8). Ubuntu 23.10 and later restrict unprivileged user namespaces; the `.deb` ships an AppArmor profile (`tools/release/apparmor/rastai`) that grants `userns` to the installed binary. Where namespaces are still unavailable (AppImage, other distributions, a removed profile), the node decides per module and the host records the outcome:
+  - a **trusted first-party** module (source `Preinstalled`, content hash equal to the release's) runs without the network namespace; the host shows warning `RRS-P2005` on the plugin;
+  - a **third-party** module without network permission is refused: the plugin goes `failed` with `RRS-P2001`, whose fix text names the AppArmor profile or the network grant;
+  - a third-party module that declares network permission runs as before.
+- **(L2) Plugin data across a downgrade.** `plugin_data.rs` keeps `plugin-data.json` (`last_version`) in `<data>/plugin-data/<plugin_id>/`; an older plugin version opens it read-only (`RASTAI_PLUGIN_DATA_READ_ONLY=1`) with `RRS-P3005`. Until then the folder is created and passed (`RASTAI_PLUGIN_DATA_DIR`) without the guard.
 
 ### 12.2 The capability table
 
 A manifest's `requires_capabilities` lists `"<name>@<major>"`. Each contribution key maps to one capability, and a plugin must require the capability of every key it uses (`rastai plugin lint` checks it; the host refuses with `RRS-P0006` if not).
 
+The rows are contracts §5.5's table, which owns the names and each one's status: 31 capabilities, one per manifest contribution key. This file encodes that table as data and nothing more.
+
 ```rust
 // plugin_host/capabilities.rs
-pub struct HostCapability { pub name: &'static str, pub majors: &'static [u32], pub contribution_key: &'static str, pub experimental: bool }
-pub struct FirstPartyCapability { pub plugin_id: &'static str, pub name: &'static str, pub majors: &'static [u32], pub contribution_key: &'static str }
+/// What the host does with a capability in this build. A row moves from Unsupported to Supported in the PR that
+/// lands its feature (themes, icon sets, macros and chat templates in M8), and only then.
+pub enum CapabilityStatus { Supported, Experimental, Unsupported }
+
+pub struct HostCapability { pub name: &'static str, pub majors: &'static [u32], pub contribution_key: &'static str,
+                            pub status: CapabilityStatus }
+pub struct FirstPartyCapability { pub plugin_id: &'static str, pub name: &'static str, pub majors: &'static [u32],
+                                  pub contribution_key: &'static str }
 
 pub const HOST_CAPABILITIES: &[HostCapability] = &[
-    HostCapability { name: "commands", majors: &[1], contribution_key: "commands", experimental: false },
-    HostCapability { name: "ui.section", majors: &[1], contribution_key: "sections", experimental: false },
-    HostCapability { name: "events.handler", majors: &[1], contribution_key: "event_handlers", experimental: false },
-    // one row per line of the table below
+    HostCapability { name: "commands", majors: &[1], contribution_key: "commands", status: CapabilityStatus::Supported },
+    HostCapability { name: "ui.section", majors: &[1], contribution_key: "sections", status: CapabilityStatus::Supported },
+    HostCapability { name: "ui.theme", majors: &[1], contribution_key: "themes", status: CapabilityStatus::Unsupported },   // M8
+    HostCapability { name: "ui.icon_set", majors: &[1], contribution_key: "icon_sets", status: CapabilityStatus::Unsupported },  // M8
+    HostCapability { name: "ui.locale", majors: &[1], contribution_key: "locales", status: CapabilityStatus::Unsupported },  // Phase 2
+    HostCapability { name: "ui.macro", majors: &[1], contribution_key: "macros", status: CapabilityStatus::Unsupported },  // M8
+    HostCapability { name: "inference.chat_template", majors: &[1], contribution_key: "chat_templates",
+                     status: CapabilityStatus::Unsupported },                                                   // M8, files only
+    HostCapability { name: "events.handler", majors: &[1], contribution_key: "event_handlers", status: CapabilityStatus::Supported },
+    // ... one row per row of contracts §5.5
 ];
 
 pub const FIRST_PARTY_CAPABILITIES: &[FirstPartyCapability] = &[
     FirstPartyCapability { plugin_id: "psychology", name: "psychology.lens", majors: &[1], contribution_key: "lenses" },
     FirstPartyCapability { plugin_id: "psychology", name: "psychology.sae_loader", majors: &[1], contribution_key: "sae_loaders" },
     FirstPartyCapability { plugin_id: "eval", name: "eval.metric", majors: &[1], contribution_key: "metrics" },
+    FirstPartyCapability { plugin_id: "eval", name: "eval.benchmark_loader", majors: &[1], contribution_key: "benchmark_loaders" },
 ];
 ```
 
-| Capability | Contribution key | Provided by | Experimental in the prototype |
-|---|---|---|---|
-| `commands@1` | `commands` | host | |
-| `ui.section@1`, `ui.panel@1`, `ui.settings_page@1` | `sections`, `panels`, `settings_pages` | host | |
-| `ui.theme@1`, `ui.layout@1`, `ui.keybindings@1` | `themes`, `layouts`, `keybindings` | host | |
-| `templates@1` | `templates` | host | |
-| `file.type@1`, `file.importer@1`, `file.exporter@1` | `file_types`, `importers`, `exporters` | host | |
-| `data.converter@1` | `converters` | host | |
-| `train.recipe@1` | `recipes` | host | |
-| `rl.reward_function@1` | `reward_functions` | host | |
-| `designer.node@1` | `node_types` | host | |
-| `events.handler@1` | `event_handlers` | host | |
-| `psychology.lens@1`, `psychology.sae_loader@1` | `lenses`, `sae_loaders` | first-party `psychology`, only while it is enabled | |
-| `eval.metric@1` | `metrics` | first-party `eval`, only while it is enabled | |
-| `inference.adapter@1` | `adapters` | host | yes: gateway adapters are a closed Rust enum today; plugin adapters need an out-of-process design first |
-| `assistant.skill@1` | `assistant_skills` | host | yes |
-| `compute.target@1` | `compute_targets` | host | yes, until providers arrive (Phase 3) |
+- **Every contribution key has a row**, so no key is silently accepted: a plugin using `icon_sets` must require `ui.icon_set@1` (`RRS-P0006` otherwise), and before M8 the host refuses that capability with `RRS-P1002`. `tests/plugin_host.rs` checks that the table's keys equal the manifest description's `contributes` keys exactly.
+- **The four declarative rows of owner decision N2** and what the host does once each is supported:
 
-That is 22 capabilities. `events.handler@1` is what the Evaluation plugin requires for auto-run (`eval.checkpoint.evaluate` on `checkpoint.saved`, training-evaluation flow 10.1) and for pinned conversations (`eval.suite.add_conversation` on `conversation.changed`, inference flow 9); without it the first-party manifest would be refused with `RRS-P0006`.
+| Capability | Key | Status now | When supported, the host |
+|---|---|---|---|
+| `ui.icon_set@1` | `icon_sets` | unsupported until M8 | reads each set through `read_document` (`rastai.icon_set/1`) and serves its files under the plugin's assets path; the UI swaps icons by id |
+| `ui.locale@1` | `locales` | unsupported; Phase 2 (prototype strings are English; catalog text is keyed) | registers the locale's string tables; `ui.locale` picks one |
+| `ui.macro@1` | `macros` | supported from M8 (M8-E05) | lists each macro in the palette; running one runs its command calls in order through `execute_command`, each journaled, each as the plugin principal |
+| `inference.chat_template@1` | `chat_templates` | supported from M8 (files only) | reads each template file and hands the matching models' overrides to the gateway and the nodes as `TokenizationOverride`s; two plugins matching one model means neither is used (`RRS-G1007`) |
+
+- **Experimental rows** (`data.source@1`, `inference.tokenizer@1`, `inference.adapter@1`, `assistant.skill@1`, `compute.target@1`) load only with `plugins.experimental_apis` (`RRS-P1003` otherwise), and registry plugins can't use them.
+- `events.handler@1` is what the Evaluation plugin requires for auto-run (`eval.checkpoint.evaluate` on `checkpoint.saved`, training-evaluation flow 10.1) and for pinned conversations (`eval.suite.add_conversation` on `conversation.changed`, inference flow 9); without it the first-party manifest would be refused with `RRS-P0006`.
 
 A major version is added to `majors` when an extension point changes incompatibly; the host keeps serving the previous major for 12 months after plugin API 1.0 (§13).
 
@@ -2552,7 +2919,9 @@ pub fn negotiation_diagnostics(result: &NegotiationResult) -> Vec<Diagnostic>
 | `file_types`, `importers`, `exporters` | rows in the file-routing table (`import_export/file_routing.rs`) | `file.open`, drag-drop, `plugin.suggest` |
 | plugin `catalog/errors.json` | `add_plugin_catalog` (codes must be `PLG-<plugin_id>-nnnn`) | every renderer |
 | `recipes`, `metrics`, `lenses`, `sae_loaders`, `reward_functions`, `converters`, `node_types` | names kept in the plugin's `LoadedPlugin` so `recipe.list`, `converter.list` and the environment facts for validation can list them | the Python registry loads the implementations by name inside jobs (`rastai_plugin`) |
-| `sections`, `panels`, `settings_pages`, `themes`, `layouts`, `keybindings`, `templates` | nothing beyond serving `ui/` assets and returning the manifest in `plugin.list` | the UI registers them (frontend doc 10) |
+| `sections`, `panels`, `settings_pages`, `layouts`, `keybindings`, `templates` | nothing beyond serving `ui/` assets and returning the manifest in `plugin.list` | the UI registers them (frontend doc) |
+| `themes` (M8) | each `tokens_file` through `read_document` as `rastai.theme/1`: a locked `--rr-locked-*` key or an unknown role fails layer 2 (`RRS-E1003`), and the accessibility check (`meaning/theme.rs`) must pass before the theme is offered | the theme picker; `ui.theme` names the theme id |
+| `icon_sets`, `locales`, `macros`, `chat_templates` | the N2 rows of 12.2, each only once its capability is supported | the UI (icons, strings, palette macros); the gateway and nodes (templates) |
 | `compute_targets` | Phase 3: start the provider process | the scheduler |
 | `event_handlers` `[]{event_type, command_id}` | kept in `LoadedPlugin`; each `command_id` must be one of the plugin's own commands (`RRS-P0004` otherwise) and `event_type` a durable type. After the indexer commits a matching durable record, the server runs `execute_command(command_id)` as the plugin principal (12.5) | `plugin_host/event_handlers.rs` |
 
@@ -2612,14 +2981,15 @@ flowchart TD
 - **At startup** `discover_plugins` reads every manifest and the saved `plugins.state` before `replay_daemon_log` and the run tails index anything, so a record indexed during startup queues the same calls as one indexed later. The calls are delivered once `load_all_plugins` has started the modules.
 - **Arguments.** Every handler command takes `HandlerEventArgs{event_type, log_name, sequence, run_id, subject_id}` (a `rastai-formats` command type, `core:HandlerEventArgs` in a plugin's `types.json`). The handler reads details through ordinary commands (`checkpoint.list`, `conversation.get`), so no event payload needs a JSON codec.
 - **Failures.** A command that fails with any code other than "module not ready" (`RRS-P4002`) or "interrupted" (`RRS-C0005`) is marked delivered with its code and logged; it is not retried, because retrying a deterministic failure would loop. The failure is in the journal like any other command.
-- **Persisted:** `plugin_event_deliveries` in `rastai.db` (section 15 row 18). It is not rebuilt (13.2): a rebuild starts it empty, so old events never fire handlers twice.
+- **Persisted:** `plugin_event_deliveries` in `rastai.db` (contracts §8.2). It is not rebuilt (13.2): a rebuild starts it empty, so old events never fire handlers twice.
+- **What M5 builds, and what is (L2).** M5 builds only what Evaluation auto-run and pins need: queue with the record, deliver once, retry on restart, drop on the user's disable. Backlog views, per-plugin limits and redelivery tools are (L2).
 - **Tests:** `tests/plugin_event_handlers.rs` and the kill -9 row in section 8.6.
 
 ---
 
 ## 13. Event indexing and rebuilding `rastai.db`
 
-`rastai.db` is an index (§19). Everything in it except five tables can be rebuilt from three sources: the run folders (`run.json` and `events.log`), the daemon's own event log, and the blob store, plus a scan of the projects and the HF cache. The runtime flows are flows/platform.md 6.1 (live indexing) and 6.4 (rebuild); this section is the code that implements them.
+`rastai.db` is an index (§19). Everything in it except `tokens`, `nodes`, `plugins`, `projects` and `archive_cursors` can be rebuilt (contracts §8.2) from three sources: the run folders (`run.json` and `events.log`), the daemon's own event log, and the blob store, plus a scan of the projects and the HF cache. When an archive is configured, the rows of pruned runs come back from it too (ADR-0035). The runtime flows are flows/platform.md 6.1 (live indexing) and 6.4 (rebuild); this section is the code that implements them.
 
 ### 13.1 Live indexing
 
@@ -2652,8 +3022,9 @@ flowchart TD
 - **Vault rows before the ack.** `gateway.request_logged` records go to `vault.db` `gateway_log` (with `run_id`, `finish_reason`, `stop_kind`), which the index writer can't reach. The tail writes them with `vault_writes_for_records` and waits for that commit before `ApplyRunEvents` commits the ack. A crash between the two re-sends the batch, and the upsert by `request_id` absorbs it.
 - **Handler calls with the ack.** The batch's `HandlerCall` rows commit in the same `ApplyRunEvents` transaction, then go out after the commit (12.5), so an indexed `checkpoint.saved` always reaches the Evaluation plugin's handler, even across a crash.
 - **Chain runs have no tail.** The chain driver writes and indexes their records itself (`record_chain_event`, 8.3); `resume_chains` indexes anything after their ack at startup.
-- **The daemon's own durable records** (`command.finished`, daemon-made `artifact.created`, `document.changed`, `node.state_changed`, `plugin.state_changed`, `download.finished`, `transfer.finished`, `conversation.changed`, and the two new ones below) go through `record_daemon_event`: append to `<data>/daemon/events.log` with `SyncPolicy::Now`, then `ApplyDaemonEvents` (rows, handler calls and `log_cursors`), then publish, then deliver handler calls. At startup `daemon_log_replay.rs` indexes anything after the cursor before the HTTP listener opens. `conversation.changed` carries ids and flags only, never text, and incognito conversations emit none.
-- **Two daemon events are added** so rebuild doesn't lose user decisions: `run.tags_changed` (`run_id`, `tags[]`) from `run.tag`, and `pin.changed` (`kind`, `id`, `pinned`) from `artifact.pin` / `artifact.unpin`. Without the second, a rebuild would forget pins and the next GC could delete pinned data.
+- **The daemon's own durable records** (`command.finished`, daemon-made `artifact.created`, `lineage.linked`, `document.changed`, `node.state_changed`, `plugin.state_changed`, `download.finished`, `transfer.finished`, `conversation.changed`, `conversation.deleted`, `run.tags_changed`, `pin.changed`, `run.deleted`, `chain.*` and the `archive.*` events) go through `record_daemon_event`: append to `<data>/daemon/events.log` with `SyncPolicy::Now`, then `ApplyDaemonEvents` (rows, handler calls and `log_cursors`), then publish, then deliver handler calls. At startup `daemon_log_replay.rs` indexes anything after the cursor before the HTTP listener opens. `conversation.changed` carries ids and flags only, never text, and incognito conversations emit none.
+- **User decisions are records,** so a rebuild keeps them: `run.tags_changed` from `run.tag`, `pin.changed` from the pin commands (without it a rebuild would forget pins and the next GC could delete pinned data), `run.deleted` from `run.delete`, and `archive.pruned` from a prune (so the stubs come back).
+- **The archiver wakes on the commit** (M11). After each committed batch the tail and `record_daemon_event` signal `server.archiver`; a signal during a pass sets one pending flag, so a burst of batches costs one extra pass, not one per batch. The archiver never runs inside the indexing transaction.
 - **Rotation:** the daemon log rolls to `events-<n>.log` at 256 MiB (flows/platform.md); each segment has its own sequence and its own `log_cursors` row.
 
 ### 13.2 Rebuild
@@ -2666,233 +3037,502 @@ pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<Rebu
     let mut report = new_rebuild_report();
     let old_database = move_old_database_aside(paths)?;             // rastai.db.broken-<unix_ms>
     let fresh = create_fresh_index(paths)?;                         // migrations
-    copy_kept_tables(&old_database, &fresh, &mut report);           // settings, tokens, nodes, plugins, projects
+    copy_kept_tables(&old_database, &fresh, &mut report);           // tokens, nodes, plugins, projects
     rebuild_from_run_folders(paths, &fresh, &mut report)?;          // run.json, then events.log or its mirror
-    rebuild_from_daemon_log(paths, &fresh, &mut report)?;           // every segment, in order
-    drop_rows_with_missing_blobs(paths, &fresh, options, &mut report)?;   // --verify-blobs re-hashes and quarantines
+    rebuild_from_daemon_log(paths, &fresh, &mut report)?;           // every segment, in order; archive.pruned makes stubs
+    drop_rows_with_missing_blobs(paths, &fresh, options, &mut report)?;   // keeps blobs freed by archive.pruned records; --verify-blobs re-hashes and quarantines
     rebuild_documents_from_projects(&fresh, &mut report)?;          // header id and content_hash per document file
     rebuild_models_from_hf_cache(&options.hf_cache_dir, &fresh, &mut report)?;
-    finish_index(&fresh)?;                                          // quick_check, then the cursors
-    Ok(report)
+    finish_index(&fresh)?;                                          // quick_check, then the log cursors
+    Ok(report)                                                      // archive_cursors stays empty
 }
 ```
 
 | Table | Rebuilt from |
 |---|---|
-| `runs` | `run.json` (record, hash, node, parent) + `run.state_changed`; `acked_sequence` = last valid sequence |
+| `runs` | `run.json` (record, hash, node, parent) + `run.state_changed`; `acked_sequence` = last valid sequence. A run whose folder was pruned comes back as a stub (`archive_state = pruned`) from its `archive.pruned` record; `run.deleted` removes it |
 | `jobs` | `job.state_changed` (final states) |
 | `run_metrics` | `run.metrics` |
 | `run_tags` | `run.tags_changed` (daemon log) |
 | `checkpoints` | `checkpoint.saved`; `pinned` from `pin.changed` |
-| `artifacts`, `artifact_copies`, `lineage` | `artifact.created` in run logs and the daemon log; copies from `transfer.finished`; `pinned` from `pin.changed`; rows whose blob is missing locally and whose home is this machine are dropped with `RRS-S1002` |
+| `artifacts`, `artifact_copies`, `lineage` | `artifact.created` in run logs and the daemon log; copies from `transfer.finished`; `pinned` from `pin.changed`; rows whose blob is missing locally and whose home is this machine are dropped with `RRS-S1002`; a row whose blob hash is listed in an `archive.pruned` record is kept (its bytes are in the archive and come back on use, flows/platform.md 8.9, 8.11) |
 | `command_journal` | `command.finished` (commands that never finished are not rebuilt) |
 | `documents` | a scan of the projects in `projects`, reading each document's header through `rastai-formats` |
 | `models` | `download.finished` (with `model_hash` and `size_bytes`) plus a scan of the HF cache; `model_hash` filled lazily only for models the scan found |
 | `undo_steps`, `transfers` | not rebuilt (flows/platform.md 6.4): undo stacks start empty; transfers restart from their partial files |
 | `plugin_event_deliveries` | not rebuilt: starts empty, so a rebuild never re-runs plugin handlers on old events (12.5). Calls pending at the time of the loss are dropped |
-| `settings`, `tokens`, `nodes`, `plugins`, `projects` | copied from the old file when readable; otherwise empty, and plugins are re-discovered `disabled` with no grants |
+| `archive_cursors` (M11) | not rebuilt: starts empty, so the next sync re-sends from the start, which the idempotent upserts absorb; `archive_state` of synced runs is set again by that sync |
+| `tokens`, `nodes`, `plugins`, `projects` | copied from the old file when readable; otherwise empty, and plugins are re-discovered `disabled` with no grants |
+
+Settings are not in this table because they aren't in `rastai.db`: they live in the files of contracts §11.1, which a rebuild never touches.
 
 - **Same code as live indexing.** Steps 3 and 4 call `apply_event_record` on a transaction of the fresh connection, so live and rebuilt rows can't differ. `tests/rebuild_index.rs` compares them row by row.
 - **Reading is tolerant.** A torn tail ends that log; a corrupt frame ends it with `RRS-S2002` in the report; the rebuild continues with the next run.
+- **Pruned runs come back from the archive** (M11; ADR-0035 decision 8, amending ADR-0002 decision 7). Their local folders are gone, so the offline rebuild can only make the stubs (`RebuildReport.pruned_run_stubs`). The last step, pulling each stub's rows (`runs` columns, `run_tags`, final `jobs` states, `checkpoints` metadata, `artifacts` and `lineage`; not `run_metrics`, which prune freed) from the archive, runs at the next daemon start, before the first sync: the store never imports the archive (contracts §2.4 rule 7), and only the daemon holds archive credentials, which live in the keychain behind `rastai-server`. `rastai storage rebuild-index` prints that step as pending; until it runs, a stub opens with its restore offer like any pruned run.
 - **Persisted:** the new `rastai.db`; the old file stays beside it until the user deletes it. `vault.db` is never touched: it is primary data, not an index. So the rebuild skips the vault side of `gateway.request_logged`, and `gateway_log` rows that retention deleted stay deleted.
 
 ---
 
-## 14. Test map for the control plane
+## 14. `rastai-archive`: the optional long-term archive (M11)
+
+**Purpose.** One-way, idempotent replication of what a daemon already keeps to the owner's own MySQL or MariaDB, for years of runs across machines in one queryable place (ADR-0035, contracts §8.7). SQLite stays the live store; nothing reads the archive to serve a live request except restore and the rebuild's last step. The crate also copies blobs to an archive blob target, prunes local copies the archive holds and has verified, restores them, verifies the archive and purges it. Only the daemon runs it, and only when `archive.enabled` is true; with no archive configured nothing changes.
+
+Built in M11, after the 90-day plan. Earlier work: the names (M1-01), the `vault_changes` outbox (M3-E02, section 6) and `MysqlConnection` with the MySQL dataset reader (M5-E07, section 4 and `layout/python.md`).
+
+### 14.1 Tree
+
+```
+crates/rastai-archive/
+  Cargo.toml
+  CLAUDE.md                   local rules: daemon only; mysql.rs is the only mysql_async import; every write statement comes
+                              from build_upsert; object first, row second, cursor last; never reads the keychain
+  src/
+    lib.rs                    pub mod lines only
+    error.rs                  ArchiveError, each variant with its RRS-S5xxx code
+    settings.rs               ArchiveSettings from the resolved `archive` section; ArchiveCredentials (plain values, per pass)
+    mysql.rs                  the only mysql_async import: connect with the one TLS rule, run statements in one transaction,
+                              fixed queries, GET_LOCK and RELEASE_LOCK, the server flavor and its encryption report
+    upsert.rs                 build_upsert(): every write statement the archive runs, for both server flavors
+    tables.rs                 ArchiveTable: name, key columns and value columns of each table of contracts §8.7
+    queries.rs                the fixed SELECT texts (cursor positions, verified blobs, frames to restore, row counts)
+    type_mapping.rs           Rastai value kinds to MySQL column types and back; goldens in fixtures/mysql/type-mapping/
+    migrations/
+      mod.rs                  run_archive_migrations(): lock, read archive_meta, apply missing steps, release
+      steps.rs                MIGRATION_STEPS: one row per schema version, each statement idempotent
+    streams.rs                Stream: the archive_cursors keys and how to read each stream after its position
+    batch.rs                  one stream's next batch to statements: event_records, the index rows its records touched,
+                              vault rows, blob_objects; filtered by SyncScope
+    sync.rs                   sync_archive(): one pass over every stream
+    objects/
+      mod.rs                  ArchiveTarget (Folder, later S3), ObjectClass, put_object(), read_object(), delete_object()
+      folder.rs               ab/<hash> layout, .incoming/ then rename, vault/<source_id>/ for vault-class blobs
+      s3.rs                   (later, M11-E04) S3-compatible PUT, GET, HEAD, DELETE over rastai-transport HTTPS
+      sigv4.rs                (later, M11-E04) in-house AWS Signature Version 4; HMAC-SHA256 from rastai-transport
+    prune.rs                  plan_prune(), prune_archived_runs()
+    restore.rs                restore_from_archive()
+    verify.rs                 verify_archive()
+    purge.rs                  purge_archive() with admin credentials passed once
+    backoff.rs                next_backoff_seconds(): 5 s doubling to 300 s
+    status.rs                 ArchiveState, ArchiveStatus, lag per stream
+  fuzz/                       cargo-fuzz crate, own workspace, nightly
+    fuzz_targets/
+      archived_frame.rs       frames read back from the archive on restore: CRC check and decode never panic
+  tests/
+    upsert_sql.rs             golden SQL text per table and flavor (no server needed)
+    type_mapping.rs           fixtures/mysql/type-mapping/ round trips
+    sync_idempotent.rs        (server) one batch sent twice leaves identical rows
+    migrations.rs             (server) re-run is a no-op; a second migrator waits on the lock; a newer min_writer_version stops writes
+    refusals.rs               (server) TLS, encryption, credentials, local-only projects
+    folder_target.rs          object first; stale .incoming files; vault-class paths
+    s3_target.rs              (MinIO, later) objects round trip; SigV4 against the published AWS test vectors (no network)
+    prune.rs                  eligibility rules, stubs, leftover files
+    restore.rs                (server) restore then rebuild equals the original index; bad frame, bad blob
+    delete_propagation.rs     (server) outbox deletes, tombstones, purge
+```
+
+Tests marked "(server)" need a MySQL or MariaDB server and skip themselves without one, printing why; in the `mysql-archive` CI job a skip fails the job (14.9).
+
+### 14.2 Public API
+
+```rust
+// error.rs
+pub enum ArchiveError {
+    Unreachable(String),                                   // RRS-S5001: retried with backoff
+    SchemaTooNew { min_writer_version: String },           // RRS-S5002: this daemon stops writing
+    TlsRequired,                                           // RRS-S5003
+    TableNotEncrypted { table: String },                   // RRS-S5004: conversations are not sent there
+    CredentialsRejected,                                   // RRS-S5005
+    BlobHashMismatch { content_hash: String },             // RRS-S5007
+    FrameChecksumMismatch { log_id: String, sequence: u64 },   // RRS-S5008: restore stops
+    PruneRefused { run_id: String, reason: String },       // RRS-S5009
+    PurgeNeedsAdmin,                                       // RRS-S5010
+    MigrationLockBusy,                                     // RRS-S5011 (info): another daemon is migrating
+    TargetUnavailable(String),                             // RRS-S5012
+    Store(StoreError),                                     // the store's own code
+}
+impl ArchiveError { pub fn code(&self) -> &'static str }
+
+// settings.rs
+pub struct ArchiveSettings {
+    pub connection: MysqlConnection,        // rastai-formats; password_secret names the keychain account, never the password
+    pub target: ArchiveTarget,
+    pub interval_seconds: u64,              // archive.interval_seconds (60)
+    pub prune_after_days: Option<u32>,      // None: local pruning is off
+    pub backoff_min_seconds: u64,           // 5
+    pub backoff_max_seconds: u64,           // 300
+    pub lag_warning_hours: u64,             // 24
+}
+pub fn archive_settings(resolved: &ResolvedSettings) -> Result<ArchiveSettings, Vec<Diagnostic>>
+
+/// Read from the keychain by rastai-server for one call and dropped after it. No Debug or Serialize derive, so it
+/// can't reach a log line or an event by accident.
+pub struct ArchiveCredentials { pub mysql_password: String, pub object_access_key: String, pub object_secret_key: String }
+
+/// What the daemon allows this pass to send, decided by check_data_policy (section 8.3). Plain data in.
+pub struct SyncScope {
+    pub source_id: String,                  // daemon_<base32 of the daemon key> (contracts §8.6)
+    pub projects: Vec<ProjectRule>,         // projects whose policy is trusted-remote or any
+    pub rows_without_project: bool,         // privacy.data_policy allows it
+}
+pub struct ProjectRule { pub project_id: String, pub include_conversations: bool }
+
+// objects/mod.rs
+pub enum ArchiveTarget { Folder(FolderTarget), S3(S3Target) }   // S3 arrives with M11-E04
+pub struct FolderTarget { pub root: PathBuf }
+pub struct S3Target { pub endpoint: String, pub bucket: String, pub region: String, pub prefix: String }
+pub enum ObjectClass { Run, Vault }                    // Vault objects go under vault/<source_id>/
+
+// upsert.rs
+pub enum ServerFlavor { Mysql, Mariadb }               // read once per connection from the server's version string
+pub enum SqlValue { Null, Integer(i64), Unsigned(u64), Float(f64), Text(String), Bytes(Vec<u8>) }
+pub struct ArchiveRow { pub values: Vec<SqlValue> }    // in the table's column order (tables.rs), source_id first
+pub struct ArchiveKey { pub values: Vec<SqlValue> }    // the table's key columns, source_id first
+pub enum ArchiveWrite { Upsert(ArchiveRow), Delete(ArchiveKey) }
+pub struct SqlStatement { pub text: String, pub parameters: Vec<SqlValue> }
+pub fn build_upsert(flavor: ServerFlavor, table: ArchiveTable, writes: &[ArchiveWrite]) -> Vec<SqlStatement>
+
+// sync.rs
+pub struct SyncReport { pub rows_written: u64, pub objects_written: u64, pub streams_done: Vec<String>,
+                        pub skipped_projects: Vec<String>, pub lag_seconds_per_stream: Vec<(String, u64)>,
+                        pub wrote_only_archive_records: bool, pub diagnostics: Vec<Diagnostic> }
+pub async fn sync_archive(store: &Store, settings: &ArchiveSettings, credentials: &ArchiveCredentials,
+                          scope: &SyncScope, progress: &ProgressSender) -> Result<SyncReport, ArchiveError>
+
+// migrations/mod.rs
+pub async fn run_archive_migrations(connection: &mut ArchiveConnection, writer_version: &str) -> Result<MigrationReport, ArchiveError>
+
+// prune.rs
+pub struct PrunePlan { pub run_ids: Vec<String>, pub blob_hashes: Vec<String>, pub leftover_run_ids: Vec<String>,
+                       pub refused: Vec<Diagnostic> }
+pub async fn plan_prune(store: &Store, settings: &ArchiveSettings, credentials: &ArchiveCredentials,
+                        now_unix_ms: i64) -> Result<PrunePlan, ArchiveError>          // reads only
+pub fn prune_archived_runs(store: &Store, plan: &PrunePlan) -> Result<PruneReport, ArchiveError>   // deletes local files
+
+// restore.rs
+pub enum RestoreRequest {
+    Run { run_id: String },
+    Conversation { conversation_id: String },
+    Artifact { artifact_id: String },
+    Source { source_id: String },                      // `--source <id> --all`: everything another daemon archived
+    PrunedRunRows { run_ids: Vec<String> },            // the rebuild's last step: stub rows only (every index row but run_metrics), no frames or files (13.2)
+}
+pub async fn restore_from_archive(store: &Store, paths: &DataPaths, settings: &ArchiveSettings,
+                                  credentials: &ArchiveCredentials, request: &RestoreRequest) -> Result<RestoreReport, ArchiveError>
+
+// verify.rs, purge.rs
+pub async fn verify_archive(store: &Store, settings: &ArchiveSettings, credentials: &ArchiveCredentials) -> Result<VerifyReport, ArchiveError>
+pub struct AdminCredentials { pub user: String, pub password: String }   // a `secret` argument of archive.purge, used once
+pub enum PurgeSelection { Tombstoned, Source { source_id: String }, Ids { kind: String, ids: Vec<String> } }
+pub async fn purge_archive(settings: &ArchiveSettings, admin: &AdminCredentials, selection: &PurgeSelection) -> Result<PurgeReport, ArchiveError>
+
+// status.rs, backoff.rs
+pub enum ArchiveState { Off, Ok, Lagging, Unreachable, Misconfigured }  // the values of archive.status_changed
+pub struct ArchiveStatus { pub state: ArchiveState, pub lag_seconds_per_stream: Vec<(String, u64)>,
+                           pub last_error: Option<Diagnostic>, pub pending_outbox_rows: u64,
+                           pub skipped_projects: Vec<(String, Diagnostic)> }    // RRS-C1009 with its one-click fix
+pub fn next_backoff_seconds(previous_seconds: u64, settings: &ArchiveSettings) -> u64
+```
+
+- **Callers:** only `rastai-server` (`archive_task.rs` and `handlers/archive.rs`, 14.6).
+- **Async where it waits on the network,** sync where it doesn't (`build_upsert`, `prune_archived_runs`, the batch builders). No async traits: the target is an enum with a `match` in each `objects/` function.
+- **`build_upsert` is the one SQL writer.** Upserts are multi-row `INSERT ... ON DUPLICATE KEY UPDATE` that set every non-key column from the new row, so a re-sent batch leaves the same rows. The two flavors differ in exactly one place, and it's here: MySQL gets the row-alias form (`AS new ... column = new.column`, since `VALUES()` is deprecated there), MariaDB the `VALUES(column)` form. Deletes are by full key. `tests/upsert_sql.rs` pins the text for both flavors; the dialect run executes them on real servers (14.9).
+
+### 14.3 One sync pass
+
+```rust
+// sync.rs: a thin sequence; each step is a small function
+const ARCHIVE_BATCH_RECORDS: usize = 500;     // rows per transaction: well under the servers' default 64 MiB packet
+
+/// The read-only inputs of one pass, bundled so no function takes more than a few arguments.
+struct Pass<'a> { store: &'a Store, settings: &'a ArchiveSettings, credentials: &'a ArchiveCredentials,
+                  scope: &'a SyncScope, progress: &'a ProgressSender }
+
+pub async fn sync_archive(store: &Store, settings: &ArchiveSettings, credentials: &ArchiveCredentials,
+                          scope: &SyncScope, progress: &ProgressSender) -> Result<SyncReport, ArchiveError> {
+    let pass = Pass { store, settings, credentials, scope, progress };
+    let mut connection = connect_archive(&settings.connection, &credentials.mysql_password).await?;  // TLS rule first
+    check_writer_version(&mut connection).await?;                     // archive_meta.min_writer_version, RRS-S5002
+    let mut report = new_sync_report();
+    for stream in list_streams(store, scope)? {                        // contracts §8.2 keys, oldest data first
+        sync_stream(&pass, &mut connection, &stream, &mut report).await?;
+    }
+    Ok(report)
+}
+
+async fn sync_stream(pass: &Pass<'_>, connection: &mut ArchiveConnection, stream: &Stream,
+                     report: &mut SyncReport) -> Result<(), ArchiveError> {
+    loop {
+        let batch = read_batch_after_cursor(pass.store, stream, pass.scope, ARCHIVE_BATCH_RECORDS)?;   // store reader API
+        if batch.is_empty() {
+            return Ok(());
+        }
+        put_batch_objects(pass, &batch).await?;                                       // 1. bytes, then rename
+        let statements = batch_statements(connection.flavor, &batch);                 // build_upsert per table
+        run_in_transaction(connection, &statements).await?;                           // 2. one MySQL transaction
+        write_index(&pass.store.index, cursor_writes(stream, &batch)).await?;        // 3. cursor (+ MarkRunsArchived)
+        add_batch_to_report(report, stream, &batch, pass.progress);
+    }
+}
+```
+
+```mermaid
+sequenceDiagram
+  participant TASK as ArchiveTask
+  participant ARC as Archiver
+  participant STORE as Store
+  participant OBJ as BlobTarget
+  participant DB as ArchiveDb
+  TASK->>ARC: sync_archive with settings, credentials and scope
+  ARC->>DB: connect, TLS unless loopback or socket
+  ARC->>DB: read archive_meta, refuse if min_writer_version is newer
+  loop each stream, each batch of up to 500
+    ARC->>STORE: read records and rows after the stream cursor
+    ARC->>OBJ: 1. put archivable blobs, .incoming then rename
+    ARC->>DB: 2. upserts for blob_objects, event_records and rows, one transaction
+    DB-->>ARC: commit
+    ARC->>STORE: 3. SetArchiveCursor and MarkRunsArchived through the writer thread
+  end
+  ARC-->>TASK: SyncReport
+  TASK->>STORE: record archive.synced in the daemon log
+```
+
+- **The numbered order is the crash contract.** A kill between 2 and 3 re-sends rows the archive already has; the upserts absorb them (kill -9 row 20). A kill between 1 and 2 leaves an object with no row; the cursor didn't move, so the next pass writes the same object again under the same name, then its row (row 21).
+- **What goes with a batch.** A run-log batch carries its `event_records` rows plus the index rows its records touched (`runs`, final `jobs` states, `checkpoints`, `run_metrics`, `eval_results` from `eval.test_result`, `artifacts`, `lineage`), read back from the index so the latest state wins. A daemon-log batch carries `run_tags`, `lineage`, pins and, for `run.deleted`, a `tombstones` row plus `runs.deleted_unix_ms`.
+- **Which blobs.** Pinned checkpoints (their files are blobs once pinned, contracts §8.4), LoRA adapters (`artifact.created` kind `adapter`) and dataset snapshots (`dataset_snapshot`). Never intermediate checkpoints, never HF weights (only `model_ref` and hash).
+- **Never archived:** `tokens`, `nodes`, `plugins`, `projects`, settings, `undo_steps`, `transfers`, secrets. `tables.rs` has no table for them, so there is no code path that could send them.
+- **Policy per record.** A run whose project isn't in `scope.projects` is skipped whole and its cursor is never written, so a later policy change sends it from the start. A daemon-log record is sent only if its subject's project is allowed (or, with no project, `rows_without_project`); its cursor still moves past a skipped record. Except delete records: `run.deleted` for a run whose `archive_state` is `archived` or `pruned` is always sent (ids only, a `tombstones` row and `runs.deleted_unix_ms`), whatever `SyncScope` says, mirroring the vault rule in 14.4.
+- **Persisted:** the archive's rows and objects; `archive_cursors` and `runs.archive_state` locally.
+- **Failure branches:** server down → `RRS-S5001`, backoff (14.6); credentials rejected → `RRS-S5005`; schema too new → `RRS-S5002`, writes stop until this daemon updates; blob target unwritable → `RRS-S5012`, the stream waits and nothing after it is sent.
+
+### 14.4 Streams and cursors
+
+One `archive_cursors` row per stream (contracts §8.2). A position is written only after the archive committed it.
+
+| Stream key | Reads | Position | Sends |
+|---|---|---|---|
+| `log:<log_name>` | a daemon-log segment, with `read_next_raw_frame` | sequence | `event_records`, and the rows its records touched |
+| `run_log:<run_id>` | a run's `events.log`, or the daemon's mirror of a remote run | sequence | `event_records`, the run's index rows, its archivable blobs |
+| `table:command_journal` | finished `command_journal` rows (secret fields already redacted) | SQLite row id | `command_journal` |
+| `vault_changes` | the vault outbox, `list_vault_changes_after` | `change_id` | `conversations`, `messages`, `annotations`, `gateway_log` of opted-in projects, into encrypted tables only; deletes for every project |
+| `blobs` | the `archive.verify` sweep over `blob_objects` | rows done in the current sweep, in content-hash order | `verified_unix_ms`, so a long verify resumes where it stopped |
+
+- **Frames are copied verbatim:** key (`source_id`, `log_id`, `sequence`), the exact protobuf body and its CRC (contracts §7.1). The archive never re-encodes a record.
+- **The outbox is trimmed** (`VaultWrite::TrimVaultChanges`) only after the archive committed past it.
+- **Vault rows need two things:** the project's `archive.include_conversations` (project layer only, never for `local-only`), and a table that reports encryption (MySQL `ENCRYPTION='Y'`, MariaDB `ENCRYPTED=YES`). The four vault tables are created, encrypted, by their migration step; if `information_schema` doesn't report encryption, `RRS-S5004` and no conversation is sent. Each pass re-reads the report.
+- **A delete always goes.** A `delete` outbox row is sent even for a project that never opted in, because a copy might exist from before an opt-out.
+
+### 14.5 Archive schema and migrations
+
+```rust
+// migrations/steps.rs
+const MIGRATION_LOCK_NAME: &str = "rastai_archive_migrate";
+const MIGRATION_LOCK_WAIT_SECONDS: u32 = 30;     // then RRS-S5011 (info) and the next pass tries again
+
+pub struct MigrationStep { pub schema_version: u32, pub min_writer_version: &'static str, pub statements: &'static [&'static str] }
+pub const MIGRATION_STEPS: &[MigrationStep] = &[
+    MigrationStep { schema_version: 1, min_writer_version: "0.1.0", statements: &[
+        "CREATE TABLE IF NOT EXISTS archive_meta (...)",
+        "CREATE TABLE IF NOT EXISTS event_records (...)",
+        // one CREATE TABLE IF NOT EXISTS per table of contracts §8.7, then the views v_runs and v_metrics
+    ] },
+];
+```
+
+- **Under one lock.** `run_archive_migrations` takes `GET_LOCK('rastai_archive_migrate', 30)`, reads `archive_meta`, applies each missing step and updates `schema_version` after each one, then releases the lock. Several daemons can start at once; one migrates, the others wait.
+- **Additive and idempotent.** MySQL commits DDL statement by statement, so a step can't be atomic. Every statement is safe to run twice instead: `CREATE ... IF NOT EXISTS`, and an added column or index is guarded by an `information_schema` check in `steps.rs`. That is what makes kill -9 row 24 safe: the server drops the dead session's lock, `schema_version` is unchanged, and the next start re-runs the whole step.
+- **`min_writer_version`** rises only when a step changes meaning in a way older daemons would get wrong. An older daemon then stops writing with `RRS-S5002`; additive steps leave it alone.
+- **Stable views.** `v_runs` and `v_metrics` are what "export runs and metrics to MySQL" means (option C). Their columns change only additively, so other tools can query them across versions.
+- **Types** come from `type_mapping.rs` (ids `VARCHAR`, hashes `CHAR(71)`, times `BIGINT`, bodies `MEDIUMBLOB`, JSON columns `JSON`). The same table, as golden files in `fixtures/mysql/type-mapping/`, is checked by `rastai_data/readers/mysql_reader.py`, so the archive and the dataset reader map types the same way.
+
+### 14.6 How the daemon drives it
+
+`rastai-server/src/archive_task.rs` owns the archiver's life; `handlers/archive.rs` runs the commands. The archive crate itself never reads the keychain, never decides policy and never writes an event.
+
+| Trigger | What runs |
+|---|---|
+| The indexer's commit (13.1) | a pass, unless one is running; then one pending flag |
+| A timer, `archive.interval_seconds` (60) | a pass |
+| `archive.sync` (`rastai archive sync`) | a pass now, as a `daemon_task` job |
+| Daemon start | the rebuild's pending row pulls (13.2), stale `.restoring` files removed, then a catch-up pass |
+
+| Command | Kind | Handler does |
+|---|---|---|
+| `archive.configure` | sync | `check_connection_tls`; reads the password from the keychain account named by `connection.password_secret` (`archive.mysql`, stored beforehand with `secret.set`, so the password never passes through this command or its journal row); connects; checks the blob target is writable (`RRS-S5012`); runs the migrations; writes the `archive` section with `write_config_file`; turns the vault outbox on (`set_vault_change_recording`); a different database resets the cursors. A missing or rejected secret is `RRS-S5005` |
+| `archive.status` | sync | the in-memory `ArchiveStatus`, cursor positions, pending outbox rows, skipped projects with `RRS-C1009` |
+| `archive.sync` | job | one pass |
+| `archive.restore` | job | `restore_from_archive`, then records `archive.restored` |
+| `archive.verify` | job | `verify_archive` |
+| `archive.purge` | job | `purge_archive` with the admin credentials from its `secret` argument (journal-redacted, never stored), then records `archive.purged` |
+
+- **Credentials per call.** Before each pass the task reads `archive.mysql` (and `archive.objects` for S3) with `get_secret`, builds `ArchiveCredentials`, and drops them after the call. They never reach a node: `NodeHubService.GetSecret` has no archive purpose.
+- **Scope per pass.** The task runs `check_data_policy(policy, PolicyTarget::ArchiveDatabase)` for each project (section 8.3) and passes the allowed ones in `SyncScope`.
+- **Events.** The task records `archive.status_changed` when `ArchiveState` changes, `archive.synced` after a pass that wrote something other than `archive.*` records (otherwise every pass would archive the previous pass's record, forever), and publishes `archive.progress` and `egress.active` (purpose `archive`, the server's host) while a pass runs, so the egress badge shows.
+- **Server down.** Backoff from `archive.backoff_min_seconds` (5) doubling to `archive.backoff_max_seconds` (300); state `unreachable`; lag grows in `archive.status`. After `archive.lag_warning_hours` (24) the state is `lagging` with `RRS-S5006`, and pruning pauses until the archive catches up. Pruning pauses in every state but `ok`, so it is already paused while the state is `unreachable`.
+- **Delete reaches the archive.** `conversation.delete` writes `DeleteConversation`, whose `delete` outbox rows go out on the next pass (or wait in the outbox while the archive is down); its `ConversationDeleteResult` lists the archive copy as an item of kind `archive` (contracts §6.5). `run.delete` records `run.deleted`, which the daemon-log stream turns into a tombstone; `archive.purge` removes tombstoned rows and their objects physically.
+
+### 14.7 Blob targets
+
+```
+<archive.objects.folder_path>/
+  ab/abcdef…(64 hex)          one file per blob, named by its BLAKE3 hash (the blob store's layout)
+  .incoming/<random>          writes land here, fsync, then rename into place
+  vault/<source_id>/ab/<hash> conversation-derived (vault-class) blobs, kept apart so a purge of one source is a folder
+```
+
+- **Folder first** (NAS, USB, NFS, SMB mounts). `put_object` streams from `open_blob`, hashes while copying, fsyncs, renames, then fsyncs the folder. An object that already exists under its name is skipped: the name is the hash.
+- **S3-compatible later** (M11-E04). Key `<prefix>/ab/<hash>`; requests go through `rastai-transport`'s HTTPS client with egress tag `archive`; signing is in-house SigV4 in `objects/sigv4.rs`, using the HMAC-SHA256 that `rastai-transport` exposes from the rustls crypto provider (no new crate). Access keys come from the keychain account `archive.objects`. CI runs it against MinIO.
+- **Object first, row second.** A `blob_objects` row (content hash, size, media type, target, `verified_unix_ms`, first writer's `source_id`) is upserted only in the transaction after its object is in place.
+- **Leftovers.** A pass deletes `.incoming/` files older than `STALE_TEMP_AGE_HOURS` (`rastai-store`'s constant, 1 h), which covers kill -9 row 21.
+- **Every byte read back is checked.** Restore and verify hash with `rastai_formats::hashing`; a mismatch is `RRS-S5007` and the byte is never used.
+
+### 14.8 Prune, restore, verify, purge
+
+```mermaid
+flowchart TD
+  A["Prune pass: archive.prune_after_days is set"] --> L{"Last sync pass ended ok, state ok?"}
+  L -->|"no"| STOP["Skip the pass: unreachable, lagging or misconfigured; RRS-S5001, RRS-S5006 or the last error stays shown"]
+  L -->|"yes"| P["plan_prune: finished runs older than the limit"]
+  P --> E{"Pinned, running, cursor not past it, or a blob not verified?"}
+  E -->|"yes"| R["Refused with RRS-S5009, kept local"]
+  E -->|"no"| REC["Server records archive.pruned: stub row, child rows deleted, one transaction"]
+  REC --> F["prune_archived_runs deletes the run folder and freed blobs"]
+  F --> DONE["Run shows as pruned, opening it restores it"]
+  REC -->|"killed before the files go"| LEFT["Next plan_prune lists it in leftover_run_ids and deletes the files"]
+```
+
+- **Prune frees local space only** and is off until `archive.prune_after_days` is set. Prune runs only right after a pass that ended in state `ok`; in every other state it pauses. It touches only runs the archive acknowledged and verified, never pinned items or running jobs. Row first, files second: the `archive.pruned` record commits the stub before any file is deleted, so a crash leaves a stub with files, never a run row pointing at nothing (kill -9 row 22).
+- **Restore** (`RestoreRequest::Run`): reads the run's frames in sequence order, checks each body's CRC-32 with `rastai_formats::crc32` against the stored value (`RRS-S5008` stops the restore before anything is indexed), writes them with `append_raw_frame` to `runs/<run_id>/events.log.restoring`, writes `run.json` from the archived record, fetches the run's archived blobs with a BLAKE3 check, renames the log into place, then indexes it through `apply_event_record` (`ApplyRunEvents`), the live path. The server then records `archive.restored`. A kill mid-write leaves a `.restoring` file that start-up deletes; the run stays `pruned` and the restore can run again (kill -9 row 23).
+- **Conversations** restore through `VaultWrite::RestoreConversation`, which writes no `vault_changes` rows for rows restored from the archive (otherwise this daemon would re-archive them under its own `source_id`, duplicating them and splitting later deletes across two ids); later local edits of those rows are sent under the original `source_id`, which the restore records per conversation; **artifacts** through `finish_upload` with the expected hash; **`Source`** restores everything one `source_id` archived, for a replacement machine.
+- **The rebuild's last step** is `RestoreRequest::PrunedRunRows`: stub rows only (`runs` columns, `run_tags`, final `jobs` states, `checkpoints` metadata, `artifacts` and `lineage` rows; no `run_metrics`, which prune freed, and no frames or files), run by the daemon at its next start (13.2). A rebuilt stub equals a live stub.
+- **Verify** re-hashes objects in the target (resuming from the `blobs` cursor) and compares row counts per run with the local index; differences are reported, never fixed silently.
+- **Purge** connects with the admin credentials given to that one call (`RRS-S5010` without them), deletes tombstoned rows (or one source's, or chosen ids) through `build_upsert` deletes, then the objects. It is the only physical removal from the archive.
+
+### 14.9 Tests
+
+| Test | Where | What |
+|---|---|---|
+| Unit | bottom of `upsert.rs`, `tables.rs`, `backoff.rs`, `streams.rs` | every key starts with `source_id`; backoff gives 5, 10, 20, 40, 80, 160, 300, 300; stream keys round-trip |
+| SQL text | `tests/upsert_sql.rs` | golden statements per table for MySQL and MariaDB, upserts and deletes |
+| Type mapping | `tests/type_mapping.rs`, `fixtures/mysql/type-mapping/` | each golden value written and read back unchanged; the Python reader checks the same files |
+| Idempotence | `tests/sync_idempotent.rs` | one batch sent twice leaves identical rows in every table; a cursor written only after the commit |
+| Migrations | `tests/migrations.rs` | running all steps twice changes nothing; two migrators at once: one waits (`RRS-S5011`); a newer `min_writer_version` stops writes with `RRS-S5002` and writes nothing |
+| Refusals | `tests/refusals.rs` | a non-loopback connection without TLS → `RRS-S5003` before any packet; conversations into an unencrypted table → `RRS-S5004`; a wrong password → `RRS-S5005`; a `local-only` project is skipped and listed with `RRS-C1009`; nothing in the "never" class reaches any table |
+| Blob targets | `tests/folder_target.rs`, `tests/s3_target.rs` | object before row; an existing object is skipped; stale `.incoming/` files go; vault-class objects land under `vault/<source_id>/`; SigV4 matches AWS's published test vectors; MinIO round trip |
+| Prune | `tests/prune.rs` | pinned, running, unacknowledged and unverified runs refused with `RRS-S5009`; nothing pruned while `archive.prune_after_days` is unset or the archive state isn't `ok` (unreachable, lagging, misconfigured); stubs open with a restore offer |
+| Restore | `tests/restore.rs` | restore then `rebuild_index` equals the original index row by row; a rebuilt stub equals a live stub row by row (no `run_metrics`); `restore --source <id> --all` then a sync adds no conversation rows under this daemon's `source_id`; a flipped frame byte → `RRS-S5008` and nothing indexed; a flipped blob byte → `RRS-S5007` |
+| Delete | `tests/delete_propagation.rs` | `conversation.delete` while the server is down reaches the archive after it returns; `run.delete` leaves a tombstone; `run.deleted` for an archived run whose project has since become `local-only` still reaches the archive as a tombstone; `archive.purge` without admin credentials → `RRS-S5010`, with them the rows and objects are gone |
+| Crash | `tests/crash/` rows 20–24 (flows/platform.md 6.5) | below |
+| Fuzz | `fuzz/fuzz_targets/archived_frame.rs` | nightly, 10 minutes (contracts §12.5) |
+
+**Kill -9 rows 20–24.** Each pauses at a named point (`RASTAI_TEST_PAUSE_AT`), kills the daemon, restarts it and checks:
+
+| Row | Killed | Then |
+|---|---|---|
+| 20 | after the MySQL `COMMIT`, before `archive_cursors` is written | the catch-up re-sends that batch; every archive table has the same row count as after a clean pass |
+| 21 | mid blob upload to a folder target | no `blob_objects` row; the `.incoming/` file goes once stale; the next pass copies the object and writes its row |
+| 22 | a prune between the index transaction and the file delete | the run is a `pruned` stub; its leftover files go in the next prune pass; opening it restores it |
+| 23 | `archive.restore` mid-write of a run's `events.log` | job `failed` with `RRS-J3005`; the `.restoring` file is deleted at start; the run is still `pruned`; a second restore succeeds |
+| 24 | an archive migration mid-statement | the server dropped the lock; `schema_version` is unchanged; the next start re-runs the step and every statement succeeds |
+
+**CI matrix** (M11-E07). The `mysql-archive` job runs `just test-archive`: the "(server)" tests, rows 20–24 and the Python MySQL reader's tests, against MySQL 8.4, MySQL 9.7, MariaDB 11.4 (contracts §14 row 18) and MinIO, as service containers. It runs on pull requests that touch `crates/rastai-archive/`, `rastai-store`'s archive code or `rastai_data/readers/mysql_reader.py`, and nightly on main. In this job a skipped server test fails the run, so a broken container can't pass silently. MySQL, MariaDB and MinIO are test services only; Rastai never bundles or ships them.
+
+### 14.10 Dependencies
+
+| Kind | Name | Used for | Wrapper file |
+|---|---|---|---|
+| Internal | `rastai-core` | paths, ids, `ResolvedSettings` | |
+| Internal | `rastai-formats` | `MysqlConnection`, `check_connection_tls`, `hashing`, `crc32` | |
+| Internal | `rastai-proto` | `EventRecord` fields (read only; frames are copied as bytes) | `batch.rs` |
+| Internal | `rastai-store` | reader functions, `read_next_raw_frame`, `append_raw_frame`, `open_blob`, `finish_upload`, `write_index`, `write_vault` | |
+| Internal | `rastai-transport` | HTTPS and HMAC-SHA256 for the S3 target (later) | `objects/s3.rs`, `objects/sigv4.rs` |
+| Internal | `rastai-diag` | diagnostics | |
+| External | mysql_async (feature `default-rustls-ring`, default features off; MIT OR Apache-2.0) | the MySQL protocol, TLS through rustls | `mysql.rs` |
+| External | tokio | timers, file I/O for objects | |
+
+Not `sqlx` (RUSTSEC-2023-0071 through `rsa`, banned in `deny.toml`), not Oracle's connectors, not `mysqlclient` (contracts §2.5).
+
+### 14.11 Boundary rules
+
+- **Only the daemon calls it.** `rastai-server` (`archive_task.rs`, `handlers/archive.rs`) is its only caller. `rastai-cli` links it through `rastai-server` but never calls it directly (CLI verbs go through `archive.*` commands), and `rastai-node` and plugins never depend on it. `check-deps` enforces that only `rastai-server` lists it as a dependency. Nodes never get archive credentials.
+- **`mysql.rs` is the only file that imports `mysql_async`**: `deny.toml` `wrappers` pins the crate to `rastai-archive` and `check-imports` pins the file.
+- **Every write statement comes from `build_upsert`.** No other file formats SQL for writes; reads are the fixed texts in `queries.rs`.
+- **Object first, row second, cursor last.** Nothing is pruned before the cursor passed it and its blobs have a verified `blob_objects` row.
+- **Never reads the keychain** (`keyring` is `rastai-server`'s) and never holds credentials beyond one call; never logs them.
+- **Never decides data policy.** It sends only what `SyncScope` allows.
+- **Never opens SQLite.** It reads through `rastai-store`'s reader API and writes cursors, states and restored rows through the store's writer threads. The store never imports it (contracts §2.4 rule 7).
+- **TLS is required** except for a loopback host or a Unix socket (`check_connection_tls`, `RRS-S5003`), before any credential is sent.
+
+### 14.12 Ported from the spike
+
+Nothing; the spike had no archive.
+
+### 14.13 Build-order step
+
+| Part | When (plan) | Size-days |
+|---|---|---|
+| Names in contracts, ADR-0035 | M1-01 | 0.5 |
+| The `vault_changes` outbox in `rastai-store` (section 6) | M3-E02 | 0.5 |
+| `MysqlConnection` in `rastai-formats`, the MySQL dataset reader (`layout/python.md`) | M5-E07 | 2 |
+| E01: `tables.rs`, `upsert.rs`, `type_mapping.rs`, `migrations/` | M11 | 2 |
+| E02: `mysql.rs`, `streams.rs`, `batch.rs`, `sync.rs`, `backoff.rs`, `status.rs`; the server's `archive_task.rs` and `archive.configure`, `status`, `sync`, for run and daemon logs | M11 | 5 |
+| E03: the `vault_changes` stream, the encryption check, opt-in, delete propagation and tombstones | M11 | 3 |
+| E04: `objects/folder.rs`, then `objects/s3.rs` and `sigv4.rs` | M11 | 4 |
+| E05: `prune.rs`, `restore.rs`, `verify.rs`, `purge.rs`, the rebuild's pull step, kill -9 rows 20–24 | M11 | 4 |
+| E06: Settings > Storage > Archive (frontend doc) | M11 | 2 |
+| E07: the `mysql-archive` CI job | M11 | 1 |
+
+M11 comes after the 90-day plan. It depends on M3-E02, M5-E04 and M9-E03, and it does not gate M10.
+
+---
+
+## 15. Test map for the control plane
 
 | Kind | Location | Runs | Covers |
 |---|---|---|---|
-| Unit | `#[cfg(test)] mod tests` at the bottom of each file | `just test-rust` on Linux, macOS and Windows CPU runners | pure functions: parsers, naming, hashing, CRC, semver, paths, stats |
-| Crate integration | `crates/<crate>/tests/<topic>.rs` | same | the per-crate tables in sections 3–9 |
+| Unit | `#[cfg(test)] mod tests` at the bottom of each file | `just test-rust` on Linux, macOS and Windows CPU runners | pure functions: parsers, naming, hashing, CRC, semver, paths, stats, SQL text |
+| Crate integration | `crates/<crate>/tests/<topic>.rs` | same | the per-crate tables in sections 3–9 and 14 |
 | Corpora | `fixtures/documents/`, `fixtures/safetensors/`, `fixtures/event-logs/`, `fixtures/conversations/` | same, plus the wheel and WASM parity tests | one verdict and code per file, identical in Rust, Python and WASM |
-| Golden | `fixtures/proto-golden/`, `fixtures/command-golden/copy-as.json`, `fixtures/mcp/server/`, `fixtures/diagnostics/` | same | wire bytes, Connect JSON, CLI/MCP naming, MCP transcripts, rendered diagnostics |
-| Fuzz | `crates/rastai-formats/fuzz/`, `crates/rastai-store/fuzz/`, `crates/rastai-server/fuzz/` | nightly, 10 minutes per target | JSON reader, documents, safetensors, zip, inflate, conversation import, event frames, request-gate headers |
-| Crash | `tests/crash/` (`rastai-crash-tests`) | `just test-crash` on Linux | the kill -9 matrix of flows/platform.md 6.5; rows 1–3, 6, 7, 9, 10 exercise these crates |
+| Golden | `fixtures/proto-golden/`, `fixtures/command-golden/copy-as.json`, `fixtures/mcp/server/`, `fixtures/diagnostics/`, `fixtures/ops/`, `fixtures/mysql/type-mapping/` | same | wire bytes, Connect JSON, CLI/MCP naming, MCP transcripts, rendered diagnostics, per-op shapes, counts and FLOPs, MySQL type mapping |
+| Fuzz | `fuzz/` in `rastai-formats`, `rastai-store`, `rastai-server`, `rastai-mcp`, `rastai-archive` | nightly, 10 minutes per target | `json_reader`, `read_document`, `safetensors_header`, `gguf_header`, `zip_reader`, `inflate`, `conversation_import`, `event_frame`, `request_gate`, `connect_json`, `jsonrpc_decode`, `archived_frame` (contracts §12.5) |
+| Crash | `tests/crash/` (`rastai-crash-tests`) | `just test-crash` on Linux; rows 20–24 in `just test-archive` | the kill -9 matrix of flows/platform.md 6.5; rows 1–3, 6, 7, 9, 10, (L2) 18 and 19, and 20–24 exercise these crates |
+| Archive | `crates/rastai-archive/tests/`, the `mysql-archive` CI job | `just test-archive` against MySQL 8.4, 9.7, MariaDB and MinIO (M11-E07) | section 14.9 |
 | End to end | `tests/e2e/` | Playwright and CLI scripts against a real daemon (frontend doc) | one command through HTTP, CLI and MCP; `rastai eval test` exit codes; the headless tunnel |
 | Rebuild equality | `crates/rastai-store/tests/rebuild_index.rs`, `fixtures/data-dirs/` | `just test-rust` | live index equals rebuilt index, table by table |
 
-Fixtures this doc adds: `fixtures/diagnostics/`, `fixtures/mcp/server/`, `fixtures/data-dirs/`, `fixtures/harness-import/`, versioned document folders `fixtures/documents/<type>/v<n>/` for migrations, `fixtures/models/<family>/expected_counts.json`, and `fixtures/gguf/`.
+Fixtures this doc relies on are listed in contracts §12.5 and §15.8: `fixtures/diagnostics/`, `fixtures/mcp/server/`, `fixtures/data-dirs/`, `fixtures/harness-import/`, `fixtures/documents/<type>/v<n>/`, `fixtures/models/<family>/expected_counts.json`, `fixtures/gguf/`, `fixtures/ops/`, `fixtures/mysql/type-mapping/`.
 
 Windows and macOS runners build and test every crate in this doc. Unix-only pieces (`daemon.sock` peer credentials, `statvfs`) sit behind one function each with a `#[cfg(unix)]` body and a Windows body that returns a typed "not supported yet" error, so tier 2 compiles from day one (§4).
 
 ---
 
-## 15. Changes this doc needs in contracts.md
+## 16. Contracts follow-ups
 
-Each lands in contracts.md in its own PR before code uses it (§29).
+Contracts v1.1 folded in every name this doc used to list (its "New names" section is gone; contracts §15 holds them). Four points it doesn't settle yet; each needs a contracts PR before code uses it.
 
-| # | Contracts section | Change | Why |
+| # | Contracts section | Point | This doc's default |
 |---|---|---|---|
-| 1 | §2.1 `rastai-store` | internal deps + `rastai-proto`; external + `prost`, `tokio` (`sync` only); − `blake3` | the store decodes `EventRecord` to index it; writer replies use a oneshot; hashing goes through `rastai_formats::hashing` |
-| 2 | §2.1 `rastai-cli` | internal deps + `rastai-mcp`, `rastai-store`, `rastai-proto`; external + `prost` | `rastai mcp` bridge; offline `storage rebuild-index`; binary `Subscribe` |
-| 3 | §2.1 `rastai-server` | external + `prost`, `serde_json` | Connect encoding; hand-written Connect JSON |
-| 4 | §2.1 | new rows `rastai-formats-wasm`, `rastai-formats-python`, `rastai-codegen` (dev), `rastai-crash-tests` (dev) | the two builds as their own small crates; codegen and crash tests as workspace members |
-| 5 | §1 tree | `tools/codegen/` is a Rust crate; `tests/crash/` is a Rust crate; `crates/rastai-formats/bindings/{wasm,python}/` | as above |
-| 6 | §4.1 `Diagnostic.path` | grammar `[<file>[:<line>:<column>]][#<json pointer>]` | one string carries both the location and the pointer |
-| 7 | §4.2 `CommandDescriptor` | + `arguments_schema_json`, `result_schema_json` (also proposed by the frontend doc) | forms, CLI flags and MCP tool schemas from one place; with these fields the registry holds the message itself (row 15) |
-| 8 | §3.3 `/api/health` | + `apis`, `plugin_api`, `node_protocol` | version discovery (section 11.4) |
-| 9 | §3.2 CLI and UI rows | `EventService` is binary-only in the prototype; `CommandService` accepts binary and JSON | section 11.3 |
-| 10 | §6.2 | handlers return `Result<CommandOutput, Vec<Diagnostic>>`; there is no `CommandError` type | matches flows/platform.md 3.1 |
-| 11 | §6.1 generated surfaces | CLI words and flags turn `_` into `-` | readable verbs (`add-conversation`) |
-| 12 | §7.3 | new durable daemon events `run.tags_changed`, `pin.changed` | rebuild keeps tags and pins (section 13.1) |
-| 13 | §8.2 | new table `log_cursors` (`log_name`, `acked_sequence`) | the daemon log's ack, like `runs.acked_sequence` |
-| 14 | §14 row 1 (§27) | + `wasm-bindgen-cli` (dev tooling), `libc` (foundation, `statvfs`, one file with an ADR for `unsafe`); `pyo3` and `wasm-bindgen` as already proposed | section 4.8, 6.4 |
-| 15 | §2.4 rule 3, §6.2 | The registry holds the generated `CommandDescriptor` (with row 7's fields); `find_command` and `list_commands` return it. The static row is `CommandRow`, with `command_id` and the generated `CommandKind`, so the twin test can compare field names. `RegisteredCommand` and `JobRequest` don't exist; `submit_job(server, spec: JobSpec, node_id)` takes the generated `JobSpec` | clears the three violations contracts §2.4 lists (sections 5.2, 8.3) |
-| 16 | §2.1, §14 row 1 | `blake3`: used only by `rastai-formats` (− from `rastai-store` and `rastai-node`; the node and `rastai-transport` hash through `rastai_formats::hashing`, node layout). `ed25519-dalek`: used only by `rastai-node` (− from `rastai-server`, which signs through `rastai_node::identity`) | one wrapper per library (§2.4 rule 8); sections 2.4, 6.5, 8.4 |
-| 17 | §2.1 `rastai-mcp` | internal deps + `rastai-proto` | `tool_from_command` takes the registry's `CommandDescriptor` (section 7.2) |
-| 18 | §5.2 plugin manifest, §8.2, §6.4 | `contributes.event_handlers[]{event_type, command_id}`; capability `events.handler@1`; table `plugin_event_deliveries` (`plugin_id`, `handler_id`, `command_id`, `event_type`, `log_name`, `sequence`, `run_id`, `subject_id`, `queued_unix_ms`, `delivered_unix_ms`, `journal_id`, `code`; key `plugin_id`, `handler_id`, `log_name`, `sequence`); command type `HandlerEventArgs` | Evaluation auto-run and pins with no lost events (section 12.5); the manifest field comes from training-evaluation §16 |
-| 19 | §7.3 `download.finished` | payload + `model_hash`, `size_bytes` | the node computes both when the download ends (flows/platform.md 1.5), so the `models` row is complete without `model.inspect` (section 6.4) |
-| 20 | §7.3, §8.3 | durable event `gateway.request_logged` (emitter worker); `gateway_log` + `run_id`, `finish_reason`, `stop_kind` | plan §10 row 33, node layout §6.6; indexed into `vault.db` (section 13.1) |
-| 21 | §7.1 | one writer of a run's `events.log`: the job, or the daemon's chain driver for chain runs | plan §10 row 18, training-evaluation flow 6; section 8.3 `record_chain_event` |
-| 22 | §5.2 | documents `rastai.converter/1`, `rastai.theme/1`, `rastai.eval_result/1`, `rastai.model_diff/1`, `rastai.sae_fit_check/1`, owned by `rastai-formats` | named by `layout/python.md` §15, frontend §20 and training-evaluation §16; section 4.1 |
-| 23 | §3.1 | CLI modes `rastai open [--print-url] [--replace-older-daemon]`, `rastai tunnel <user@host>`, `rastai node init --daemon-key <key>` | plan §10 row 2, designer-gym-remote C1 and C8, flows/platform.md 9.2; section 9.2 |
-| 24 | §10 | `RRS-E6501`–`6506` for the GGUF header reader | node layout §12 Q9; section 16.4 |
-
----
-
-## 16. New names
-
-### 16.1 Crates, binaries and modules
-
-| Name | What |
-|---|---|
-| `rastai-formats-wasm` | `crates/rastai-formats/bindings/wasm/`, cdylib, the only `wasm-bindgen` user; output to `packages/formats/src/wasm/` |
-| `rastai-formats-python` | `crates/rastai-formats/bindings/python/`, cdylib, the only `pyo3` user; module `rastai_formats._native` |
-| `rastai_formats._native.FormatsValidationError` | the one exception the wheel raises, carrying diagnostics JSON |
-| `rastai-codegen` | `tools/codegen/`, dev-only crate with bins `rastai-formats-codegen` (named in contracts §5.4) and `rastai-catalog-codegen` |
-| `rastai-crash-tests` | `tests/crash/`, dev-only crate for the kill -9 matrix |
-| `crates/rastai-store/fuzz/`, `crates/rastai-server/fuzz/` | cargo-fuzz crates beside the formats one, excluded from the workspace |
-| `tools/checks/check-unsafe`, `tools/checks/check-no-pickle` | CI checks (section 2.1) |
-
-### 16.2 Types, functions and constants other docs may reference
-
-| Name | Crate | What |
-|---|---|---|
-| `DiagnosticPath`, `format_path`, `parse_path` | `rastai-diag` | the path grammar of section 15 row 6 |
-| `RuntimeCatalog`, `PluginCatalogEntry`, `add_plugin_catalog`, `plugin_diagnostic` | `rastai-diag` | third-party `PLG-` codes at runtime |
-| `render_text`, `render_basic`, `render_json`, `init_logger`, `log_info` | `rastai-diag` | renderer and logger |
-| `ByteSource`, `SliceSource`, `FileSource`, `ByteSink`, `VecSink`, `FileSink` | `rastai-formats` | byte access without paths, both directions |
-| `ImportLimits`, `ReadOutcome`, `read_document`, `Document`, `EnvironmentFacts`, `check_environment`, `write_document` | `rastai-formats` | the four-layer API |
-| `ConverterDocument`, `ThemeDocument`, `EvalResult`, `ModelDiffReport`, `SaeFitCheckReport` | `rastai-formats` | the five document types other docs introduced (section 15 row 22) |
-| `TypeDescription`, `FieldDescription`, `FieldKind` (`Json`, `Enum` and `Proto` added to the frontend doc's kinds), `cli_position` | `rastai-formats` | descriptions; `x-rastai-cli-position` is the same hint in a plugin's `types.json`; `Proto` is contracts §4's name |
-| `parse_arguments`, `describe_arguments`, `describe_result`, `json_schema_for`, `read_plugin_types`, `HandlerEventArgs` | `rastai-formats` | command argument handling; the arguments every plugin event handler takes (12.5) |
-| `plan_safetensors`, `read_safetensors_header`, `check_safetensors_header`, `plan_gguf`, `encode_gguf_tensor`, `read_gguf_header`, `GgufHeader`, `GgufTensorInfo`, `gguf_tensor_bytes`, `write_zip_stored`, `ZipSource`, `copy_zip_entry`, `write_small_zip` | `rastai-formats` | byte formats |
-| `hash_bytes`, `StreamHasher`, `content_hash_of_value`, `model_hash` | `rastai-formats` | the one BLAKE3 wrapper |
-| `apply_patch`, `diff_values`, `JsonPatchOperation` | `rastai-formats` | undo patches |
-| `CommandRow`, `CommandRegistry`, `CommandFilter`, `CommandOutput`, `descriptor_from_row` | `rastai-core` | registry; the registry holds the generated `CommandDescriptor` |
-| `proto_json` functions (`job_spec_to_json`, `job_spec_from_json`, and the same for `HardwareFingerprint` and `SamplingSettings`) | `rastai-core` | named in contracts §4 |
-| `NodeSettings`, `node_settings`, `GatewaySettings`, `gateway_settings` | `rastai-core` | resolved settings for the node and the gateway |
-| `daemon_key_path`, `node_key_path`, `node_socket_path`, `node_hub_socket_path`, `worker_host_socket_path`, `job_socket_path`, `remote_node_socket_path` | `rastai-core` | path functions the node and transport layouts call |
-| `RETIRED_COMMANDS`, `RetiredCommand` | `rastai-core` | section 11.2 |
-| `cli_words`, `command_id_from_cli_words`, `flag_name`, `mcp_tool_name`, `command_id_from_mcp_tool_name`, `check_command_id` | `rastai-core` | naming |
-| `Scope::Plugin(String)` | `rastai-core` | a third-party plugin's own scope |
-| `PathEnvironment`, `DataPaths`, `read_path_environment`, `resolve_paths`, `hf_cache_dir` | `rastai-core` | paths |
-| `APP_VERSION`, `PLUGIN_API_VERSION`, `NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`, `API_PACKAGES` | `rastai-core` | versions |
-| `Store`, `open_store`, `IndexWrite`, `VaultWrite`, `write_index`, `write_vault`, `queue_vault_write`, `VaultCommit`, `wait_for_commit`, `ReaderPool`, `open_index_reader`, `open_vault_reader`, `IndexReaderGuard`, `VaultReaderGuard` | `rastai-store` | persistence API |
-| `HandlerCall`, `list_pending_handler_calls`, `vault_writes_for_records` | `rastai-store` | plugin handler queue; vault rows from run logs |
-| `EventLogWriter`, `EventLogReader`, `SyncPolicy`, `append_raw_frame`, `rebuild_index`, `RebuildOptions`, `RebuildReport`, `take_daemon_lock`, `free_bytes`, `check_free_space` | `rastai-store` | logs, rebuild, lock, disk |
-| `WRITER_BATCH_MAX` (256) | `rastai-store` | equals flows/platform.md `INDEX_BATCH_RECORDS` |
-| `McpStep`, `McpTool`, `ToolOutcome`, `McpSession`, `McpConnection`, `LineChannel`, `run_stdio_bridge`, `MAX_MESSAGE_BYTES` (4 MiB), `SUPPORTED_PROTOCOL_VERSIONS` | `rastai-mcp` | MCP |
-| `Server`, `run_daemon`, `DaemonOptions`, `CommandContext`, `check_arguments`, `record_daemon_event`, `submit_job`, `NodeLink`, `NodeTransport` | `rastai-server` | daemon internals named across docs |
-| `record_chain_event`, `resume_chains` (with `ChainStep`, `ChainAction`, `next_chain_action` from training-evaluation flow 6) | `rastai-server` | the chain driver |
-| `check_data_policy`, `PolicyTarget`, `policy_target_for_route` | `rastai-server` | the one data-policy check (`RRS-C1009`) |
-| `HOST_CAPABILITIES`, `FIRST_PARTY_CAPABILITIES`, `negotiate_capabilities`, `NegotiationResult`, `LoadedPlugin`, `PluginSource` | `rastai-server` | plugin host |
-| `match_event_handlers`, `deliver_handler_calls`, `deliver_pending_handler_calls` | `rastai-server` | plugin event handlers (12.5) |
-| `VaultLogSink` | `rastai-server` | named by the node/gateway doc |
-| `DesignStats`, `compute_design_stats`, `estimate_memory_bytes`, `check_fits`, `estimate_time_seconds` | `rastai-server` | ModelSpec analysis behind `design.stats` |
-| `TrainingMemoryEstimate`, `estimate_training_memory`, `largest_micro_batch` (training-evaluation flow 3); `plan_layer_placement`, `PlacementUnit`, `GpuBudget`, `LayerPlacement` (designer-gym-remote A8a) | `rastai-server` | ModelSpec analysis for training plans and multi-GPU placement |
-| `Mode` (with `Tunnel` and `NodeInit`), `ALIASES`, `EXIT_OK` … `EXIT_ERRORED` | `rastai-cli` | sections 9.2, 9.5 |
-
-### 16.3 Files, protocol details and conventions
-
-| Name | What |
-|---|---|
-| `[workspace.metadata.rastai.allowlist]` in `Cargo.toml` | the §27 crate table as data, read by `check-deps` |
-| `<install prefix>/share/rastai/plugins/` | preinstalled first-party `.rrsplugin` archives |
-| `<cache>/commands-<app version>.json` | the CLI's help cache |
-| `<data>/daemon/events-<n>.log` | rotated segments of the daemon log (the log itself is named in flows/platform.md) |
-| `log_cursors` table | section 15 row 13 |
-| `plugin_event_deliveries` table | section 15 row 18 |
-| `run.tags_changed`, `pin.changed` | durable daemon events (section 13.1) |
-| `Rastai-Client: <name>/<version>` header | client identification (section 11.4) |
-| `/api/health` fields `apis`, `plugin_api`, `node_protocol` | section 11.4 |
-| Capability names | the 22 names in section 12.2 (`commands@1`, `ui.section@1`, ..., `events.handler@1`, ..., `compute.target@1`) |
-| CLI global flags | `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help` |
-| Fixtures | `fixtures/diagnostics/`, `fixtures/mcp/server/`, `fixtures/data-dirs/`, `fixtures/harness-import/`, `fixtures/documents/<type>/v<n>/`, `fixtures/models/<family>/expected_counts.json`, `fixtures/gguf/` (tiny GGUF files, one K-quant made by the pinned `llama-quantize`) |
-
-### 16.4 Catalog codes
-
-In ranges contracts §10 already assigns. Codes defined in flows/platform.md (for example `RRS-C0001`–`0005`, `RRS-S0001`–`4001`, `RRS-P0001`–`4003`, `RRS-E3001`, `RRS-E5001`, `RRS-E5002`) and in the other docs are used, not repeated.
-
-| Code | Severity | Meaning |
-|---|---|---|
-| `RRS-E0001` | error | JSON syntax error at a line and column |
-| `RRS-E0002` | error | File is not valid UTF-8 |
-| `RRS-E0003` | error | Duplicate key in a JSON object |
-| `RRS-E0004` | error | NaN or Infinity is not valid JSON |
-| `RRS-E1001` | error | Required field missing |
-| `RRS-E1002` | error | Field has the wrong kind |
-| `RRS-E1003` | error | Unknown field |
-| `RRS-E1004` | error | Value is not one of the allowed values |
-| `RRS-E1005` | error | The `type` field doesn't match the file extension |
-| `RRS-E2001` | error | Reference doesn't resolve |
-| `RRS-E2002` | error | Shapes don't match along a graph edge |
-| `RRS-E2003` | error | Graph has a cycle with no recurrent node |
-| `RRS-E2004` | error | Input ranges overlap |
-| `RRS-E2005` | error | Duplicate id (graph node, test, tool, task) |
-| `RRS-E4002` | error | Migration step failed |
-| `RRS-E5003` | error | File is larger than the import limit |
-| `RRS-E5004` | error | JSON nested deeper than the import limit |
-| `RRS-E5005` | error | Graph has more nodes or parameters than the import limit |
-| `RRS-E6001` | error | Safetensors: file is shorter than the 8-byte header length |
-| `RRS-E6002` | error | Safetensors: header length points past the end of the file |
-| `RRS-E6003` | error | Safetensors: header is over the 100 MB limit |
-| `RRS-E6004` | error | Safetensors: header is not valid UTF-8 JSON (includes NaN and trailing bytes) |
-| `RRS-E6005` | error | Safetensors: header is not a JSON object |
-| `RRS-E6006` | error | Safetensors: header has duplicate keys |
-| `RRS-E6007` | error | Safetensors: a tensor entry is not an object |
-| `RRS-E6008` | error | Safetensors: unsupported dtype |
-| `RRS-E6009` | error | Safetensors: shape is not a list of non-negative integers |
-| `RRS-E6010` | error | Safetensors: `data_offsets` is not two integers |
-| `RRS-E6011` | error | Safetensors: `data_offsets` fall outside the data section (reversed, past the end, or beyond 64 bits) |
-| `RRS-E6012` | error | Safetensors: the shape's byte size overflows 64 bits |
-| `RRS-E6013` | error | Safetensors: the shape's byte size doesn't match the offsets |
-| `RRS-E6014` | error | Safetensors: tensors overlap |
-| `RRS-E6015` | error | Safetensors: gap in the data section |
-| `RRS-E6016` | error | Safetensors: bytes at the end belong to no tensor |
-| `RRS-E6017` | error | Safetensors: `__metadata__` must map strings to strings |
-| `RRS-E6501` | error | GGUF: not a GGUF file (bad magic) |
-| `RRS-E6502` | error | GGUF: unsupported version (only 3 is read) |
-| `RRS-E6503` | error | GGUF: header ends before its declared key-values or tensor infos |
-| `RRS-E6504` | error | GGUF: a count, string or array length is over the import limit |
-| `RRS-E6505` | error | GGUF: unknown value type or tensor type |
-| `RRS-E6506` | error | GGUF: a tensor's data lies outside the file |
-| `RRS-C0006` | warning | The daemon is running a different app version; restart it |
-| `RRS-C0007` | error | Command retired; use its replacement |
-| `RRS-P0004` | error | Plugin command id outside the plugin's namespace or in a reserved area |
-| `RRS-P0005` | error | Plugin command type missing from `types.json` |
-| `RRS-P0006` | error | Plugin contributes to an extension point it doesn't require |
-
-`offset_beyond_64_bits.safetensors` must give `RRS-E6011` in both readers: Rust sees a number that doesn't fit `u64`, Python sees a big integer past the end; both are "outside the data section".
+| 1 | §5.2 theme row | The `type{...}` token group has the same JSON key as the shared header's `type` field (`"rastai.theme"`), so a `rastai.theme/1` file can't hold both. | The group's key is `typography` (struct field `ThemeDocument.typography`, section 4.2a) until contracts renames it (open question 14). |
+| 2 | §15.9 | The `mysql-archive` job's tests need the addresses of the MySQL, MariaDB and MinIO services. | One test-only environment variable, named in contracts with M11-E07. Until then the tests skip. |
+| 3 | §8.2 rebuild rule | "Rebuild gains a last step that pulls the rows of pruned runs from the archive." The offline rebuild can't reach the archive: the store never imports it and only the daemon holds its credentials. | The offline rebuild makes the stubs; the pull runs at the next daemon start, before the first sync (section 13.2). The wording in contracts could say so. |
+| 4 | §15.1 | Code-level names that cross a crate boundary on the archive path and aren't listed yet. `rastai-store`: `set_vault_change_recording`, `RawFrame`, `RawFrameRead`, `read_next_raw_frame`, `frame_bytes_from_body`, `list_archive_cursors`, `list_journal_rows_after`, `list_vault_changes_after`, `list_prune_candidates`, and the archive variants of `IndexWrite` and `VaultWrite`. `rastai-archive`: `ArchiveSettings`, `archive_settings`, `ArchiveCredentials`, `SyncScope`, `ProjectRule`, `ArchiveState`, `ArchiveStatus`, `SyncReport`, `PrunePlan`, `plan_prune`, `RestoreRequest`, `PurgeSelection`, `AdminCredentials`. `rastai-server`: `PolicyTarget::ArchiveDatabase`. | Added to contracts with the epic that first builds them: the outbox switch with M3-E02, the rest with M11-E01. |
 
 ---
 
 ## 17. Open questions
 
-Each has the default this doc uses until the owner decides.
+Each has the default this doc uses until the owner decides. Row numbers are stable; decided rows are removed.
+
+**Decided on 2026-10-10 and removed:** row 2 (`statvfs`: ADR-0033), row 3 (`EventService` JSON: binary in the prototype, a generated codec later, contracts §4), row 4 (DEFLATE: `miniz_oxide`, ADR-0037), row 7 (one safetensors header check, in `rastai-formats`, contracts §2.4 rule 10), row 10 ("Copy as Python" uses `rastai.connect()`, contracts §15.2), row 11 (one CRC-32 table in `rastai-formats/src/crc32.rs`, contracts §7.1).
 
 | # | Question | Default |
 |---|---|---|
-| 1 | `rastai-diag::Diagnostic` mirrors `rastai.common.v1.Diagnostic` field for field. Is that "a type defined twice"? | Keep the twin: `rastai-diag` must stay free of `rastai-proto` (contracts §2.1, WASM size). `wire.rs` converts and a test pins the field lists. Alternative: make `rastai-diag` depend on `rastai-proto`. |
-| 2 | Free disk space needs `statvfs` (no std API). | `libc` in §27 and an ADR for `unsafe` in `rastai-store/src/disk_space.rs`. Alternative without `unsafe`: run `df --output=avail -B1` (Linux only). |
-| 3 | `EventService` JSON. | Binary only in the prototype. Hand-write the JSON codec if a non-TS, non-Rust client needs the stream. |
-| 4 | DEFLATE decoding for zip is in-house (~400 lines, fuzzed). | In-house. Alternative: allowlist `miniz_oxide` behind `zip/inflate.rs`. |
+| 1 | `rastai-diag::Diagnostic` mirrors `rastai.common.v1.Diagnostic` field for field. Is that "a type defined twice"? | Keep the twin, which contracts §2.4 rule 3 allows: `rastai-diag` must stay free of `rastai-proto` (WASM size). `wire.rs` converts and a test pins the field lists. |
 | 5 | OS randomness without a crate. | `/dev/urandom` now; add `getrandom` to §27 when Windows (tier 2) work starts. |
 | 6 | Where preinstalled plugins ship. | `<install prefix>/share/rastai/plugins/`; to confirm with the packaging scripts in `tools/release/`. |
-| 7 | One implementation of the strict safetensors contract? | Keep the Python reader (`layout/python.md`), sharing the corpus and codes. The wheel's `check_safetensors_header` is there if the Python owner prefers to delegate. |
 | 8 | Embedding the web app. | `build.rs` writes an `include_bytes!` table of `apps/web/dist/`. Alternative: serve from `<install prefix>/share/rastai/web/` and drop `build.rs`. |
-| 9 | Protocol version constants live in `rastai-core` (`NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`). | Keep them in core: the daemon and the node both read them. Reconcile with the node doc if it defines its own. |
-| 10 | "Copy as Python" uses `rastai.client.connect()` (frontend doc). | Use it; the Python packages doc confirms the name. |
-| 11 | Zip needs CRC-32/IEEE, the same checksum as event-log frames, whose table is in `rastai-store/src/event_log/crc32.rs`; `rastai-formats` can't depend on the store. | Move the table to `rastai-formats/src/crc32.rs` when the zip reader lands, and have `event_log/frame.rs` call it, so there is one CRC table. Alternative: a second copy in `zip/`, pinned to the store's by a shared test vector. |
+| 9 | Protocol version constants live in `rastai-core` (`NODE_PROTOCOL_VERSION`, `WORKER_PROTOCOL_VERSION`). | Keep them in core: the daemon and the node both read them (contracts §15.1). |
 | 12 | Pinned conversations become tests through an event handler (12.5). Reading `conversation.list {pinned: true}` when a suite runs needs no event at all. | Keep the handler, which makes the pin visible in the suite file at once and is durable through `plugin_event_deliveries`. The Evaluation plugin may also read pins at run time as a safety net; that is its owner's call (`rastai_eval/suites.py`). |
-| 13 | The identity type is `NodeIdentity` (node layout) although the daemon uses it for `daemon.key` too. | Keep the node layout's name. Rename both docs to `Identity` only if a third key holder appears. |
+| 13 | The identity type is `NodeIdentity` (node layout) although the daemon uses it for `daemon.key` too. | Keep the node layout's name. Rename to `Identity` only if a third key holder appears. |
+| 14 | The theme token group `type` collides with the header's `type` key (section 16 row 1). | Use `typography` in `rastai.theme/1` files and in `ThemeDocument`; the `--rr-font-*` and `--rr-line-height-*` variables don't change. |
+| 15 | Where the core event-type table behind `ListEventTypes` lives. | `rastai-server/src/events/event_types.rs`, internal to the daemon. If `docs/reference/events.md` should be generated by `rastai-codegen`, the table moves to `rastai-core` with a contracts entry. |
+| 16 | `archive.synced` is itself a durable daemon record, which the next pass archives. | Record it only after a pass that wrote something other than `archive.*` records (section 14.6), so an idle archive doesn't write one record per interval forever. |

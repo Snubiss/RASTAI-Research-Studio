@@ -33,6 +33,11 @@
 8. **Where readouts live:** `rastai_lens` stays in `python/` as a runtime feature exposed through the public API. The Psychology plugin holds the UI, the commands and the offline analyses.
 9. **If graph capture fails** (an unsupported op, or a backend without graph support), decode falls back to the eager step with an `RRS-M4xxx` warning, and the UI shows the measured speed.
 
+*Note since acceptance (2026-10-10):*
+- *Decision 7's budget is the owner's decision now, not a proposal (owner decision 14): +35% at CUDA-graph speed, shown in the UI, `RRS-L1001` above it, and the nightly `tests/gpu/test_live_panel_overhead.py` fails above it.*
+- *Decision 8: the math of the offline analyses (probes, projections, model diff, SAE fit check, attribution graphs, routing stats) lives in `rastai_lens` too; the Psychology plugin (`rastai_psychology`) owns their commands, jobs and UI (contracts §1). The plugin's interactive controls (sliders, lens toggles) call core commands such as `chat.settings.set` directly from the UI, never through the plugin's Python module, with an M4 latency test: p95 under 50 ms for the local round trip (contracts §2.4 rule 12).*
+- *The decisions are unchanged.*
+
 **Checked by:** a test that tokens with the panel on match tokens with it off (the spike: 64/64 in every configuration); the nightly overhead test; a two-GPU test capturing on GPU 1 after GPU 0 was used first.
 
 ## Consequences

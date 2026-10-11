@@ -1,6 +1,8 @@
 # ADR-0002: Workers own their event logs; the database is an index
 
-**Status:** Accepted, 2026-10-10
+**Status:** Accepted, 2026-10-10. Decision 7 amended by [ADR-0035](0035-mysql-long-term-archive.md), 2026-10-10.
+
+**Amended:** decision 7's rebuild. When a long-term archive is configured, `rastai storage rebuild-index` gains a last step that pulls the rows of pruned runs from the archive (ADR-0035 decision 8). With no archive, the decision is unchanged.
 
 ## Context
 
@@ -15,6 +17,7 @@
    - an 8-byte header, ASCII `RRSEVLG1`;
    - then frames: `body_length: u32 LE` | `checksum: u32 LE` (CRC-32/IEEE of the body) | `body` (protobuf `rastai.events.v1.EventRecord`);
    - `sequence` starts at 1 and has no gaps.
+   - *Note since acceptance (2026-10-10): a chain run's log (Teach it, RLHF, sweeps) has one writer too, the daemon's chain driver, and the daemon keeps its own durable records in `<data>/daemon/events.log` with the same frames (contracts §7.1, §16 row 18). The rule "one writer per log" is unchanged.*
 2. **Two event classes.**
    - Durable (metrics, state changes, checkpoints, artifacts, rollouts, eval results) go into the log.
    - Ephemeral (tokens, live packets, progress, peek steps, log lines) go over `WatchLive` only and may be dropped under backpressure.
@@ -28,7 +31,9 @@
 6. **Recovery when a log is opened:**
    - a torn or bad-checksum frame at the end is truncated (the writer died mid-write);
    - a bad frame anywhere else is corruption: `RRS-S2002`. The run is flagged and the file is kept for inspection.
-7. **`rastai.db` is an index.** Every table except `settings`, `tokens`, `nodes`, `plugins` and `projects` can be rebuilt from event logs, run records and the blob store (`rastai storage rebuild-index`).
+7. **`rastai.db` is an index.** Every table except `tokens`, `nodes`, `plugins` and `projects` can be rebuilt from event logs, run records and the blob store (`rastai storage rebuild-index`).
+   - *Amended by ADR-0035 (2026-10-10): when a long-term archive is configured, the rebuild gains a last step that pulls the rows of pruned runs from the archive. `archive_cursors` is reset by a rebuild, and the next sync re-sends from the start (the upserts are idempotent).*
+   - *Note since acceptance (2026-10-10): `settings` is removed from the list because there is no settings table. Settings live only in files (spec v5.4 §19, contracts §11.1). The rule is unchanged.*
 8. **Node-side state** (job states, leases, loaded models, sandboxes) isn't logged by the node. It rides in every `Heartbeat` as a snapshot, and the daemon reconciles against it.
 
 ```mermaid
@@ -80,4 +85,4 @@ sequenceDiagram
 
 - Spec: [§19](../spec/rastai_spec_v5.md#19-storage-and-durability-new), [§20](../spec/rastai_spec_v5.md#20-schemas-protocols-and-versioning)
 - Contracts: [§7 events](../architecture/contracts.md#7-events), [§8 storage](../architecture/contracts.md#8-storage)
-- Related: [ADR-0001](0001-process-layout.md), [ADR-0003](0003-storage-sqlite-vault-blobs.md), [ADR-0024](0024-no-pickle-checkpoints.md)
+- Related: [ADR-0001](0001-process-layout.md), [ADR-0003](0003-storage-sqlite-vault-blobs.md), [ADR-0024](0024-no-pickle-checkpoints.md), [ADR-0035](0035-mysql-long-term-archive.md)

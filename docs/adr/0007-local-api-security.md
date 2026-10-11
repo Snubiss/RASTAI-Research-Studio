@@ -1,8 +1,12 @@
 # ADR-0007: Loopback plus socket, a 0600 token file, Host and Origin checks, scoped tokens
 
-**Status:** Accepted, 2026-10-10
+**Status:** Accepted, 2026-10-10. Decisions 3 and 4 superseded in part by [ADR-0034](0034-login-codes-loopback-host-owner-token.md), 2026-10-10.
 
-**Pending change:** decisions 3 and 4 are superseded in part by ADR-0034, which plan task M1-01 writes: sign-in goes through `rastai open --print-url` and `token.login_code.create`, so Tauri never reads `owner.token`; any loopback Host on any port is accepted, with Origin equal to `http://` plus Host; a too-open `owner.token` refuses the start. See [Notes since acceptance](README.md#notes-since-acceptance) and [plan §10 rows 2, 22 and 36](../plan/implementation-plan.md#10-conflicts-between-docs-and-the-defaults-m1-01-adopts).
+**Superseded in part:**
+- Decision 3: sign-in goes through `rastai open --print-url` and `token.login_code.create`, so Tauri never reads `owner.token`. The session is bound to the origin that redeemed the login code. A cookie request without Origin passes only for `GET` and `HEAD` with `Sec-Fetch-Site` `same-origin` or `none` (ADR-0034 decisions 1, 2, 4, 5).
+- Decision 4: any loopback Host (`127.0.0.1`, `localhost`, `::1`) on any port is accepted, with Origin equal to `http://` plus Host (ADR-0034 decision 3).
+- Cross-origin browser clients are refused in v1 (ADR-0034 decision 7), and a too-open `owner.token` refuses the start with `RRS-C1008`, never a rotation (ADR-0034 decision 8).
+- Decisions 1, 2 and 5–10 stand.
 
 ## Context
 
@@ -21,12 +25,12 @@
 2. **The owner token** lives at `<config>/auth/owner.token`, mode 0600, and is created on first run.
 3. **Browser sessions:**
    - a one-time login code is exchanged at `POST /api/login` for a session cookie (HttpOnly, SameSite=Strict);
-   - Tauri reads `owner.token` and passes a one-time code in the start URL;
+   - Tauri reads `owner.token` and passes a one-time code in the start URL; *(superseded: the shell only runs `rastai open --print-url`, ADR-0034)*
    - `rastai serve` opens the browser the same way.
    - Tokens never go in `localStorage`.
 4. **Host and Origin are checked on every request to the TCP listener**, including `/v1/*` and `/mcp`.
-   - Host must be `127.0.0.1:<port>` or `localhost:<port>`.
-   - Origin, when present, must match the daemon's own.
+   - Host must be `127.0.0.1:<port>` or `localhost:<port>`. *(superseded: any loopback host on any port, ADR-0034)*
+   - Origin, when present, must match the daemon's own. *(superseded: Origin equals `http://` plus Host, and a cookie works only from the origin that redeemed its login code, ADR-0034)*
    - A failure returns `RRS-C1xxx` with no side effect. This blocks DNS rebinding and cross-site requests.
 5. **The CLI** uses `daemon.sock` and is authenticated by peer credentials (`SO_PEERCRED`, same uid).
 6. **Scoped tokens** (`token.create`, `token.list`, `token.revoke`):
@@ -69,4 +73,4 @@
 
 - Spec: [§21](../spec/rastai_spec_v5.md#21-command-layer-and-local-api-security), [§24](../spec/rastai_spec_v5.md#24-trust-and-privacy)
 - Contracts: [§3.2 who talks to whom](../architecture/contracts.md#3-processes-and-boundaries), [§6.3 scopes](../architecture/contracts.md#6-commands), [§8.1 paths](../architecture/contracts.md#8-storage)
-- Related: [ADR-0005](0005-command-layer.md), [ADR-0006](0006-ui-transport-http-only.md), [ADR-0011](0011-remote-transport-ssh-first.md), [ADR-0015](0015-plugins-and-licensing.md)
+- Related: [ADR-0005](0005-command-layer.md), [ADR-0006](0006-ui-transport-http-only.md), [ADR-0011](0011-remote-transport-ssh-first.md), [ADR-0015](0015-plugins-and-licensing.md), [ADR-0034](0034-login-codes-loopback-host-owner-token.md)

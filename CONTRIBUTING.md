@@ -26,10 +26,11 @@ Write code a person can read top to bottom without a guide.
 - Readable names: `embedding_size`, not `n_embd`.
 - Comments explain why, not what the syntax does.
 - Small functions; `main` is mostly a sequence of calls.
+- Frontend, plugin-UI and SDK code is plain JavaScript with React and JSX: `.js` and `.jsx` files only, no TypeScript syntax. Types go in short JSDoc comments (`@typedef`, `@param`, `@returns`), kept simple: no conditional or mapped types, no long generic templates. `just check` type-checks them with `tsc --noEmit` in `checkJs` mode; that's a dev-only check, nothing ships it. Generated declarations (`.d.ts`) live in generated folders and are never edited by hand.
 
 ## Dependencies
 
-Rastai builds in-house by default. A new external dependency is allowed only in the five categories of spec §27 (foundations, security-critical code, byte-exact compatibility surfaces, external engines, dev tooling). It must be added to the dependency register in the same pull request, with its reason and replacement path. CI enforces the list.
+Rastai builds in-house by default. A new external dependency is allowed only in the five categories of spec §27 (foundations, security-critical code, byte-exact compatibility surfaces, external engines, dev tooling). It must be added to the dependency register in the same pull request, with its reason and replacement path, and only one wrapper file in the owning crate or package may import it. CI enforces the list.
 
 ## Hard rules
 

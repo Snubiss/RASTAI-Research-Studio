@@ -1,12 +1,12 @@
 # Flows: Model Designer, Agent Gym and Remote Nodes
 
-**Status:** v2, 2026-10-10. Pre-build design. Built on spec v5.3 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names in `docs/architecture/contracts.md`. It follows the layout docs (`layout/python.md`, `layout/rust-control-plane.md`, `layout/rust-node-gateway-proto.md`, `layout/frontend-and-plugins.md`), the sibling flow docs (`flows/platform.md`, `flows/inference-psychology.md`, `flows/training-evaluation.md`) and the conflict defaults in `docs/plan/implementation-plan.md` §10. ADRs used: 0001, 0002, 0007, 0008, 0010, 0011, 0013, 0021, 0022, 0024, 0031. Anything contracts.md doesn't define is listed under [New names](#new-names).
+**Status:** v3, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names in `docs/architecture/contracts.md` v1.1, which is the only list of names: this file keeps none of its own. It follows the layout docs (`layout/python.md`, `layout/rust-control-plane.md`, `layout/rust-node-gateway-proto.md`, `layout/frontend-and-plugins.md`), the sibling flow docs (`flows/platform.md`, `flows/inference-psychology.md`, `flows/training-evaluation.md`) and the settled conflict answers in contracts §16. ADRs used: 0001, 0002, 0007, 0008, 0010, 0011, 0013, 0021, 0022, 0024, 0031, plus 0034 (sign-in and the request gate, C8), 0035 (long-term archive, C5 and C9) and 0036 (plain JavaScript frontend). Frontend files named here are `.js` and `.jsx`.
 
 ## Contents
 
 | Part | Flow | Triggered by |
 |---|---|---|
-| A. Model Designer | [A1. HF model import](#a1-hf-model-import) | `design.import`, drag-drop of a `config.json` folder, `.pt2` or `.onnx` |
+| A. Model Designer | [A1. HF model import](#a1-hf-model-import) | `design.import`, drag-drop of a `config.json` folder or an `.onnx` file |
 | | [A2. Compile, load weights and parity check](#a2-compile-load-weights-and-parity-check) | `design.compile`; `model.load` and `train.start` reuse the compiler |
 | | [A3. Design edit, validation and live stats](#a3-design-edit-validation-and-live-stats) | `design.edit`, `document.undo` / `document.redo` |
 | | [A4. Play button: compile then train](#a4-play-button-compile-then-train) | the Designer's play button |
@@ -32,14 +32,14 @@
 | | [C7. Resumable BLAKE3 transfers](#c7-resumable-blake3-transfers) | job inputs, adapter sync-back, on-demand fetches |
 | | [C8. Headless rastai serve and the UI over an SSH tunnel](#c8-headless-rastai-serve-and-the-ui-over-an-ssh-tunnel) | `rastai serve --headless`, `rastai tunnel` |
 | | [C9. Node update, unpair and teardown](#c9-node-update-unpair-and-teardown) | `node.update`, `node.unpair` |
-| | [New names](#new-names) · [Open questions](#open-questions) | |
+| | [Open questions](#open-questions) | |
 
 **How to read this file**
 - Participants are crates, packages and processes from contracts §2–§3. Crates that share a process (for example `rastai-server` and `rastai-store` in the daemon) are drawn apart when ownership matters. A legend under a diagram maps short ids when an alias is abbreviated.
 - Worker calls into the node go through `WorkerHostService` on `worker-host.sock`. Diagrams draw them straight to the node part that does the work (`rastai-sandbox`, the node's `rastai-mcp` client, the node gateway).
-- **Error codes.** Codes in this file's own areas (`RRS-E7xxx` importers, `RRS-M`, `RRS-R`, `RRS-N`) are concrete numbers. Where `layout/rust-node-gateway-proto.md` already assigned a number (`RRS-N0001`–`N0003`, `RRS-N3001`–`N3006`, `RRS-R1001`–`R1010`), this file uses it; new numbers are listed under New names. Codes owned by other areas are cited with their meaning, for example "`RRS-J1001` (killed by a signal)", or by range when docs still disagree, for example "`RRS-H3xxx` (GPU out of memory)". The catalog renumbering task (plan M1-13) maps them.
+- **Error codes.** Every code named here is in contracts §10.3, which owns the number and the title; this file defines none. Collisions between docs were settled in contracts §10.2, so the numbers below are final. Codes are cited by number and meaning, for example `RRS-J1001` (killed by a signal).
 - **Durable** means in an event log, `rastai.db`, `vault.db`, the blob store, a project file or a container label. **Ephemeral** means it may be dropped.
-- Signatures in code blocks are illustrative. They show the house style (plain data, small functions, no builders or frameworks), not final APIs.
+- Signatures in code blocks are illustrative. They show the house style (plain data, small functions, no builders or frameworks), not final APIs. Frontend samples are plain JavaScript with short JSDoc, never TypeScript syntax.
 
 ---
 
@@ -47,7 +47,7 @@
 
 ## A1. HF model import
 
-Runs when the user imports a model into the Designer: `design.import` with an HF repo, a local model folder, a `.pt2` (`torch.export`) archive or an `.onnx` file, from the Designer section (`import/ImportDialog.tsx`), the CLI, MCP or a drag-drop.
+Runs when the user imports a model into the Designer: `design.import` with an HF repo, a local model folder or an `.onnx` file, from the Designer section (`import/ImportDialog.jsx`), the CLI, MCP or a drag-drop. A `torch.export` graph comes in only from a live notebook session (`import_exported_program`); a `.pt2` file is refused (A1b).
 
 ### A1a. Request path
 
@@ -70,6 +70,7 @@ sequenceDiagram
   W->>W: size and depth limits on config.json
   W->>W: find_family by model_type
   W->>W: build the ModelSpec, unknown parts become opaque graph nodes
+  W->>W: check every header with rastai_formats.check_safetensors_header
   W->>W: match weight names and shapes against the headers
   W->>W: validate through the rastai_formats PyO3 wheel
   W->>NODE: PutBlob with the ModelSpec JSON
@@ -83,17 +84,17 @@ sequenceDiagram
 ```
 
 - **Import never downloads weights.** Two HTTP Range requests per safetensors file read the 8-byte length and the JSON header (the in-house HF client in `rastai-node` `downloads.rs`). DeepSeek-V2-Lite (about 31 GB) imports in seconds. Headers are cached as JSON under `<cache>/hf-headers/`; `config.json` and the small JSON files go into the HF cache in its standard layout.
-- **Import runs on the embedded node** as job kind `compile` (`rastai_worker/jobs/compile_design.py`, plan §10 row 13). It needs no GPU and no lease. Local folders, `.pt2` and `.onnx` files skip the download step. A file dropped on a UI that talks to a remote daemon arrives through `PUT /api/blobs` first.
+- **Import runs on the embedded node** as job kind `compile` (`rastai_worker/jobs/compile_design.py`, contracts §16 row 13). It needs no GPU and no lease. Local folders, `.pt2` and `.onnx` files skip the download step. A file dropped on a UI that talks to a remote daemon arrives through `PUT /api/blobs` first.
 - **The daemon is the only writer of project files.** The job hands back a blob. The daemon parses it again with `rastai-formats` (parse at both ends, contracts §4) and writes `designs/<name>.rrsmodel`.
 - **Post-job actions are driven by the indexed event and keyed by `job_id`.** If the daemon crashes between the job's success and the document write, it re-indexes the event after restart and does the write then. Running it twice is harmless.
 - **Gated repos:** the node gets the token from `NodeHubService.GetSecret(hf_download)`. A license that isn't accepted fails the download with `RRS-N3005`, whose fix runs `hf.license.check`.
 
 | Failure | What happens | User sees | Persisted |
 |---|---|---|---|
-| Network drop during the header fetch | The download job retries with backoff, then fails | the download code (platform 1.5), retry button | Nothing in the project |
+| Network drop during the header fetch | The download job retries with backoff, then fails | `RRS-N3009` (download interrupted; retries used up), retry button | Nothing in the project |
 | Repo or file missing | Download fails at the file list | `RRS-N3004` | Nothing |
 | `config.json` not JSON, too big or too deep | Job fails before mapping | `RRS-E0001` (syntax), `RRS-E5003` (too big) or `RRS-E5004` (too deep) with the path | Nothing |
-| Bad safetensors header | Strict contract check fails | `RRS-E60xx` naming the file and the rule (ADR-0029) | Nothing |
+| Bad safetensors header | `check_safetensors_header` rejects it (one implementation, in `rastai-formats`) | `RRS-E6001` to `RRS-E6017` naming the file and the rule (ADR-0029) | Nothing |
 | kill -9 of the import job | Node records the exit by signal; job `failed` | `RRS-J1001` (killed by a signal) | No `.rrsmodel`; a stray draft blob is collected by GC |
 | Disk full or permission denied writing the design | Write fails before the rename; the document is unchanged | `RRS-S3002` (disk full) or `RRS-S0004` (not writable) | Draft blob kept; the command can be re-run |
 
@@ -103,7 +104,8 @@ sequenceDiagram
 flowchart TD
   SRC{"Source kind"}
   SRC -->|"HF config.json"| REMOTE{"auto_map present (remote code)"}
-  SRC -->|".pt2 archive"| PT2{"Pickled payload in the archive"}
+  SRC -->|".pt2 file"| REF["Refuse with RRS-E7004<br/>payload never opened"]
+  SRC -->|"torch.export session in a notebook"| ATEN["import_exported_program<br/>map aten ops to ModelSpec ops"]
   SRC -->|".onnx file"| ONNX["Decode with the generated onnx_proto classes"]
   REMOTE -->|"yes"| WARN["RRS-E7003 warning<br/>remote code never runs"]
   REMOTE -->|"no"| FAM{"find_family matches model_type"}
@@ -124,8 +126,6 @@ flowchart TD
   COMPAT -->|"no"| VIEW["View-only design"]
   CC --> VALID
   VIEW --> VALID
-  PT2 -->|"yes"| REF["Refuse with RRS-E7004"]
-  PT2 -->|"no"| ATEN["Read the graph JSON only<br/>map aten ops to ModelSpec ops"]
   ATEN --> OPS{"Every op mapped"}
   ONNX --> OPS
   OPS -->|"yes"| VALID
@@ -133,11 +133,11 @@ flowchart TD
   OPQ --> VALID
 ```
 
-- **Import never fails outright** (spec §11). The only hard stops are unreadable input, the untrusted-import limits (`RRS-E5xxx`), a bad safetensors header and a pickled `.pt2`.
+- **Import never fails outright** (spec §11). The only hard stops are unreadable input, the untrusted-import limits (`RRS-E5xxx`), a bad safetensors header and a `.pt2` file.
 - **What "opaque" covers:** a config feature the family doesn't support (for example an unknown RoPE scaling type) turns only that block opaque. Unmapped tensors under a block prefix (`model.layers.<i>.`) turn that block opaque; unmapped top-level tensors turn the whole model opaque. The warning lists every tensor it covers. A config with neither `model_type` nor `architectures` takes the whole-model path with `RRS-E7001`.
 - **`compat_class`:** every opaque graph node from an HF source gets `opaque.compat_class` = the config's `architectures[0]`, when that class exists in the pinned `transformers`. It means "the compat runtime can run the model that contains this node" (A2b).
-- **`.pt2` archives are read as data.** `importers/torch_export.py` opens the zip with the zip-bomb and zip-slip limits (`RRS-E5002`, `RRS-E5001`) and reads `serialized_exported_program.json`. It never calls `torch.export.load`, which unpickles. A pickled payload is refused (`RRS-E7004`); weights must come as safetensors. A live `ExportedProgram` in a notebook goes through `import_exported_program` with no file at all.
-- **ONNX** is decoded with Python classes generated from a vendored `onnx.proto` (`importers/onnx_proto/`, protobuf runtime only, no `onnx` package).
+- **`.pt2` files are refused.** A `.pt2` archive may hold pickled tensor data, and no loader that never unpickles has been verified yet (`RRS-E7004`; contracts 15.2). `torch.export` graphs come in only from a live session: `importers/torch_export.py` is reached through `import_exported_program` from a notebook, with no file at all. Weights must come as safetensors. The importer never calls `torch.export.load`, which unpickles.
+- **ONNX** is decoded with Python classes generated from the vendored `proto/third_party/onnx/onnx.proto` (`importers/onnx_proto/`, protobuf runtime only). The `onnx` package is not imported here; only the export job uses it (A6).
 
 A family is plain data plus a few small methods (`layout/python.md` §2.2), in the style of the spike's name tables:
 
@@ -163,7 +163,8 @@ def import_hf_config(config: dict, weights_source: str) -> ImportResult:
 
 **Tests:**
 - `python/rastai_models/tests/test_importers.py`: golden tests. Each `fixtures/models/<family>/config.json` produces the expected `.rrsmodel` in `fixtures/documents/model/valid/`. Cases: an unknown `model_type` gives one opaque node with diagnostics, never an exception (plan M6-E04); an unknown RoPE type in a Llama config gives one opaque block; an extra tensor turns its block opaque; `auto_map` gives `RRS-E7003`.
-- `fixtures/documents/import/invalid/`: a pickled `.pt2` (`RRS-E7004`), an oversized config (`RRS-E5003`), the 33-file safetensors corpus (`RRS-E60xx`).
+- `fixtures/documents/import/invalid/`: a `.pt2` file (`RRS-E7004`), an oversized config (`RRS-E5003`), the 33-file safetensors corpus (`RRS-E60xx`; Python gets the same verdict as Rust because it calls the wheel).
+- Fuzzing: the `json_reader` and `safetensors_header` targets in `rastai-formats` cover this flow's untrusted input (contracts 12.5). ONNX goes through the protobuf runtime, not an in-house parser.
 - `crates/rastai-node/tests/headers_only.rs`: against the in-house fake HF server, only Range requests touch weight files.
 - `tests/crash/import_kill.rs`: kill -9 the import job, and separately the daemon, at named pause points; no partial `.rrsmodel` ever exists and a re-run completes.
 
@@ -197,7 +198,7 @@ sequenceDiagram
   NODE->>W: WorkerService.Hello
   W->>W: parse the spec file through the rastai_formats PyO3 wheel
   W->>W: compile_model on the meta device
-  W->>FS: read safetensors headers, strict contract
+  W->>W: check every safetensors header through the rastai_formats wheel
   W->>FS: read tensors straight to the device in the target dtype
   W->>W: strict bind, every parameter loaded or new, every tensor used
   W->>W: seeded init for new graph nodes
@@ -214,19 +215,20 @@ sequenceDiagram
 ```
 
 - **Parse at both ends.** The daemon validated the document; the worker parses the same bytes again (`job.json` `resolved_models[...].spec_file`, `layout/python.md` §7.3), so a bad document can't reach the compiler.
-- **Meta device first, then straight to the device** (spike `load_model`): no CPU copy of the weights, so peak memory is the model, not twice the model.
+- **Meta device first, then straight to the device** (spike `load_model`): no CPU copy of the weights, so peak memory is the model, not twice the model. Python never validates a header itself: `rastai_formats.check_safetensors_header` accepts it first, then Python reads tensor bytes (contracts 2.4 rule 10).
 - **Strict bind** (spike `load_state_dict(strict=True)`): every parameter is loaded or explicitly new, and every tensor in the source is used. The rules per graph node are in the table below.
-- **`parity_check`** (`DesignCompileArgs`, new field):
+- **`parity_check`** (`DesignCompileArgs`):
   - `smoke` (default): strict bind, smoke forward, finite logits, shapes equal to `rastai-formats` shape inference (`rastai_models/smoke.py`). For a supported family the report also shows the family's CI parity record (version, tolerances, date).
   - `reference`: also runs the HF reference through the compat runtime and applies the ADR-0013 criteria (fp32: max |Δlogit| ≤ 0.005, mean KL ≤ 10⁻⁶, top-1 100%; bf16: our drift from fp32 ≤ 1.25× the reference's own), with the attention kernel pinned and template-forced positions skipped (spike 01b). Our model is freed first, so peak memory is the larger model, not the sum. Needs the `compat` dependency group in the node's environment; without it the check is skipped with `RRS-M3003`.
   - `off`: bind and smoke shapes only, for huge models where the forward pass is the expensive part.
 - **Stats parity.** The report compares the compiled parameter count with the daemon's `compute_design_stats` (`RRS-M0003` if they differ, which is a stats bug) and the measured peak memory with `estimate_memory_bytes`. The measured numbers are kept so ADR-0010's lease estimates can be corrected.
+- **Per-op golden fixtures.** Shapes, parameter counts and FLOPs are checked one op at a time before any whole design. Every op has one `fixtures/ops/<op>.json` (input shapes and attributes in; output shapes, parameter count and FLOPs per token out). Rust `compute_design_stats` and the Python compiler must both match it (contracts 2.4 rule 10), so a disagreement between live stats and the compiler shows up on one op, with its name, long before `RRS-M0003`.
 
 **Where each graph node's weights come from**
 
 | Graph node | Weights |
 |---|---|
-| In `weights.name_mapping` | The named tensor in `weights.source` (`hf:`, `blob:` or `ckpt:` model ref), through `Family.parameter_name` and `convert_tensor` |
+| In a `weights[]` entry's `name_mapping` | The named tensor in that entry's `source` (`hf:`, `blob:` or `ckpt:` model ref), through `Family.parameter_name` and `convert_tensor` |
 | New: heads, from-scratch designs | Seeded init per op (`init_weights`); the seed is in the run record |
 | `train_mode: lora` | Base from the source; LoRA `compress` random, `expand` zero, float32 master weights (spike `lora.py`) |
 | Opaque with `compat_class` | The compat runtime (A2b) |
@@ -243,7 +245,7 @@ def smoke_forward(model: CompiledModel, spec: ModelSpec) -> SmokeResult: ...
 |---|---|---|---|
 | Lease not available | Job stays `queued` with the holder named; `job.cancel` gives `cancelled` | "Waiting for GPU n" | Run record |
 | No `Register` within 60 s | `starting → failed` | `RRS-J0002` | Run record, `stderr.log` |
-| CUDA OOM while loading | The worker catches it and names the graph node it was loading | `RRS-H3xxx` (GPU out of memory) with the lease size | Run record; lease released |
+| CUDA OOM while loading | The worker catches it and names the graph node it was loading | `RRS-H3006` (out of GPU memory while loading) with the lease size | Run record; lease released |
 | kill -9 or crash | The node records the exit cause and releases the lease | `RRS-J1001` (killed by a signal) | `events.log` up to the last fsync |
 | Missing, unused or mis-shaped tensors | Bind stops before any forward | `RRS-M2002` / `RRS-M2003` / `RRS-M2004` with the first 20 names and a count | Report blob |
 | Non-finite logits | Smoke forward fails | `RRS-M3001` | Report blob |
@@ -280,13 +282,14 @@ flowchart TD
 **Tests:**
 - `tests/parity/` per family, fp32 and bf16, tiny random configs in CI and real weights nightly (ADR-0013).
 - `tests/parity/test_stats_parity.py`: for every template in `templates/designs/` and every family fixture, `compute_design_stats` equals the compiled parameter count exactly, and the memory estimate is within a stated margin of the measured peak.
+- `python/rastai_models/tests/test_op_fixtures.py`: for every op, the compiler's output shapes, parameter count and FLOPs equal `fixtures/ops/<op>.json`, the same files `crates/rastai-server/tests/modelspec_stats.rs` checks.
 - `python/rastai_models/tests/test_bind.py`: missing, unused and mis-shaped tensors give `RRS-M2002`–`M2004`; LoRA init matches the spike.
 - `python/rastai_models/tests/test_compat_runtime.py`: a fixture repo with only a `.bin` file is refused (`RRS-M2005`); `auto_map` is refused (`RRS-M1003`).
 - `tests/crash/compile_kill.rs`: kill -9 during weight loading; the lease is released and the job ends `failed` with `RRS-J1001`.
 
 ## A3. Design edit, validation and live stats
 
-Runs on every accepted change on the canvas: a drop, a connect, an attribute commit, a train-mode toggle, and every `document.undo` / `document.redo`. The user triggers it; `canvas/edit-gestures.ts` turns gestures into `design.edit` operations.
+Runs on every accepted change on the canvas: a drop, a connect, an attribute commit, a train-mode toggle, and every `document.undo` / `document.redo`. The user triggers it; `canvas/edit-gestures.js` turns gestures into `design.edit` operations.
 
 ```mermaid
 sequenceDiagram
@@ -317,17 +320,37 @@ sequenceDiagram
   end
 ```
 
-Legend: CV = `@rastai/canvas` (`DesignCanvas.tsx`); UI = the Designer section in `apps/web`; CL = `@rastai/client`.
+Legend: CV = `@rastai/canvas` (`DesignCanvas.jsx`); UI = the Designer section in `apps/web`; CL = the `CommandExecutor` the section holds (`@rastai/client`), called through the generated wrapper `designEdit(executor, args)`.
 
-- **Nothing crosses the network per frame.** Dragging, panning and zooming are local to `@rastai/canvas`. One `design.edit` goes out on drop; attribute fields send on commit (Enter or blur), not per keystroke. A move writes the graph node's `layout{x, y, collapsed}` (plan §10 row 10).
+- **Nothing crosses the network per frame.** Dragging, panning and zooming are local to `@rastai/canvas`. One `design.edit` goes out on drop; attribute fields send on commit (Enter or blur), not per keystroke. A move writes the graph node's `layout{x, y, collapsed}` (contracts 5.2).
 - **Meaning errors don't block an edit.** A shape mismatch (`RRS-E2002`) or an unconnected input is a diagnostic on the saved document, because users pass through invalid states while building. Only ops that can't be applied at all (unknown op, missing graph node, bad JSON Patch) are rejected.
 - **Autosave on every accepted edit.** There is no unsaved state.
 - **Missing plugin node types:** a file whose header `requires` plugins that aren't installed opens with placeholder graph nodes (shapes known) and the banner "Install N plugins (permissions: ...)", backed by `plugin.suggest` (platform 7.4). Other graph nodes stay editable; compile is refused (A2b).
 - **Multi-input designs:** overlapping input-map ranges (`RRS-E2004`) and a fusion node with mismatched inputs (`RRS-E2002`) are layer-3 errors.
-- **Blocks and the composer use this same pipeline.** `design.block.define` turns a selection into an entry in `blocks{}` plus `block` instances. Dropping a pretrained backbone (the pretrained-block composer) runs the A1 mapping for that model and inserts it as a `block` instance with its own `train_mode`; its weights bind through `weights.name_mapping` (one pretrained source per design until open question 2 lands).
+- **Blocks and the composer use this same pipeline.** `design.block.define` turns a selection into an entry in `blocks{}` plus `block` instances. Dropping a pretrained backbone (the pretrained-block composer) runs the A1 mapping for that model and inserts it as a `block` instance with its own `train_mode`; its weights bind through its own `weights[]` entry (one entry per pretrained part, so a design can compose several).
 - **Basic mode:** a text-generation goal on a from-scratch design shows a notice steering toward fine-tuning an import, with the reason (spec §11). It doesn't block anything.
+- **The canvas holds no domain logic** (contracts 2.4 rule 9). Shapes, stats, fits, validation and placement all come from the daemon as commands and events; the section keeps only view state (selection, drafts, zoom, open panels). So the CLI and MCP get the same results.
+- **Theme and colors.** Diagnostic marks and node colors come from theme tokens through `canvasColors(tokens)`. Error and warning severity colors are locked tokens no theme can change. A theme switch calls `setColors()` on the `GraphRenderer`; it never recreates the WebGL context.
 
-**Live stats** (`design.stats`, also pushed as `design.stats_updated`). `rastai-server` `modelspec_analysis/` computes them from `rastai-formats` shape inference. Target: under 50 ms for a 1,000-node design.
+```js
+// apps/web/src/sections/designer/canvas/edit-gestures.js
+import { designEdit } from "@rastai/plugin"; // generated wrapper, re-exported by the SDK
+
+/**
+ * Send one accepted canvas gesture as one design.edit call.
+ * Field names here are illustrative; DesignEditArgs in contracts 6.5 is the source.
+ * @param {CommandExecutor} host  the PluginHost from usePluginHost()
+ * @param {string} documentId
+ * @param {object} operation  one edit op, for example a move that writes layout{x, y}
+ * @returns {Promise<object[]>}  the diagnostics of the new document
+ */
+export async function sendEdit(host, documentId, operation) {
+  const outcome = await designEdit(host, { document_id: documentId, operations: [operation] });
+  return outcome.diagnostics;
+}
+```
+
+**Live stats** (`design.stats`, also pushed as `design.stats_updated`). `rastai-server` `modelspec_analysis/` computes them from `rastai-formats` shape inference. Target: under 50 ms for a 1,000-node design. Per-op shapes, parameter counts and FLOPs come from the golden files `fixtures/ops/<op>.json`, which the Python compiler must also match (A2).
 
 | Stat | How it's computed |
 |---|---|
@@ -337,14 +360,15 @@ Legend: CV = `@rastai/canvas` (`DesignCanvas.tsx`); UI = the Designer section in
 | Memory for batch × sequence | Weights + KV cache (MLA stores the latent; sliding layers store the window) + training activations with checkpointing + gradients and optimizer state for trainable graph nodes. Each term is shown separately |
 | Fits per target | For each connected node and GPU set: memory ≤ VRAM − `compute.vram_reserve_bytes`. "Fits now" also subtracts pinned leases; evictable leases show as "fits if chat is unloaded" |
 | Time per target | Training FLOPs ÷ (GPUs × peak FLOPS × MFU). MFU comes from past run records on that GPU, else a default marked as a guess |
-| Data warning | For from-scratch objectives, parameters greater than dataset tokens gives an `RRS-E3xxx` warning |
+| Layer placement | For two or more GPUs, the result carries the map from `plan_layer_placement` (A8). It is computed here only; Python applies it |
+| Data warning | For from-scratch objectives, parameters greater than dataset tokens gives a layer-4 warning (its catalog code is missing from contracts 10.3; [open question 13](#open-questions)) |
 | Shape errors | The layer-3 diagnostics, with graph node paths |
 
 **Versions and diff**
 - The file is written with sorted keys, 2-space indent, graph nodes sorted by `node_id` and edges by endpoints, so `git diff` is line-based and stable.
 - `content_hash` is updated on every write; `id` never changes.
 - Every compile, train and export snapshots the exact bytes into the blob store. The run record and the artifact catalog point at `<id>@<content_hash>`, so every trained model traces back to the exact design version.
-- `design.diff` takes two refs (a path, a blob, or `<id>@<hash>`) and returns a structural diff: graph nodes added and removed, attributes changed, edges changed (`diff/DesignDiff.tsx`).
+- `design.diff` takes two refs (a path, a blob, or `<id>@<hash>`) and returns a structural diff: graph nodes added and removed, attributes changed, edges changed (`diff/DesignDiff.jsx`).
 - `document.undo` applies the stored inverse JSON Patch through this same pipeline (platform 3.4), so validation, stats and the file write all run again.
 - "Save to a remote server" (spec §11) means the project lives on a headless daemon's machine (C8). The pipeline is the same; only the daemon is elsewhere.
 
@@ -358,12 +382,12 @@ Legend: CV = `@rastai/canvas` (`DesignCanvas.tsx`); UI = the Designer section in
 **Tests:**
 - `crates/rastai-server/tests/design_edit.rs`: every edit op; malformed ops are rejected with nothing written; undo and redo round-trip to identical bytes.
 - `tests/crash/design_edit_kill.rs`: kill -9 the daemon in a loop of edits; after restart the file is always a valid document and matches the database or is newer.
-- `crates/rastai-server/tests/modelspec_stats.rs`: stats for every template against hand-computed values; a 1,000-node design under 50 ms.
-- `tests/e2e/designer.spec.ts` (Playwright): drag, connect, see the shape error and the stats update, undo.
+- `crates/rastai-server/tests/modelspec_stats.rs`: stats for every template against hand-computed values; every `fixtures/ops/<op>.json` matches `compute_design_stats`; a 1,000-node design under 50 ms.
+- `tests/e2e/designer.spec.js` (Playwright): drag, connect, see the shape error and the stats update, undo.
 
 ## A4. Play button: compile then train
 
-Runs when the user presses play on a design (`actions/CompileAndTrain.tsx`). It chains existing commands; no new work happens in the daemon.
+Runs when the user presses play on a design (`actions/CompileAndTrain.jsx`). It chains existing commands; no new work happens in the daemon.
 
 ```mermaid
 flowchart LR
@@ -381,11 +405,11 @@ flowchart LR
 - The compile job is a fast check. The train job compiles again in its own process, which is cheap on the meta device and keeps jobs independent.
 - `train.start` uses `model_ref = design:<document_id>` and records the snapshot `<id>@<content_hash>` in the run record, so later edits never change what a run trained.
 
-**Persisted:** the design snapshot blob, the compile run and the training run records. **Tests:** `tests/loop/` (design → train → eval → ONNX export → re-import, CPU, under 10 minutes, spec §29); `tests/e2e/designer.spec.ts` second half (design → train → ONNX export from the UI, the §32 week-13 exit).
+**Persisted:** the design snapshot blob, the compile run and the training run records. **Tests:** `tests/loop/` (design → train → eval → ONNX export → re-import, CPU, under 10 minutes, spec §29); `tests/e2e/designer.spec.js` second half (design → train → ONNX export from the UI, the §32 week-13 exit).
 
 ## A5. Eject to PyTorch
 
-Runs when the user picks "Export to PyTorch" (`design.eject`, `actions/EjectDialog.tsx`). The output is readable PyTorch source plus safetensors with no `rastai` import (spec §11).
+Runs when the user picks "Export to PyTorch" (`design.eject`, `actions/EjectDialog.jsx`). The output is readable PyTorch source plus safetensors with no `rastai` import (spec §11).
 
 ```mermaid
 sequenceDiagram
@@ -460,9 +484,9 @@ sequenceDiagram
 ```
 
 - **The round trip is in-house.** Running ONNX would need onnxruntime, which isn't allowed. Instead the export is re-imported through our own ONNX importer and compiled, which checks the exporter and the importer at once. `verify` defaults to true.
-- **Provenance** (spec §13): `metadata_props` gets the design `<id>@<content_hash>` and the "Made with Rastai, open recipe" pointer.
+- **Provenance** (spec §13): `metadata_props` gets the provenance keys of contracts 15.5, including `rastai.derived_from` (the design `<id>@<content_hash>`) and `rastai.created_with` (the "Made with Rastai, open recipe" pointer).
 - A round-trip mismatch is a warning: the file is kept and labeled unverified.
-- `rastai_models/onnx_export.py` is the only `torch.onnx` import. Its current exporter needs extra Python packages; see [open question 1](#open-questions).
+- `rastai_models/onnx_export.py` is the only `torch.onnx` import. The exporter imports the `onnx` and `onnxscript` packages; both are on the §27 allowlist under the `torch.onnx` row and are used only by `export` jobs (contracts 2.5).
 
 **Persisted:** `model.onnx` as a blob (artifact kind `onnx`) with lineage. **Tests:** `tests/loop/` (export → re-import → outputs match); `python/rastai_models/tests/test_onnx_roundtrip.py` per template.
 
@@ -486,7 +510,7 @@ flowchart TD
   SRC -->|"none"| INIT
   SRC -->|"hf"| HFC{"In the local HF cache"}
   SRC -->|"blob or ckpt"| DMN{"Daemon reachable on daemon.sock"}
-  HFC -->|"yes"| LOAD["In-house safetensors reader<br/>strict bind"]
+  HFC -->|"yes"| LOAD["Header check through the rastai_formats wheel<br/>then tensor bytes, strict bind"]
   HFC -->|"no"| RAISE4["raise RRS-M2001, never downloads"]
   DMN -->|"yes"| PATH["artifact.list or checkpoint.list<br/>gives the local file path"]
   DMN -->|"no"| RAISE4
@@ -496,8 +520,10 @@ flowchart TD
 ```
 
 - **Same code as the app:** parsing is the `rastai-formats` PyO3 wheel; compiling is `rastai_models`. A design that compiles in the app compiles here.
-- **Files from a newer schema version** open read-only in the app (§23); here they load if every field is understood, else `RRS-E4xxx`.
+- **Files from a newer schema version** open read-only in the app (§23); here they load if every field is understood, else the SDK raises `RRS-E1003` (unknown field).
 - **The SDK never downloads.** `RRS-M2001`'s fix text names `rastai model download` and `hf download`. The HF cache is found the same way as in the app (`$HF_HUB_CACHE`, then `$HF_HOME/hub`, then `~/.cache/huggingface/hub`). `blob:` and `ckpt:` sources are asked of a running daemon through `rastai.connect()`; the SDK never reads the data directory on its own.
+- **No second header validator.** `rastai_models/io/safetensors_reader.py` calls `rastai_formats.check_safetensors_header` and reads tensor bytes only after it accepts the header, so `RRS-E60xx` means the same thing here and in the app.
+- **Several GPUs:** `to_torch` puts the model on one device. If the file's `placement{}` is set, it is applied with `apply_placement`; the SDK never plans a split (A8).
 - The returned module is a standard `nn.Module` whose classes live in `rastai_models`. Observation hooks are off; `rastai.observe(model)` turns them on. Eject (A5) is the path with no `rastai` import at all.
 
 ```python
@@ -538,12 +564,13 @@ flowchart TD
   MOVE --> OUT
 ```
 
-- **Owner:** `rastai-server` plans for jobs, because the node needs bytes per GPU to grant leases before the worker starts. It already has per-graph-node memory from live stats and each node's `HardwareProfile`. The worker only applies the plan (`rastai_models.apply_placement`). `rastai.load()` without a daemon uses the Python twin `plan_placement` in `rastai_models/placement.py`; a parity test keeps the two planners identical (see [open question 11](#open-questions)).
-- **The plan is plain data:** `placement{node_id: gpu_index}`, the ModelSpec field contracts §5.2 already has. It travels in the job's spec snapshot.
+- **One owner: the Rust planner.** `plan_layer_placement` in `rastai-server` is the only code that plans placement (contracts 2.4 rule 10). The node needs bytes per GPU to grant leases before the worker starts, and the daemon already has per-graph-node memory from live stats and each node's `HardwareProfile`. The result is written into the ModelSpec `placement{}` field of the job's spec snapshot. Python has `rastai_models.apply_placement` and nothing else: it reads `placement{}` and puts each unit on its device. There is no Python planner and no parity test between two planners.
+- **`rastai.load()` without a daemon** applies the `placement{}` it finds in the file, or uses one device when the field is empty. To split a model in a notebook, ask a running daemon for the plan (`design.stats` returns it) and keep it in the file.
+- **The plan is plain data:** `placement{graph_node_id: gpu_index}`, the ModelSpec field of contracts 5.2. It travels in the job's spec snapshot.
 - **Budget per GPU** = VRAM − `compute.vram_reserve_bytes` − pinned leases. Evictable leases count as free, and the UI says which model would be unloaded (ADR-0010).
 - **Units never split a block.** A unit's memory includes its share of the KV cache for the configured batch and sequence length.
 - **GPU order** follows `compute.gpu_assignment`, else index order. Proportional fill keeps hops to one per GPU boundary.
-- A placement map set by hand (`design.edit` on `placement`) is checked, never rewritten.
+- A map already in `placement{}` (kept from an earlier plan, or edited by hand) is checked against the budgets and never rewritten. Over budget gives `RRS-M5001`.
 
 ```rust
 // crates/rastai-server/src/modelspec_analysis/layer_placement.rs
@@ -594,7 +621,7 @@ sequenceDiagram
   end
 ```
 
-- **All or nothing, in ascending order.** Leases are requested in GPU index order so two multi-GPU loads can't deadlock. If one is denied, the granted ones are released at once. Interactive loads fail fast with the lease-denied code (`RRS-H3xxx`); training jobs wait in `queued`. Training-evaluation flow 4.4 grants one `PINNED` lease per GPU; a placed model sends one size per GPU in `ResourceRequest.vram_bytes_per_gpu` (new field).
+- **All or nothing, in ascending order.** Leases are requested in GPU index order so two multi-GPU loads can't deadlock. If one is denied, the granted ones are released at once. Interactive loads fail fast with `RRS-H3001` (not enough GPU memory for this lease, holders listed); training jobs wait in `queued`. Training-evaluation flow 4.4 grants one `PINNED` lease per GPU; a placed model sends one size per GPU in `ResourceRequest.vram_bytes_per_gpu`.
 - **Decode across devices:** one static-shape CUDA graph per device segment, each captured on its own stream (spike 02: the default capture stream broke the second GPU). Between segments the hidden state is copied into the next segment's static input buffer, outside the graphs (`layout/python.md` §2.3). The 5080 and the 3090 have no NVLink, but one token's hidden state is a few KB. A capture failure falls back to eager decode with `RRS-M4001` (warning), never a failed load.
 - **Training a placed model:** LoRA and freezing work unchanged, because autograd follows the devices and optimizer state lives with its parameters. Gradient checkpointing runs per segment. DDP and FSDP2 are a different path, for models that fit on each GPU (spec §10).
 - **OOM while materializing a unit:** `RRS-M5004` names the GPU and the unit, both leases are released, and the model goes `failed → unloaded`.
@@ -606,8 +633,7 @@ sequenceDiagram
 
 **Tests:**
 - `crates/rastai-server/tests/layer_placement.rs`: table tests on fake GPUs (16 GB + 24 GB with the DeepSeek-V2-Lite config; tied embeddings; a unit too big; a dtype gap; a hand-set map over budget).
-- `tests/parity/test_placement_parity.py`: the Rust and Python planners give the same map on every fixture.
-- `python/rastai_models/tests/test_placement.py` (CPU CI): a tiny config split across two `cpu` devices through the placement code path gives logits identical to the unsplit model.
+- `python/rastai_models/tests/test_placement.py` (CPU CI): `apply_placement` with a map splits a tiny config across two `cpu` devices and gives logits identical to the unsplit model; an empty map puts everything on one device; a test greps that no planning code exists in `rastai_models`.
 - `tests/gpu/test_placement_two_gpus.py` (nightly): a tiny config split across `cuda:0` and `cuda:1` matches the single-GPU run within the ADR-0013 fp32 tolerance; real-weight DeepSeek-V2-Lite parity on both GPUs (ADR-0021, plan M6-E09).
 - `tests/crash/placement_kill.rs`: kill -9 during loading releases both leases.
 
@@ -619,14 +645,14 @@ The gym trains a policy by RL on agent tasks. Rollouts run in sandboxes on the n
 
 ## B1. Harness editing and import
 
-Runs when the user edits a harness (`harness.edit`, `harness.tool.toggle`), imports one (`harness.import`) or imports Harbor tasks (`gym.task.import`), from `harness/HarnessEditor.tsx`, `harness/HarnessImport.tsx` and `tasks/TaskImport.tsx`.
+Runs when the user edits a harness (`harness.edit`, `harness.tool.toggle`), imports one (`harness.import`) or imports Harbor tasks (`gym.task.import`), from `harness/HarnessEditor.jsx`, `harness/HarnessImport.jsx` and `tasks/TaskImport.jsx`.
 
 ```mermaid
 flowchart TD
   IN["harness.import or drag-drop"] --> KIND{"Input kind"}
   KIND -->|".mcp.json, Claude Desktop or VS Code config"| CFG["Read the server entries"]
   KIND -->|"server.json reference"| REG["Read package and remote entries"]
-  KIND -->|".mcpb bundle"| BUN["Unzip with zip-bomb and zip-slip limits<br/>read manifest.json"]
+  KIND -->|".mcpb bundle"| BUN["Unzip with the rastai-formats zip reader<br/>zip-bomb and zip-slip limits, read manifest.json"]
   KIND -->|"Agent Skills folder"| SK["Read SKILL.md front matter<br/>files become environment files"]
   CFG --> EACH{"Entry transport"}
   REG --> EACH
@@ -645,17 +671,17 @@ flowchart TD
 ```
 
 - **Stdio MCP servers run inside the sandbox,** so their side effects stay contained. `.mcpb` bundles are copied into the sandbox as environment files. The image must carry the runtime the server needs; B2's preflight checks it.
-- **Remote HTTP MCP servers are network permissions, not sandboxed tools** (spec §12). The node's `rastai-mcp` client calls them over HTTPS, only for hosts in `network_hosts`, and only after the user confirms the host list at `gym.start`. They show as network permissions in `harness/ToolList.tsx`.
+- **Remote HTTP MCP servers are network permissions, not sandboxed tools** (spec §12). The node's `rastai-mcp` client calls them over HTTPS, only for hosts in `network_hosts`, and only after the user confirms the host list at `gym.start`. They show as network permissions in `harness/ToolList.jsx`.
 - **Secrets never enter a harness.** MCP configs often carry API keys in `env`. The importer keeps the key names (`tools[].env_secret_names`), drops the values, and asks the user to store them with `secret.set`. At sandbox creation the node fetches them through `NodeHubService.GetSecret` (purpose `harness:<name>`) and passes them as container environment variables.
 - **Harbor tasks are data.** `gym.task.import` runs as job kind `data_import` (`rastai_rl.import_harbor_tasks`): task folders become `tasks[]` and `task_sources[]`, `task.toml` is read with the standard library, and solution scripts are kept out of anything the policy sees. A folder missing a required file is skipped with `RRS-R0004`.
 - **Images are never built.** `rastai-sandbox` never builds images (`layout/rust-node-gateway-proto.md` §5.6) and pulls only images the harness names (ADR-0031). A Harbor task that names a prebuilt image uses it. A task that has only a Dockerfile imports with `RRS-R0006`, whose fix text is the `podman build` / `docker build` command and the `environment.image` to set (see [open question 9](#open-questions)).
 - Editing (`harness.edit`, `harness.tool.toggle`) uses the A3 document pipeline: validate, atomic write, undo step, `document.changed`.
 
-**Persisted:** the `.rrsharness` file in `harnesses/` with undo steps; secrets in the OS keychain only; Harbor task folders as blobs referenced from `task_sources[]`. **Tests:** `crates/rastai-formats/tests/harness_import.rs` with fixtures for each input kind (`fixtures/harness-import/`) and the expected `.rrsharness` output, both ways (plan M7-E02); a test that no `env` value appears in any output; zip-slip and zip-bomb `.mcpb` fixtures rejected with `RRS-E5001` and `RRS-E5002`; `python/rastai_rl/tests/test_harbor_import.py` (solutions excluded, Dockerfile-only tasks give `RRS-R0006`).
+**Persisted:** the `.rrsharness` file in `harnesses/` with undo steps; secrets in the OS keychain only; Harbor task folders as blobs referenced from `task_sources[]`. **Tests:** `crates/rastai-formats/tests/harness_import.rs` with fixtures for each input kind (`fixtures/harness-import/`) and the expected `.rrsharness` output, both ways (plan M7-E02); a test that no `env` value appears in any output; zip-slip and zip-bomb `.mcpb` fixtures rejected with `RRS-E5001` and `RRS-E5002` (the zip reader inflates through `miniz_oxide`, and the `zip_reader`, `inflate` and `json_reader` fuzz targets in `rastai-formats` cover these inputs); `python/rastai_rl/tests/test_harbor_import.py` (solutions excluded, Dockerfile-only tasks give `RRS-R0006`).
 
 ## B2. Gym run start and preflight
 
-Runs when the user starts training an agent (`gym.start` from `runs/GymRunForm.tsx`: harness, base model, recipe GRPO, GSPO or PPO, group size, target node). Preflight fails fast, before the GPU work starts.
+Runs when the user starts training an agent (`gym.start` from `runs/GymRunForm.jsx`: harness, base model, recipe GRPO, GSPO or PPO, group size, target node). Preflight fails fast, before the GPU work starts.
 
 ```mermaid
 sequenceDiagram
@@ -702,7 +728,7 @@ sequenceDiagram
   SRV-->>UI: run page opens
 ```
 
-- **Daemon-side checks are free:** names resolve against the plugin registry (engines never import plugins, contracts §2.4 rule 6; metric ids are namespaced, for example `eval.pass_at_k`, plan §10 row 17). The `gym` capability comes from the handshake (C3). The base model's family must have a tool-call format, else `RRS-G0007` (tool calls not supported for this model family).
+- **Daemon-side checks are free:** names resolve against the plugin registry (engines never import plugins, contracts §2.4 rule 6; metric ids are namespaced, for example `eval.pass_at_k`, contracts 15.7). The `gym` capability comes from the handshake (C3). The base model's family must have a tool-call format, else `RRS-G0007` (tool calls not supported for this model family).
 - **Node-side admission is all or nothing** (`layout/rust-node-gateway-proto.md` §5.3): the job asks for `sandbox_count` slots at `StartJob`. More than `compute.sandbox_cap` is refused at once (`RRS-R1009`). Busy slots (`RRS-R1001`) or too little free RAM for the sandboxes' caps (`RRS-R1008`) keep the job `queued` with that reason, so a run never fails halfway through a group.
 - **One throwaway sandbox proves the real setup** before the model loads: the image, the caps, the tool servers and `tools/list`.
 - **Memory layout** follows ADR-0022: one base model, the `policy` adapter on for rollouts and updates, all adapters off for the reference, a value head for PPO, a `reward` adapter when the reward is a reward model on the same base. A reward model on a different base loads as a second model, and the plan shows the extra memory.
@@ -755,7 +781,7 @@ sequenceDiagram
 Legend: RL = `rollout_manager.py` and `agent_loop.py`; POL = `policy_server.py`, which answers `WorkerService.Generate` for the model ref `job:<job_id>` on the job's model thread; REW = a reward function, an Evaluation metric or the reward adapter, found by name in the `rastai_plugin` registry (`rewards.py`).
 
 - **Rollouts go through the gateway** (spec §12). The node gateway (`layout/rust-node-gateway-proto.md` §6.6) renders the chat template, tokenizes, parses tool calls, and calls back into the gym job's own policy. All token IDs come from one source (ADR-0008). There is no second copy of the model.
-- **Token IDs never round-trip through text.** The rollout keeps its token list. Each turn the gateway renders only the new segment (tool result plus the next assistant header) from `GatewayGenerateRequest.prior_token_ids` and appends its IDs; generated tokens are never re-encoded. A template that can't render a segment on its own fails with `RRS-G1006`.
+- **Token IDs never round-trip through text.** The rollout keeps its token list. Each turn the gateway renders only the new segment (tool result plus the next assistant header) from `GatewayGenerateRequest.prior_token_ids` and appends its IDs; generated tokens are never re-encoded. A template that can't render a segment on its own fails with `RRS-G1002` (chat template error).
 - **One writer per log.** The node gateway returns its log record as `GenerateFinished.gateway_log`; the job appends `gateway.request_logged` and puts long token lists into the rollout's trace blob. The node never writes the run's `events.log`.
 - **Concurrency:** up to `sandbox_count` rollouts run at once. At L1 the policy server decodes one request at a time; batched decode across a group's rollouts is the L2 step (`layout/python.md` §6.3).
 - **Tools:** `WorkerHostService.CallTool` reaches the node's `gym_tools.rs`, which runs the harness's stdio MCP servers inside the rollout's sandbox through `exec` and connects `rastai-mcp`'s client to them. A tool result with `is_error` is an observation for the agent. A tool server that crashes is restarted once; a second crash makes the rollout an infra failure (`RRS-R3003`).
@@ -792,7 +818,7 @@ flowchart TD
   PPO --> UPD
 ```
 
-- **Infra failures are not rewards.** Scoring a broken sandbox as 0 would teach the policy that the task is hard. Infra failures are retried, then excluded: a sandbox that failed to start (`RRS-R1004` pull failed, `RRS-R1005` exited at start), a lost engine (`RRS-R1013`), a tool server that crashed twice (`RRS-R3003`), and reward code that raised (`RRS-R2004`, traceback in `stderr.log`). Agent outcomes, including running out of time (`RRS-R1006`) or memory (`RRS-R1012`) inside the sandbox, are real results and get scored. `layout/python.md` §6.3 says failed sandboxes score 0; [open question 8](#open-questions) settles it, and this doc's default is exclusion.
+- **Infra failures are not rewards.** Scoring a broken sandbox as 0 would teach the policy that the task is hard. Infra failures are retried, then excluded: a sandbox that failed to start (`RRS-R1004` pull failed, `RRS-R1005` exited at start), a lost engine (`RRS-R1013`), a tool server that crashed twice (`RRS-R3003`), and reward code that raised (`RRS-R2004`, traceback in `stderr.log`). Agent outcomes, including running out of time (`RRS-R1006`) or memory (`RRS-R1012`) inside the sandbox, are real results and get scored. `layout/python.md` §6.3 states the same rule: a failed sandbox is never scored as 0.
 - **GSPO uses the same group advantages** as GRPO; it differs in the trainer step, where the importance ratio and clipping are per sequence (training-evaluation flow 11.4).
 - **All-equal rewards** carry no signal, so the group is skipped (training-evaluation flow 11.4). The fraction is logged as `zero_variance_group_fraction`, because a high value means the tasks are too easy or too hard.
 - Defaults (recipe settings, overridable in `gym.start`): `group_size` 8, `max_turns` 32, `infra_retry_limit` 1, `min_valid_group_members` 2, `max_dropped_groups_in_a_row` 3.
@@ -823,7 +849,7 @@ def group_advantages(rewards: list[float]) -> list[float]:
 
 ## B4. Live peek
 
-Runs when the user opens the live view of a running gym run (`gym.peek.start`, `gym.peek.stop`, `peek/LivePeek.tsx`). It is read-only.
+Runs when the user opens the live view of a running gym run (`gym.peek.start`, `gym.peek.stop`, `peek/LivePeek.jsx`). It is read-only.
 
 ```mermaid
 sequenceDiagram
@@ -853,11 +879,11 @@ sequenceDiagram
 - **Gaps are visible:** each event carries `rollout_id` and `step_index`, so the UI shows "N steps skipped" after drops. The full trace blob is always there once the rollout finishes.
 - Over a remote node the stream rides the same SSH session (C5). A network drop ends the stream (`RRS-N2002`); the UI calls `gym.peek.start` again after reconnect.
 
-**Persisted:** nothing durable; peek is ephemeral by design. **Tests:** `tests/gpu/test_gym_peek_overhead.py` (the budget); a `rastai_rl` unit test that no peek events are produced with no watcher; `tests/e2e/gym.spec.ts` (peek opens, shows steps, closes).
+**Persisted:** nothing durable; peek is ephemeral by design. **Tests:** `tests/gpu/test_gym_peek_overhead.py` (the budget); a `rastai_rl` unit test that no peek events are produced with no watcher; `tests/e2e/gym.spec.js` (peek opens, shows steps, closes).
 
 ## B5. Step mode and partial groups
 
-Runs when the user pauses one sandbox to step its agent by hand (`gym.step` with `action` `hold`, `step` or `release`, from `peek/StepControls.tsx`).
+Runs when the user pauses one sandbox to step its agent by hand (`gym.step` with `action` `hold`, `step` or `release`, from `peek/StepControls.jsx`).
 
 ### B5a. Hold, step, release
 
@@ -898,7 +924,7 @@ sequenceDiagram
 - **`STEP` with a `sandbox_id` leaves the job `running`.** Only that rollout leaves the batch. The rest of the group, and the run, carry on. The held sandbox still counts toward the cap, because its memory stays in use.
 - **A held rollout never enters a gradient.** It is user-steered and off-policy. Its reward is logged with `detached: true` for inspection only.
 - **Hold timeout:** a held sandbox untouched for `step_hold_timeout_seconds` (default 1800) is released automatically (`RRS-R2005`).
-- **Whole-run pause** (`SignalJob PAUSE` with no `sandbox_id`) is different: no new rollouts start, live rollouts pause at their next turn boundary with their sandboxes paused, and the trainer waits. `RESUME` continues all of them. An engine that can't pause (`RRS-R1007`) disables step mode for the run and says so in `StepControls.tsx`.
+- **Whole-run pause** (`SignalJob PAUSE` with no `sandbox_id`) is different: no new rollouts start, live rollouts pause at their next turn boundary with their sandboxes paused, and the trainer waits. `RESUME` continues all of them. An engine that can't pause (`RRS-R1007`) disables step mode for the run and says so in `StepControls.jsx`.
 
 ### B5b. Partial-group rule
 
@@ -993,7 +1019,7 @@ pub async fn create_sandbox(manager: &SandboxManager, job_id: Option<&str>, run_
 
 ## B7. Orphan cleanup
 
-Runs at node start (after job reattach), on every job's terminal state for that job's sandboxes, and on demand with `sandbox.cleanup` (`sandboxes/SandboxList.tsx`).
+Runs at node start (after job reattach), on every job's terminal state for that job's sandboxes, and on demand with `sandbox.cleanup` (`sandboxes/SandboxList.jsx`).
 
 ```mermaid
 flowchart TD
@@ -1013,7 +1039,7 @@ flowchart TD
 ```
 
 - **Only our containers.** Containers without Rastai labels, or labeled with another node's id (two nodes sharing one engine), are never touched. The sweep filters by label in the API call, then checks again in code.
-- **Reattach runs first.** "Owner job live or lost" uses the node's job table, rebuilt from `runs/<run_id>/job.json` and live pids. A `lost` job may still re-register, so its sandboxes are kept. Running the sweep first would kill the sandboxes of a gym run that is still alive.
+- **Reattach runs first.** "Owner job live or lost" uses the node's job table, rebuilt from `runs/<run_id>/job.json` and live pids. A `lost` job may still re-register, so its sandboxes are kept. Running the sweep first would kill the sandboxes of a gym run that is still alive. The node reattaches each job in the ADR-0034 order: wait for the worker's `Register`, check the token hash against `job.json`, then call `Hello`.
 - **A job's own exit removes its sandboxes at once,** so the sweep is a safety net for node crashes, not the normal path.
 - Internal networks created for egress-proxy runs carry the same labels and are swept the same way.
 
@@ -1058,7 +1084,7 @@ sequenceDiagram
 | kill -9 or crash of the gym job | Node: exit by signal | Sandboxes removed at once, lease and reservation released, job `failed` | `RRS-J1001` (killed by a signal), or `RRS-J1002` if the kernel OOM killer did it; Resume | `events.log` up to the last fsync, finished rollouts' traces, last checkpoint. In-flight rollouts are lost; they were never durable |
 | kill -9 of the node | Daemon: missed heartbeats | Job and sandboxes keep running (own process groups). The restarted node reattaches from `job.json` and adopts the sandboxes (B7) | Node unreachable, then running | Everything |
 | kill -9 of the daemon | — | Job unaffected; on restart the daemon re-reads events after `acked_sequence` | Brief disconnect | Everything |
-| GPU OOM in the trainer | The worker catches the CUDA OOM | Last checkpoint kept; job `failed` | `RRS-H3xxx` (GPU out of memory), fix: smaller `group_size` or batch | Last checkpoint |
+| GPU OOM in the trainer | The worker catches the CUDA OOM | Last checkpoint kept; job `failed` | `RRS-H3007` (out of GPU memory inside a job step), fix: smaller `group_size` or batch | Last checkpoint |
 | Container engine restart | Exec streams break | Live sandboxes `failed`; rollouts are infra failures and retried. Engine down for over 60 s: the run fails | `RRS-R1013` | Last checkpoint |
 | Disk full on the node | An event append fails with ENOSPC | The worker frees its 1 MiB reserve, records `RRS-S3002` and pauses the run with state in memory (platform 6.1); the user frees space and resumes | Run `paused`, `RRS-S3002` with a `storage.gc` fix | Everything; training continues from the same step |
 | Network drop to a remote node | C6 | Gym keeps running on the node | Reconnecting | Everything |
@@ -1069,11 +1095,11 @@ sequenceDiagram
 - **Gym runs resume through `train.resume`.** A gym run is a training run whose recipe is GRPO, GSPO or PPO on a harness; the daemon checks the `gym` scope as well as `training` and restarts it as job kind `gym`.
 - **Resume restarts at the task cursor** of the last completed update. Rollouts that were in flight at the checkpoint are regenerated, not recovered.
 
-**Persisted:** as B3, plus `checkpoint.resumed` and `train.preempted` events. **Tests:** `tests/crash/gym_worker_kill.rs` (kill -9 mid-rollout; no orphaned containers; `train.resume` continues from the checkpoint with the same task cursor; the metric history has no duplicates); `tests/crash/gym_sigterm.rs`; an engine-restart test in CI that restarts the Podman service mid-run; `tests/e2e/gym.spec.ts` with kill -9 of the node (plan M7-E06).
+**Persisted:** as B3, plus `checkpoint.resumed` and `train.preempted` events. **Tests:** `tests/crash/gym_worker_kill.rs` (kill -9 mid-rollout; no orphaned containers; `train.resume` continues from the checkpoint with the same task cursor; the metric history has no duplicates); `tests/crash/gym_sigterm.rs`; an engine-restart test in CI that restarts the Podman service mid-run; `tests/e2e/gym.spec.js` with kill -9 of the node (plan M7-E06).
 
 ## B9. Psychology on agent traces
 
-Runs when the user picks "Open in Psychology" on a finished rollout (`runs/RolloutList.tsx`). Spec §12: Psychology works on agent traces.
+Runs when the user picks "Open in Psychology" on a finished rollout (`runs/RolloutList.jsx`). Spec §12: Psychology works on agent traces.
 
 ```mermaid
 flowchart TD
@@ -1093,7 +1119,7 @@ flowchart TD
 - **The fidelity label is honest.** Checkpoints are written every few updates, so the exact adapter that generated a rollout often isn't saved. The replay says which step it used ("approximate: policy at step 1,200, rollout at step 1,230").
 - Tool calls and results show as conversation parts, so the token timeline lines up with the agent's actions.
 
-**Persisted:** the replay summary blob on the node and its local copy (inference-psychology 6.1), with `lineage` from the trace to the replay. **Tests:** `tests/e2e/gym.spec.ts` opens a trace from the CPU gym loop in Psychology; a unit test for checkpoint choice and the fidelity label.
+**Persisted:** the replay summary blob on the node and its local copy (inference-psychology 6.1), with `lineage` from the trace to the replay. **Tests:** `tests/e2e/gym.spec.js` opens a trace from the CPU gym loop in Psychology; a unit test for checkpoint choice and the fidelity label.
 
 ---
 
@@ -1103,7 +1129,7 @@ The prototype pairs the user's own boxes over OpenSSH (ADR-0011). One SSH sessio
 
 ## C1. SSH pairing
 
-Runs once per box, when the user runs `rastai node pair --ssh user@host` or uses "Add a node" (`PairDialog.tsx`), which run `node.pair`, a job. `rastai-server` `nodes/pairing.rs` drives it through `rastai-transport` `ssh.rs`.
+Runs once per box, when the user runs `rastai node pair --ssh user@host` or uses "Add a node" (`PairDialog.jsx`), which run `node.pair`, a job. `rastai-server` `nodes/pairing.rs` drives it through `rastai-transport` `ssh.rs`.
 
 ```mermaid
 sequenceDiagram
@@ -1148,6 +1174,7 @@ sequenceDiagram
 - **The user's SSH setup is used as is:** keys, agent, `~/.ssh/config`, jump hosts. `rastai-transport` only adds options: `BatchMode=yes` (never prompt), `ConnectTimeout=10`, `ServerAliveInterval=5`, `ServerAliveCountMax=3`, `ExitOnForwardFailure=yes`, `StreamLocalBindUnlink=yes`, and `UserKnownHostsFile=<data>/node/ssh_known_hosts` with `StrictHostKeyChecking=yes`.
 - **Host keys are trust-on-first-use with explicit confirmation.** An unknown key is fetched and shown as a fingerprint; the user confirms; it is pinned in Rastai's own known-hosts file. A changed key is a hard stop. The fix is `node.unpair` and a fresh pair, never an automatic accept.
 - **The node bundle** is the `rastai` binary for the box's architecture (same version as the daemon), the pinned `uv` binary, the backend environment projects and the first-party `rastai_*` wheels (platform 1.3 lists what the app bundle holds). It goes to `<data>/bin/` on the box. `upload_over_ssh` streams each file into `cat > <path>.partial && mv`, so no `scp` or `sftp` is needed. Third-party wheels (PyTorch) are fetched from their source on the box in C4, never uploaded from the laptop.
+- **Plugin modules on the box.** The AppArmor profile that grants user namespaces ships in the `.deb` and covers the installed `rastai` binary (contracts 8.8); the bundle's copy under `<data>/bin/` is not covered. On Ubuntu 23.10 and later a plugin module may therefore not get its network namespace on the box. The node then follows 8.8 as written: a trusted, preinstalled first-party module runs without the namespace and shows `RRS-P2005`; a third-party module without network permission is refused with `RRS-P2001`. Whether a first-party plugin pushed to a box counts as preinstalled is [open question 14](#open-questions).
 - **Supported in the prototype:** Linux x86_64 with systemd user sessions. Anything else gives `RRS-N1004`. A box with no GPU is fine; it becomes a CPU node.
 - **Linger** lets the node keep running after the user logs out. If `loginctl enable-linger` isn't allowed, pairing still succeeds with a warning. The unit uses `KillMode=process`, so restarting it never kills jobs.
 - **One node agent per user per machine.** A second `rastai node serve` (for example a headless daemon's embedded node on the same box) fails at `bind_local_socket` with `RRS-N0003`, because two agents would both lease the same GPUs.
@@ -1225,7 +1252,7 @@ sequenceDiagram
   RN->>SRV: Heartbeat every 5 s on the hub socket
 ```
 
-- **Signed both ways** (ADR-0011). The daemon signs `("rastai-node-handshake-v1", node_id, daemon_nonce, sent_unix_ms, hub_socket_path)` with `daemon.key`. The node signs `("rastai-node-handshake-v1", daemon_id, daemon_nonce, session_token_hash)` with `node.key`. Both use Ed25519 (`ed25519-dalek`). The domain string stops a signature from being reused anywhere else. A daemon key that isn't pinned gets `RRS-N0002`.
+- **Signed both ways** (ADR-0011). The daemon signs `("rastai-node-handshake-v1", node_id, daemon_nonce, sent_unix_ms, hub_socket_path)` with `daemon.key`. The node signs `("rastai-node-handshake-v1", daemon_id, daemon_nonce, session_token_hash)` with `node.key`. Both use Ed25519 (`ed25519-dalek`, imported only in `rastai-node` `identity.rs`). The domain string stops a signature from being reused anywhere else. A daemon key that isn't pinned gets `RRS-N0002`.
 - **A fresh `-R` socket name per session** (`<runtime>/node-hub-<session_id>.sock` on the box). After an unclean drop, `sshd` can keep the old reverse socket bound for a while; a new name avoids waiting for it. `HandshakeRequest.hub_socket_path` tells the node which path to dial.
 - **The session token** authenticates later calls both ways (gRPC metadata). A reconnect issues a new one and drops the old one.
 
@@ -1254,13 +1281,13 @@ flowchart TD
 | `generate.fast` | A pinned `llama-server` build exists for this backend | `model.load` fast |
 | `lens.live` | Live packets from the decode step | the live panel |
 | `sandbox.engine` | A Docker-API engine answered on its socket | Pass@k samples, gym |
-| `gym` (new) | Linux, `sandbox.engine`, and the engine can pause containers | `gym.start` |
+| `gym` | Linux, `sandbox.engine`, and the engine can pause containers | `gym.start` |
 | `transfer.resume` | `PutFile` and `GetFile` resume from an offset | transfers (C7) |
 | `self_update` | A standalone node that accepts `UpdateNode` | `node.update` |
 
-The first six come from `layout/rust-node-gateway-proto.md` §7.9. Flags change after an engine restart or a self-test; the daemon re-reads them with `GetHardware`. Environment readiness is not a flag: the scheduler calls `EnsureEnvironment` (C4) before the first job on a new environment, and the self-test result lives in `HardwareProfile`.
+The full list is in contracts 8.6; `layout/rust-node-gateway-proto.md` §7.9 explains each. Flags change after an engine restart or a self-test; the daemon re-reads them with `GetHardware`. Environment readiness is not a flag: the scheduler calls `EnsureEnvironment` (C4) before the first job on a new environment, and the self-test result lives in `HardwareProfile`.
 
-**Persisted:** `nodes.protocol_version`, `nodes.capabilities`; the session token in node and daemon memory only. **Tests:** `crates/rastai-node/tests/handshake.rs` (a forged daemon signature, a replayed nonce, clock skew, a node key that doesn't match the pin); `tests/e2e/remote_version_mismatch.rs` (a node built with `protocol_version + 1`, and an older node updated back to compatible); golden handshake messages in `fixtures/proto-golden/`.
+**Persisted:** `nodes.protocol_version`, `nodes.capabilities`; the session token in node and daemon memory only. **Tests:** `crates/rastai-node/tests/handshake.rs` (a forged daemon signature, a replayed nonce, clock skew, a node key that doesn't match the pin); `tests/e2e/remote_version_mismatch.rs` (a node built with `protocol_version + 1`, and an older node updated back to compatible); golden handshake messages in `fixtures/proto-golden/`; the `handshake` fuzz target in `rastai-node` (contracts 12.5, plan M9-E02).
 
 ## C4. Environment sync and self-test
 
@@ -1296,17 +1323,17 @@ sequenceDiagram
 
 - **The app, node and worker ship together** (spec §20), so the node bundle carries its own environment projects and lockfiles. `EnsureEnvironment` only names the environment and the expected hash; a mismatch means the node is the wrong version (C3).
 - **Fetch from the source:** the box downloads PyTorch itself (spike: CUDA 5.2 GB in 33 s, ROCm 16.5 GB in 91 s on the owner's link). Nothing is uploaded from the laptop except the small bundle from C1.
-- **The marker is written last** (`.rastai-ready`, plan §10 row 12). A folder without it is deleted and synced again; the uv cache on the box makes the second attempt fast.
+- **The marker is written last** (`.rastai-ready`, contracts §16 row 12). A folder without it is deleted and synced again; the uv cache on the box makes the second attempt fast.
 - **The numerical self-test gates the backend** (spec §22, spike 05). A failed self-test marks that backend unusable in `HardwareProfile`, so jobs on it are refused instead of returning silently wrong numbers. ROCm is never forced with an override.
-- **Plugin environments** follow the same path when a job needs a plugin's Python module: the daemon sends the plugin package as a blob (C7), and the node syncs the plugin's lockfile (`EnsureEnvironmentRequest.plugin_id`, `.plugin_version`).
+- **Plugin environments** follow the same path when a job needs a plugin's Python module: the daemon sends the plugin package as a blob (C7), and the node syncs the plugin's lockfile (`EnsureEnvironmentRequest.plugin_id`, `.plugin_version`). The namespace rules for the module itself are in C1.
 
 | Failure | User sees | State after |
 |---|---|---|
-| Package index unreachable | `RRS-H2xxx` (environment sync failed), retry | No marker; resync next time |
+| Package index unreachable | `RRS-H2004` (environment sync failed), retry | No marker; resync next time |
 | Not enough disk for the backend | `RRS-S3001` with the size needed | Nothing written |
 | kill -9 or reboot mid-sync | Next `EnsureEnvironment` resyncs | No marker |
-| Driver too old for `cuda13` (below 580) | `RRS-H4xxx` with the fix | `cuda13` jobs refused on this node |
-| Self-test wrong results | `RRS-H1xxx` | That backend disabled; CPU stays |
+| Driver too old for `cuda13` (below 580) | `RRS-H4001` (warning) with the driver fix | The node uses `cuda126` instead |
+| Self-test wrong results | `RRS-H1001` | That backend disabled; CPU stays |
 
 **Persisted:** on the box, `<data>/envs/<environment_id>-<lock_hash12>/` with its marker, and the uv cache; on the daemon, the `HardwareProfile` and capabilities in the `nodes` row. **Tests:** `tests/e2e/remote_env_sync.rs` (cold sync in the sshd container with the CPU backend; kill -9 mid-sync, then resync; a lock-hash mismatch is refused); `crates/rastai-node/tests/env_marker.rs`.
 
@@ -1346,7 +1373,8 @@ sequenceDiagram
   end
 ```
 
-- **Data policy** (spec §24): `local-only` refuses any remote job that needs project data with the shared `RRS-C1009`, raised by the daemon's policy check before any transfer or `StartJob` (plan §10 row 37; the same code the gateway and the scheduler use); `trusted-remote` allows paired nodes; `any` is for Phase 3 providers. The egress badge shows whenever data leaves the machine, and while a job runs on a remote node.
+- **Data policy** (spec §24): `check_data_policy` in `rastai-server` raises one refusal, `RRS-C1009`, before any transfer or `StartJob`, the same code the gateway, the scheduler and the archive use (contracts §16 row 37). `local-only` refuses any remote job that needs project data; `trusted-remote` allows paired nodes and the archive; `any` is for Phase 3 providers. The default is `local-only`, so the first remote job in a new project is refused once, and the error's fix sets the policy in one click (`settings.set privacy.data_policy`). The egress badge shows whenever data leaves the machine, and while a job runs on a remote node.
+- **The archive is a remote destination for the same policy** (contracts 8.7, ADR-0035, M11). A project's events, runs and metrics are replicated to the owner's MySQL or MariaDB only when its policy is `trusted-remote` or `any`. A `local-only` project never syncs: the archiver skips it and lists it in `archive.status` with `RRS-C1009`. Remote runs need nothing special. The archiver reads the daemon's mirrored `events.log` and its index, never the node's files, and nodes hold no archive credentials. It copies blob bytes only from the daemon's own blob store, so a blob that exists only on a node waits until it has been fetched (C7). While a sync runs the egress badge shows `egress.active` with purpose `archive`.
 - **Upload only what exists nowhere else.** Datasets are snapshotted to blobs (`dataset.snapshot`) before they move, so transfers always carry immutable, hash-named files. HF weights and HF datasets are fetched by the node itself, with the HF token as a short-lived value from `GetSecret`.
 - **The node's cache persists,** so a second run on the same box starts warm. `artifact_copies` records what the box already has.
 - **Events:** the job writes `events.log` on the box. The daemon tails it with `WatchRunEvents`, appends the same bytes to its own mirror before indexing, then stores `runs.acked_sequence` (platform 6.1). Ephemeral events (tokens, live packets at about 8.3 KB per token, peek steps, progress) ride `WatchLive` over the same SSH session.
@@ -1397,7 +1425,7 @@ sequenceDiagram
 | Job state on the box | Daemon does |
 |---|---|
 | Still running | `lost → running`, then replays from `acked_sequence` |
-| Finished during the drop | `lost →` the terminal state the node recorded (a transition contracts §9.1 lacks; [open question 10](#open-questions)); the log replay ends with the final run state, so the run completes normally |
+| Finished during the drop | `lost →` the terminal state the node recorded (contracts 9.1: lost → the terminal state the node recorded); the log replay ends with the final run state, so the run completes normally |
 | Gone with no exit record (box rebooted) | `lost → failed` with `RRS-J3002` (ended while no node was watching); the run is resumable from its last checkpoint with `train.resume` (preemption-safe, spec §10) |
 
 - **Idempotent mirroring:** the daemon appends each record to its mirror, fsyncs, indexes it keyed by `(run_id, sequence)`, then stores `acked_sequence` in the same transaction. After a daemon crash it re-indexes mirrored records past `acked_sequence` and resubscribes after the mirror's last valid sequence. Frames are copied byte for byte, so their checksums still verify (platform 6.2).
@@ -1405,7 +1433,7 @@ sequenceDiagram
 - **The UI's own stream** (UI ↔ daemon, on loopback) isn't affected. The UI sees the node go unreachable and come back. For a UI on a tunnel, see C8.
 - The daemon going down is handled the same way: on restart it reconnects every paired node through this path.
 
-**Persisted:** the box's `events.log` (the source of truth), the daemon's mirror and `runs.acked_sequence`; `node.state_changed` and `job.state_changed` events. **Tests:** `tests/e2e/remote_network_drop.rs`, the §32 weeks 11–12 exit criterion (plan M9-E03): start TextCNN training on the sshd box, cut the connection for 60 s (kill the `ssh` child, and separately drop packets in a network namespace so `ServerAlive` has to notice), restore it, and assert the run completes, the daemon's mirror is byte-identical to the box's log, and every sequence arrives exactly once. Variants: kill -9 the daemon during the drop; reboot the box container during the drop (the job ends `failed` with `RRS-J3002` and `train.resume` continues).
+**Persisted:** the box's `events.log` (the source of truth), the daemon's mirror and `runs.acked_sequence`; `node.state_changed` and `job.state_changed` events. **Tests:** the mirror reader is covered by the `event_frame` fuzz target in `rastai-store` (contracts 12.5). `tests/e2e/remote_network_drop.rs`, the §32 weeks 11–12 exit criterion (plan M9-E03): start TextCNN training on the sshd box, cut the connection for 60 s (kill the `ssh` child, and separately drop packets in a network namespace so `ServerAlive` has to notice), restore it, and assert the run completes, the daemon's mirror is byte-identical to the box's log, and every sequence arrives exactly once. Variants: kill -9 the daemon during the drop; reboot the box container during the drop (the job ends `failed` with `RRS-J3002` and `train.resume` continues).
 
 ## C7. Resumable BLAKE3 transfers
 
@@ -1450,7 +1478,7 @@ sequenceDiagram
 - **Partial files are named by hash** (`<data>/blobs/.incoming/<hash>.partial`), so any later transfer of the same blob finds and continues them.
 - **Downloads (`GetFile`) mirror this** with the daemon as the receiver: its own `.incoming/<hash>.partial`, `GetFile` from the offset, verify, rename.
 - **Network drop mid-transfer:** the stream breaks and the transfer row stays `running` with its `bytes_done`. After reconnect (C6) the daemon restarts the flow at `StatFile`.
-- **`transfer.cancel`** closes the stream and keeps the partial file until GC, so a later transfer can continue it (`RRS-N3010`).
+- **`transfer.cancel`** closes the stream and keeps the partial file until GC, so a later transfer can continue it (`RRS-N3012`).
 - **Disk full:** checked before the first write (`RRS-S3001` with the space needed). Running out mid-transfer keeps the partial file and fails with `RRS-S3002`.
 
 ```rust
@@ -1491,6 +1519,7 @@ sequenceDiagram
   CLI->>BR: open 127.0.0.1 on the local port, code in the fragment
   BR->>HD: POST /api/login through the tunnel
   HD->>HD: Host is a loopback name, Origin equals http plus Host, code unused
+  HD->>HD: bind the session to that Origin
   HD-->>BR: session cookie named for this daemon
   BR->>HD: Connect Execute and EventService.Subscribe
   Note over SSH: tunnel drops
@@ -1505,11 +1534,13 @@ sequenceDiagram
 ```
 
 - **Nothing opens on the network** (spec §21). The headless daemon listens on loopback and `daemon.sock` exactly as on a desktop; the tunnel is the only way in. MCP (`/mcp`) and the gateway (`/v1/*`) work through the same tunnel with scoped tokens.
-- **Login without copying tokens:** `rastai tunnel` runs the generated verb `rastai token login-code create --json` on the box over SSH (plan §10 row 2). Like every generated verb, it starts the box's daemon if none runs (control-plane layout 9.3, unless `--no-start`); the systemd unit is the normal path. It then runs `token.login_code.create` over `daemon.sock`, where peer credentials prove the owner, and prints one JSON result line with `code`, `expires_unix_ms` and `http_port`. `rastai tunnel` forwards a free local port to `127.0.0.1:<http_port>` on the box and opens `http://127.0.0.1:<local port>/#login=<code>`. Nobody copies a token or a URL.
+- **Login without copying tokens:** `rastai tunnel` runs the generated verb `rastai token login-code create --json` on the box over SSH (contracts §16 row 2). Like every generated verb, it starts the box's daemon if none runs (control-plane layout 9.3, unless `--no-start`); the systemd unit is the normal path. It then runs `token.login_code.create` over `daemon.sock`, where peer credentials prove the owner, and prints one JSON result line with `code`, `expires_unix_ms` and `http_port`. `rastai tunnel` forwards a free local port to `127.0.0.1:<http_port>` on the box and opens `http://127.0.0.1:<local port>/#login=<code>`. Nobody copies a token or a URL.
 - **The 60 s code lifetime covers the tunnel setup.** `rastai tunnel` mints the code first, then opens the forward and the browser; a slow SSH start that lets the code expire shows `RRS-C1007`, and running `rastai tunnel` again mints a fresh one.
-- **The manual path works without `rastai tunnel`:** `HeadlessHelp.tsx` shows platform 4.1's path: `ssh user@box rastai open --print-url`, then `ssh -N -L <local port>:127.0.0.1:<box port> user@box`, then open the printed URL with its port changed to the local one. A person copies a whole URL more easily than a bare code, so the manual path keeps `rastai open --print-url`.
+- **The manual path works without `rastai tunnel`:** `HeadlessHelp.jsx` shows platform 4.1's path: `ssh user@box rastai open --print-url`, then `ssh -N -L <local port>:127.0.0.1:<box port> user@box`, then open the printed URL with its port changed to the local one. A person copies a whole URL more easily than a bare code, so the manual path keeps `rastai open --print-url`.
 - **Local port:** 47830–47839, so it can't collide with the laptop's own daemon on 47820–47829.
-- **Host check across a tunnel:** the browser's Host is `127.0.0.1:<local port>`, not the box daemon's port. The request gate (platform 4.2) therefore accepts any loopback Host name on any port and requires Origin to equal `http://` plus that Host. A page on another local port still fails, because its Origin differs from the Host it targets. This amends ADR-0007 rule 4 ([open question 4](#open-questions), plan §10 row 22).
+- **Request gate across a tunnel (ADR-0034, which supersedes ADR-0007 rule 4):** the browser's Host is `127.0.0.1:<local port>`, not the box daemon's port. The gate (platform 4.2) therefore accepts any loopback Host name on any port. When Origin is present it must equal `http://` plus that Host, else `RRS-C1004`. A foreign Host is `RRS-C1003`.
+- **The session is bound to the origin that redeemed the login code.** Browsers don't isolate cookies by port, so a page on another loopback port would be sent the same cookie. Its requests carry their own Origin and are refused with `RRS-C1004`. A cookie request with no Origin passes only for `GET` and `HEAD` with `Sec-Fetch-Site` of `same-origin` or `none` (blob downloads, images, static files); any other cookie request without Origin is `RRS-C1004`. Cross-origin browser clients are refused in v1. Two routes are planned for Phase 2: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing.
+- **Same local port after a drop.** The origin includes the port, so `rastai tunnel` restarts a dropped tunnel on the same local port and the session stays valid. A different port is a different origin and needs a new login code.
 - **Cookie name per daemon:** cookies are per host, not per port, so two daemons on 127.0.0.1 would overwrite each other's session. The cookie is named `rastai_session_<daemon id prefix>`.
 - **Jobs on the box never notice a tunnel drop.** They're local to the headless daemon. Only the UI reconnects.
 
@@ -1520,9 +1551,10 @@ sequenceDiagram
 | Login code expired or reused | `RRS-C1007`; run `rastai tunnel` again |
 | No free local port in 47830–47839 | `RRS-N1009` naming the range |
 | Foreign Host or Origin | `RRS-C1003` or `RRS-C1004`, no side effect |
-| Daemon on the box restarted | `RRS-U0002` (session ended); run `rastai tunnel` again |
+| A cookie request with no allowed Origin, or a session used from another origin | `RRS-C1004`, no side effect |
+| Daemon on the box restarted | `RRS-U0003` (sessions live in daemon memory, so a restart signs you out); run `rastai tunnel` again |
 
-**Persisted:** everything lives on the box (its `rastai.db`, `vault.db`, blobs, projects). The laptop keeps nothing but the browser cookie. **Tests:** `tests/e2e/headless_tunnel.spec.ts` (Playwright through an SSH tunnel on a different local port to the sshd box running `rastai serve --headless`: log in, start a TextCNN run, kill the tunnel, reconnect, see the gap replayed, plan M9-E05); `rastai token login-code create --json` on the box prints one line that parses as `TokenLoginCodeCreateResult` with the daemon's real `http_port`; a login code works once; a second tunnel to another daemon keeps both sessions; a request with a non-loopback Host fails with `RRS-C1003`; a page on another loopback port fails with `RRS-C1004`.
+**Persisted:** everything lives on the box (its `rastai.db`, `vault.db`, blobs, projects). The laptop keeps nothing but the browser cookie. **Tests:** `tests/e2e/headless_tunnel.spec.js` (Playwright through an SSH tunnel on a different local port to the sshd box running `rastai serve --headless`: log in, start a TextCNN run, kill the tunnel, reconnect, see the gap replayed, plan M9-E05); `rastai token login-code create --json` on the box prints one line that parses as `TokenLoginCodeCreateResult` with the daemon's real `http_port`; a login code works once; a second tunnel to another daemon keeps both sessions; a request with a non-loopback Host fails with `RRS-C1003`; a page on another loopback port fails with `RRS-C1004`, and so does a session redeemed on one local port when used from another; a cookie `POST` with no Origin fails with `RRS-C1004`, while a same-origin `GET` of a blob with no Origin works; a daemon restart gives `RRS-U0003`.
 
 ## C9. Node update, unpair and teardown
 
@@ -1553,6 +1585,7 @@ flowchart TD
 ```
 
 - **Teardown wipes unpinned remote data** (spec §22). Pinned artifacts are fetched first, so pinning means "keep this even if the box goes away". The confirm dialog lists every run and checkpoint with its size.
+- **The archive is untouched.** Records of runs that ran on the box were mirrored to the daemon (C5) and sit in the archive, if one is configured, under the daemon's `source_id`, not the node's. Unpair removes only the box's own unpinned bytes.
 - **Pinned state comes from the daemon.** The node keeps no catalog; the daemon sends the pinned list in the wipe request (`layout/rust-node-gateway-proto.md` §7.9).
 - A failed `GetFile` stops the wipe before anything is deleted (`RRS-N3003` or `RRS-S3001`), so a pinned artifact is never lost.
 
@@ -1560,156 +1593,16 @@ flowchart TD
 
 ---
 
-## New names
-
-Names this file uses that contracts.md doesn't define yet. Each needs a contracts PR before code uses it (spec §29). "Also in" marks names another doc already proposes with the same meaning.
-
-**CLI and process modes** (`rastai-cli` `modes.rs`)
-- `rastai tunnel <user@host>`: run the generated verb `rastai token login-code create --json` on the box over SSH, open `ssh -N -L` from a free local port in 47830–47839 to the box's `http_port`, open the browser at `http://127.0.0.1:<local port>/#login=<code>` (C8; as plan §10 row 2 decides).
-- `rastai node init --daemon-key <public key>`: create the node identity and pin the daemon key on a box; prints the node id (C1).
-
-**Protobuf additions**
-- `WorkerHostService.ListTools` / `CallTool` with `ListToolsRequest/Response` and `CallToolRequest/Response` (B2, B3). Also in `layout/rust-node-gateway-proto.md` §3.2.
-- `WorkerHostService.PauseSandbox` / `ResumeSandbox`: the worker pauses its own rollout's sandbox (B5). Also in the node layout §5.2.
-- `SignalJobRequest.sandbox_id`, `.arguments_json` and the same two fields on `ControlRequest`: `STEP` for one sandbox, `{"action": "hold" | "step" | "release"}` (B5). Also in the node layout §3.2.
-- `ResourceRequest.vram_bytes_per_gpu[]`: per-GPU lease sizes for a placed model, parallel to `gpu_indices` (A8).
-- `HandshakeRequest`: `daemon_id`, `daemon_nonce`, `sent_unix_ms`, `daemon_signature`, `hub_socket_path`; `HandshakeResponse.node_signature` (C3). `hub_socket_path` also in the node layout.
-- `GatewayGenerateRequest.prior_token_ids` (B3). Also in the node layout.
-- Event payload fields: `gym.rollout_finished.outcome` (`done`, `max_turns`, `time_cap`, `sandbox_oom`, `infra_failure`), `.detached`, `.policy_step`; `gym.peek_step.rollout_id`, `.step_index`.
-
-**Job states:** `lost →` the terminal state the node recorded (`succeeded`, `failed` or `cancelled`), for jobs that finished while the daemon couldn't see them (C6).
-
-**Command arguments and results** (`rastai-formats/src/commands/`)
-- `ModelDownloadArgs.headers_only` (A1).
-- `DesignCompileArgs.parity_check`: `off`, `smoke` (default), `reference` (A2).
-- `DesignExportOnnxArgs.opset`, `.verify` (default true) (A6).
-- `GymStepArgs.action`: `hold`, `step`, `release` (B5).
-- `NodeUnpairArgs.force` (C9).
-- `PsychologyReplayOpenArgs.trace_ref`: a `rollout_trace` artifact to replay instead of a conversation (B9).
-- `TokenLoginCodeCreateResult`: `code`, `expires_unix_ms`, `http_port` (C8). `http_port` lets `rastai tunnel` forward the box daemon's port without a second SSH call to read `<runtime>/daemon.port`; `rastai open` can build its `DesktopLaunchInfo.url` from the same fields.
-
-**Document fields**
-- `rastai.model/1` graph node `layout{x, y, collapsed}`: canvas position and collapse state (A3; plan §10 row 10; the frontend layout calls it `position{x, y}`).
-- `rastai.harness/1` `tools[].env_secret_names[]`: secret names filled from the keychain at sandbox creation (B1).
-- GRPO, GSPO and PPO recipe settings for the gym: `group_size` (8), `max_turns` (32), `infra_retry_limit` (1), `min_valid_group_members` (2), `max_dropped_groups_in_a_row` (3), `partial_group_rule` (`recompute`, `mark_partial`; also in `layout/python.md` §6.3), `step_hold_timeout_seconds` (1800).
-
-**Artifact kinds:** `design_import`, `eject`, `onnx`, `rollout_trace` (also in `layout/python.md` §15); `compile_report` (new).
-
-**Model refs:** `job:<job_id>`, the policy served live by a gym or RL job (also in `layout/python.md`).
-
-**Capability flag:** `gym` (C3). The other flags are in the node layout §11.2.
-
-**Metric names:** `logprob_mismatch_mean`, `zero_variance_group_fraction`, `pass_at_1`, `pass_at_k`, `peek_overhead_percent`.
-
-**Settings:** `sandbox.default_caps.pids_limit` (512), `sandbox.default_caps.disk_bytes` (10 GiB).
-
-**Paths and files**
-- `<cache>/hf-headers/<org>--<name>/<revision>/<file>.json`: cached safetensors headers (A1).
-- `<data>/blobs/.incoming/<hash>.partial`: resumable partial files (C7); contracts §8.4 has `.incoming/<random>` for other writes.
-- `<data>/node/ssh_known_hosts` (also in the node layout), `<runtime>/remote/<node_id>/node.sock` (also there), remote `<runtime>/node-hub-<session_id>.sock` (C1, C3).
-- `<data>/bin/`: the node bundle on a box (`rastai`, `uv`, environment projects, wheels) (C1).
-- `~/.config/systemd/user/rastai-node.service` (C1).
-- `proto/third_party/onnx/onnx.proto`: vendored, generated into `rastai_models/importers/onnx_proto/` (A1, A6).
-- `fixtures/harness-import/`, `fixtures/documents/import/invalid/`.
-
-**Code locations**
-- `crates/rastai-server/src/modelspec_analysis/layer_placement.rs` (`plan_layer_placement`, `PlacementUnit`, `GpuBudget`, `LayerPlacement`).
-- `python/rastai_models/importers/hf_config.py` helpers `check_import_limits`, `mark_unsupported_features_opaque`, `check_weight_names`, `read_cached_headers`; `ImportReport`.
-- `python/rastai_models/compiler/weights.py` `bind_weights`, `BindReport`; `smoke.py` `smoke_forward`, `SmokeResult`.
-
-**Environment:** a `compat` dependency group in each backend lockfile, holding `transformers` (A2b).
-
-**Other:** session cookie name `rastai_session_<daemon id prefix>` (C8).
-
-**Names this file takes from other docs** (not in contracts.md yet; the source doc owns them and folds them in)
-- `layout/python.md`: `Family`, `find_family`, `import_hf_config`, `import_onnx`, `import_exported_program`, `ImportResult`, `compile_model`, `init_weights`, `load_compat_module`, `plan_placement`, `apply_placement`, `export_onnx`, `eject/` (`source_writer.py`, `loader_source.py`), `smoke.py`, `rastai_worker/jobs/compile_design.py` and `jobs/gym.py`, `job.json` `resolved_models` and `granted_leases`, `Design` and `RastaiError` in the SDK, `rastai_rl` files (`rollout_manager.py`, `agent_loop.py`, `policy_server.py`, `rewards.py`, `peek.py`), `PolicyServer`, `run_rl_training`, `import_harbor_tasks`, `PEEK_EVENTS_PER_SECOND`, `HOST_RECONNECT_TIMEOUT_SECONDS`.
-- `layout/rust-control-plane.md`: `modelspec_analysis/` with `compute_design_stats` and `estimate_memory_bytes`; `nodes/node_links.rs`, `nodes/pairing.rs`.
-- `layout/rust-node-gateway-proto.md`: `ssh.rs` (`run_remote_command`, `upload_over_ssh`, `start_ssh_forwarding`), `open_node_connection`, `bind_local_socket`, `transfer.rs` (`TRANSFER_CHUNK_BYTES`, `bytes_written`), the node's `downloads.rs`, `transfers.rs` and `gym_tools.rs`; `rastai-sandbox` files and functions (`manager.rs`, `container_spec.rs`, `deadlines.rs`, `orphan_sweep.rs`, `egress_proxy.rs`, `reserve_sandboxes`, `release_reservation`, `remove_job_sandboxes`, `adopt_existing_containers`, `stop_egress_network`); label `rastai.job_id`; network `rastai-egress-<run_id>`; messages `SandboxCaps`, `LiveEvent` (`GymPeekStep`), `GatewayGenerateRequest`, `GenerateFinished.gateway_log`, `EnsureEnvironmentRequest.plugin_id`; event `gateway.request_logged`; capability flags `generate.inspectable`, `generate.fast`, `lens.live`, `sandbox.engine`, `transfer.resume`, `self_update`; codes `RRS-G0007`, `RRS-G1006`, `RRS-J0002`, `RRS-J1001`, `RRS-J1002`, `RRS-J3002`, `RRS-J3003`.
-- `layout/frontend-and-plugins.md`: the Designer, Gym and Remote section files named in each flow (`import/ImportDialog.tsx`, `canvas/edit-gestures.ts`, `actions/CompileAndTrain.tsx`, `actions/EjectDialog.tsx`, `diff/DesignDiff.tsx`, `harness/*.tsx`, `tasks/TaskImport.tsx`, `runs/*.tsx`, `peek/*.tsx`, `sandboxes/SandboxList.tsx`, `PairDialog.tsx`, `HeadlessHelp.tsx`).
-- `flows/platform.md`: `.rastai-ready`, `events.log.reserve`, `rastai open --print-url` behavior, and codes `RRS-S0004`, `RRS-S3001`, `RRS-S3002`, `RRS-C1003`, `RRS-C1004`, `RRS-C1007`, `RRS-C2002`, `RRS-U0001`, `RRS-U0002`.
-- `flows/inference-psychology.md`: `RRS-M2001`, `RRS-M4001`, `RRS-N2002`.
-- `plan/implementation-plan.md` §11: `RRS-C1009` (the project's data policy forbids this; plan §10 row 37), used in C5.
-
-**Catalog codes.** New numbers in this file's areas. Codes the node layout already assigned (`RRS-N0001`–`N0003`, `RRS-N3001`–`N3006`, `RRS-N3008`, `RRS-R1001`–`R1010`) and codes other docs define (`RRS-N2001`, `RRS-N2002`, `RRS-N3007`, `RRS-N3009`, `RRS-N4001`, `RRS-M2001`, `RRS-M4001`, `RRS-C1009`) are used or left alone, not repeated.
-
-| Code | Severity | Title |
-|---|---|---|
-| `RRS-E7001` | warning | `config.json` has no `model_type` or `architectures`; imported as one opaque graph node |
-| `RRS-E7002` | warning | Unsupported config feature or unmapped tensors; the owning block is opaque |
-| `RRS-E7003` | warning | The repo declares remote code (`auto_map`); Rastai never runs it |
-| `RRS-E7004` | error | The `.pt2` archive holds pickled data; refused |
-| `RRS-E7005` | warning | An ONNX op has no ModelSpec mapping; imported as opaque |
-| `RRS-E7006` | error | Weight shapes don't match the config; compile refused |
-| `RRS-M0001` | error | A graph node has no implementation; the design is view only |
-| `RRS-M0002` | error | Smoke forward shape differs from the inferred shape (compiler bug) |
-| `RRS-M0003` | warning | Compiled parameter count differs from live stats (stats bug) |
-| `RRS-M0601` | error | Graph nodes without Eject or ONNX support |
-| `RRS-M0602` | error | ONNX lowering failed for a graph node |
-| `RRS-M0603` | warning | ONNX round trip differs beyond tolerance; file kept as unverified |
-| `RRS-M0604` | error | Ejected code doesn't reproduce the compiled model, or imports `rastai` |
-| `RRS-M1001` | info | No in-house family; the compat runtime can run this model |
-| `RRS-M1002` | error | The compat runtime isn't installed in this environment |
-| `RRS-M1003` | error | The model needs remote code; refused |
-| `RRS-M2002` | error | The weights lack tensors the ModelSpec needs |
-| `RRS-M2003` | error | The weights hold tensors the ModelSpec doesn't use |
-| `RRS-M2004` | error | Tensor shape mismatch |
-| `RRS-M2005` | error | Weights exist only in pickle format; refused |
-| `RRS-M3001` | error | Non-finite logits in the smoke forward |
-| `RRS-M3002` | error | Reference parity outside tolerance |
-| `RRS-M3003` | warning | Reference parity skipped; the compat group isn't installed |
-| `RRS-M5001` | error | Doesn't fit the chosen GPUs |
-| `RRS-M5002` | error | One placement unit is larger than any GPU |
-| `RRS-M5003` | error | The dtype isn't supported on every chosen GPU |
-| `RRS-M5004` | error | Out of memory loading a placement unit on GPU n |
-| `RRS-R0001` | error | Reward or metric name not found; install the plugin |
-| `RRS-R0002` | error | A tool needs network hosts that aren't allowed |
-| `RRS-R0003` | warning | Import entry skipped: unsupported transport |
-| `RRS-R0004` | warning | Harbor task folder incomplete; task skipped |
-| `RRS-R0005` | warning | MCP `env` values not imported; set them as secrets |
-| `RRS-R0006` | warning | Harbor task has no prebuilt image; build it and set `environment.image` |
-| `RRS-R1011` | error | Permission denied on the container engine socket |
-| `RRS-R1012` | info | Sandbox killed by its memory cap |
-| `RRS-R1013` | error | Container engine failed during the run, or a container can't be removed |
-| `RRS-R2001` | info | Infra failure; rollout retried |
-| `RRS-R2002` | warning | Group dropped: too few valid members |
-| `RRS-R2003` | error | Too many dropped groups in a row; run failed |
-| `RRS-R2004` | warning | Reward code raised an error; rollout excluded |
-| `RRS-R2005` | info | Held sandbox released after the hold timeout |
-| `RRS-R3001` | error | An MCP tool server failed to start in the sandbox |
-| `RRS-R3002` | error | A harness tool isn't offered by its server |
-| `RRS-R3003` | warning | A tool server crashed twice in one rollout; rollout excluded |
-| `RRS-N0004` | error | The node lacks a capability this job needs |
-| `RRS-N1001` | error | SSH authentication failed |
-| `RRS-N1002` | error | SSH host key changed; refused |
-| `RRS-N1003` | info | Unknown SSH host key; confirm the fingerprint |
-| `RRS-N1004` | error | Remote OS or CPU architecture not supported |
-| `RRS-N1005` | warning | Linger unavailable; the node stops when you log out |
-| `RRS-N1006` | error | `ssh` binary not found |
-| `RRS-N1007` | error | Rastai isn't installed on the host |
-| `RRS-N1008` | error | SSH connection timed out or the host is unreachable |
-| `RRS-N1009` | error | No free local port for the tunnel |
-| `RRS-N2003` | info | Node reconnected; jobs reattached |
-| `RRS-N3010` | info | Transfer cancelled; partial file kept |
-
-**For the M1-13 mapping.** Earlier drafts of this file used two numbers that other docs hold:
-- `RRS-N3007` (transfer cancelled) is now `RRS-N3010`. Platform 1.4 holds `RRS-N3007` (Hugging Face token missing or rejected), and the node layout §4.6 holds `RRS-N3008` (outbound HTTPS request without an egress tag).
-- `RRS-N3009` (data policy forbids this node) is dropped for the shared `RRS-C1009` (plan §10 row 37). Platform 1.5 holds `RRS-N3009` (download interrupted; retries used up).
-
 ## Open questions
 
-Each has a default that this file follows until the owner decides. Numbers 2 and 4 are referenced by the plan (§10 rows 11 and 22).
+Each has a default that this file follows until the owner decides. As in contracts §14, decided rows are removed, not renumbered.
+
+**Decided on 2026-10-10 and removed:** 1 (`onnx` and `onnxscript` are on the §27 allowlist, contracts 2.5), 2 (`weights[]` is a list, 5.2), 4 (ADR-0034 accepted), 5 (the egress proxy is built at plan §31 step 7 / M7-E02, 15.11), 7 (`.pt2` files are refused, 15.2), 8 (infra failures are excluded, never scored 0; `layout/python.md` §6.3 agrees), 10 (`lost →` the recorded terminal state, 9.1), 11 (one Rust planner, 2.4 rule 10), 12 (catalog collisions settled, 10.2).
 
 | # | Question | Default |
 |---|---|---|
-| 1 | **`torch.onnx`'s current exporter imports the `onnx` and `onnxscript` packages,** which §27 doesn't list. | Add both to the allowlist as part of the `torch.onnx` foundation row, used only by `export` jobs. The in-house alternative is an ONNX writer from ModelSpec using the vendored `onnx.proto`; revisit if the packages churn. |
-| 2 | **A composed design with more than one pretrained backbone** (for example two pretrained encoders in a multi-input design) needs more than one weight source; `rastai.model/1` has a single `weights{}`. | Make `weights` a list of `{source, family, name_mapping, prefix}` in `rastai.model/1` before the first release, so no migration is needed (plan §10 row 11, settled in M2-01). |
 | 3 | **The HF reference for DeepSeek-V2-Lite real-weight parity** across two GPUs would need `accelerate`'s `device_map`, which isn't allowed. | Run the reference on CPU in bf16 on a few short prompts (about 32 GB of RAM), layer by layer if RAM is short. |
-| 4 | **ADR-0007 rule 4** requires Host to be `127.0.0.1:<port>` or `localhost:<port>` for the daemon's own port, which breaks a tunnel on a different local port (C8). | Accept any loopback Host name on any port, and require Origin to equal `http://` plus Host. Amend ADR-0007 and platform 4.2 in M9-E05 (plan §10 row 22). |
-| 5 | **Network allowlists inside sandboxes.** Docker has no host allowlist. The node layout describes the in-house CONNECT proxy in §5.4 but its §12 question 3 still says "Phase 2". | Build the proxy with the gym (§31 step 7) as §5.4 describes. Fallback if it slips: network is all-or-nothing in the prototype, and the `gym.start` confirm dialog says so. |
 | 6 | **The peek overhead budget** has no measurement yet. | Proposed at most 2% of rollout tokens per second; set the real number from `tests/gpu/test_gym_peek_overhead.py`. |
-| 7 | **`.pt2` weight storage** varies across PyTorch versions; some versions pickle tensor payloads. | Read only `serialized_exported_program.json` and raw tensor payloads; refuse pickled ones (`RRS-E7004`). Confirm against the pinned PyTorch version when the importer is built. |
-| 8 | **Infra failures and rewards.** `layout/python.md` §6.3 gives a failed or timed-out sandbox reward 0; this doc retries and then excludes infra failures, and scores time-outs as agent outcomes. | Exclude infra failures (B3b). A 0 for a broken container teaches the policy the wrong thing. Update `layout/python.md` §6.3 to match. |
 | 9 | **Harbor tasks that ship only a Dockerfile.** The sandbox manager never builds images. | No builds in the prototype: import with `RRS-R0006` and the build command as the fix. Revisit with a "sandbox image" plugin that builds through the engine's build endpoint behind a trust prompt. |
-| 10 | **Contracts §9.1 has no `lost →` terminal transition** for a job that finished during a drop. | Add "lost → the terminal state the node recorded". The daemon takes it from `ListJobs` and the replayed log (C6). |
-| 11 | **Two layer-placement planners** (Rust in `rastai-server` for jobs, Python in `rastai_models` for the standalone SDK) implement one algorithm. | Keep both, with `tests/parity/test_placement_parity.py` requiring identical maps. Alternative: the SDK asks a running daemon for the plan and has no planner of its own. |
-| 12 | **Catalog numbers still collide between docs** (`RRS-J1xxx`, `RRS-H2xxx`/`H3xxx`, the HF download codes in platform 1.5 vs the node layout). | This doc cites those codes by meaning or by range and uses the owning crate's layout numbers where it gives one (plan §10 row 8). Its own N3xxx numbers avoid platform's (`RRS-N3010`, and `RRS-C1009` for the data policy; see "For the M1-13 mapping" under New names). The M1-13 renumbering maps the rest. |
+| 13 | **The live-stats data warning** (parameters greater than dataset tokens for a from-scratch objective, A3) has no catalog code in contracts 10.3. | Add one warning code in the `RRS-E3xxx` or layer-4 range in the next contracts PR; until then the warning shows its text without a code. |
+| 14 | **First-party plugins on a paired box** may hit the user-namespace limit (C1). Contracts 8.8 lets a "trusted, preinstalled" first-party module run without the network namespace, but a plugin pushed to a box as a blob isn't installed from `<install prefix>/share/rastai/plugins/`. | Treat a first-party plugin whose content hash matches the release manifest as trusted on the box too, with the same `RRS-P2005` warning. Confirm in the plugin-host ADR work. |

@@ -1,6 +1,8 @@
 # ADR-0023: Code style: simple functions and plain data; polymorphism yes, obscure abstraction no
 
-**Status:** Accepted, 2026-10-10
+**Status:** Accepted, 2026-10-10. The TypeScript section, and the TS wording in decisions 1 and 7, superseded by [ADR-0036](0036-frontend-plain-javascript.md), 2026-10-10.
+
+**Superseded in part:** the frontend is plain JavaScript + React with short JSDoc types checked by `checkJs` (ADR-0036). Read decision 1's "TS object types" as "plain JS objects described by a JSDoc `@typedef`", and decision 7's "a TS interface" as "a JS object shape that several modules satisfy, documented with one `@typedef`" (for example `CommandExecutor`). The JavaScript rules are in ADR-0036 and contracts §12.4. Everything else here stands.
 
 ## Context
 
@@ -12,13 +14,13 @@
 ## Decision
 
 **All languages**
-1. **Plain data in, plain data out:** Rust structs and enums, Python `@dataclass` (frozen where possible), TS object types.
+1. **Plain data in, plain data out:** Rust structs and enums, Python `@dataclass` (frozen where possible), TS object types *(superseded: plain JS objects with a JSDoc `@typedef`, ADR-0036)*.
 2. **Small functions, named verb-first** (`load_config`, `check_exact_tiling`). A function that doesn't fit on one screen gets split.
 3. **Constants at the top of each file** in `SCREAMING_SNAKE_CASE`, with a comment when the value came from a measurement (`# 8.3 KB per token, measured in the spike`).
 4. **Readable names:** `embedding_size`, `layer_count`, `head_size`, `vocabulary_size`, never `n_embd` or `d_k`. Units go in names: `_bytes`, `_ms`, `_seconds`, `_count`, `_unix_ms`.
 5. **Comments explain why**, not what the syntax does.
 6. **A thin `main`**: a sequence of calls with no logic.
-7. **Polymorphism is allowed where there are several real implementations:** a Rust trait or enum, a Python base class or Protocol, a TS interface. One implementation means no interface.
+7. **Polymorphism is allowed where there are several real implementations:** a Rust trait or enum, a Python base class or Protocol, a TS interface *(superseded: a JS object shape documented with one `@typedef`, ADR-0036)*. One implementation means no interface.
 8. **Forbidden in our code:**
    - builder chains;
    - dependency-injection frameworks or service locators;
@@ -42,7 +44,7 @@
 - Extension points are base classes with a few methods in `rastai_plugin`. Implementations are found by name in its registry.
 - Type hints on every public function.
 
-**TypeScript**
+**TypeScript** *(superseded by ADR-0036: plain JavaScript + React, JSDoc types, no TypeScript syntax. The rules below carry over to JavaScript, except that "interfaces" become object shapes documented with one `@typedef`)*
 - Function components and plain functions. Classes only where a browser API demands one (a renderer that owns a WebGL context).
 - Interfaces for polymorphism. No global state library: React state and context, plus `@rastai/client` for server state.
 
@@ -58,6 +60,8 @@ pub fn lease_fits(gpu: &GpuMemory, requested_bytes: u64, reserve_bytes: u64) -> 
 ```
 
 **Enforced by:** the root `CLAUDE.md` and a `CLAUDE.md` per crate and package; the PR template's style checkbox; review; `rustfmt` and `clippy` in `just check`; CI greps for `anyhow`, `thiserror`, `pydantic`, `metaclass=` and `proc-macro = true` in our own manifests.
+
+*Note since acceptance (2026-10-10): formatting now also runs ruff for Python and prettier for JavaScript inside `just check` (owner decision 7, M1); `tools/checks/check-unsafe` holds the one file allowed `unsafe` (ADR-0033), and `tools/checks/check-no-typescript` fails on hand-written TypeScript (ADR-0036). The rules are unchanged.*
 
 ## Consequences
 
@@ -84,4 +88,4 @@ pub fn lease_fits(gpu: &GpuMemory, requested_bytes: u64, reserve_bytes: u64) -> 
 - Spec: [§29](../spec/rastai_spec_v5.md#29-repo-and-engineering-setup) (making AI coding agents productive)
 - Contracts: [§12 naming and code conventions](../architecture/contracts.md#12-naming-and-code-conventions)
 - Repo: [CLAUDE.md](../../CLAUDE.md), [CONTRIBUTING.md](../../CONTRIBUTING.md)
-- Related: [ADR-0004](0004-schema-ownership.md), [ADR-0005](0005-command-layer.md), [ADR-0030](0030-diagnostics-catalog.md)
+- Related: [ADR-0004](0004-schema-ownership.md), [ADR-0005](0005-command-layer.md), [ADR-0030](0030-diagnostics-catalog.md), [ADR-0033](0033-unsafe-statvfs.md), [ADR-0036](0036-frontend-plain-javascript.md)

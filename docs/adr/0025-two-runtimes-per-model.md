@@ -21,6 +21,7 @@
 1. **Every local model can run on two runtimes:**
    - **Inspectable** (`RuntimeKind.INSPECTABLE`): the compiled ModelSpec in a `serve_inspectable` Python job;
    - **Fast** (`RuntimeKind.FAST`): a managed `llama-server` in a node-native `serve_fast` job (ADR-0010). vLLM is an optional Fast engine on Linux serving nodes.
+     *Note since acceptance (2026-10-10): a managed vLLM engine comes after the prototype (owner decision 8); the prototype has no vLLM job kind, environment or capability flag. An external vLLM server is reached now through `OpenAiAdapter` as an OpenAI-compatible endpoint (`RuntimeKind.API`), and its chats replay at `proxy` fidelity (ADR-0027). The two-runtime decision is unchanged.*
 2. **One toggle in chat** switches between them (`chat.runtime.set`). The default is `inference.default_runtime = inspectable`.
 3. **Both get token IDs from the gateway** (ADR-0008), so a conversation's token IDs are the same whichever runtime produced them.
 4. **Psychology, interventions and branching with interventions run only on Inspectable.** A Fast-runtime conversation opens in Psychology through its **replay twin**: the full-precision weights mapped with `model.twin.set`, replayed from the logged token IDs (ADR-0027).

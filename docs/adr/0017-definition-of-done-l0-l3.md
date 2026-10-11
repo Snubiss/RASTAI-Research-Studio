@@ -29,6 +29,12 @@
 5. **Per pull request:** "done" means `just check` passes and the change adds a test that fails without it (§29, PR template).
 6. **Stubs are honest.** An L0 command that isn't built yet returns a coded "not available yet" diagnostic from its area's range. It never pretends to succeed.
 
+*Note since acceptance (2026-10-10):*
+- *Decision 2's "Linux AMD" is checked at M10, which holds the AMD parity gate; M2 closes on NVIDIA (owner decision 11).*
+- *Names marked "(L2)" in contracts.md are designed now but built only after the core loop reaches L2: daily `VACUUM INTO` snapshots with salvage, the node self-update watchdog with rollback, plugin-data downgrade guards, crash-report rate limits, and plugin event deliveries beyond what Evaluation auto-run needs. The minimal durable path comes first: event logs, reattach, atomic writes. That is "durability first" applied, not a change to L1.*
+- *M1-49's three-surfaces test (`tests/e2e/three_surfaces/`) grows each milestone, and M10-E02 adds an API-only run of the core loop (contracts §2.4 rule 9).*
+- *The decisions are unchanged.*
+
 **Checked by:** a CI test that runs every registered command with `dry_run` and fails on an un-coded error (this is the L0 floor for the whole app); the plan's level table, reviewed at each milestone exit.
 
 ## Consequences

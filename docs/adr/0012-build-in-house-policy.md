@@ -31,6 +31,11 @@
 8. **Dropped (prior art, not dependencies):** Unsloth, TRL, PEFT, Accelerate, nnsight, TransformerLens, SAELens, circuit-tracer, rLLM, Harbor (its task format is imported), React Flow, three.js, deck.gl, uPlot, miette, Extism, Trackio (its logs are imported). **Never:** LiteLLM.
 9. **Pending additions.** contracts.md §14 item 1 lists dependencies the design needs that §27 doesn't name yet: `hyper`, `hyper-util`, `tokio-rustls`, `webpki-roots`, `pyo3`, `wasm-bindgen`, `protobuf-es`, Python `protobuf`, `keyring`, `pyarrow`, and dev tooling `pytest`, `vitest`, `typescript`, `vite`, `pnpm`. Code uses these defaults until the owner adds them to §27 or picks otherwise. The spike's `reqwest`, `futures-util` and `memmap2` are not carried over.
 
+*Note since acceptance (2026-10-10):*
+- *Decision 9 is settled. The owner approved the pending additions (spec v5.4 §27, owner decision 1), each behind one wrapper file listed in contracts §2.5: `hyper`, `hyper-util`, `tokio-rustls`, `webpki-roots`, `tower`, `pyo3`, `wasm-bindgen`, `wasm-bindgen-cli`, `protobuf-es`, Python `protobuf`, `keyring`, `pyarrow`, `onnx` and `onnxscript` (under `torch.onnx`), `libc` (ADR-0033), the OS tools `setsid`, `kill`, `unshare`, `df`, `nvidia-smi` and `rocm-smi`, and dev tooling `pytest`, `vitest`, `vite`, `pnpm`, `ruff` and `prettier`. The `typescript` package is dev tooling only, as the `checkJs` checker; nobody writes TypeScript (ADR-0036). Later decisions added `miniz_oxide` and `torchvision.io.decode_image` (ADR-0037), and `mysql_async` and PyMySQL (ADR-0035). The contracts §14 item the decision cites is closed.*
+- *Category 4's example: a managed vLLM engine comes after the prototype (owner decision 8). An external vLLM server is reached now through the OpenAI-compatible adapter, with `proxy` replays.*
+- *The decisions are unchanged.*
+
 **Checked by:** CI fails a PR that adds a crate, Python package or npm package not on its allowlist; a test per wrapper module that the library is imported nowhere else (`check-imports`); the offline CI test (Phase 2) that counts zero outbound connections.
 
 ## Consequences
@@ -56,6 +61,6 @@
 ## Links
 
 - Spec: [§2](../spec/rastai_spec_v5.md#2-principles), [§27](../spec/rastai_spec_v5.md#27-build-in-house-policy-and-dependency-register-new), [§28](../spec/rastai_spec_v5.md#28-risk-register) risk 12
-- Contracts: [§2 component inventory](../architecture/contracts.md#2-component-inventory) (external deps per component), [§14](../architecture/contracts.md#14-open-questions) item 1
+- Contracts: [§2 component inventory](../architecture/contracts.md#2-component-inventory) (external deps per component), [§2.5 external libraries and their wrapper files](../architecture/contracts.md#25-external-libraries-and-their-one-wrapper-file)
 - Spike: [07 backend bake-off](../../spike/results/07_backend_bakeoff.md) (DJL telemetry)
-- Related: [ADR-0015](0015-plugins-and-licensing.md), [ADR-0019](0019-in-house-webgl2-canvas.md), [ADR-0023](0023-owner-code-style.md)
+- Related: [ADR-0015](0015-plugins-and-licensing.md), [ADR-0019](0019-in-house-webgl2-canvas.md), [ADR-0023](0023-owner-code-style.md), [ADR-0033](0033-unsafe-statvfs.md), [ADR-0035](0035-mysql-long-term-archive.md), [ADR-0036](0036-frontend-plain-javascript.md), [ADR-0037](0037-borrowed-decoders-and-parser-fuzzing.md)

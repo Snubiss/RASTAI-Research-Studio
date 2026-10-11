@@ -21,7 +21,7 @@
    - Basic shows `basic_text` and a fix button when `fix_command_id` is set.
    - Advanced shows the code, path, message and fix.
    - Validation collects all diagnostics in one pass (ADR-0032).
-8. **Logging (default until the owner decides, contracts §14 item 2):** an in-house JSON-lines logger in `rastai-diag` (`log_info(message, fields)`) writes to `<state>/logs/`. Run ids reach Python through `RASTAI_RUN_ID`. §25 names Rust `tracing`, which isn't on the allowlist; revisit if structured spans are needed.
+8. **Logging (default until the owner decides, contracts §14 item 2):** an in-house JSON-lines logger in `rastai-diag` (`log_info(message, fields)`) writes to `<state>/logs/`. Run ids reach Python through `RASTAI_RUN_ID`. §25 names Rust `tracing`, which isn't on the allowlist; revisit if structured spans are needed. *(Note since acceptance, 2026-10-10: decided. Spec v5.4 §25 now names this in-house logger (`init_logger`, `log_info`), and `tracing` is not used (owner decision 2). The contracts §14 item is closed.)*
 
 ```rust
 // crates/rastai-store/src/error.rs
@@ -39,8 +39,10 @@ impl StoreError {
 }
 ```
 
+*Note since acceptance (2026-10-10): contracts v1.1 settles the numbering collisions between the drafts (each number keeps one meaning; withdrawn draft numbers are listed in `catalog/README.md`), adds the ranges `RRS-S5xxx` (long-term archive, ADR-0035) and `RRS-D4xxx` (run-log import), and lists every assigned code in §10.3. The first check below says "JavaScript" where it said "TS" (ADR-0036). The decisions are unchanged.*
+
 **Checked by:**
-- a CI check that every code used in Rust, Python or TS exists in the catalog and is not retired;
+- a CI check that every code used in Rust, Python or JavaScript exists in the catalog and is not retired;
 - the L0 test that every command fails with a coded diagnostic (ADR-0017);
 - a worker test that an exception in a job ends in a coded `job.state_changed`;
 - a catalog lint that every entry has `basic_text` and `fix_text`.
@@ -69,5 +71,5 @@ impl StoreError {
 ## Links
 
 - Spec: [§7](../spec/rastai_spec_v5.md#7-ux-system), [§23](../spec/rastai_spec_v5.md#23-validation), [§25](../spec/rastai_spec_v5.md#25-observability-updates-and-maintenance-new), [§29](../spec/rastai_spec_v5.md#29-repo-and-engineering-setup)
-- Contracts: [§10 error catalog](../architecture/contracts.md#10-error-catalog), [§4.1 Diagnostic](../architecture/contracts.md#4-wire-contracts), [§14](../architecture/contracts.md#14-open-questions) item 2
+- Contracts: [§10 error catalog](../architecture/contracts.md#10-error-catalog), [§4.1 Diagnostic](../architecture/contracts.md#4-wire-contracts), [§10.2 collisions settled in v1.1](../architecture/contracts.md#102-collisions-settled-in-v11)
 - Related: [ADR-0005](0005-command-layer.md), [ADR-0017](0017-definition-of-done-l0-l3.md), [ADR-0023](0023-owner-code-style.md), [ADR-0032](0032-document-files-and-validation.md)

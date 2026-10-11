@@ -13,7 +13,7 @@
 
 1. **One manifest for everything:** `rastai-plugin.json` (`rastai.plugin/1`) for first-party plugins, third-party plugins and core sections. Each core section's `section.json` uses the manifest schema.
 2. **First-party code uses only the public API:**
-   - TypeScript: `@rastai/plugin`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz`;
+   - JavaScript: `@rastai/plugin`, `@rastai/ui`, `@rastai/canvas`, `@rastai/viz`;
    - Python: `rastai` and `rastai_plugin`.
    `tools/checks/check-imports` enforces this. Psychology and Evaluation live in `plugins/` and ship preinstalled as `.rrsplugin` packages (ADR-0020).
 3. **Versioning:**
@@ -28,7 +28,7 @@
    | Declarative (themes, layouts, keybindings, templates, eval suites) | data | the trust prompt if it requests network or data permissions |
    | UI, first-party | in-process React (3D views, per-token streams) | trusted |
    | UI, third-party | sandboxed iframe with a JSON-RPC bridge compatible with MCP Apps | `sandbox="allow-scripts"`, no same-origin, calls bounded by `commands:[scopes]` |
-   | Python module | its own process, worker job kind `plugin_module` | network off by default (a new user and network namespace on Linux, contracts §14 item 6). Still trusted code, and the trust prompt says so |
+   | Python module | its own process, worker job kind `plugin_module` | network off by default (a new user and network namespace on Linux, contracts §8.8). Still trusted code, and the trust prompt says so |
    | Provider (Phase 3) | a separate process speaking `ProviderService` gRPC | credentials fetched from the keychain per call |
    | WASM | **deferred** until first-party code needs it, then on wasmtime with WASI 0.3 component interfaces | — |
 
@@ -41,6 +41,13 @@
    - GPL, LGPL, AGPL, SSPL, BUSL and non-commercial licenses are rejected.
    - Any other license needs a named exception with a reason in `deny.toml` or the allowlist JSON.
    - Model weights and SAE data keep their own terms. They are shown and checked, never bundled.
+
+*Note since acceptance (2026-10-10):*
+- *The first-party API list in decision 2 reads "JavaScript", not "TypeScript": the SDK `@rastai/plugin` is plain JavaScript with generated declarations for authors' editors, and the `rastai plugin new` templates are `.jsx` (ADR-0036). Plugin authors may use any language inside their own iframe.*
+- *Network-off enforcement (decision 4's Python row) is settled in contracts §8.8. Ubuntu 23.10 and later restrict unprivileged user namespaces, so the `.deb` ships an AppArmor profile granting `userns` to the installed binary. Where namespaces are still unavailable, trusted, preinstalled first-party modules run without the network namespace with the warning `RRS-P2005`; a third-party module without network permission is refused with `RRS-P2001`.*
+- *Every manifest contribution key maps to one capability, including `icon_sets`, `locales`, `macros` and `chat_templates`, with each one's prototype status (contracts §5.5).*
+- *Theme plugins and plugin UIs can't restyle the security UI (egress badge, trust prompt, permission list, signed-out screen, error severity colors): those use locked tokens no theme can change (contracts §5.6).*
+- *The decisions are unchanged.*
 
 **Checked by:** `check-imports` in CI; a plugin test fixture per tier in `fixtures/plugins/`; a test that a plugin needing a missing capability installs as `incompatible` with a diagnostic; cargo-deny's license check and the allowlist JSONs on every PR.
 
@@ -69,5 +76,5 @@
 ## Links
 
 - Spec: [§13](../spec/rastai_spec_v5.md#13-plugins-and-ecosystem), [§24](../spec/rastai_spec_v5.md#24-trust-and-privacy), [§27](../spec/rastai_spec_v5.md#27-build-in-house-policy-and-dependency-register-new), [§35](../spec/rastai_spec_v5.md#35-licensing-and-community)
-- Contracts: [§1 repository tree](../architecture/contracts.md#1-repository-tree) (first-party plugins), [§4.8 iframe bridge](../architecture/contracts.md#4-wire-contracts), [§9.7 plugin states](../architecture/contracts.md#9-state-machines), [§14](../architecture/contracts.md#14-open-questions) item 6
-- Related: [ADR-0009](0009-python-environments-uv.md), [ADR-0012](0012-build-in-house-policy.md), [ADR-0018](0018-license-apache-dco-trademark.md), [ADR-0020](0020-evaluation-first-party-plugin.md)
+- Contracts: [§1 repository tree](../architecture/contracts.md#1-repository-tree) (first-party plugins), [§4.8 iframe bridge](../architecture/contracts.md#4-wire-contracts), [§9.7 plugin states](../architecture/contracts.md#9-state-machines), [§8.8 network isolation for plugin modules](../architecture/contracts.md#88-network-isolation-for-plugin-modules), [§5.5 capabilities](../architecture/contracts.md#55-extension-point-capabilities)
+- Related: [ADR-0009](0009-python-environments-uv.md), [ADR-0012](0012-build-in-house-policy.md), [ADR-0018](0018-license-apache-dco-trademark.md), [ADR-0020](0020-evaluation-first-party-plugin.md), [ADR-0036](0036-frontend-plain-javascript.md)

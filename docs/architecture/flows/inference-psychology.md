@@ -1,20 +1,18 @@
 # Inference and Psychology: Logic Flows
 
-**Status:** v1.2, 2026-10-10. Pre-build design. Sources: spec v5.3 (§8, §9, §17–§19, §21, §22, §24, §26), `spike/README.md` (experiments 01, 02, 04, 07) and `docs/architecture/contracts.md`.
+**Status:** v1.3, 2026-10-10. Pre-build design. Sources: spec v5.4 (§8, §9, §16–§19, §21, §22, §24, §26), `spike/README.md` (experiments 01, 02, 04, 07) and `docs/architecture/contracts.md` v1.1.
 
-v1.1 reconciles v1 with the docs written beside it and with the defaults in plan §10:
-- gateway, node and worker names and constants come from `layout/rust-node-gateway-proto.md` ("node layout") and `layout/python.md` ("Python layout"): `prepare_chat`, `run_chat`, `LogCommit`, `TokenizeChat`, `SessionPool`, `InterventionHook`, `DECODE_SLOT_COUNT`, `EVICTION_GRACE_SECONDS`, one llama-server slot;
-- error numbers in `RRS-G`, `RRS-H` and `RRS-J` are the node layout's (plan §10 row 8);
-- `GenerateRequest` carries the `InterventionSet` (contracts §4.4), and job signals follow the contracts `JobSignal` table;
-- Prefer this branch writes the preference rows that training-evaluation §7.1 defines;
-- new flows: SAE loading (5.4) and offline analyses (6.5).
+v1.3 reconciles this file with contracts v1.1 and the owner decisions of 2026-10-10:
+- **No names section.** Every name comes from `contracts.md`, or from the layout doc that owns it (named where first used). The old section 10 ("New names") is gone; commands, wire fields, columns, artifact kinds, events and error codes are all in contracts now. Superseded v1 names are in contracts 15.11, and withdrawn error numbers in contracts 10.2.
+- **Long-term archive (contracts 8.7, ADR-0035, M11).** The archive joins the "every copy" set for `conversation.delete` (queued in the `vault_changes` outbox when the archive is down; 9.2). Gateway-log retention becomes a prune when a project archives conversations, which is opt-in only (1.4).
+- **Interactive Psychology controls go straight to core commands** from the UI. The plugin module is for validation and offline jobs. A p95 under 50 ms round-trip budget test guards it (0.2, 7.1).
+- **Live-panel budget** is +35% at CUDA-graph speed, shown in the UI, with a nightly GPU test that fails above it (5.2, 5.3).
+- **Fast runtime is llama-server only** in the prototype. A managed vLLM engine comes after it; an external vLLM is an OpenAI-compatible adapter and replays as `proxy` (1.3, 2.1, 3.1).
+- **One owner per algorithm.** The Python worker validates safetensors headers through the `rastai_formats` wheel, and a multi-GPU placement comes from the server's planner (4.3).
+- **Sign-in (ADR-0034).** A daemon restart signs browser sessions out; the desktop shell reruns `rastai open --print-url` (4.8).
+- **JavaScript, not TypeScript (ADR-0036).** Test files are `*.spec.js`; the UI is plain JavaScript and JSX.
 
-v1.2 applies review fixes:
-- one data-policy code, `RRS-C1009`, raised by `rastai-server`'s `check_data_policy` (plan §10 row 37);
-- the chat handler sits where the control-plane layout puts it;
-- delete reaches every copy of a conversation (0.2, 9.2), and run event logs carry no conversation content.
-
-Every name comes from `contracts.md`, or from the layout doc that owns it (named where first used). Names that neither defines are marked *(new)* at first use and listed in [section 10](#10-new-names). Section 10.6 maps each superseded v1 and v1.1 name to its replacement.
+Earlier versions: v1.1 aligned names with the layout docs and added SAE loading (5.4) and offline analyses (6.5). v1.2 made `RRS-C1009` the one data-policy code, put the chat handler where the control-plane layout puts it, and made delete reach every copy (0.2, 9.2).
 
 ## Contents
 
@@ -36,8 +34,7 @@ Every name comes from `contracts.md`, or from the layout doc that owns it (named
 8. [Remote models](#8-remote-models)
 9. [Conversation flags and imports](#9-conversation-flags-and-imports)
    - 9.1 Flags and imports · 9.2 Delete reaches every copy
-10. [New names](#10-new-names)
-11. [Open questions](#11-open-questions)
+10. [Open questions](#10-open-questions)
 
 ---
 
@@ -47,7 +44,7 @@ Every name comes from `contracts.md`, or from the layout doc that owns it (named
 
 | Id in diagrams | Component (contracts name) | Process |
 |---|---|---|
-| `UI` | `apps/web` through `@rastai/client`; the Psychology panels are `@rastai/psychology-ui` | UI |
+| `UI` | `apps/web` through `@rastai/client` (Connect); the Psychology panels are `@rastai/psychology-ui`. Plain JavaScript and JSX | UI |
 | `SRV` | `rastai-server`: command dispatch, scheduler, plugin host, `VaultLogSink` (the daemon's `LogSink`) | Daemon |
 | `GW` | `rastai-gateway`: routing, chat templates, tokenization, adapters. One `Gateway` with place `Daemon` serves the user endpoints. Each node has its own with place `Node` (node layout §6.2) | Daemon, or node |
 | `VAULT` | `rastai-store`: the `vault.db` writer thread and reader connections | Daemon |
@@ -65,18 +62,21 @@ Every name comes from `contracts.md`, or from the layout doc that owns it (named
 - **The full context and the interventions travel with every request.** A `GenerateRequest` always carries every `prompt_token_ids` entry and the session's `interventions_json` (contracts §4.4).
   - A worker's KV cache for a `session_id` is only a speed-up. If the cached prefix matches, the worker skips that part of the prefill; if not (evicted, worker restarted), it prefills from scratch.
   - No flow breaks because a session is gone.
-- **Psychology reaches the runtime only through core commands.**
-  - `psychology.*` commands run in `PM`. It validates and resolves, then calls core `chat.*` commands (`chat.settings.set`, `chat.regenerate`, `chat.continue`, `chat.tensor.fetch`) through `WorkerHostService.ExecuteCommand` → `NodeHubService.ExecuteCommand`.
+- **Interactive Psychology controls call core commands directly; the plugin module is for validation and offline jobs** (contracts 2.4 rule 12).
+  - The UI sends a slider drag, a step, a resume, a rewind and a branch straight to core commands: `chat.settings.set`, `chat.continue`, `chat.regenerate`, `chat.send`. No plugin module sits on that path, so the round trip stays short.
+  - `psychology.*` commands run in `PM`. Use them where something must be checked or resolved first, or where a job is needed: `psychology.intervention.set` (resolve and validate), `psychology.live.start`, `psychology.branch.prefer`, `psychology.sae.load`, replay, export, zoom, analyses and distill. `PM` then calls core commands (`chat.settings.set`, `chat.tensor.fetch`, ...) through `WorkerHostService.ExecuteCommand` → `NodeHubService.ExecuteCommand`.
+  - The CLI, MCP and scripts use the `psychology.*` forms (`psychology.step`, `psychology.branch.create`). They resolve to the same core commands as the UI's direct calls.
+  - **Latency budget:** the local round trip of one slider change (UI → daemon → node → worker, and back) has a p95 under 50 ms. `tests/e2e/psychology-latency.spec.js` (M4) measures it and fails above it (7.1).
   - Only core code calls the session RPCs (`SetInterventions`, `ForkSession`, `CloseSession`, `FetchTensor`).
   - Psychology jobs that need forward passes from a loaded model use the node gateway (`WorkerHostService.GatewayGenerate`, `TokenizeChat`), like rollout and judge jobs.
   - Jobs that need gradients or many forward passes (6.5) load their own model copy.
-  - This keeps contracts §2.4 rule 5, and third-party lens plugins get the same path.
+  - This keeps contracts 2.4 rule 5, and third-party lens plugins get the same path.
   - The manifest's permissions are in frontend layout §14.2: `conversations.read`, `weights.read`, `gpu`, `commands:[...]`. Psychology is first-party and preinstalled, so they are granted.
 - **The daemon creates plugin jobs.** A plugin command that needs a job returns it in `CommandReply.follow_up_jobs[]`. `rastai-server` then creates the run (`run.json`, `runs` row, lineage) and calls `StartJob` (platform flow 3.3).
 - **Delete reaches every copy.**
-  - A conversation's content (text, token IDs, logprobs) lives only in `vault.db`, in artifacts that have a lineage edge to it (`replay_of`, `analysis_of`), and in copies the user made on purpose (preference rows, dataset snapshots, eval results).
+  - A conversation's content (text, token IDs, logprobs) lives only in `vault.db`, in artifacts that have a lineage edge to it (`replay_of`, `analysis_of`), in copies the user made on purpose (preference rows, dataset snapshots, eval results) and, only if the project opted in with `archive.include_conversations`, in the long-term archive (contracts 8.7).
   - Run event logs carry ids, counts and hashes, never content. The full gateway record travels as a short-lived record blob that the daemon moves into `vault.db` (9.2).
-  - `conversation.delete` removes the rows and every unpinned derived artifact and run, on every node that holds a copy (9.2).
+  - `conversation.delete` removes the rows and every unpinned derived artifact and run, on every node that holds a copy. It also adds the archive to the set: the delete is queued in the `vault_changes` outbox when the archive is down (9.2).
 - **Durable vs ephemeral.** `chat.token` and `psychology.packet` may be dropped for a slow subscriber. The panel marks the gap (`RRS-U0005`, info) and offers Recompute, which is a replay (6.1). Vault rows, documents and `*.state_changed` events are never dropped.
 - **One generation at a time per loaded model.**
   - A `serve_inspectable` worker runs one `Generate` at a time, from a FIFO queue.
@@ -84,7 +84,7 @@ Every name comes from `contracts.md`, or from the layout doc that owns it (named
   - Queue wait counts toward the first-token timeout.
 - **One GPU view per job.**
   - The node sets `CUDA_VISIBLE_DEVICES` (`HIP_VISIBLE_DEVICES` on ROCm) to the leased GPUs in ascending physical order, so a single-GPU job always sees `cuda:0`.
-  - A model placed across GPUs captures one graph per device segment, on that device's own capture stream (spike 02; Python layout §2.3).
+  - A model placed across GPUs captures one graph per device segment, on that device's own capture stream (spike 02; Python layout §2.3). The placement is the ModelSpec `placement{}` field that the server's `plan_layer_placement` wrote; the worker only applies it (contracts 2.4 rule 10).
 
 ### 0.3 Constants used in these flows
 
@@ -101,7 +101,7 @@ Defined by a layout doc and used here:
 | `DECODE_SLOT_COUNT` | 2 | `rastai_models/decoding.py`: chat plus one branch |
 | `SUMMARY_LENS_TOP_K`, `SUMMARY_FEATURE_TOP_K` | 5, 16 | `rastai_lens/summary_layer.py` |
 
-New in this doc:
+Local to these flows. Each is a constant at the top of the one file that owns it and crosses no crate or package boundary, so none is a shared name in contracts 15.10:
 
 | Constant | Value | Owner | Why |
 |---|---|---|---|
@@ -170,18 +170,19 @@ Not obvious from the picture:
 - **Generation belongs to the daemon, not to the HTTP call.** `chat.send` returns once the user row commits. Closing the tab doesn't stop generation; `chat.stop` does. A `chat.send` turn therefore never ends `client_disconnected`.
 - **Model version:** the gateway logs `model_hash` and a `model_ref` whose revision is resolved to the commit hash from the HF cache's `refs/`, never `@main`.
 - **What an assistant row's `token_ids` hold:** the full sequence the model saw and produced, prompt IDs first, then generated IDs.
-  - `settings_json.prompt_token_count` *(new)* marks the split.
+  - `settings_json.prompt_token_count` marks the split.
   - Replaying a branch is one read of its leaf row. It is exact for any chat template, including templates that re-render earlier turns.
   - The cost is quadratic storage (about 3 MB for 100 turns of 8k tokens), which SQLite handles.
 - **`settings_json` on the assistant row** holds:
   - `sampling` (with the seed), `runtime`, `lens`, `interventions` (section 7) and `prompt_token_count`;
-  - for Fast turns, `engine` *(new)*: the pinned llama-server build.
-- **`finish_reason`** *(new column on `messages`)* uses the gateway's `FinishReason` names (node layout §6.2): `stop`, `length`, `cancelled`, `client_disconnected`, `error`, `evicted`.
+  - for Fast turns, `engine`: the pinned llama-server build.
+- **`finish_reason`** uses the gateway's `FinishReason` names (node layout §6.2): `stop`, `length`, `cancelled`, `client_disconnected`, `error`, `evicted`.
 - **No conversation text outside `vault.db`.**
   - The command journal stores `chat.*` arguments with the message text removed.
   - Structured logs carry ids, counts and timings only (node layout §6.7, `privacy.rs`).
   - Run event logs carry ids, counts and hashes only: a job's `gateway.request_logged` points at a record blob that the daemon moves into `vault.db` and then deletes (9.2).
   - `vault.db` is the one file SQLCipher will encrypt in Phase 2.
+  - The one exception is the long-term archive, which holds conversation rows only when the project opted in, never for a `local-only` project, and only in tables that report encryption (1.4).
 - **Data policy before anything is written:** the handler calls `check_data_policy` on the prepared route before it inserts the user row, so a refusal (`RRS-C1009`) leaves no trace but the journal row (1.3).
 
 The daemon's side, in the house style:
@@ -202,11 +203,11 @@ pub async fn send(context: &CommandContext<'_>, arguments: ChatSendArgs) -> Resu
 
 **Persisted:**
 - durable, before generation: the user `messages` row (`vault.db`); the `command_journal` row with the text removed (`rastai.db`);
-- durable, after generation: the assistant `messages` row and the `gateway_log` row, in one transaction; then `conversation.changed`;
+- durable, after generation: the assistant `messages` row and the `gateway_log` row, in one transaction; then `conversation.changed`. While an archive is configured, the same transaction also writes their `vault_changes` rows (the archive outbox, contracts 8.3);
 - ephemeral: `chat.token`, `psychology.packet`, and the worker's KV cache for the session (GPU memory only).
 
 **Tests:**
-- `tests/e2e/chat_turn.spec.ts`: send and watch tokens stream. Then `conversation.get` and `gateway.log.list` show the token IDs, `model_hash`, the resolved revision and a filled seed.
+- `tests/e2e/chat_turn.spec.js`: send and watch tokens stream. Then `conversation.get` and `gateway.log.list` show the token IDs, `model_hash`, the resolved revision and a filled seed.
 - `crates/rastai-gateway/tests/tokenizer_parity.rs`: the 162-case corpus in `fixtures/tokenizer/` gives the IDs recorded from llama.cpp in spike 04, with 0 mismatches and the whole-spec case not truncated.
 - `tests/crash/chat_daemon_kill`: kill -9 the daemon mid-stream. After restart, the user row is intact and no torn assistant row exists. The worker was reattached without a reload, and Regenerate works.
 - `tests/crash/chat_worker_kill`: kill -9 the worker mid-stream. The partial reply is saved with `finish_reason = error` and `RRS-J1001`.
@@ -222,7 +223,7 @@ sequenceDiagram
   participant NODE as rastai-node
   participant LS as llama-server
   NAVI->>SRV: POST /v1/chat/completions, Bearer token, stream true
-  SRV->>SRV: auth layer checks Host, Origin and the token
+  SRV->>SRV: request gate checks Host, Origin when sent, and the token
   SRV->>SRV: check_data_policy on the model's route, user-level setting
   SRV->>GW: the gateway's /v1 handler
   GW->>GW: route the model name, check scope chat
@@ -250,7 +251,7 @@ sequenceDiagram
 ```
 
 Not obvious:
-- **Auth:** a scoped Bearer token with `chat`. API models also need `gateway.spend` (1.3). Host and Origin are checked on every request (§21).
+- **Auth:** a scoped Bearer token with `chat`. API models also need `gateway.spend` (1.3). The Host (any loopback host, any port) and, when sent, the Origin are checked on every request; a Bearer request may omit Origin (contracts 3.2).
 - **Data policy:** `gateway_glue/routing.rs` in `rastai-server` resolves the `model` field with the gateway's `route_model` and calls `check_data_policy` with the user-level setting before the gateway sees the request. A refusal is HTTP 403 with `RRS-C1009` in the error JSON (1.3).
 - **Model names** (node layout §6.3):
   - a local model is served under its repo name, on the runtime it is loaded on;
@@ -321,15 +322,17 @@ Not obvious:
   - `local-only` keeps everything on this machine; `trusted-remote` adds paired nodes; `any` adds third-party APIs.
   - The default is `local-only` (contracts §11.2), so the first API chat or remote-node chat shows `RRS-C1009`, "the project's data policy forbids this" (plan §10 row 37, M1-13). The training and designer flows raise the same code for the same refusal.
   - Its fix button runs `settings.set privacy.data_policy`, at project level (user level for chats outside a project).
-  - One function decides both cases: `check_data_policy` in `rastai-server`'s `policy.rs` *(new file)*, the daemon's policy check. It runs before anything starts:
+  - One function decides both cases: `check_data_policy` in `rastai-server`'s `policy.rs`, the daemon's policy check. It runs before anything starts:
     - for `chat.*`, in the handler, on the `PreparedPrompt.route`, with the project's policy, before the user row is written (1.1);
     - for `/v1`, in `gateway_glue/routing.rs`, with the user-level setting, before the gateway routes the request (1.2).
+  - The archive uses the same function: it is a remote destination, so a `local-only` project is never archived (contracts 8.7).
   - The gateway doesn't check the policy itself. Its `privacy.rs` keeps incognito, log fields and retention (node layout §6.7).
   - The egress badge (`privacy.show_egress_badge`) is on whenever the active model is an API model or sits on a remote node.
 - **Scopes** are checked by `rastai-server`'s `check_scope` (control-plane layout), which returns `RRS-C1005` naming the missing scope.
 - **Fast with a lens:** the gateway drops the lens rather than failing the chat, and the panel shows `RRS-G3004` with its fix (5.1). Interventions and presets are refused, because silently dropping them would change the answer.
 - **COMPAT models** (unsupported architectures on HF `transformers`) are served by the same `serve_inspectable` job kind with `runtime = COMPAT`. Psychology sees only the opaque node's edges.
 - **The adapter set is closed** (node layout §6.2): `NodeRuntime`, `OpenAi`, `Anthropic`, plus `DaemonForward` in a node's gateway. OpenAI-compatible endpoints use `OpenAi` with another base URL.
+  - An **external vLLM** is one of those endpoints. The managed vLLM engine is not in the prototype (contracts 15.11), so no route, state or error here is vLLM-specific. Its answers are `proxy` fidelity (3.1, 3.2).
 
 ```rust
 // crates/rastai-server/src/policy.rs
@@ -357,8 +360,15 @@ flowchart TD
   ONLY --> OK
   OK -->|"yes"| EV["conversation.changed when a conversation changed"]
   OK -->|"disk full"| DF["RRS-G4001, cause RRS-S3002<br/>text stays on screen, reply not saved"]
-  GC["storage.gc and the daily retention timer"] --> AGE["Delete gateway_log rows older than gateway.retention_days"]
-  AGE --> KEEP["messages rows stay until the user deletes the conversation"]
+  GC["storage.gc and the daily retention timer"] --> AGE["gateway_log rows older than gateway.retention_days"]
+  AGE --> ARCQ{"Does the row's project archive gateway logs? Opt-in only"}
+  ARCQ -->|"no, the default"| DELR["Delete the row"]
+  ARCQ -->|"yes"| ACKQ{"Did the archive acknowledge and verify it?"}
+  ACKQ -->|"yes"| PRUNE["Prune: remove the local row only<br/>the archive keeps its copy"]
+  ACKQ -->|"no, or the archive is down"| WAIT["Keep the row and retry at the next timer<br/>RRS-S5006 after 24 h"]
+  DELR --> KEEP["messages rows stay until the user deletes the conversation"]
+  PRUNE --> KEEP
+  WAIT --> KEEP
 ```
 
 Not obvious:
@@ -371,12 +381,18 @@ Not obvious:
   - This includes rows the node gateway logged for jobs (`gateway_log.run_id` set).
   - Retention really removes the content: the job's `events.log` keeps only the request's ids, counts and hashes, and the record blob was deleted when the row was indexed. A re-index or a rebuild finds no record and writes nothing (9.2).
   - Conversations are user-managed: delete or archive (section 9).
+- **Retention becomes a prune when gateway logs are archived (opt-in only).**
+  - It applies only when the row's project sets `archive.include_conversations` (a project-layer key), its data policy is not `local-only`, and the archive tables report encryption (`RRS-S5004` otherwise). Everything else behaves as above. That includes every `/v1` row that belongs to no project and every incognito turn, which never reach the archive.
+  - A prune frees local space only. The local row is removed once the archive has acknowledged and verified it; the archive keeps its copy (contracts 8.7). The same age rule drives it, so no new setting is needed.
+  - If the archive is down or behind, the rows stay and pruning pauses. `archive.status` shows the lag, and `RRS-S5006` warns after 24 hours.
+  - For these projects "retention removes the content" no longer holds: the content stays in the archive until the user deletes the conversation (9.2) or purges it with `rastai archive purge`. `archive.restore` for a conversation brings its `gateway_log` rows back.
+  - Retention never sends a delete to the archive. Only user intent does (9.2).
 
 **Persisted:** as drawn. Incognito: nothing durable anywhere.
 
 **Tests:**
-- `tests/e2e/incognito.spec.ts`: an incognito chat with a marker string and the live panel on. Then grep `vault.db`, `rastai.db`, `<state>/logs/` and `<data>/blobs/` for the marker: no hits. Replay and Prefer return `RRS-L0006`.
-- `crates/rastai-server/tests/retention.rs`: with a fake clock, rows older than the setting are deleted, and `messages` rows are untouched. Re-indexing the job's `events.log` afterwards doesn't bring a deleted row back.
+- `tests/e2e/incognito.spec.js`: an incognito chat with a marker string and the live panel on. Then grep `vault.db`, `rastai.db`, `<state>/logs/` and `<data>/blobs/` for the marker: no hits. Replay and Prefer return `RRS-L0006`.
+- `crates/rastai-server/tests/retention.rs`: with a fake clock, rows older than the setting are deleted, and `messages` rows are untouched. Re-indexing the job's `events.log` afterwards doesn't bring a deleted row back. With a fake archive in an opted-in project, a row is removed only after the acknowledgement and is never deleted from the archive; with the archive down, the row stays.
 
 ### 1.5 Failure table (1.1 and 1.2)
 
@@ -397,6 +413,7 @@ Not obvious:
 | Model evicted for a training job | `rastai-node` | `RRS-H3004` (info) | partial row, `finish_reason = evicted` |
 | Daemon kill -9 | nobody, until restart | after restart, the user message has no reply; Regenerate | user row only; workers keep running (4.8) |
 | Disk full when logging | vault writer | `RRS-G4001` (cause `RRS-S3002`); the text stays on screen | user row only |
+| Archive unreachable (opted-in project) | `rastai-archive` | nothing in chat; `archive.status` shows the lag (`RRS-S5001`), then `RRS-S5006` after 24 h | rows stay in `vault.db`; the outbox grows; pruning pauses |
 | Network drop to a remote node | `rastai-transport` | `RRS-G0006`; the node shows `RRS-N2001` after 15 s | partial row (section 8) |
 | `/v1` client disconnects | `rastai-gateway` | nothing (the client is gone) | `gateway_log` row, `client_disconnected` |
 | Malformed `/v1` body | `rastai-gateway` | HTTP 400 with `RRS-G0001` in the error JSON | nothing |
@@ -439,12 +456,13 @@ Not obvious:
 - **The swap is the daemon's job.** The node never evicts one chat model for another: an evictable request is granted or denied (node layout §7.7).
   - `rastai-server` unloads the other model only when it is idle: no generation running, and no replay job using it.
   - Then it retries the load.
-- **The pair comes from `models.twin_of`** in `rastai.db`. If several GGUFs point at the same twin, the one used most recently wins; `chat.runtime.set` takes an optional `model_ref` *(new argument)* to pick another.
+- **The pair comes from `models.twin_of`** in `rastai.db`. If several GGUFs point at the same twin, the one used most recently wins; `chat.runtime.set` takes an optional `model_ref` to pick another.
 - **Both models stay resident when they fit.** Gemma 3 1B as a Q4 GGUF plus bf16 weights fits easily on 16 GB.
+- **Fast is llama-server in the prototype.** A managed vLLM engine comes after it and is not drawn in these flows. An external vLLM is an `OpenAi` adapter model (1.3), not a Fast runtime, so it has no twin and its replays are `proxy`.
 - **Fast has no live panel or interventions.** The panel shows `RRS-G3004` with the fix `chat.runtime.set`, plus a button that replays the conversation on the twin (6.1).
 
 **Persisted:**
-- `conversations.settings_json` *(new column)* gets the runtime (durable).
+- `conversations.settings_json` gets the runtime (durable).
 - Each assistant row stores `runtime` in `settings_json`, plus `model_hash` and the fidelity known at write time:
   - `exact` for Inspectable output;
   - `exact` or `approximate` for Fast output, by the twin rule in 2.2;
@@ -486,9 +504,9 @@ flowchart TD
 The replay's consistency check (6.1) can still lower `exact` to `approximate`.
 
 `model.twin.set` (owned by `rastai-server`, sync):
-1. Reads both models' `models.format_info_json` *(new column)*. The node fills it when a download finishes or a cached model is first scanned, from the GGUF header (`read_gguf_header`, node layout Q9) or `config.json`. It holds architecture, vocabulary size, file type or dtype, and a hash of the tensor names and shapes.
+1. Reads both models' `models.format_info_json`. The node fills it when a download finishes or a cached model is first scanned, from the GGUF header (`read_gguf_header`, node layout Q9) or `config.json`. It holds architecture, vocabulary size, file type or dtype, and a hash of the tensor names and shapes.
 2. Refuses a family, vocabulary-size or shape mismatch with `RRS-G3010`.
-3. Sets `models.twin_same_weights` *(new column)* when the GGUF is unquantized (F32, F16 or BF16) and the shapes match. ADR-0025 #5 allows `exact` only for the same tensors.
+3. Sets `models.twin_same_weights` when the GGUF is unquantized (F32, F16 or BF16) and the shapes match. ADR-0025 #5 allows `exact` only for the same tensors.
    - Matching names and shapes don't prove matching values, for example an f16 GGUF of a fine-tune.
    - The replay's consistency check (6.1) catches that case: it lowers the label to `approximate` with `RRS-L0003`.
 4. Records `models.twin_of`. From then on the gateway takes the GGUF's tokenizer files from the GGUF repo if present, else from the twin (node layout §6.8). Every llama-server load proves the two tokenizers agree (4.4).
@@ -558,9 +576,10 @@ Not obvious:
   - OpenAI-compatible adapters request `logprobs` with `top_logprobs`; Anthropic returns none.
 - **Retries** (node layout §6.10): one retry on a connect error before any byte arrives, never after the first byte. A 429 shows `RRS-G2003` with the server's wait time; the user presses Retry (`chat.regenerate`).
 - **Timeouts:**
-  - connect: 10 s, then `RRS-G2004` *(new)*;
+  - connect: 10 s, then `RRS-G2004`;
   - first token: 120 s, and a stall of 60 s, both `RRS-G0009`.
   - A connection that drops mid-stream saves the partial text with `RRS-G2004`.
+- **An external vLLM or any OpenAI-compatible server** is configured as one more adapter (`adapter.configure`) and follows this flow. It is a proxy-fidelity endpoint: no token IDs, so Psychology replays it on an observer (3.2).
 - **Live Psychology is greyed out** for API models (§9). The panel offers a proxy replay (3.2).
 
 **Persisted:** the user row before the call. After it, the assistant row and the `gateway_log` row: text, logprobs blob, `sampling_json`, `adapter`, `finish_reason`. Never the key.
@@ -608,7 +627,7 @@ sequenceDiagram
 
 Not obvious:
 - **The observer is any Inspectable model the user picks.** `PM` lists the candidates in the `RRS-L0005` reply.
-  - If the observer isn't loaded, the node loads it under an evictable lease before `TokenizeChat` or `GatewayGenerate` runs. That load-on-demand rule is a contract addition proposed in training-evaluation §16.
+  - If the observer isn't loaded, the node loads it under an evictable lease before `TokenizeChat` or `GatewayGenerate` runs. That load-on-demand rule belongs to `GatewayGenerate` and `TokenizeChat` (training-evaluation §16; node layout §6.6).
 - **`TokenizeChat`** (Python layout §14, node layout §6.6) renders the messages with the observer's chat template.
   - It returns the token IDs plus a target mask.
   - The mask marks each assistant span, which labels the timeline.
@@ -623,14 +642,14 @@ Not obvious:
 
 **Persisted:**
 - the summary blob (`<data>/blobs/`);
-- an `artifacts` row of kind `replay_summary` *(new)*;
-- a `lineage` row `replay_of` *(new)* from the summary to the conversation;
+- an `artifacts` row of kind `replay_summary`;
+- a `lineage` row `replay_of` from the summary to the conversation;
 - one `gateway_log` row with `run_id`; the record blob only until that row commits;
 - the lens job's run folder (`run.json`, `events.log`), with no conversation content in it.
 - The conversation itself is unchanged.
 
 **Tests:**
-- `tests/e2e/proxy_replay.spec.ts`: import a fixture API conversation from `fixtures/conversations/`, replay it on the tiny Gemma fixture, and check the `proxy` label and one summary row per observer token.
+- `tests/e2e/proxy_replay.spec.js`: import a fixture API conversation from `fixtures/conversations/`, replay it on the tiny Gemma fixture, and check the `proxy` label and one summary row per observer token.
 - `plugins/psychology/python/rastai_psychology/tests/test_replay_open.py`: with no observer, the reply is `RRS-L0005` and no job starts.
 
 ---
@@ -668,7 +687,7 @@ What each state means per runtime:
 |---|---|---|
 | `downloading` | `download` job into the HF cache: license check, free-space check, resumable (platform flow 1.5) | the same, for the GGUF file |
 | `waiting_for_lease` | evictable lease for weight bytes + KV cache + `INSPECTABLE_OVERHEAD_PERCENT` (node layout §7.8) | evictable lease for GGUF size + KV cache from the GGUF header + `FAST_COMPUTE_BUFFER_BYTES` |
-| `loading` | spawn the worker; compile the ModelSpec from the family mapping; read safetensors with the in-house strict reader | verify the build's SHA-256, spawn llama-server, poll `/health` |
+| `loading` | spawn the worker; compile the ModelSpec from the family mapping; check each safetensors header with `rastai_formats.check_safetensors_header`, then read tensor bytes | verify the build's SHA-256, spawn llama-server, poll `/health` |
 | `warming` | allocate the decode slots, capture the `off` graph for the first slot, time the baseline, resize the lease to the measured peak | tokenizer parity probe through `/tokenize`; resize the lease to the measured VRAM plus 5% |
 | `failed` codes | `RRS-H3006` (OOM), `RRS-M2001`–`M2005` (weight binding, designer-gym-remote A2), `RRS-J1001` (killed). `RRS-M4001` is only a warning (eager fallback) | `RRS-G3005` (build hash), `RRS-G3002` (not healthy), `RRS-G3003` (died), `RRS-G1004` (tokenizer mismatch), `RRS-G1003` (no tokenizer files) |
 
@@ -697,7 +716,7 @@ stateDiagram-v2
 What it means for chat:
 - Chat and Psychology models (`serve_inspectable`, `serve_fast`) hold `evictable` leases. Training and gym jobs hold `pinned` ones.
 - Only a pinned request reclaims. An evictable request is granted or denied (`RRS-H3001`, listing the holders).
-- `ResourceRequest.may_reclaim_evictable` *(training-evaluation §16)* is false for auto-run evals and for Psychology analysis jobs (6.5). Those jobs wait in the queue instead of evicting chat.
+- `ResourceRequest.may_reclaim_evictable` is false for auto-run evals and for Psychology analysis jobs (6.5). Those jobs wait in the queue instead of evicting chat.
 
 **Persisted:** in node memory and in each holder's `job.json` (`granted_leases`), so a node restart rebuilds the leases from reattached jobs (4.8). `lease.state_changed` reaches the daemon through heartbeats; there is no lease table in `rastai.db`.
 
@@ -727,7 +746,7 @@ sequenceDiagram
   W->>NODE: WorkerHostService.Register
   NODE->>W: WorkerService.Hello
   W->>W: set_per_process_memory_fraction from the granted bytes
-  W->>W: compile the ModelSpec, read safetensors with the strict reader
+  W->>W: compile the ModelSpec, check headers with rastai_formats, read tensor bytes
   W->>W: SessionPool with DECODE_SLOT_COUNT slots
   W->>W: capture the off graph for the first slot on this device's stream
   W->>W: time 32 panel-off steps for the baseline tokens per second
@@ -747,11 +766,14 @@ Not obvious:
   - After warm-up the worker compares `torch.cuda.max_memory_reserved()` with the lease and calls `ResizeLease`. A denied resize fails the load with `RRS-H3001`.
   - SAEs add a resize when the live panel turns on (5.1).
   - Spike reference: the whole Gemma 3 1B stack with the panel peaks at 2.7 GiB.
+- **One owner per algorithm** (contracts 2.4 rule 10):
+  - Header validation lives in `rastai-formats` only. The worker calls the wheel's `check_safetensors_header` and reads tensor bytes only after it accepts (`rastai_models/io/safetensors_reader.py`), so Rust and Python raise the same `RRS-E60xx` code.
+  - A model that spans GPUs gets its split from the ModelSpec `placement{}` field. The server's `plan_layer_placement` is the only planner; the worker's `apply_placement` applies it.
 - **Decode slots** (`SessionPool`, Python layout §2.2): each slot is a preallocated KV cache plus token and position buffers. The CUDA graphs are captured against those buffers (spike `StaticDecoder`).
   - Sessions bind to slots.
   - A third session evicts the least recently used one: its cache is dropped, and the next request re-prefills (rule 0.2).
   - The second slot captures its graph on first use.
-- **Capture failure isn't fatal.** If capture fails (an op that can't be captured, or the graph pool runs out of memory), the worker decodes eagerly at about a third of the speed. It reports `RRS-M4001` *(proposed number in the `RRS-M4xxx` range)* as a warning, and the UI shows the measured speed.
+- **Capture failure isn't fatal.** If capture fails (an op that can't be captured, or the graph pool runs out of memory), the worker decodes eagerly at about a third of the speed. It reports `RRS-M4001` as a warning, and the UI shows the measured speed.
 - **The worker reports readiness through its event log** (`run.state_changed`), and `NODE` turns that into model `ready`. Every serve job has a run folder for `job.json` and `events.log`, like any job.
 
 The slot, as plain data:
@@ -875,7 +897,7 @@ Rules:
 
 **Persisted:** `lease.state_changed` (durable, via heartbeats); `job.state_changed` for the holder.
 
-**Tests:** `crates/rastai-node/tests/leases.rs` (4.2), plus `tests/e2e/eviction.spec.ts` (4.6).
+**Tests:** `crates/rastai-node/tests/leases.rs` (4.2), plus `tests/e2e/eviction.spec.js` (4.6).
 
 ### 4.6 Eviction for a training job
 
@@ -915,7 +937,7 @@ Not obvious:
 
 **Persisted:** the partial assistant row; `job.state_changed` for both jobs; lease and model state changes via heartbeats.
 
-**Tests:** `tests/e2e/eviction.spec.ts` on a fake GPU profile small enough to force eviction: a streaming answer ends with `evicted`, the training job starts, and reloading afterwards works. `crates/rastai-node/tests/leases.rs`: a holder that ignores `CANCEL` gets `KILL` after 10 s and `RRS-J1003`.
+**Tests:** `tests/e2e/eviction.spec.js` on a fake GPU profile small enough to force eviction: a streaming answer ends with `evicted`, the training job starts, and reloading afterwards works. `crates/rastai-node/tests/leases.rs`: a holder that ignores `CANCEL` gets `KILL` after 10 s and `RRS-J1003`.
 
 ### 4.7 OOM diagnostics
 
@@ -979,7 +1001,8 @@ Not obvious:
   - a worker that doesn't re-register within 300 s ends `failed` with `RRS-J3003`, and its group is killed;
   - an unhealthy llama-server gets `KILL` and ends `failed` with `RRS-J3002`.
   - In each case the model goes `failed` → `unloaded`, and its lease isn't rebuilt.
-- **The UI reconnects** with its last `bus_sequence`. A gap older than the buffer gives `RRS-C0401`, and the UI refetches with `conversation.get` and `model.list` (contracts §7.2).
+- **The UI signs in again first.** Sessions live in daemon memory, so a restart signs every browser out (`RRS-U0003`, the signed-out screen). The desktop shell reruns `rastai open --print-url` and opens the new login URL; a browser user runs `rastai open` (ADR-0034).
+- **Then the UI reconnects** with its last `bus_sequence`. A gap older than the buffer gives `RRS-C0401`, and the UI refetches with `conversation.get` and `model.list` (contracts 7.2).
 - **A conversation whose leaf is a user message shows Regenerate.** Its context is still in the worker's slot cache, so regenerating skips the prefill.
 
 **Persisted:** nothing new. Reattach only reads `job.json` and rewrites `jobs` and `runs` rows.
@@ -990,7 +1013,7 @@ Not obvious:
 
 ## 5. Inspectable decode step and the live Psychology panel
 
-Runs when the user turns on the live panel beside a chat (`psychology.live.start`), then for every generated token, in step mode (`psychology.step`), and when SAEs are fetched (`psychology.sae.load`).
+Runs when the user turns on the live panel beside a chat (`psychology.live.start`), then for every generated token, in step mode (`chat.continue` from the UI, `psychology.step` from scripts), and when SAEs are fetched (`psychology.sae.load`).
 
 ### 5.1 Turning the live panel on
 
@@ -1028,10 +1051,11 @@ sequenceDiagram
 ```
 
 Not obvious:
-- **`chat.settings.set`** stores the conversation's `LensRequest`. It takes a new `lens` argument *(new)*, alongside the sampling settings it already sets.
-  - The request holds mode `OFF` or `SUMMARY` *(new enum values)*, the layers, the SAE ids, and top-k from `psychology.top_k`.
+- **`chat.settings.set`** stores the conversation's `LensRequest`. It takes a new `lens` argument, alongside the sampling settings it already sets.
+  - The request holds mode `OFF` or `SUMMARY`, the layers, the SAE ids, and top-k from `psychology.top_k`.
   - The gateway copies the lens into every `GenerateRequest` for that conversation. `psychology.live.stop` sets mode `OFF`.
 - **The result** gives the packet shape (layer count, head count, SAE ids, top-k values) and the feature-label blobs (frontend layout §14.3). The UI decodes packet token IDs with the piece table from `model.vocabulary` (frontend layout §2.2).
+- **Why this one goes through `PM`:** starting the panel is validation (are the SAE files there, do they match the model?). Once it is on, the UI sends chat turns and slider moves straight to core commands (0.2).
 - **A denied `ResizeLease`** doesn't fail the chat. The worker answers without packets and reports `RRS-H3001` through `diagnostic.reported`, and the panel says why it is empty.
 - **COMPAT models** get the packet's entropy and final top-k only, the readouts at the opaque node's edges.
 - **AttnRes designs:** the logit lens and SAEs read each layer's output. `model.inspect` marks the model, and the panel labels those readouts approximate (§9).
@@ -1039,7 +1063,7 @@ Not obvious:
 **Persisted:** the lens state in `conversations.settings_json` (`vault.db`, durable). SAE files sit in the HF cache. Packets are ephemeral.
 
 **Tests:**
-- `tests/e2e/psychology-live.spec.ts` (M4-E04): turn the panel on, send, and receive one `psychology.packet` per `chat.token`, with matching `token_index`.
+- `tests/e2e/psychology-live.spec.js` (M4-E04): turn the panel on, send, and receive one `psychology.packet` per `chat.token`, with matching `token_index`.
 - `python/rastai_lens/tests/test_sae.py`: a tiny random SAE in Gemma Scope layout loads; a wrong hook point gives `RRS-L2002`.
 
 ### 5.2 One decode step
@@ -1085,13 +1109,14 @@ Not obvious:
   - top-k on the GPU;
   - one packed tensor and one copy per token.
   - Measured on Gemma 3 1B: +16–31% (1.5–2.4 ms per token) at CUDA-graph speed, and 8.3 KB per packet.
+- **The budget is +35% at CUDA-graph speed** (`psychology.overhead_budget_percent`, default 35; decision 14). The UI shows the measured overhead next to the budget (5.3), and a nightly GPU test fails above it.
 - **Graph variants per slot** (ADR-0026): `off` (the packet is the token ID, its log-probability and the alternatives) and `summary` (the full readout). Switching the panel on or off picks the other captured graph.
 - **Recapture rules** (Python layout §2.3):
   - a graph is recaptured only when the set of hooked points changes, for example the first intervention at a new point or a new set of SAE layers. That takes under a second, once.
   - Changing a value (a steering strength, sampling settings) is a buffer write in `InterventionHook` and never recaptures. That is why the slider is cheap (7.1).
 - **Identity at zero:** a hooked point at strength 0 leaves the logits unchanged (Python layout `test_interventions.py`).
 - **Sampling inside the graph:** temperature, top-k, top-p and the repetition penalty live in GPU buffers; the penalty keeps a per-slot token-count vector. The session's `torch.Generator` is registered with the graph, so a seed replays the same tokens.
-- **MoE:** single-token decode gathers the k chosen experts' weights by index, which keeps the shape static (§17). The chosen experts and gate weights go into the packet as `LivePacket.expert_choices` *(new field)*.
+- **MoE:** single-token decode gathers the k chosen experts' weights by index, which keeps the shape static (§17). The chosen experts and gate weights go into the packet as `LivePacket.expert_choices`.
 - **MLA:** attention patterns are computed from the compressed keys in the absorbed form. `blocks.<i>.latent_cache` is an observation point for zoom (6.3).
 - **The CPU side** turns the float packet into `TokenEvent{token_id, logprob, top_alternatives}` and `LivePacket`. Then it checks the stop IDs, `max_new_tokens`, and a cancel flag set by `chat.stop` or a dropped stream, so cancellation takes effect within one token.
 
@@ -1106,9 +1131,9 @@ def router_bias_row(forced_experts: list[int], blocked_experts: list[int], exper
 **Persisted:** nothing. Packets are ephemeral; the gateway writes the token row at the end of the turn (1.1).
 
 **Tests:**
-- `tests/gpu/test_live_panel_budget.py` (nightly, M4-E03): on the 5080 capped at 8 GiB and on the 3090, tokens/s with the panel on is within `psychology.overhead_budget_percent` (35) of the baseline, and every packet is under 20 KB.
+- `tests/gpu/test_live_panel_overhead.py` (nightly GPU job, M4-E03): on the 5080 capped at 8 GiB and on the 3090, tokens/s with the panel on is within `psychology.overhead_budget_percent` (35) of the baseline at CUDA-graph speed, and every packet is under 20 KB. The job fails above 35%.
 - `tests/gpu/panel_does_not_change_tokens`: greedy tokens are identical with the panel off, with it on, with the CUDA graph and without it (spike: 64/64).
-- `python/rastai_lens/tests/test_live_packet.py` plus the `LivePacket` golden in `fixtures/proto-golden/`: pack in Python, decode the protobuf in TS, same values; the fused packet equals the unfused reference.
+- `python/rastai_lens/tests/test_live_packet.py` plus the `LivePacket` golden in `fixtures/proto-golden/`: pack in Python, decode the protobuf in JavaScript, same values; the fused packet equals the unfused reference.
 
 ### 5.3 Token and packet path, step mode
 
@@ -1117,7 +1142,6 @@ sequenceDiagram
   participant UI as psychology-ui
   participant SRV as rastai-server
   participant GW as rastai-gateway
-  participant PM as rastai_psychology module
   participant NODE as rastai-node
   participant W as serve_inspectable worker
   W-->>NODE: GenerateEvent TokenEvent, then LivePacket
@@ -1125,9 +1149,8 @@ sequenceDiagram
   GW-->>SRV: TokenSink items
   SRV-->>UI: BusEvent chat.token and psychology.packet
   Note over UI: PacketStore marks gaps with RRS-U0005, rows are never lost
-  UI->>SRV: Execute psychology.step
-  SRV->>PM: HandleCommand through the node
-  PM->>SRV: ExecuteCommand chat.continue with max_new_tokens 1
+  UI->>SRV: Execute chat.continue with max_new_tokens 1
+  SRV->>SRV: check scope chat, find the open assistant message
   SRV->>GW: run_chat on the open assistant message
   GW->>NODE: Generate with the full context and the same session_id
   NODE->>W: Generate, the slot's cached prefix matches, no prefill
@@ -1140,18 +1163,19 @@ sequenceDiagram
 ```
 
 Not obvious:
-- **Step mode is ordinary generation with `max_new_tokens = 1`.**
-  - `chat.continue` *(new core command)* extends an assistant message by N tokens on its existing session.
-  - The first step of a new answer is `chat.send` with a `max_new_tokens` override *(new argument)* of 1.
+- **Step mode is ordinary generation with `max_new_tokens = 1`, and the UI calls core commands directly** (0.2).
+  - `chat.continue` extends an assistant message by N tokens on its existing session.
+  - The first step of a new answer is `chat.send` with a `max_new_tokens` override of 1.
+  - `psychology.step` is the same thing for the CLI, MCP and scripts. The plugin module is not on the UI's path.
   - No pause signal is involved, so a paused answer costs nothing but its slot.
 - **Each step ends a `Generate` call,** so the assistant row is rewritten after every step. A crash in step mode loses at most the step in flight.
-- **Overhead display:** `GenerateFinished.tokens_per_second` is shown next to `GenerateFinished.baseline_tokens_per_second` *(new field)*, measured at warm-up (4.3). Above `psychology.overhead_budget_percent`, the panel shows `RRS-L1001` (warning) and suggests fewer SAE layers or a smaller `psychology.top_k`.
+- **Overhead display:** `GenerateFinished.tokens_per_second` is shown next to `GenerateFinished.baseline_tokens_per_second`, measured at warm-up (4.3), as "+N% of a 35% budget". The panel always shows it, not only on failure. Above `psychology.overhead_budget_percent` (35, at CUDA-graph speed), it also shows `RRS-L1001` (warning) and suggests fewer SAE layers or a smaller `psychology.top_k`. In eager fallback (`RRS-M4001`) the budget does not apply, and the panel says so.
 - **Dropped packets** (daemon backpressure): the panel shows "N tokens missing" (`RRS-U0005`, info) and a Recompute button that runs `psychology.replay.open` (frontend layout §2.2).
 - **Transport:** packets ride Connect server-streaming like every bus event (8.3 KB × ~150 tok/s ≈ 1.3 MB/s; contracts §14 #11). The bus buffer of 10,000 events covers about 30 s of a streaming chat with the panel on, which is enough for a reconnect.
 
 **Persisted:** the assistant row and a `gateway_log` row after each step (`vault.db`); everything else is ephemeral.
 
-**Tests:** `tests/e2e/step_mode.spec.ts`: three steps, then continue, with greedy sampling. The final row's tokens equal a normal greedy run of the same prompt, and each step produced one packet.
+**Tests:** `tests/e2e/step_mode.spec.js`: three steps, then continue, with greedy sampling. The final row's tokens equal a normal greedy run of the same prompt, and each step produced one packet.
 
 ### 5.4 Loading SAEs and labels
 
@@ -1188,12 +1212,12 @@ Not obvious:
 - **SAE loaders are plugin contributions** (`psychology.gemma_scope`, `psychology.llama_scope`; frontend layout §14.2). Each lists, per model family, the HF repo, the files per layer and point, the width, and the label files. Gemma 3 1B uses `google/gemma-scope-2-1b-it`, residual stream, 16k wide (spike).
 - **Everything is data, fetched by the node** (§9, §19).
   - SAE weights go through the same resumable, hash-checked `download` job as model weights.
-  - Neuronpedia label files are listed with a URL and a hash, and go through the same job. That is a `url` file entry on `model.download` *(new argument)*.
+  - Neuronpedia label files are listed with a URL and a hash, and go through the same job. That is a `url` file entry on `model.download`.
   - Plugin jobs never open network connections.
 - **Licenses are shown, not gated:** Gemma Scope 2 is CC-BY-4.0. A gated source goes through the HF license flow (platform flow 1.4).
 - **SAEs for a fine-tuned checkpoint** come from an `sae` run (training-evaluation §12.2). The loader finds them through the checkpoint's lineage, keyed by the tuned model's hash.
-- **Validation happens where the SAEs are used.** The serve worker reads them with the strict safetensors reader and checks the hook point and width against the model, failing with `RRS-L2002`. Spike sanity check: Gemma Scope 2 fires 57–63 features per token, against the 54–60 it was trained for.
-- **Permissions:** `model.download` needs scope `inference.manage`, so the Psychology manifest adds it to its `commands:[...]` list *(new; frontend layout §14.2 lists psychology, chat, training, data, read)*.
+- **Validation happens where the SAEs are used.** The serve worker checks each header with `rastai_formats.check_safetensors_header`, reads the tensor bytes, and checks the hook point and width against the model, failing with `RRS-L2002`. Spike sanity check: Gemma Scope 2 fires 57–63 features per token, against the 54–60 it was trained for.
+- **Permissions:** `model.download` needs scope `inference.manage`, so the Psychology manifest adds it to its `commands:[...]` list.
 
 **Persisted:** SAE and label files in the HF cache (durable, the user's cache); the `download` job's row; `download.finished`.
 
@@ -1247,13 +1271,13 @@ sequenceDiagram
 Not obvious:
 - **What is replayed:** the leaf assistant row's `token_ids` are the full context (1.1), so one forward pass recomputes the whole view.
   - A `/v1` log row replays from `gateway_log.prompt_ids` + `generated_ids`.
-  - The command takes `message_id` or `request_id` *(new argument)*.
+  - The command takes `message_id` or `request_id`.
 - **Same worker as chat.** The replay runs in the `serve_inspectable` job that already holds the model, reached through the node gateway (`GatewayGenerate`, purpose `replay`). The model is never loaded twice, which matters on an 8 GB budget.
-  - While the replay runs, chat on that model waits (rule 0.2).
+  - While the replay runs, chat on that model waits (rule 0.2). The chat input shows "Replay running" with its progress, so the pause is never silent. A 2k-token replay takes well under a second.
   - For a Fast conversation, the worker is the twin's.
 - **The request** sends `prompt_token_ids` as given: no template, no BOS rule (node layout §6.8).
   - `max_new_tokens = 0` means prefill only.
-  - `LensRequest` mode `ALL_POSITIONS` *(new value)* asks for a packet at every position (`prefill_packets`, Python layout §3.2).
+  - `LensRequest` mode `ALL_POSITIONS` asks for a packet at every position (`prefill_packets`, Python layout §3.2).
   - `interventions_json` is the leaf row's interventions, so a steered answer replays steered.
 - **Consistency check** (owned by `LJ`):
   - At every position the model generated (from `settings_json.prompt_token_count`), the logged token must be the replay's argmax for greedy turns. For sampled turns it must have nonzero probability under the logged top-k and top-p.
@@ -1290,7 +1314,7 @@ Not obvious:
 - All of it is removed when the conversation is deleted, unless pinned (9.2).
 
 **Tests:**
-- `tests/e2e/replay_open.spec.ts`: chat 3 turns, open the replay, and get one summary row per token with the `exact` label.
+- `tests/e2e/replay_open.spec.js`: chat 3 turns, open the replay, and get one summary row per token with the `exact` label.
 - `tests/gpu/replay_matches_live` (M4-E06): a replay of a stored greedy chat on Gemma 3 1B equals its live packets, with zero `RRS-L0003`, on the same GPU with the kernel pinned.
 - `tests/crash/lens_job_kill`: kill -9 the lens job mid-replay. No blob appears, the job is `failed` with `RRS-J1001`, and a second open succeeds.
 - `python/rastai_lens/tests/test_summary_layer.py`: a 2k-token fixture packs under 5 MB.
@@ -1360,7 +1384,7 @@ sequenceDiagram
 ```
 
 Not obvious:
-- **`chat.tensor.fetch`** *(new core command)* is the only path to `FetchTensor`. It writes the result as a safetensors blob, because a command result is JSON and a tensor isn't.
+- **`chat.tensor.fetch`** is the only path to `FetchTensor`. It writes the result as a safetensors blob, because a command result is JSON and a tensor isn't.
 - **Recompute, don't store.** Full activations are never kept during chat. Prefill runs at ~36k tok/s (spike 04), so recomputing up to the range end is cheaper than storing activations for every token.
 - **Points:** any observation point from contracts §5.3, such as:
   - `blocks.<i>.attention_pattern` (the full eager pattern for the range);
@@ -1368,7 +1392,7 @@ Not obvious:
 - **The 3D data-flow view** draws one value per (layer, token) from packets or the summary when zoomed out. Zoomed in on a window of tokens, it asks for heads and top features in that window, and Psychology answers with `psychology.tensor.fetch`. This is the level-of-detail rule of §9 (frontend layout §6.2).
 - **The 64 MiB cap** (`TENSOR_FETCH_CAP_BYTES`) applies locally too, so local and remote behave the same.
 
-**Persisted:** a blob of artifact kind `tensor_fetch` *(new)*, unpinned, so `storage.gc` removes it unless the user pins it or exports it with the replay. A `lineage` row `analysis_of` from the artifact to the conversation lets `conversation.delete` find it (9.2).
+**Persisted:** a blob of artifact kind `tensor_fetch`, unpinned, so `storage.gc` removes it unless the user pins it or exports it with the replay. A `lineage` row `analysis_of` from the artifact to the conversation lets `conversation.delete` find it (9.2).
 
 **Tests:** `plugins/psychology/python/rastai_psychology/tests/test_tensor_fetch.py`: a fetched `residual_out` slice equals the same slice from a full forward pass; an oversized request gives `RRS-L1002` and makes no RPC.
 
@@ -1417,10 +1441,10 @@ Not obvious:
   - Without WebGL2 it shows `RRS-U1001` (info) and draws the tables that sit behind every chart (§7).
 - **Incognito conversations can't be exported** (`RRS-L0006`).
 
-**Persisted:** the `.rrsreplay` zip as a blob, an `artifacts` row of kind `replay` *(new)*, `lineage` `replay_of`, and the file the user saves.
+**Persisted:** the `.rrsreplay` zip as a blob, an `artifacts` row of kind `replay`, `lineage` `replay_of`, and the file the user saves.
 
 **Tests:**
-- `tests/e2e/replay_export_viewer.spec.ts` (M4-E06): export, open in `apps/viewer` with networking blocked, and see the same token timeline as in the app.
+- `tests/e2e/replay_export_viewer.spec.js` (M4-E06): export, open in `apps/viewer` with networking blocked, and see the same token timeline as in the app.
 - `crates/rastai-formats/tests/replay_roundtrip.rs` and `fixtures/documents/rastai.replay/invalid/`: zip bomb, zip slip, missing summary and newer-version cases, each with its expected code.
 
 ### 6.5 Offline analyses
@@ -1457,7 +1481,7 @@ sequenceDiagram
   UI->>SRV: GET /api/blobs, then draw with the viz package
 ```
 
-| Command | Inputs | `rastai.lens` call (Python layout §3.2) | Result artifact *(new kinds)* | Notes |
+| Command | Inputs | `rastai.lens` call (Python layout §3.2) | Result artifact | Notes |
 |---|---|---|---|---|
 | `psychology.projection.run` | model, layer, points (conversations or dataset rows), optional existing projection | `fit_projection` once (PCA), then `place_points` | `projection`: basis and coordinates | New points are placed into the fixed space, so the map never moves. The training view fits on the first checkpoint and places later checkpoints into the same space. |
 | `psychology.probe.train` | model, layer, a dataset with a label column, split | `train_probe` on recorded activations | `probe`: weights and held-out accuracy | A probe direction can be saved as a steering vector blob (7.1). |
@@ -1469,7 +1493,9 @@ Not obvious:
 - **Analyses use their own model copy,** because they need many forward passes or gradients (attribution). Sharing the chat worker would block chat for minutes.
   - The lease is pinned, so the job can't be evicted mid-run.
   - It carries `may_reclaim_evictable = false`, so it waits in the queue rather than evicting chat.
-  - On the 8 GB budget, a second Gemma 3 1B copy (2 GiB in bf16) fits beside chat.
+  - The First Run default is Gemma 3 1B, and analyses keep it as their default: on the 8 GB budget a second copy (2 GiB in bf16) fits beside chat.
+  - When a model is too large for two copies, the job waits in the queue and chat is never evicted. If the owner chooses the fallback of running it in the serve job, chat pauses, and the UI shows that clearly: a banner on the chat names the analysis and has a Cancel button.
+  - Sharing the frozen base between chat and an analysis through read-only CUDA IPC is on the M5 completion list behind a measurement gate. Nothing here depends on it.
   - For a LoRA checkpoint the job loads one base and toggles the adapter (Python layout §3.2).
 - **Feature search** (`psychology.feature.search`) is sync and runs in `PM` over the label files. It returns labeled features with a confidence score and example inputs (§9 "honest readouts"), and feeds the concept slider (7.1).
 - **The UI only draws.** `VectorSpaceView` places coordinates the job computed; the attribution graph renders on `@rastai/canvas` (frontend layout §6).
@@ -1484,7 +1510,7 @@ Not obvious:
 | Routing stats on a dense model | `RRS-L4003` | refused before any job |
 | Disk full writing the result | `RRS-S3002` | job `failed` (worker exit 4, node layout §7.4) |
 
-**Persisted:** the lens run's folder; the result blob; an `artifacts` row of the kind above; a `lineage` row `analysis_of` *(new)* from the artifact to the model or conversation.
+**Persisted:** the lens run's folder; the result blob; an `artifacts` row of the kind above; a `lineage` row `analysis_of` from the artifact to the model or conversation.
 
 **Tests:**
 - `python/rastai_lens/tests/test_projection.py`: placing the fitted points reproduces their coordinates, and new points never move old ones (M4-E10).
@@ -1530,11 +1556,12 @@ sequenceDiagram
     SRV->>NODE: SetInterventions
     NODE->>W: SetInterventions, buffer writes only
   end
-  UI->>SRV: on release, Execute psychology.branch.create from the answer start
+  UI->>SRV: on release, Execute chat.regenerate from the answer start, a new branch
 ```
 
 Not obvious:
-- **Two commands, one path.** `psychology.intervention.set` resolves and validates. `chat.settings.set` (new `interventions` argument *(new)*) stores the set and applies it to the live session. Slider drags skip resolution and call `chat.settings.set` directly with new strengths.
+- **Validation goes through `PM`; the controls go straight to core commands** (0.2). `psychology.intervention.set` resolves and validates the first set, then calls `chat.settings.set`, which stores the set and applies it to the live session. Slider drags skip resolution and call `chat.settings.set` directly with new strengths. The release calls `chat.regenerate` directly.
+- **Latency budget:** the local round trip of one slider change has a p95 under 50 ms. It is the `SetInterventions` path: UI → daemon → node → worker. That is why no plugin module sits on it.
 - **The four kinds** (contracts §5.2 `InterventionSet`; `InterventionHook`, Python layout §3.2):
   - concept boost or suppress is a feature edit, `feature_edits[]{sae_id, feature_index, strength}`. It clamps one feature and needs that layer's SAE on the worker.
   - A steering vector is `steering[]{point, vector_ref, strength}`, with the vector as a blob: a probe direction (6.5) or an uploaded safetensors file.
@@ -1567,7 +1594,8 @@ Not obvious:
 **Tests:**
 - `tests/gpu/steering_changes_output` (M4-E05): a known Gemma Scope feature at strength 0 gives the baseline tokens. At a high strength the text changes, the feature's activation rises in the packets, and the change lands within one token.
 - `plugins/psychology/python/rastai_psychology/tests/test_intervention_validation.py`: one case per failure row.
-- `tests/e2e/slider.spec.ts`: 40 slider moves in 2 s produce at most 40 `chat.settings.set` calls. The worker's recapture counter rises by exactly one, for the first set at the point.
+- `tests/e2e/slider.spec.js`: 40 slider moves in 2 s produce at most 40 `chat.settings.set` calls. The worker's recapture counter rises by exactly one, for the first set at the point.
+- `tests/e2e/psychology-latency.spec.js` (M4): on the local stack with a tiny model, many slider moves are timed from the UI call to the worker's acknowledgement. The p95 must be under 50 ms, or the test fails.
 
 ### 7.2 Rewind, branch, compare, prefer
 
@@ -1580,9 +1608,7 @@ sequenceDiagram
   participant NODE as rastai-node
   participant W as serve_inspectable worker
   participant VAULT as rastai-store vault.db
-  UI->>SRV: Execute psychology.branch.create at token i of answer A
-  SRV->>PM: HandleCommand through the node
-  PM->>SRV: ExecuteCommand chat.regenerate with from_token_index i
+  UI->>SRV: Execute chat.regenerate at token i of answer A, with the current InterventionSet
   SRV->>GW: prepare_chat with A's context plus its first i tokens
   SRV->>NODE: ForkSession of A's session at that length
   NODE->>W: ForkSession, copy the KV prefix into a free slot
@@ -1608,11 +1634,11 @@ sequenceDiagram
 ```
 
 Not obvious:
-- **Rewind is a fork, not a copy of text.** `chat.regenerate` gets two new arguments *(new)*: `from_token_index` and an optional `interventions`.
+- **Rewind is a fork, not a copy of text, and the UI calls `chat.regenerate` directly** (0.2). `psychology.branch.create` is the same call for the CLI, MCP and scripts. `chat.regenerate` takes `from_token_index` and an optional `interventions`.
   - Answer B is a new assistant row whose parent is A's parent.
   - Its `token_ids` start with A's context and A's first i generated tokens, then the new ones.
   - `prompt_token_count` covers A's context plus those i tokens, because B didn't sample them.
-  - `settings_json.rewind_from` *(new key)* records `{message_id, token_index}`.
+  - `settings_json.rewind_from` records `{message_id, token_index}`.
 - **`ForkSession` is a speed-up, owned by `rastai-server`.** If A's session was evicted, the server skips the fork and the worker prefills from the IDs (rule 0.2).
 - **Compare** is UI-only. Both rows come from `conversation.get`, with their live packets if still on screen, otherwise a replay of each leaf (6.1).
 - **Prefer this branch** appends one row to the inline source of the project's preferences dataset, `data/preferences.rrsdata`, task `dpo`. The row shape is training-evaluation §7.1's:
@@ -1622,11 +1648,11 @@ Not obvious:
   - An SFT target is a row with `chosen` only.
   - A target the user edited by hand is re-tokenized with `TokenizeChat` and marked `edited`.
 - **Rows hold copies, not references.** Training reads exactly the IDs the model produced, and the dataset survives a later conversation delete (section 9).
-  - v1 of this doc stored the pair as an `examples[]` reference. Training-evaluation §7.1 settled on inline rows for branch picks.
-  - `examples[]` stays for `dataset.from_conversations` (training-evaluation §2). Its pointer there, "the field `psychology.branch.prefer` uses", needs a one-line fix in M1-01.
+  - `examples[]` references are only for `dataset.from_conversations` (training-evaluation §2; contracts 5.2 and 16).
+  - Blind A/B votes use the same inline row shape in another project document, `evals/votes.rrsdata`, with `source = blind_vote`. Elo reads either file like any preference dataset (contracts 16).
 - **Undo:** the edit is a JSON Patch in `CommandReply.document_edits`, so `document.undo` works (contracts §6.1).
 - **Lineage:** the daemon writes `pair_from` (message → pair) through its own event log (platform flow, "daemon event log"), so lineage runs replay → pair → dataset (§26).
-- **Which dataset:** `data/preferences.rrsdata`, created on the first Prefer if missing. The command takes an optional `document_id` *(new argument)* to pick another.
+- **Which dataset:** `data/preferences.rrsdata`, created on the first Prefer if missing. The command takes an optional `document_id` to pick another.
 
 | Failure | Code |
 |---|---|
@@ -1644,7 +1670,7 @@ Not obvious:
 - `document.changed`.
 
 **Tests:**
-- `tests/e2e/branch_prefer.spec.ts` (M4-E07): rewind at token 5, steer, regenerate, prefer.
+- `tests/e2e/branch_prefer.spec.js` (M4-E07): rewind at token 5, steer, regenerate, prefer.
   - The dataset has one row whose token IDs equal the messages' `token_ids`.
   - Undo removes it and redo restores it.
   - The lineage panel shows replay → pair → dataset.
@@ -1691,10 +1717,10 @@ Not obvious:
   - No extra command is needed.
 - **Model checks:**
   - base model loaded only on Fast, or not at all: `RRS-G0004`, with the fix `model.load` on the Inspectable runtime;
-  - loaded base model's hash differs from the preset's `model_hash`: `RRS-G0010` *(new)* in the OpenAI error JSON.
+  - loaded base model's hash differs from the preset's `model_hash`: `RRS-G0010` in the OpenAI error JSON.
 - **One call per request.** `GenerateRequest` carries the preset's set (contracts §4.4), so the gateway needs no separate `SetInterventions`. It closes the session on every exit path, errors included (node layout's `close_preset_session`).
 - **Logging:** `gateway_log.sampling_json.preset = <served name>@<content_hash>` (node layout §6.7), so the exact intervention set is recoverable.
-- **Distill** hands off to the training flows with recipe `psychology.steering_distill` *(new)*. It is a Recipe the Psychology plugin contributes (§13 recipe extension point), and it runs in a `train` job (Python layout §7.4).
+- **Distill** hands off to the training flows with recipe `psychology.steering_distill`. It is a Recipe the Psychology plugin contributes (§13 recipe extension point), and it runs in a `train` job (Python layout §7.4).
   - The job holds one base copy:
     - the teacher is the base with the preset's `InterventionHook` on and the adapter off;
     - the student is the base with a LoRA on and the hook off.
@@ -1710,7 +1736,7 @@ Not obvious:
 - the distill run's folder and checkpoints (training flows).
 
 **Tests:**
-- `tests/e2e/preset_serve.spec.ts` (M4-E09): save, serve, then an OpenAI client call with the served name. The reply equals an in-app chat with the same interventions and seed, and `/v1/models` lists the name.
+- `tests/e2e/preset_serve.spec.js` (M4-E09): save, serve, then an OpenAI client call with the served name. The reply equals an in-app chat with the same interventions and seed, and `/v1/models` lists the name.
 - `crates/rastai-gateway/tests/steering_presets.rs`: routes to Inspectable, carries the set, and always closes its session. Clearing `served_model_name` removes the route; a hash mismatch gives `RRS-G0010`.
 
 ---
@@ -1748,7 +1774,7 @@ sequenceDiagram
     RN->>RW: cancel Generate, its client is gone
     SRV->>SRV: three missed heartbeats, node unreachable, RRS-N2001
     SRV->>SSH: reconnect with backoff, Handshake, ListJobs
-    RN-->>SRV: serve job still running, model ready, RRS-N2002
+    RN-->>SRV: serve job still running, model ready, RRS-N2003
     Note over RW: session cache kept, Regenerate skips the prefill
   end
 ```
@@ -1767,7 +1793,7 @@ Not obvious:
 - **Disconnects** follow designer-gym-remote C6:
   - the gateway saves the partial answer at once;
   - the node is marked `unreachable` after three missed heartbeats (15 s, `RRS-N2001`, warning);
-  - after reconnecting, `ListJobs` reconciles by snapshot. The serve job never stopped, so the model is `ready` again with no reload (`RRS-N2002`, info).
+  - after reconnecting, `ListJobs` reconciles by snapshot. The serve job never stopped, so the model is `ready` again with no reload (`RRS-N2003`, info).
   - If the node restarted meanwhile, the job is reattached (4.8) or ends `failed` with `RRS-J3002`.
 - **Data policy:** `local-only` refuses remote models with `RRS-C1009` (1.3).
 - **Delete reaches node B too.** Deleting a conversation removes its replay's run folder and summary blob on B as well as the local copy (9.2).
@@ -1778,12 +1804,12 @@ Not obvious:
 - Unpinned remote data is wiped on teardown (§22).
 
 **Tests:**
-- `tests/e2e/remote_chat.spec.ts` against a node on the real SSH transport (CI runs the local node over the network transport, §16): chat with the panel on; the measured bytes per token on the wire stay under 20 KB.
+- `tests/e2e/remote_chat.spec.js` against a node on the real SSH transport (CI runs the local node over the network transport, §16): chat with the panel on; the measured bytes per token on the wire stay under 20 KB.
 - `tests/crash/remote_drop_mid_chat`: cut the SSH tunnel mid-stream.
   - The partial answer is saved with `RRS-G0006`.
   - The node returns to `connected`, and the serve job keeps its pid.
   - The next turn works without a reload.
-- `tests/e2e/remote_replay.spec.ts`: replay a remote conversation. The request carried only token IDs (the transport log shows no weight or tensor transfer), and the summary has a local copy.
+- `tests/e2e/remote_replay.spec.js`: replay a remote conversation. The request carried only token IDs (the transport log shows no weight or tensor transfer), and the summary has a local copy.
 
 ---
 
@@ -1809,21 +1835,22 @@ flowchart LR
 
 Not obvious:
 - **Star** marks a conversation for datasets. Building the dataset is an explicit `dataset.from_conversations` (training-evaluation §2).
-- **Pin** makes a behavior test. The Evaluation plugin's event handler (`contributes.event_handlers[]`, training-evaluation §16) runs `eval.suite.add_conversation` on `conversation.changed` with the pinned flag.
+- **Pin** makes a behavior test. The Evaluation plugin's event handler (`contributes.event_handlers[]`, training-evaluation §16) runs `eval.suite.add_conversation` on `conversation.changed` with the pinned flag. This is the one handler delivery the minimal path needs; deliveries beyond Evaluation auto-run are (L2) (contracts 8.2).
 - **Imports** (ChatGPT with branches, Claude, OpenAI JSONL, ShareGPT, `rastai.conversation/1`) parse through `rastai-formats` with the untrusted-import limits (`RRS-E5xxx`; importer errors `RRS-E7xxx`). Text-only rows are flagged `approximate` (§14).
 
 **Persisted:** flag columns on `conversations`; `conversation.changed`.
 
 **Tests:**
-- `tests/e2e/conversation_flags.spec.ts`: star, pin, archive and delete, each checked through `conversation.list` and the events.
+- `tests/e2e/conversation_flags.spec.js`: star, pin, archive and delete, each checked through `conversation.list` and the events.
 - `crates/rastai-formats/tests/conversation_import.rs` over `fixtures/conversations/`: branch trees are kept, and text-only imports are flagged `approximate`.
 
 ### 9.2 Delete reaches every copy
 
-Delete is permanent (contracts §6.4). The rule (0.2): a conversation's content (text, token IDs, logprobs) lives only in `vault.db`, in artifacts with a lineage edge to it, and in copies the user made on purpose. Delete removes the first two and lists the third. Three things make that true:
+Delete is permanent (contracts §6.4). The rule (0.2): a conversation's content (text, token IDs, logprobs) lives only in `vault.db`, in artifacts with a lineage edge to it, in copies the user made on purpose, and, for a project that opted in, in the long-term archive. Delete removes the first two, lists the third, and reaches the fourth. Four things make that true:
 - run event logs carry no content, so there is nothing to redact in an append-only file (second chart);
 - every derived artifact and run has a lineage edge to the conversation from the moment it is created, so one query finds them all;
-- delete removes rows, then files, on every node that holds a copy, and empties the WAL.
+- delete removes rows, then files, on every node that holds a copy, and empties the WAL;
+- the archive is in the "every copy" set: the delete rides the `vault_changes` outbox, so it survives an archive that is down.
 
 ```mermaid
 flowchart TD
@@ -1835,7 +1862,7 @@ flowchart TD
   DRY -->|"no"| RUNQ{"A derived job still running?"}
   RUNQ -->|"yes"| CAN["job.cancel, wait for its final state<br/>and for its last event to be indexed"]
   RUNQ -->|"no"| VT
-  CAN --> VT["One vault transaction removes the conversation, messages, annotations<br/>and the gateway_log rows of the conversation and of the derived runs"]
+  CAN --> VT["One vault transaction removes the conversation, messages, annotations<br/>and the gateway_log rows of the conversation and of the derived runs<br/>with an archive configured it also writes the vault_changes delete rows"]
   VT --> WAL["secure_delete zeroes the freed pages<br/>wal_checkpoint TRUNCATE empties the WAL"]
   WAL --> REFS["Unsnapshotted dataset references and the pinned suite entry<br/>removed as document edits"]
   REFS --> PINQ{"Derived artifact or run pinned?"}
@@ -1848,7 +1875,14 @@ flowchart TD
   HOME -->|"yes, unreachable"| QUE["Removal queued until the node's next reconcile<br/>the result names the node"]
   RDEL --> SESS["CloseSession frees any cache"]
   QUE --> SESS
-  SESS --> EV["conversation.changed"]
+  SESS --> ARCQ{"Archive configured?"}
+  ARCQ -->|"no"| EV["conversation.changed"]
+  ARCQ -->|"yes"| SEND["The archiver sends the deletes from vault_changes<br/>conversation rows are deleted in the archive<br/>run rows get a tombstone"]
+  SEND --> UP{"Archive reachable?"}
+  UP -->|"yes"| ACK["Acknowledged, the cursor moves past the delete"]
+  UP -->|"no"| RETRY["The delete stays in vault_changes and is retried<br/>archive.status shows the lag"]
+  ACK --> EV
+  RETRY --> EV
 ```
 
 Not obvious:
@@ -1856,7 +1890,8 @@ Not obvious:
   - the derived artifacts and runs that will go: replay summaries, `.rrsreplay` exports, `tensor_fetch` blobs, analyses and their lens runs;
   - pinned ones, which stay; the user unpins them first (`artifact.unpin`) to remove them too;
   - copies the user made on purpose, which stay: preference rows (7.2), dataset snapshots that already materialized it, and eval results that already ran it as a pinned test (training-evaluation §7.1). The user may want them gone too (PII), so they are listed with their documents and runs; `run.delete` removes such an eval run;
-  - remote nodes that hold a copy, and whether they are reachable.
+  - remote nodes that hold a copy, and whether they are reachable;
+  - the archive, when the project archives conversations, and whether it is reachable. A dataset snapshot already in the archive's blob target is a deliberate copy too: it stays and is listed.
 - **What "derived" means.** Lineage edges exist from creation:
   - a lens run gets its lineage when `rastai-server` creates the run (rule 0.2), before the job starts, so a running replay is found too;
   - replay summaries and `.rrsreplay` exports have `replay_of` (6.1, 6.4); analyses have `analysis_of` (6.5); a `tensor_fetch` blob has `analysis_of` (6.3).
@@ -1866,9 +1901,15 @@ Not obvious:
 - **The WAL.** `vault.db` runs with `PRAGMA secure_delete = ON`, because SQLite's freed pages keep old bytes until `VACUUM`. The WAL keeps the old page images until a checkpoint, so delete ends with `PRAGMA wal_checkpoint(TRUNCATE)` on the vault writer thread.
 - **References not yet snapshotted** are removed from their datasets, and the conversation id from the pinned suite's `pinned_conversations[]`, in the same command as undoable document edits, so no document points at a missing message.
 - **Remote copies.** A replay of a remote model leaves its lens run folder and summary blob on node B (section 8). The node keeps no catalog (node layout §7.9), so the daemon sends the exact run ids and blob hashes.
-  - When B is unreachable, the removal waits for B's next reconcile (open question 10).
+  - When B is unreachable, the removal waits for B's next reconcile (open question 8).
   - A derived job still running on an unreachable B can't be cancelled. Its run is removed locally at once, so its tail never resumes (second chart). After the reconcile, the daemon cancels the job, then sends the removal, which takes B's record blobs too.
-- **Rebuild can't bring anything back.** `rastai storage rebuild-index` rebuilds from run folders, the daemon log and the blob store. The derived run folders and blobs are gone, the remaining event logs hold no content, and a re-indexed `gateway.request_logged` finds no record blob, so it writes nothing.
+- **The archive (opt-in projects only; contracts 8.7).**
+  - The vault transaction writes the `vault_changes` delete rows with the row deletes, so they commit together and carry only ids. Deletes are always sent, whatever `archive.include_conversations` says now.
+  - The archiver applies them to the archive's conversation tables (`conversations`, `messages`, `annotations`, `gateway_log`) and gives the derived runs a tombstone. The cursor moves only after the MySQL commit, so a crash in between re-sends the delete, which is idempotent.
+  - If the archive is down, the delete waits in the outbox with backoff from 5 s to 5 min. The result does not wait for the archive; `archive.status` shows the queued deletes, and `RRS-S5006` warns after 24 hours (open question 10).
+  - A MySQL `DELETE` doesn't wipe freed pages, so the conversation tables must report encryption (MySQL `ENCRYPTION='Y'`, MariaDB `ENCRYPTED=YES`; `RRS-S5004` otherwise). `rastai archive purge`, with admin credentials, removes tombstones and objects physically.
+  - Prune is not delete. Retention and `archive.prune_after_days` only free local space and leave the archive's copy (1.4); only this delete reaches it.
+- **Rebuild can't bring anything back.** `rastai storage rebuild-index` rebuilds from run folders, the daemon log and the blob store, and pulls pruned runs from the archive. The derived run folders and blobs are gone, the remaining event logs hold no content, and a re-indexed `gateway.request_logged` finds no record blob, so it writes nothing. The archive's copies of the run logs hold no content either, and the conversation delete already reached it.
 
 Indexing a job's log record, the second half of the rule:
 
@@ -1888,7 +1929,7 @@ flowchart TD
 Not obvious:
 - **Why a record blob and not the event.** A run's `events.log` is append-only with one writer (contracts §7.1), so a delete or retention can't redact it. A blob can be deleted.
 - **What the event keeps** is what the run's history needs: `request_id`, `run_id`, `model_ref`, `model_hash`, `runtime`, `finish_reason`, token counts, timings, and BLAKE3 hashes of the prompt and generated ID blobs. A later reader can check that two runs used the same input without the input being stored.
-- **This changes the node layout's payload** (§6.6, §11). There, only long token lists go to a blob; here the whole `GatewayLogEntry` always does. Every emitter (lens, eval, rollout and judge jobs) writes it the same way through `rastai_worker`. Listed in 10.2 for M1-01.
+- **This changes the node layout's payload** (§6.6, §11). There, only long token lists go to a blob; here the whole `GatewayLogEntry` always does. Every emitter (lens, eval, rollout and judge jobs) writes it the same way through `rastai_worker`. The event is `GatewayRequestLogged` (contracts 4.9).
 - **The record blob is short-lived.** It exists from the job's `PutBlob` to the daemon's index, normally under a second on the embedded node. A remote node keeps it until the daemon has copied it with `GetFile` and acked the event (node layout §7.5).
 - **It is in no artifact row.** GC collects a stranded one like any unreferenced blob (24 h grace, platform flow 8), which covers a crash between the vault commit and the blob delete.
 - **"Write nothing" is what makes delete and retention stick.** A row is written only from a record blob, and the blob is gone once the row has been written. A re-index, a reconnect that replays a mirror, or a rebuild can't re-create a row that delete or retention removed.
@@ -1896,10 +1937,11 @@ Not obvious:
 **Persisted:**
 - removed: the `vault.db` rows above; the derived `artifacts`, `artifact_copies` and `runs` rows; their blobs and run folders, locally and on remote homes;
 - kept: lineage rows (shown as "deleted"), pinned items, copies the user made on purpose;
-- written: the `command_journal` row (ids only); `document.changed` for edited datasets and the pinned suite; `conversation.changed`.
+- queued for the archive, when configured: the `vault_changes` delete rows, until acknowledged;
+- written: the `command_journal` row (ids only); `document.changed` for edited datasets and the pinned suite; `conversation.changed`; the daemon event `conversation.deleted` (ids and hashes) for a removal that waits for an unreachable node.
 
 **Tests:**
-- `tests/e2e/conversation_delete_copies.spec.ts`:
+- `tests/e2e/conversation_delete_copies.spec.js`:
   - chat with a marker string of at least 8 tokens on the tiny Gemma fixture, so a chance byte match in other binary data is negligible. Open its replay (6.1), fetch one tensor (6.3), export it (6.4), then delete the conversation;
   - stop the daemon, run `rastai storage rebuild-index`, start it again;
   - the marker is found nowhere under `<data>` or in `<state>/logs/`: not as text, and not as its token-ID bytes (little-endian u32, as in `messages.token_ids`). The search covers `vault.db` and `vault.db-wal`, `rastai.db`, every `events.log`, the daemon log and `blobs/`;
@@ -1907,215 +1949,24 @@ Not obvious:
 - `crates/rastai-store/tests/secure_delete.rs` (M3-E02): after delete, a marker string isn't found in the bytes of `vault.db` or `vault.db-wal`.
 - `crates/rastai-server/tests/request_logged_index.rs`: an event whose record blob is gone writes no row; re-indexing a run log after delete or retention re-creates nothing; the record blob is deleted after the commit.
 - `tests/crash/delete_mid_replay`: delete while a replay runs. The lens job is cancelled, and no blob, row or run folder from it survives.
-- `tests/e2e/remote_delete.spec.ts`: delete a conversation replayed on node B while B is unreachable. The local copies go at once; B's run folder and blob go after B reconnects.
+- `crates/rastai-archive/tests/delete_propagation.rs` (M11-E03), against MySQL and MariaDB: delete a conversation in an opted-in project and the archive's conversation rows go; with the archive down the delete waits in `vault_changes` and arrives after it returns; a re-sent delete is harmless; a deleted run leaves a tombstone, and `archive purge` removes it. For a project that has not opted in, the archiver drops the upserts and sends only the deletes.
+- `tests/e2e/remote_delete.spec.js`: delete a conversation replayed on node B while B is unreachable. The local copies go at once; B's run folder and blob go after B reconnects.
 
 ---
 
-## 10. New names
+## 10. Open questions
 
-Everything below must land in `contracts.md` (its own PR, §29; plan M1-01) before code uses it.
-
-### 10.1 Commands and arguments
-
-| Command | Purpose | Scope | Undo | Kind |
-|---|---|---|---|---|
-| `chat.continue` | extend an assistant message by `max_new_tokens` on its session (step mode, resume after a stop) | chat | | stream |
-| `chat.tensor.fetch` | `FetchTensor` for a conversation's context; returns a `BlobRef` | conversations.read | | sync |
-
-New arguments on existing commands:
-
-| Command | Argument | Meaning |
-|---|---|---|
-| `chat.send` | `max_new_tokens` | per-turn override (step mode uses 1) |
-| `chat.regenerate` | `from_token_index`, `interventions` | rewind point inside the source answer; interventions for the new branch |
-| `chat.settings.set` | `lens`, `interventions` | the conversation's `LensRequest` and `InterventionSet`; applied to its live session |
-| `chat.runtime.set` | `model_ref` | which GGUF or twin when several exist |
-| `model.download` | file entries with `url` and `hash` | non-HF data files such as Neuronpedia label exports, through the same resumable job |
-| `psychology.replay.open` | `message_id` or `request_id`, `observer_model_ref` | the leaf to replay, or a `/v1` log row; the observer for proxy replays |
-| `psychology.branch.prefer` | `document_id`, `kind` (`dpo`/`sft`), `target_text` | target `.rrsdata` (default `data/preferences.rrsdata`); an SFT target the user edited |
-
-### 10.2 Fields, values and keys
-
-| Where | Name | Meaning |
-|---|---|---|
-| `vault.db` `conversations` | `settings_json` | the conversation's current sampling, runtime, lens and interventions |
-| `vault.db` `messages` | `finish_reason` | the gateway's `FinishReason` names: `stop`, `length`, `cancelled`, `client_disconnected`, `error`, `evicted` (the node layout adds the same column to `gateway_log`) |
-| `vault.db` `messages.token_ids` | (meaning) | for assistant rows: the full context, prompt IDs then generated IDs |
-| `messages.settings_json` | `prompt_token_count`, `rewind_from{message_id, token_index}`, `lens`, `interventions`, `interventions_changed_mid_answer`, `runtime`, `engine` | split point, branch origin, applied lens and interventions, the mid-answer flag (2.2), runtime, llama-server build for Fast turns |
-| `rastai.db` `models` | `format_info_json`, `twin_same_weights` | GGUF or safetensors header facts (architecture, vocabulary size, file type or dtype, shape hash); the unquantized-twin flag (2.2) |
-| `LensRequest` | `mode`: `OFF`, `SUMMARY`, `ALL_POSITIONS` | `ALL_POSITIONS` returns a packet per position (replay) |
-| `GenerateRequest` | `max_new_tokens = 0` | prefill only (the node layout uses the same rule) |
-| `GenerateFinished` | `baseline_tokens_per_second`; `reason` values as `finish_reason` | panel overhead display; finish reasons |
-| `LivePacket` | `expert_choices[]{layer, expert_indices[], gate_weights[]}` | MoE routing per token |
-| `artifacts.kind` | `replay_summary`, `replay`, `tensor_fetch`, `steering_vector`, `projection`, `probe`, `attribution_graph`, `routing_stats` | Psychology artifacts (`model_diff`, `sae_fit_check` are training-evaluation §16's) |
-| `lineage.relation` | `replay_of`, `analysis_of` | summary or `.rrsreplay` → conversation; analysis or `tensor_fetch` artifact → model or conversation. `conversation.delete` finds derived data through them (9.2) |
-| `gateway.request_logged` payload (`GatewayRequestLogged`) | `request_id`, `run_id`, `model_ref`, `model_hash`, `runtime`, `finish_reason`, `prompt_token_count`, `generated_token_count`, `started_unix_ms`, `finished_unix_ms`, `prompt_ids_hash`, `generated_ids_hash`, `record` (`BlobRef` of the proto-encoded `GatewayLogEntry`) | no conversation content in run logs; the daemon writes the `gateway_log` row from the record blob, then deletes the blob (9.2). Replaces the node layout's full-record payload (§6.6, §11) |
-| `conversation.delete` result | `removed[]`, `kept[]`, `pending_nodes[]`; items `{kind (run, artifact, dataset, eval_run), id, node_id, pinned}` | the dry run fills the confirm dialog; the real run reports what went and what waits for a node (9.2) |
-| daemon event | `conversation.deleted` (`conversation_id`, `node_id`, `run_ids[]`, `blob_hashes[]`; ids and hashes only) | a remote removal that waits for an unreachable node (9.2, open question 10) |
-| `rastai.data/1` | `examples[]{example_id, kind (dpo/sft), conversation_id, chosen_message_id, rejected_message_id, target_text}` | references to conversation messages, materialized by `dataset.snapshot`. Used by `dataset.from_conversations` (training-evaluation §2); Prefer this branch writes inline rows instead (7.2) |
-| recipe | `psychology.steering_distill` | contributed by the Psychology plugin: a LoRA that reproduces a steering preset (KL to the steered teacher) |
-| Psychology manifest | `commands:[...]` adds `inference.manage` | so `psychology.sae.load` can run `model.download` (5.4) |
-
-### 10.3 Constants
-
-The tables in [0.3](#03-constants-used-in-these-flows). The second table is new; the first lists layout-owned constants this doc relies on.
-
-### 10.4 Error codes
-
-Plan §10 row 8: the owning crate's layout doc keeps its numbers. "Node layout" means the number is already assigned there; "proposed" means this doc proposes it inside the contracts §10 range, for M1-13 to confirm.
-
-| Code | Severity | Title | Owner | Status |
-|---|---|---|---|---|
-| `RRS-G0001` | error | Invalid request | `rastai-gateway` | node layout |
-| `RRS-G0002` | error | Unknown model name | `rastai-gateway` | node layout |
-| `RRS-G0004` | error | Steering preset needs its model on the Inspectable runtime | `rastai-gateway` | node layout |
-| `RRS-G0005` | error | Model not ready (fix `model.load`) | `rastai-gateway` | node layout |
-| `RRS-G0006` | error | The model's node is unreachable (also mid-stream) | `rastai-gateway` | node layout |
-| `RRS-G0009` | error | Generation timed out or stalled | `rastai-gateway` | proposed |
-| `RRS-G0010` | error | Steering preset was made for different weights | `rastai-gateway` | proposed |
-| `RRS-G1001` | error | Tokenizer couldn't be loaded | `rastai-gateway` | node layout |
-| `RRS-G1002` | error | Chat template error | `rastai-gateway` | node layout |
-| `RRS-G1003` | error | No tokenizer files for this model | `rastai-gateway` | node layout |
-| `RRS-G1004` | error | Tokenizer mismatch between the gateway and llama-server | `rastai-gateway` | node layout |
-| `RRS-G1005` | error | Prompt longer than the model's context (never truncated) | `rastai-gateway` | node layout |
-| `RRS-G2001` | error | API key missing (fix `adapter.configure`) | `rastai-gateway` | node layout |
-| `RRS-G2002` | error | API provider returned an error (incl. a rejected key) | `rastai-gateway` | node layout |
-| `RRS-G2003` | error | API provider rate limit; wait time shown | `rastai-gateway` | node layout |
-| `RRS-G2004` | error | API connection failed or dropped | `rastai-gateway` | proposed |
-| `RRS-G3002` | error | llama-server didn't become healthy (out of memory named when its log says so) | `rastai-node` | node layout |
-| `RRS-G3003` | error | llama-server stopped unexpectedly | `rastai-node` | node layout |
-| `RRS-G3004` | error | Needs the Inspectable runtime (fix `chat.runtime.set`) | `rastai-node`, `rastai_psychology` | node layout |
-| `RRS-G3005` | error | llama-server build hash mismatch | `rastai-node` | node layout |
-| `RRS-G3006` | error | Fast runtime busy | `rastai-node` | node layout |
-| `RRS-G3007` | error | Malformed event from llama-server | `rastai-node` | node layout |
-| `RRS-G3008` | error | No GGUF for the Fast runtime (fix `model.download` of a GGUF, or `checkpoint.export`) | `rastai-server` | proposed |
-| `RRS-G3009` | error | No full-precision twin for this GGUF (fix `model.twin.set`) | `rastai-server`, `rastai_psychology` | proposed |
-| `RRS-G3010` | error | Twin doesn't match the GGUF (family, vocabulary or shapes) | `rastai-server` | proposed |
-| `RRS-G4001` | error | Gateway log write failed | `rastai-gateway` | node layout |
-| `RRS-H3001` | error | Not enough GPU memory for this lease (holders listed) | `rastai-node` | node layout |
-| `RRS-H3004` | info | Model is being evicted; generation stopped | `rastai-node` | node layout |
-| `RRS-H3005` | warning | Process uses more GPU memory than its lease | `rastai-node` | node layout |
-| `RRS-H3006` | error | Out of GPU memory while loading | `rastai_worker` | proposed |
-| `RRS-H3007` | error | Out of GPU memory during generation, replay or analysis | `rastai_worker` | proposed |
-| `RRS-J1001` | error | Job killed by a signal | `rastai-node` | node layout |
-| `RRS-J1002` | error | Job killed by the kernel's out-of-memory killer | `rastai-node` | node layout |
-| `RRS-J1003` | error | Job killed by the node | `rastai-node` | node layout |
-| `RRS-J3002` | error | Job ended while no node was watching; no final state | `rastai-node` | node layout |
-| `RRS-J3003` | error | Job didn't reconnect after a node restart | `rastai-node` | node layout |
-| `RRS-M4001` | warning | CUDA graph capture failed; eager decode in use | `rastai_models` | proposed |
-| `RRS-L0001` | error | Replay weights not present (fix `model.download`) | `rastai_psychology` | proposed |
-| `RRS-L0002` | warning | Weights differ from the conversation's; replay is approximate | `rastai_psychology` | proposed |
-| `RRS-L0003` | warning | Replay diverged from the logged tokens at token N | `rastai_psychology` | proposed |
-| `RRS-L0004` | error | Replay file has no readable summary layer | `rastai-formats` (viewer) | proposed |
-| `RRS-L0005` | info | API conversation: pick a local observer model | `rastai_psychology` | proposed |
-| `RRS-L0006` | error | Incognito conversations are never saved, so replay, export and Prefer are refused | `rastai_psychology` | proposed |
-| `RRS-L1001` | warning | Live panel overhead above `psychology.overhead_budget_percent` | `rastai_psychology` | proposed |
-| `RRS-L1002` | error | Tensor request over 64 MiB; pick a smaller range | `rastai_psychology` | proposed |
-| `RRS-L2001` | error | SAE weights missing (fix `psychology.sae.load`) | `rastai_psychology` | proposed |
-| `RRS-L2002` | error | SAE doesn't match the model (hook point or width) | `rastai_lens` | proposed |
-| `RRS-L2003` | warning | SAE labels stale after fine-tuning (training-evaluation §12.2's `RRS-L2xxx`) | `rastai_psychology` | proposed |
-| `RRS-L2004` | error | No published SAEs for this model (fix `train.start` recipe `sae`) | `rastai_psychology` | proposed |
-| `RRS-L3001` | error | Not an intervention point | `rastai_psychology` | proposed |
-| `RRS-L3002` | error | Expert override on a dense model or an unknown expert | `rastai_psychology` | proposed |
-| `RRS-L3003` | error | Steering vector size differs from the model | `rastai_psychology` | proposed |
-| `RRS-L3004` | error | The two branches don't share a prompt | `rastai_psychology` | proposed |
-| `RRS-L4001` | info | Model diff ran without SAE features (training-evaluation §12.1's `RRS-L4xxx`) | `rastai_psychology` | proposed |
-| `RRS-L4002` | error | No transcoders for this model (fix `train.start` recipe `sae`, transcoder mode) | `rastai_psychology` | proposed |
-| `RRS-L4003` | error | Routing stats need an MoE model | `rastai_psychology` | proposed |
-
-Codes used here from other owners: `RRS-C0401`, `RRS-C1005` (control-plane layout); `RRS-C1009` (the project's data policy forbids this; plan §10 row 37, numbered in M1-13); `RRS-E4001`, `RRS-E5xxx`, `RRS-E7xxx` (`rastai-formats`); `RRS-S3002` (disk full while writing; control-plane layout); `RRS-U0005`, `RRS-U1001` (frontend layout); `RRS-N2001`, `RRS-N2002` (designer-gym-remote C6); `RRS-M2001`–`M2005` (designer-gym-remote A2).
-
-### 10.5 Names this doc uses from other docs that aren't in contracts yet
-
-| Name | Defined in | Used in |
-|---|---|---|
-| `WorkerHostService.TokenizeChat` | Python layout §14, node layout §6.6 (plan §10 row 9) | 3.2, 5.4, 6.5, 7.2 |
-| `GatewayGenerateRequest` with `lens`, `pin_attention_kernel`, `session_id`, `purpose`, `served_model_name` | node layout §3.2 | 3.2, 6.1 |
-| `GatewayGenerate` and `TokenizeChat` load a local model that isn't loaded, under an evictable lease | training-evaluation §16 | 3.2, 6.1 |
-| `ResourceRequest.may_reclaim_evictable` | training-evaluation §16 | 4.2, 4.5, 6.5 |
-| `gateway.request_logged`, `gateway_log.run_id`, `gateway_log.finish_reason`, `GatewayLogEntry`, `LogCommit`, `VaultLogSink` | node layout §11 (this doc changes the event's payload, 10.2) | 1.1, 1.2, 1.4, 3.2, 6.1, 9.2 |
-| `X-Rastai-Incognito: 1` (proposed by v1 of this doc and by the node layout) | node layout §11.2 | 1.2, 1.4 |
-| `.rrsdata` source kind `inline` with `rows[]`; the preference row shape | training-evaluation §7.1, §16 | 7.2 |
-| plugin manifest `contributes.event_handlers[]`; the pinned suite's `pinned_conversations[]` | training-evaluation §7.1, §16 | 9.1, 9.2 |
-| `model.vocabulary` | frontend layout §2.2 | 5.1 |
-| `SessionPool`, `DecodeSlot`, `StaticDecoder`, `InterventionHook`, `LivePanelReadout`, `TensorRecorder`, `prefill_packets` | Python layout §2.2, §3.2 | 4.3, 5.2, 6.1–6.3 |
-| `FinishReason`, `prepare_chat`, `run_chat`, `set_served_presets`, `PreparedPrompt.route`, `RouteTarget`, `route_model` | node layout §6.2, §6.3 | 1.1, 1.2, 1.3, 7.3 |
-| `crates/rastai-server/src/commands/handlers/chat.rs`, `CommandContext.server`, `gateway_glue/routing.rs` | control-plane layout §8.1, §8.3 | 1.1, 1.2 |
-| `check_data_policy` in `rastai-server` `policy.rs` (new file) | this doc, for plan §10 row 37 | 1.1, 1.2, 1.3, 8 |
-
-### 10.6 Superseded v1 names
-
-| Earlier name (v1 unless marked v1.1) | Replaced by |
-|---|---|
-| `gateway.tokenize` (core command) | `WorkerHostService.TokenizeChat` |
-| `chat.lens.set`, `chat.interventions.set` | `chat.settings.set` with `lens` and `interventions` |
-| Prefer this branch writing `.rrsdata` `examples[]` references | inline preference rows (training-evaluation §7.1); `examples[]` itself stays, for `dataset.from_conversations` |
-| recipe `steering_distill` | `psychology.steering_distill` (plugin-contributed) |
-| `prepare_turn`, `run_turn` | `prepare_chat`, `run_chat` |
-| `check_data_policy` in the gateway's `privacy.rs` (v1.1) | `check_data_policy` in `rastai-server`'s `policy.rs` |
-| `crates/rastai-server/src/handlers/chat.rs`, `context.gateway` (v1.1) | `crates/rastai-server/src/commands/handlers/chat.rs`, `context.server.gateway` |
-| `gateway.request_logged` carrying the full record (v1.1, node layout §6.6) | the content-free payload in 10.2 plus a record blob |
-| `InterventionBuffers` | `InterventionHook` |
-| `MAX_DECODE_SLOTS` | `DECODE_SLOT_COUNT` |
-| `RECLAIM_GRACE_SECONDS` | `EVICTION_GRACE_SECONDS` |
-| `TOKEN_PARITY_CHECK_STRINGS`, `SERVE_WATCH_INTERVAL_SECONDS`, `LLAMA_SERVER_*` constants | the node layout's parity probe and `fast_runtime.rs` constants |
-
-Error codes, v1 and v1.1 → v1.2. Codes not listed kept their number and meaning.
-
-| Earlier code (meaning) | Current code |
-|---|---|
-| `RRS-G0003` (model not loaded) | `RRS-G0005` |
-| `RRS-G0006` (data policy, v1) | `RRS-C1009`; `RRS-G0006` is now "node unreachable" |
-| `RRS-G0008` (data policy, v1.1) | `RRS-C1009` (plan §10 row 37); the one data-policy code, raised by `rastai-server`'s `check_data_policy` |
-| `RRS-G0007` (stall or timeout) | `RRS-G0009`; `RRS-G0007` is now the node layout's tool-call code |
-| `RRS-G0008` (model busy, v1) | `RRS-G0009` |
-| `RRS-G0009` (no twin) | `RRS-G3009` |
-| `RRS-G1001` (template failed) | `RRS-G1002` |
-| `RRS-G1002` (prompt too long) | `RRS-G1005` |
-| `RRS-G1003` (no tokenizer, or twin mismatch) | `RRS-G1003` (no tokenizer), `RRS-G3010` (twin mismatch) |
-| `RRS-G2002` (key rejected), `RRS-G2005` (API error) | `RRS-G2002` |
-| `RRS-G2006` (no `gateway.spend`) | `RRS-C1005` |
-| `RRS-G3001` (build hash) | `RRS-G3005` |
-| `RRS-G3002` (exit at startup), `RRS-G3003` (OOM at startup), `RRS-G3004` (not healthy in time) | `RRS-G3002` |
-| `RRS-G3005` (died while serving) | `RRS-G3003` |
-| `RRS-G3006` (no GGUF) | `RRS-G3008` |
-| `RRS-G4001` (incognito refusal) | `RRS-L0006`; `RRS-G4001` is now "Gateway log write failed" |
-| `RRS-H3002` (OOM at load) | `RRS-H3006` |
-| `RRS-H3003` (OOM in a step or replay) | `RRS-H3007` |
-| `RRS-H3005` (host RAM OOM) | `RRS-J1002`; `RRS-H3005` is now "over lease" |
-| `RRS-J3001` (ended while the daemon was down) | `RRS-J3002` |
-| `RRS-N2002` (stream to the node dropped) | `RRS-G0006`; `RRS-N2002` is "node reconnected" (designer-gym-remote C6) |
-| `RRS-C1002` (missing scope) | `RRS-C1005` |
-| `RRS-S3001` (disk full while writing) | `RRS-S3002` |
-| `RRS-M2001` (weights missing or changed) | `RRS-M2001`–`M2005` (designer-gym-remote A2) |
-| `RRS-L0004` (replay diverged) | `RRS-L0003` |
-| `RRS-L0005` (no summary layer) | `RRS-L0004` |
-| `RRS-L0006` (pick an observer) | `RRS-L0005` |
-| `RRS-L1001`, `RRS-L3001` (needs the Inspectable runtime) | `RRS-G3004` |
-| `RRS-L1002` (overhead above budget) | `RRS-L1001` |
-| `RRS-L1003` (tensor request too big) | `RRS-L1002` |
-| `RRS-L3002` (not an intervention point) | `RRS-L3001` |
-| `RRS-L3003` (bad expert override) | `RRS-L3002` |
-| `RRS-L3004` (preset for different weights) | `RRS-G0010` |
-| `RRS-L3005` (vector size) | `RRS-L3003` |
-| `RRS-L3006` (branches don't share a prompt) | `RRS-L3004` |
-
----
-
-## 11. Open questions
-
-Each has the default these flows use until the owner decides.
+Each has the default these flows use until the owner decides. Decided rows are removed: the data-policy default (decision 13: `local-only`, with a one-click fix on the first `RRS-C1009` refusal, 1.3) and the path `psychology.*` commands take to the runtime (decision on contracts 2.4 rule 12, 0.2) are no longer questions.
 
 | # | Question | Default used here |
 |---|---|---|
-| 1 | Data policy and API chats. The default `local-only` blocks API models and remote nodes until the user changes it. | Keep the one ladder (1.3); the first refusal's fix button sets the project policy in one click. |
-| 2 | Storing the full context on every assistant row costs quadratic storage. | Keep it for exact, template-agnostic replay; revisit with a prefix-sharing encoding if a real `vault.db` passes 1 GB. |
-| 3 | Two decode slots per Inspectable model. | `DECODE_SLOT_COUNT = 2`; make it a setting only if branch comparison needs more. |
-| 4 | Replay runs inside the chat model's worker, so chat on that model waits during a replay. | Accept for the prototype; a 2k-token replay takes well under a second at ~36k tok/s prefill. |
-| 5 | `psychology.*` commands that touch sessions go through core `chat.*` commands. The node layout lists `psychology.branch.create` among `rastai-server`'s direct gateway callers. | Adopt the core-command path (it keeps contracts §2.4 rule 5, and third-party lens plugins get the same commands). Under it, `psychology.branch.create` reaches the gateway as `chat.regenerate`; the node layout's row needs a one-line pointer in M1-01. |
-| 6 | Interventions changed mid-answer can't be replayed exactly in one forward pass. | Flag the row and label its replay approximate (2.2); the slider's release already makes a clean branch. |
-| 7 | Analyses load their own model copy rather than using the chat worker. | Own copy, pinned lease, `may_reclaim_evictable = false` (6.5). Revisit for models too large for two copies; the fallback is running the analysis in the serve job with chat paused. |
-| 8 | "Same weights" for an unquantized GGUF twin is decided from headers (names, shapes, dtype), not values. | Header check plus the replay consistency check, which lowers the label on divergence (2.2). A value check over sampled tensors on the node can be added if mislabels show up. |
-| 9 | Neuronpedia labels are not on HF, so `model.download` needs `url` file entries (5.4). | Add them to `model.download`, so the node stays the only process that downloads; plugin jobs keep the network off. |
-| 10 | A conversation is deleted while a node that holds its replay is unreachable. | Delete the local copies at once and name the node in the result. Record the remote removal as a daemon event `conversation.deleted` (ids and hashes only) and send it after the node's next reconcile (9.2). |
-| 11 | A record blob is plaintext on disk until the daemon indexes it, outside the Phase 2 SQLCipher boundary. | Accept: it lives under a second on the embedded node. In Phase 2, either encrypt record blobs with the vault key or send records over `NodeHubService` straight into `vault.db`. |
+| 1 | Storing the full context on every assistant row costs quadratic storage. | Keep it for exact, template-agnostic replay; revisit with a prefix-sharing encoding if a real `vault.db` passes 1 GB. |
+| 2 | Two decode slots per Inspectable model. | `DECODE_SLOT_COUNT = 2`; make it a setting only if branch comparison needs more. |
+| 3 | Replay runs inside the chat model's worker, so chat on that model waits during a replay. | Accept for the prototype, and show the wait ("Replay running", 6.1); a 2k-token replay takes well under a second at ~36k tok/s prefill. |
+| 4 | Interventions changed mid-answer can't be replayed exactly in one forward pass. | Flag the row and label its replay approximate (2.2); the slider's release already makes a clean branch. |
+| 5 | Analyses load their own model copy rather than using the chat worker. | Own copy, pinned lease, `may_reclaim_evictable = false`, Gemma 3 1B as the default (6.5). For models too large for two copies, the fallback is running the analysis in the serve job with chat paused and a visible banner. Read-only CUDA IPC sharing of the frozen base is on the M5 completion list behind a measurement gate. |
+| 6 | "Same weights" for an unquantized GGUF twin is decided from headers (names, shapes, dtype), not values. | Header check plus the replay consistency check, which lowers the label on divergence (2.2). A value check over sampled tensors on the node can be added if mislabels show up. |
+| 7 | Neuronpedia labels are not on HF, so `model.download` needs `url` file entries (5.4). | Add them to `model.download`, so the node stays the only process that downloads; plugin jobs keep the network off. |
+| 8 | A conversation is deleted while a node that holds its replay is unreachable. | Delete the local copies at once and name the node in the result. Record the remote removal as a daemon event `conversation.deleted` (ids and hashes only) and send it after the node's next reconcile (9.2). |
+| 9 | A record blob is plaintext on disk until the daemon indexes it, outside the Phase 2 SQLCipher boundary. | Accept: it lives under a second on the embedded node. In Phase 2, either encrypt record blobs with the vault key or send records over `NodeHubService` straight into `vault.db`. |
+| 10 | The `conversation.delete` result (`removed[]`, `kept[]`, `pending_nodes[]`) has no field for a delete still queued for the archive. | The result doesn't wait for the archive; `archive.status` shows the queue (9.2). Add a field in contracts only if the confirm dialog needs it. |

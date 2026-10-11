@@ -1,6 +1,13 @@
 # Layout: the Rust node and edge (`rastai-node`, `rastai-sandbox`, `rastai-transport`, `rastai-gateway`) and `proto/`
 
-**Status:** v1, 2026-10-10. Pre-build design. Built on spec v5.3 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and the shared names in `docs/architecture/contracts.md`. Names from contracts are used exactly; names this doc adds are listed in section 11.
+**Status:** v1.1, 2026-10-10. Pre-build design. Built on spec v5.4 (`docs/spec/rastai_spec_v5.md`), the spike (`spike/README.md`) and contracts v1.1 (`docs/architecture/contracts.md`), which is the only list of shared names. Names from contracts are used exactly; this doc keeps no "New names" list (section 11 says where each kind of name lives).
+
+Owner decisions of 2026-10-10 applied here:
+- the managed vLLM engine is out of the prototype, and an external vLLM goes through `OpenAiAdapter` as a proxy-fidelity endpoint (6.5, 6.10, 7.8);
+- plugin modules under the AppArmor rule: a profile in the `.deb`, a warned fallback for trusted first-party modules, a refusal for third-party ones (7.9);
+- a `stability` field on command and event descriptors (3.2);
+- the MySQL dataset reader gets its credential through `GetSecret` (7.9);
+- generated client code is JavaScript, not TypeScript (3.4).
 
 This doc covers:
 - `proto/` and the generated code it produces (section 3);
@@ -9,7 +16,7 @@ This doc covers:
 - `crates/rastai-gateway` (section 6);
 - `crates/rastai-node` (section 7).
 
-It does not cover the daemon side of the same conversations (`rastai-server`: `NodeHubService`, the node connection manager, `VaultLogSink`), the store (`rastai-store`), or the Python worker (`rastai_worker`). Those have their own layout docs. Where this doc depends on them, it names the function or type it needs.
+It does not cover the daemon side of the same conversations (`rastai-server`: `NodeHubService`, the node connection manager, `VaultLogSink`), the store (`rastai-store`), the optional long-term archive (`rastai-archive`, M11, contracts 8.7), or the Python worker (`rastai_worker`). Those have their own layout docs. Nodes never get archive credentials and never read the archive. Where this doc depends on them, it names the function or type it needs.
 
 Every crate section has the same parts: tree, public API, dependencies, boundary rules, tests, ported spike code, build-order step.
 
@@ -21,21 +28,22 @@ Every crate section has the same parts: tree, public API, dependencies, boundary
 |---|---|---|---|
 | `rastai-transport` | daemon, node, CLI | nothing on its own; it opens sockets and channels for the others | OpenSSH binary, HTTPS hosts, local sockets |
 | `rastai-sandbox` | node | nothing; it is a library under `SandboxService` | Docker or Podman engine socket |
-| `rastai-gateway` | daemon (the `/v1/*` endpoints), node (rollout and judge gateway, no HTTP) | `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/v1/messages` (mounted by `rastai-server`) | `NodeService.Generate`, third-party APIs, `NodeHubService.GatewayGenerate` (from a node) |
-| `rastai-node` | daemon (embedded node, own tokio runtime) and `rastai node serve` | `NodeService` + `SandboxService` on `node.sock`; `WorkerHostService` on `worker-host.sock` | `WorkerService` on `jobs/<job_id>.sock`, `NodeHubService`, llama-server, vLLM (optional, Linux NVIDIA), HF Hub, uv |
+| `rastai-gateway` | daemon (the `/v1/*` endpoints), node (rollout and judge gateway, no HTTP) | `/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/v1/messages` (mounted by `rastai-server`) | `NodeService.Generate`, third-party APIs and OpenAI-compatible endpoints (an external vLLM included), `NodeHubService.GatewayGenerate` (from a node) |
+| `rastai-node` | daemon (embedded node, own tokio runtime) and `rastai node serve` | `NodeService` + `SandboxService` on `node.sock`; `WorkerHostService` on `worker-host.sock` | `WorkerService` on `jobs/<job_id>.sock`, `NodeHubService`, llama-server, HF Hub, uv, and `unshare` for network-off plugin modules |
 
 ```mermaid
 flowchart TD
   NODE["rastai-node"] --> GW["rastai-gateway"]
   NODE --> SBX["rastai-sandbox"]
   NODE --> TR["rastai-transport"]
-  NODE --> STORE["rastai-store (event-log reader)"]
+  NODE --> STORE["rastai-store (event-log reader, free_bytes)"]
   NODE --> MCP["rastai-mcp (gym tools)"]
   GW --> TR
   GW --> FMT["rastai-formats"]
   TR --> FMT
   NODE --> FMT
   SBX --> CORE["rastai-core"]
+  SBX --> PROTO
   TR --> CORE
   GW --> CORE
   NODE --> CORE
@@ -46,7 +54,7 @@ flowchart TD
   PROTO --> PROTOFILES["proto files"]
 ```
 
-Arrows mean "may depend on", as in contracts §2.4. Not shown: every crate also depends on `rastai-diag`. `rastai-sandbox` does not depend on `rastai-transport` (contracts §2.1), so it has its own small HTTP-over-Unix-socket file (section 5). `rastai-transport` and `rastai-node` reach `rastai-formats` for one thing that matters here: every BLAKE3 hash goes through `rastai_formats::hashing`, the one blake3 wrapper (contracts §2.4 rule 8). The transport edge is new (section 12).
+Arrows mean "may depend on", as in contracts §2.4. Not shown: every crate also depends on `rastai-diag`. `rastai-sandbox` does not depend on `rastai-transport` (contracts §2.1), so it has its own small HTTP-over-Unix-socket file (section 5). `rastai-transport` and `rastai-node` reach `rastai-formats` for one thing that matters here: every BLAKE3 hash goes through `rastai_formats::hashing`, the one blake3 wrapper (contracts §2.4 rule 8). Two edges are easy to miss and are in contracts 2.1: `rastai-sandbox` to `rastai-proto` (it uses the generated sandbox types) and `rastai-transport` to `rastai-formats` (hashing).
 
 ---
 
@@ -75,7 +83,7 @@ These restate contracts §12 where it matters for this code, and add the rules t
 **Errors at the edge**
 - Library functions return the crate's error enum.
 - The tonic service files and the axum handlers are the edge: they turn the error into a `rastai.common.v1.Diagnostic` with the catalog code. gRPC status stays `OK` when the call itself ran (contracts §4).
-- Initial codes for these crates are in section 11.3.
+- Every code these crates raise is listed in contracts 10.3 (section 11 maps files to codes). A code is named in this doc only after it is there.
 
 ---
 
@@ -93,16 +101,17 @@ proto/rastai/
     hardware.proto            HardwareProfile, GpuInfo, HardwareFingerprint, NodeTelemetry, GpuTelemetry
     resources.proto           ResourceRequest, LeaseClass
     states.proto              JobState, RunState, ModelState, LeaseState, NodeState, SandboxState, PluginState,
-                              EvalRunState, EventClass, RuntimeKind
+                              EvalRunState, EventClass, Stability (PREVIEW, STABLE, DEPRECATED), RuntimeKind
   commands/v1/
     command_service.proto     CommandService (Execute, ListCommands); ExecuteRequest, ExecuteResponse,
-                              CommandDescriptor, CommandKind (SYNC, JOB, STREAM), ListCommandsRequest/Response
+                              CommandDescriptor (with stability), CommandKind (SYNC, JOB, STREAM), ListCommandsRequest/Response
   events/v1/
-    event_service.proto       EventService (Subscribe); SubscribeRequest, BusEvent
-    event_record.proto        EventRecord (one events.log frame body; contracts §7.1)
+    event_service.proto       EventService (Subscribe, ListEventTypes); SubscribeRequest, BusEvent,
+                              EventTypeDescriptor (with stability), ListEventTypesRequest/Response
+    event_record.proto        EventRecord (one events.log frame body, contracts §7.1; also the bytes the archive stores, 3.3)
     payloads.proto            one message per event type in contracts §7.3 (JobStateChanged, JobProgress,
                               JobLogLine, RunStateChanged, RunMetrics, CheckpointSaved, ...,
-                              GatewayRequestLogged, EgressActive), plus PluginEventPayload
+                              GatewayRequestLogged, EgressActive, the archive.* events of M11), plus PluginEventPayload
   node/v1/
     node_service.proto        NodeService: the RPC list only, plus the small per-RPC request messages
                               (HandshakeRequest/Response, GetHardwareRequest/Response, HandleCommandRequest, ...)
@@ -122,7 +131,7 @@ proto/rastai/
     sandbox_service.proto     SandboxService; SandboxSpec, SandboxCaps, SandboxInfo, ExecFrame,
                               SandboxIdRequest, ListSandboxesRequest/Response
     node_hub_service.proto    NodeHubService; HeartbeatRequest/Response, GatewayGenerateRequest,
-                              GetSecretRequest/Response (ExecuteCommand reuses commands.v1 messages)
+                              GetSecretRequest/Response (purposes in 3.2; ExecuteCommand reuses commands.v1 messages)
   worker/v1/
     worker_service.proto      WorkerService; HelloRequest, WorkerInfo, ControlRequest
     worker_host_service.proto WorkerHostService; RegisterRequest/Response, ResizeLeaseRequest/Response,
@@ -133,9 +142,11 @@ proto/rastai/
     provider_service.proto    ProviderService (Phase 3): Offer, ProvisionRequest, MachineInfo, BillableResource
 ```
 
+**Nothing in `proto/` is for the archive** (M11, contracts 8.7). The daemon talks to MySQL or MariaDB with the MySQL protocol and to the blob target with files; neither is protobuf (contracts 4.7). The archive touches `proto/` in three ways only: its `archive.*` events (payloads in `payloads.proto`), the `stability` field its commands carry like every command, and `EventRecord`, whose bytes the archive stores in `event_records.body` (3.3). A node never sees an archive message.
+
 ### 3.2 What this doc adds to the messages
 
-Contracts §4 defines the services and the main messages. This doc fills in the ones it names without fields. All are listed in section 11.
+Contracts §4 defines the services and the main messages, and 4.9 fixes the fields of the ones below. This table explains why each exists and adds the few details contracts leaves to this doc.
 
 | Message | Fields | Why |
 |---|---|---|
@@ -153,7 +164,7 @@ Contracts §4 defines the services and the main messages. This doc fills in the 
 | `RequestLeaseRequest` | `gpu_index`, `vram_bytes`, `lease_class`, `holder_job_id`, `optional bool may_reclaim_evictable` (unset reads as `true`) | the node copies the flag from the job's `ResourceRequest` at admission and on `ResizeLease`; `decide_lease` reads it (section 7.7) |
 | `SetInterventionsRequest` | `session_id`, `interventions_json` | the `InterventionSet` crosses the wire only as JSON; its type lives in `rastai-formats` `documents/steering_preset.rs` (contracts §4.4, §20) |
 | `EgressActive` | `purpose`, `host`, `subject_id` | payload of the ephemeral `egress.active` event, built from one `EgressReport` (section 4.6) |
-| `ModelInfo` | adds `engine_build` (`llama-server <build>` or `vllm <version>`; empty for Inspectable) | which Fast engine serves the model, for the UI and `gateway_log.sampling_json` (section 7.8) |
+| `ModelInfo` | adds `engine_build` (`llama-server <build>`; empty for Inspectable) | which Fast engine serves the model, for the UI and `gateway_log.sampling_json` (section 7.8). Only llama-server exists in the prototype; the field is what lets a second engine arrive later without a wire change |
 | `EnvironmentInfo` | `environment_id`, `lock_hash`, `path`, `python_version`, `torch_version`, `size_bytes`, `ready` | result of `EnsureEnvironment`, listed by `system.env.list` |
 | `GatewayLogEntry` | the `gateway_log` row fields from contracts §8.3, with `prompt_ids` and `generated_ids` as `repeated uint32`, plus `run_id`, `finish_reason` (section 6.2 names), `stop_kind`, and for a `chat.send` turn `conversation_id`, `message_id` and the assistant `parts_json` | the one log-record type: the gateway's `LogSink` takes it, and `GenerateFinished.gateway_log` returns it to a job, the only writer of its `events.log` (section 6.6) |
 | `GatewayGenerateRequest` | `model_ref` or `served_model_name`, `messages_json` (`rastai.conversation/1` messages) or `prompt_token_ids`, `prior_token_ids`, `SamplingSettings`, `max_new_tokens` (0 = prefill only), `stop_token_ids`, `return_logprobs`, `LensRequest lens`, `pin_attention_kernel`, `session_id`, `run_id`, `purpose` (`rollout`, `judge`, `command`, `replay`) | node and job requests to a gateway: replay sends token IDs only with `max_new_tokens = 0`, lens mode `ALL_POSITIONS`, a pinned kernel and a new session (inference flow 6.1); gym rollouts send `prior_token_ids` plus only the new messages (designer flow B3a) |
@@ -165,6 +176,10 @@ Contracts §4 defines the services and the main messages. This doc fills in the 
 | `TensorChunk` | `point`, `shape[]`, `dtype`, `offset_bytes`, `bytes`, `last` | `FetchTensor` |
 | `BlobChunk` | `hash` (first chunk), `offset_bytes`, `bytes`, `last` | `PutBlob` / `GetBlob` |
 | `HandleCommandRequest` | `plugin_id`, `CommandCall call` | `NodeService.HandleCommand` |
+| `Stability` | enum `PREVIEW`, `STABLE`, `DEPRECATED`, plus the zero value `STABILITY_UNSPECIFIED` (3.3); the zero value reads as `PREVIEW` | `CommandDescriptor.stability` and `EventTypeDescriptor.stability` (owner decision N3). Every command and event type is `PREVIEW` until Phase 2. The daemon fills the field from the registry (`descriptor_from_row`); a client that gets the zero value from an older daemon treats it as `PREVIEW` |
+| `CommandDescriptor` | adds `stability` (`Stability`) after `kind`; every other field is in contracts 4.2 | the registry row as the UI, CLI and MCP see it |
+| `EventTypeDescriptor` | `event_type`, `event_class`, `payload_type`, `emitter`, `stability`, `since_version`, `plugin_id` | the item of `EventService.ListEventTypes`; plugin-defined event types carry `stability` too, `PREVIEW` until Phase 2 |
+| `GetSecretRequest` / `GetSecretResponse` | request `purpose`, `job_id`; response `value`, `expires_unix_ms`, `Diagnostic` | `NodeHubService.GetSecret`. Purposes: `hf_download`, `hf_upload`, `adapter:<name>`, `mysql:<connection_name>`. The MySQL purpose is for the dataset reader (7.9). The value lives in the node's memory until `expires_unix_ms` and is never written to `job.json`, a log or an event. The request/response fields are this doc's proposal; they need a row in contracts 4.9 (section 12, question 19) |
 
 ### 3.3 Rules for the `.proto` files
 
@@ -175,6 +190,8 @@ Contracts §4 defines the services and the main messages. This doc fills in the 
 - Times are `int64 *_unix_ms`, sizes `uint64 *_bytes`, hashes `string` `blake3:<hex>`, documents `string *_json` (contracts §4).
 - **No proto message re-declares a `rastai-formats` type** (§20). A document type that crosses the wire is a `*_json` string, validated at both ends. `InterventionSet` is the case that matters here: `GenerateRequest.interventions_json` and `SetInterventionsRequest.interventions_json`, never a message.
 - Field numbers are never reused; removed fields become `reserved`.
+- **`stability` is data, not a proto option.** `buf breaking` checks field numbers and types. It can't see `arguments_json`, `result_json` or any other `_json` payload (contracts 4). A schema-diff check over `schemas/commands/` is planned with the stable commands subset (Phase 2). Until then every `CommandDescriptor` and `EventTypeDescriptor` says `PREVIEW`, and no wire rule depends on the other two values.
+- **`EventRecord` is read for years.** The archive keeps raw `EventRecord` bytes in `event_records.body` (contracts 8.7), and a restore decodes them with the schema of the day. Its field numbers are frozen like any other, and when a field is added the golden test keeps decoding the older `.binpb` files beside the new one.
 
 ### 3.4 Generated code
 
@@ -182,16 +199,19 @@ Contracts §4 defines the services and the main messages. This doc fills in the 
 |---|---|---|---|
 | Rust | `crates/rastai-proto/src/generated/rastai.<package>.v1.rs` | buf with the prost and tonic plugins | `crates/rastai-proto/src/lib.rs` is the one hand-written file: a module tree that `include!`s each generated file. No `build.rs`, so building never needs `protoc`. |
 | Python | `python/rastai_proto/rastai_proto/<package>/v1/*_pb2.py`, `*_pb2_grpc.py` | buf with the protobuf and grpcio plugins | protoc writes `from rastai.common.v1 import ...`, which would collide with the public `rastai` SDK package. `tools/codegen/rewrite_python_imports` rewrites `rastai.` to `rastai_proto.` in generated imports. It has its own test. |
-| TypeScript | `packages/proto/src/generated/rastai/<package>/v1/*_pb.ts` | buf with protoc-gen-es | protobuf-es v2 emits service descriptors that connect-es uses directly. |
+| JavaScript | `packages/proto/src/generated/rastai/<package>/v1/*_pb.js` and `*_pb.d.ts` | buf with protoc-gen-es, `target=js+dts` | protobuf-es v2 emits service descriptors that connect-es uses directly from JavaScript. The `.d.ts` files are generated, never edited and not part of review; `tools/checks/check-no-typescript` allows them only in generated folders (ADR-0036). Nobody writes TypeScript. |
 
 `just codegen` runs all three. `tools/checks/check-generated` fails CI if regenerating changes any file.
+
+The typed command wrappers in `@rastai/client` are not made by buf. Arguments are `_json` strings to protobuf, so the wrappers come from the command registry's schemas (control-plane layout), written against the `CommandExecutor` interface that `DaemonClient` and `PluginHost` both satisfy.
 
 ### 3.5 Tests
 
 | Test | Where | What |
 |---|---|---|
 | Lint and breaking | CI step `just proto-check` | `buf lint`; `buf breaking --against` the main branch |
-| Golden messages | `fixtures/proto-golden/<package>/<MessageName>.binpb` and `.json` | one filled instance per message; round-tripped in `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py`, `packages/proto/src/golden.test.ts`; binary bytes must match exactly across the three |
+| Golden messages | `fixtures/proto-golden/<package>/<MessageName>.binpb` and `.json` | one filled instance per message; round-tripped in `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py`, `packages/proto/src/golden.test.js`; binary bytes must match exactly across the three |
+| Unset stability | `CommandDescriptor` and `EventTypeDescriptor` goldens without the field | decode as `PREVIEW` in Rust, JS and Python |
 | Import rewrite | `tools/codegen/tests/` | a generated file with nested imports rewrites correctly and imports cleanly |
 | Generated-code freshness | `tools/checks/check-generated` | regenerate, diff, fail on change |
 
@@ -199,19 +219,20 @@ Contracts §4 defines the services and the main messages. This doc fills in the 
 
 | Files | First needed at §31 step |
 |---|---|
-| `common/v1/*`, `commands/v1/*`, `events/v1/*` | 1 (Foundation: the command layer and durability) |
+| `common/v1/*` (with `Stability`), `commands/v1/*`, `events/v1/*` (with `EventTypeDescriptor` and `ListEventTypes`) | 1 (Foundation: the command layer and durability) |
 | `node/v1/node_service.proto` (Handshake, GetHardware, StartJob, SignalJob, ListJobs, WatchRunEvents, WatchLive), `jobs.proto`, `live.proto`, `node_hub_service.proto` (Heartbeat, ExecuteCommand) | 1 (daemon + embedded node; weeks 3–4 skeleton) |
 | `worker/v1/worker_service.proto` (Hello, Control), `worker_host_service.proto` (Register) | 1 (worker protocol v0 runs TextCNN training) |
-| `environments.proto`; `EgressActive` in `payloads.proto` and `LiveEvent` | 2 (uv environments; HF downloads are the first egress) |
+| `environments.proto`; `EgressActive` in `payloads.proto` and `LiveEvent`; `NodeHubService.GetSecret` with purpose `hf_download` (gated models need the token) | 2 (uv environments; HF downloads are the first egress) |
 | `leases.proto` (with `RequestLeaseRequest.may_reclaim_evictable`), `ResourceRequest.may_reclaim_evictable`, `models.proto` (with `ModelInfo.engine_build`), `generation.proto` (minus `interventions_json`, tensors and sessions) | 3 (Inference) |
 | `TokenizationOverride`, `HandshakeRequest.tokenization_overrides`, `HeartbeatRequest.tokenization_overrides_hash`, `HeartbeatResponse.tokenization_overrides` | 3 (user overrides); plugin templates and tokenizers use them from 8 |
 | `generation.proto`: `GenerateRequest.interventions_json`, `SetInterventionsRequest`, `FetchTensor`, sessions; `WorkerService.SetInterventions`, `FetchTensor` | 4 (Psychology) |
-| `worker_host_service.proto`: `GatewayGenerate`, `TokenizeChat`, `PutBlob`, `GetBlob`, `ResizeLease`; `NodeHubService.GatewayGenerate`, `GetSecret` | 5 (Training and Evaluation: judges, checkpoints) |
+| `worker_host_service.proto`: `GatewayGenerate`, `TokenizeChat`, `PutBlob`, `GetBlob`, `ResizeLease`; `NodeHubService.GatewayGenerate`; `GetSecret` purposes `hf_upload` and `mysql:<connection_name>` (the MySQL dataset reader, M5-E07) | 5 (Training and Evaluation: judges, checkpoints, data import) |
 | `sandbox_service.proto`, `WorkerHostService` sandbox RPCs | 5 (Pass@k needs sandboxes), completed at 7 |
 | `WorkerHostService.ListTools`, `CallTool`, `PauseSandbox`, `ResumeSandbox`; `sandbox_id` and `arguments_json` on `SignalJobRequest` and `ControlRequest`; `GatewayGenerateRequest.prior_token_ids` | 7 (Agent Gym: tools in sandboxes, step mode, multi-turn rollouts) |
 | `GatewayGenerateRequest.lens`, `.pin_attention_kernel`, `.session_id`; `max_new_tokens = 0` | 4 (Psychology replay through the node gateway) |
 | `command_call.proto`, `HandleCommand`, `ExecuteCommand` | 4 (Psychology is the first plugin module); used by every plugin at 8. `WorkerHostService.StartJob` is not built in the prototype: modules return `CommandReply.follow_up_jobs` and the daemon starts them (plan §10 row 31) |
 | `files.proto`, `PutFile`, `GetFile`, `StatFile`, `UpdateNode` | 9 (Remote) |
+| the `archive.*` payloads in `payloads.proto` | M11 (long-term storage, after the 90-day plan; M11-E01 is the contracts epic) |
 | `provider/v1/*` | Phase 3 |
 
 Each row lands as its own contract PR before the code that uses it (§29).
@@ -245,6 +266,8 @@ crates/rastai-transport/
     transfer_resume.rs      interrupt a transfer mid-file, resume from offset, hash matches
     ssh_loopback.rs         real OpenSSH against a test sshd (ignored unless RASTAI_TEST_SSH is set)
     http_client.rs          against a local axum test server: chunked streaming, timeouts, TLS refusal of bad certs
+  fuzz/
+    fuzz_targets/sse_reader.rs   arbitrary bytes in arbitrary chunk sizes never panic; the events equal a one-chunk parse (nightly, 10 minutes)
 ```
 
 `quic.rs` (iroh) is added in Phase 2 next to `ssh.rs`. Windows named pipes are a branch inside `local_socket.rs` (tokio provides them), added with tier 2.
@@ -335,6 +358,7 @@ Who calls what:
 | `rastai-gateway` | `send_request` / `open_response_stream` + `sse` for the OpenAI and Anthropic adapters |
 | `rastai-cli` | `connect_local_socket` for `daemon.sock` |
 | `rastai-mcp` | `http_client` for remote HTTP MCP servers |
+| `rastai-archive` (M11) | `send_request` / `open_response_stream` for an S3-compatible blob target (M11-E04), with an `EgressTag` of purpose `archive`. MySQL traffic never passes through this crate: `mysql_async` opens its own TLS socket, so `rastai-archive` builds the `EgressReport`s for it itself, one every `EGRESS_REPORT_INTERVAL_SECONDS` while a sync runs |
 
 ### 4.3 How SSH carries both directions
 
@@ -369,7 +393,7 @@ ssh -N -T
 | Internal | Why |
 |---|---|
 | `rastai-core` | `DataPaths` and its path functions (`paths.rs`), ids |
-| `rastai-formats` | `hashing::{new_stream_hasher, update_stream_hasher, finish_stream_hasher}` for `transfer.rs` (new internal dep; section 12) |
+| `rastai-formats` | `hashing::{new_stream_hasher, update_stream_hasher, finish_stream_hasher}` for `transfer.rs` (listed in contracts 2.1) |
 | `rastai-proto` | `FileStat`, `FileChunk` types used by `transfer.rs` |
 | `rastai-diag` | catalog codes, JSON logger |
 
@@ -377,12 +401,12 @@ ssh -N -T
 |---|---|---|
 | tokio | everywhere | sockets, child processes, timers |
 | tonic | `grpc_channel.rs` | channels and servers over local sockets |
-| tower† (already in the tree through axum and tonic) | `grpc_channel.rs` | `service_fn` connector that tonic's `Endpoint::connect_with_connector` takes |
-| hyper†, hyper-util† | `http_client.rs` only | HTTP/1.1 client |
-| rustls, tokio-rustls†, webpki-roots† | `http_client.rs` only | TLS for HTTPS (never in-house crypto, §24) |
+| tower | `grpc_channel.rs` | `service_fn` connector that tonic's `Endpoint::connect_with_connector` takes |
+| hyper, hyper-util | `http_client.rs` only | HTTP/1.1 client |
+| rustls, tokio-rustls, webpki-roots | `http_client.rs` only | TLS for HTTPS (never in-house crypto, §24). The same file serves the SHA-256 and HMAC-SHA256 helpers from the rustls crypto provider (HF file checks, llama-server builds, and SigV4 for the archive's S3 target in M11); no extra crate |
 | OpenSSH binary | `ssh.rs` | remote access (foundation, §27); found through settings `nodes.ssh_binary` |
 
-† not yet in §27; raised in contracts §14 question 1, plus `tower` raised here (section 12).
+Every external library above is on the §27 list approved on 2026-10-10 (contracts 2.5) and is imported in the one file named.
 
 ### 4.6 Boundary rules
 
@@ -397,6 +421,7 @@ ssh -N -T
 ### 4.7 Tests
 
 - Unit tests at the bottom of `sse.rs` (split lines across chunk boundaries, `\r\n`, multi-line `data:`, comment lines), `peer.rs`, `transfer.rs` (offset mismatch refused, bad hash refused).
+- The `sse_reader` fuzz target is one of the fuzz targets contracts 12.5 requires for every in-house parser of untrusted input.
 - Integration tests listed in the tree. `ssh_loopback.rs` runs in CI against an OpenSSH server in a container with a throwaway key; on a laptop it's skipped unless `RASTAI_TEST_SSH` is set.
 - The 12-week exit test "a remote job survives a network drop" (§32) lives in `tests/e2e/remote_network_drop.rs`: it kills the SSH child mid-run and checks that the daemon reconnects and loses no events. It exercises this crate, `rastai-node` and `rastai-server` together.
 
@@ -405,7 +430,7 @@ ssh -N -T
 | Spike | Here | What changes |
 |---|---|---|
 | `bakeoff/rust/src/gateway.rs` `take_complete_lines` | `sse.rs` | becomes a reader struct that also parses `event:` and multi-line `data:` fields (Anthropic streams name their events); returns typed `SseEvent`s instead of raw lines |
-| `bakeoff/rust/src/gateway.rs` `reqwest::Client` | `http_client.rs` | reqwest is not carried over (contracts §14 question 1); plain hyper behind four functions |
+| `bakeoff/rust/src/gateway.rs` `reqwest::Client` | `http_client.rs` | reqwest is not carried over (contracts 2.5, "Never carried over from the spike"); plain hyper behind four functions |
 | `src/rastai_spike/llama_server.py` `urllib` calls | `http_client.rs` `LoopbackHttp` target | same requests, now with per-request timeouts and streaming |
 
 ### 4.9 Build-order step
@@ -451,11 +476,14 @@ crates/rastai-sandbox/
     orphan.rs             orphan sweep after a simulated node crash
     deadline.rs           time cap kills a busy container; paused time is not counted
     egress_proxy.rs       allowlist table (unit); real engine: a listed host connects, any other host and plain HTTP are refused
+  fuzz/
+    fuzz_targets/connect_request.rs   the egress proxy's CONNECT line parser, fed bytes a sandbox container could send: never panics, never accepts a host that host_allowed refuses
+    fuzz_targets/exec_stream.rs       the multiplexed stream parser on arbitrary bytes
 ```
 
 ### 5.2 Public API
 
-The crate uses the generated `SandboxSpec`, `SandboxCaps`, `SandboxInfo`, `SandboxState` and `ExecFrame` from `rastai-proto` directly, so no sandbox type is defined twice (§20). That adds `rastai-proto` to this crate's internal deps (raised in section 12).
+The crate uses the generated `SandboxSpec`, `SandboxCaps`, `SandboxInfo`, `SandboxState` and `ExecFrame` from `rastai-proto` directly, so no sandbox type is defined twice (§20). That puts `rastai-proto` in this crate's internal deps, as contracts 2.1 lists.
 
 ```rust
 // engine.rs
@@ -589,13 +617,13 @@ Each allowed CONNECT also sends an `EgressReport` (purpose `sandbox`, the host, 
 | Internal | Why |
 |---|---|
 | `rastai-core` | `DataPaths` and its path functions, ids (`sbx_...`) |
-| `rastai-proto` | the sandbox wire types (addition; section 12) |
+| `rastai-proto` | the sandbox wire types (listed in contracts 2.1) |
 | `rastai-diag` | codes, logger |
 
 | External (§27) | Used in | For |
 |---|---|---|
 | tokio | everywhere | Unix socket, timers, channels; the egress proxy's TCP listener and byte copy |
-| hyper†, hyper-util† | `engine_http.rs` only | HTTP/1.1 over the engine socket, the upgraded exec connection |
+| hyper, hyper-util | `engine_http.rs` only | HTTP/1.1 over the engine socket, the upgraded exec connection |
 | serde_json | `docker_api.rs`, `container_spec.rs` | Engine API JSON |
 | Docker or Podman engine | at run time | containers (foundation, §27) |
 
@@ -617,6 +645,7 @@ Each allowed CONNECT also sends an `EgressReport` (purpose `sandbox`, the host, 
 - Real-engine tests run in CI on Docker (the Linux runner has it) and nightly on the owner's box on rootless Podman. They pull one tiny pinned image listed in `fixtures/sandbox/images.json`.
 - Crash test `tests/crash/node_kill_with_sandboxes.rs`: start a gym-like fake job with 3 sandboxes, `kill -9` the node, restart. Expected: the job reattaches, its 3 sandboxes are adopted, and a fourth container labeled for a dead job is swept.
 - Egress (`tests/egress_proxy.rs`, real engine, Linux): a container on a run's internal network reaches a listed host through the proxy; an unlisted host gets `403`; a direct connection without the proxy fails; a container of a sandbox without `network_hosts` can't resolve or connect (ADR-0031's network test). Unit tests at the bottom of `egress_proxy.rs` cover `host_allowed` (case, trailing dot, ports, IP literals refused).
+- The two fuzz targets are in the tree. The CONNECT parser reads bytes written by sandboxed, untrusted code, so it is the most exposed parser in this doc (contracts 12.5 asks for a target on every in-house parser of untrusted input).
 - Pass@k uses this crate through the Evaluation plugin's job; its tests in `plugins/evaluation/tests/` cover the end-to-end path.
 
 ### 5.8 Ported spike code
@@ -672,7 +701,7 @@ crates/rastai-gateway/
     adapters/
       mod.rs                Adapter enum, AdapterRequest, AdapterResult, generate() match
       node_runtime.rs       NodeRuntimeAdapter: token IDs -> NodeService.Generate (Inspectable or Fast)
-      openai.rs             OpenAiAdapter: OpenAI and any OpenAI-compatible endpoint (vLLM, Ollama, ...)
+      openai.rs             OpenAiAdapter: OpenAI and any OpenAI-compatible endpoint (an external vLLM, Ollama, ...)
       anthropic.rs          AnthropicAdapter
       daemon_forward.rs     DaemonForwardAdapter (node only): NodeHubService.GatewayGenerate
       secrets.rs            SecretReader trait: an API key per request
@@ -688,6 +717,9 @@ crates/rastai-gateway/
     logging.rs                     exactly one log record per request, including client disconnects; none when incognito
     streaming_latency.rs           inter-chunk gap with an instant upstream (the TCP_NODELAY guard)
     steering_presets.rs            a preset routes to Inspectable, sets interventions, always closes its session
+    openai_external.rs             OpenAiAdapter against a fake vLLM-style server over loopback HTTP: text in, text and logprobs out, log record has empty token-ID columns, fidelity proxy
+  fuzz/
+    fuzz_targets/tool_call_parse.rs   tool_calls.rs on arbitrary model output never panics
 ```
 
 ### 6.2 Public API
@@ -787,7 +819,7 @@ pub trait SecretReader {
 pub fn gateway_routes(gateway: Arc<Gateway>, log_sink: Arc<dyn LogSink + Send + Sync>) -> axum::Router;
 ```
 
-`LogSink` keeps the contracts §12.2 shape and adds a return value: `LogCommit` carries the writer thread's oneshot, so the gateway can await the commit before it sends the final chunk (section 6.5; plan §10 row 20). It takes the generated `GatewayLogEntry`, so the log record is defined once, in `proto/` (§20). `NodeRuntime`, `OpenAi` and `Anthropic` are the contracts names; `DaemonForward` is new (section 11).
+`LogSink::log_request` returns a `LogCommit` (contracts 12.2; plan §10 row 20): it carries the writer thread's oneshot, so the gateway can await the commit before it sends the final chunk (6.3, step 6). It takes the generated `GatewayLogEntry`, so the log record is defined once, in `proto/` (§20). The four adapter names are the ones in contracts 12.2 and 15.1.
 
 Who calls what:
 
@@ -800,7 +832,7 @@ Who calls what:
 | `rastai-node` (`Handshake`, a `HeartbeatResponse` with overrides) | `set_tokenization_overrides` on the node `Gateway` |
 | `rastai-server` (`NodeHubService.GatewayGenerate`) | `generate_chat` for a node's request to an API model or a model on another node |
 | `rastai-node` (`WorkerHostService.GatewayGenerate`, `TokenizeChat`) | `generate_chat`, `tokenize_chat` on the node `Gateway` |
-| `rastai-node` (`fast_runtime.rs` and `fast_runtime_vllm.rs`, at Fast model load) | `tokenizer.rs` encode, for the engine's tokenizer parity probe (section 7.8) |
+| `rastai-node` (`fast_runtime.rs`, at Fast model load) | `tokenizer.rs` encode, for the engine's tokenizer parity probe (section 7.8) |
 
 ### 6.3 The request path
 
@@ -855,7 +887,7 @@ sequenceDiagram
 - **Sessions.** `chat.send` passes the conversation's `session_id`, so the worker reuses its KV cache across turns. `/v1` requests have none: the worker opens a temporary session and closes it when the stream ends.
 - **The live panel** rides the same stream. With `LensRequest` set, the worker interleaves a `LivePacket` after each `TokenEvent`; the gateway passes it to the `TokenSink` as `StreamItem::LivePacket`, and the server publishes `psychology.packet`. `/v1` never asks for packets.
 - **Remote node:** the same diagram, with `NodeService.Generate` going through the SSH-forwarded `node.sock`. Per token, only a few dozen bytes cross the link (about 8.3 KB more with the live panel; spike 02).
-- **Persisted where:** one `gateway_log` row in `vault.db` per request, written by the vault writer thread in `rastai-store` through `VaultLogSink` (in `rastai-server`). `chat.send` also writes the message rows; `/v1` requests write only the log row.
+- **Persisted where:** one `gateway_log` row in `vault.db` per request, written by the vault writer thread in `rastai-store` through `VaultLogSink` (in `rastai-server`). `chat.send` also writes the message rows; `/v1` requests write only the log row. When an archive is configured, the same transaction also writes a `vault_changes` outbox row (contracts 8.3); that is the store's job, and the gateway never knows.
 - **Failure branches:**
   - the node is unreachable or the model isn't `ready`: no generation starts; the client gets `RRS-G0006` or `RRS-G0005` as an HTTP error with the OpenAI or Anthropic error body;
   - the worker crashes mid-stream: the node sends `GenerateFinished` with the job's `Diagnostic`; the gateway logs the partial record (`finish_reason = error`) and sends an error event in the stream;
@@ -891,7 +923,7 @@ sequenceDiagram
 - **Persisted where:** as in section 6.4: one `gateway_log` row, with `runtime = FAST` and the GGUF's model hash. llama-server itself keeps nothing we rely on; its prompt cache is a speed-up only.
 - **Slots.** The prototype starts llama-server with one slot (`FAST_RUNTIME_SLOTS = 1` in `fast_runtime.rs`). Requests queue in the node, first in first out, up to `FAST_QUEUE_LIMIT = 16`; beyond that the gateway returns `RRS-G3006` (HTTP 429 on `/v1`).
 - **Failure branches:** llama-server dies mid-stream (EOF without `stop`): the node sends `GenerateFinished` with `RRS-G3003`, marks the `serve_fast` job `failed`, moves the model to `failed` then `unloaded`, and releases the lease. The gateway logs the partial record. A malformed event fails the request with `RRS-G3007` instead of being skipped (the spike skipped it silently).
-- **vLLM is the other Fast engine** (optional, Linux NVIDIA; section 7.8). The gateway sees no difference: the same `NodeRuntimeAdapter` with `runtime = FAST`, token IDs in, token IDs out, one log record. The node picks the engine from the model ref (a GGUF goes to llama-server, safetensors weights to vLLM), so the gateway has no vLLM code.
+- **No managed vLLM in the prototype** (owner decision 8). The node starts only llama-server for the Fast runtime. A managed vLLM engine comes after the prototype as a second engine behind the same `NodeRuntimeAdapter`; the gateway would see no difference, so it has no vLLM code. An external vLLM server is reached through `OpenAiAdapter` (6.10).
 
 ### 6.6 The node gateway: rollouts, judges and training data
 
@@ -926,23 +958,23 @@ sequenceDiagram
 - **Logged exactly once, by the gateway that ran the adapter.** The daemon gateway logs to `vault.db`. The node gateway can't: the job is the only writer of its `events.log` (contracts §7.1), and the node never writes `vault.db`. So `JobEventLogSink` (in `rastai-node`) captures the record and the node returns it as `GenerateFinished.gateway_log`. The job appends a durable `gateway.request_logged` event, and the daemon indexes it into `vault.db` `gateway_log` (with `run_id`) when it mirrors the run's log. For the `DaemonForward` branch the daemon has already logged, so the entry comes back empty.
 - **Large token lists** (long agent traces) go to the blob store: the job uses `PutBlob` and the event carries the `BlobRef` (spec §19: events carry only the hash).
 - **`job:<job_id>`** (a policy served live by an RL job; defined in `layout/python.md`) resolves only in the node gateway, and only for a job on the same node. Its tokenizer files come from the job's base model in `job.json`.
-- **`TokenizeChat`** (new RPC, defined in `layout/python.md`) calls `tokenize_chat` on the node gateway, so training rows get exactly the tokens the gateway would send at inference. No generation, no log record.
+- **`TokenizeChat`** (contracts 4.5; its use by training is in `layout/python.md`) calls `tokenize_chat` on the node gateway, so training rows get exactly the tokens the gateway would send at inference. No generation, no log record.
 - **Cloud credentials never leave the daemon** (§24): API models are always reached through `DaemonForward`.
 
 ### 6.7 Token-ID logging, incognito and retention
 
-**What is logged.** One `GatewayLogEntry` (the generated proto message, section 3.2) per request: the `gateway_log` columns from contracts §8.3, plus `run_id`, `finish_reason` and `stop_kind` (new columns; section 11). A `chat.send` entry also carries `conversation_id`, `message_id` and the assistant `parts_json`, so the daemon's `VaultLogSink` writes the assistant row and the log row in one transaction (inference flow 1.1). Token IDs are little-endian `u32` blobs and logprobs little-endian `f32` blobs, as in `messages.token_ids`. `sampling_json` holds the sampling settings, the stop rules, the chat template hash and `template_source` (6.8), the Fast engine's `engine_build` (from `ModelInfo`, 7.8) and, for presets, `preset: <served name>@<content_hash>`, so a replay knows steering was on.
+**What is logged.** One `GatewayLogEntry` (the generated proto message, section 3.2) per request: the `gateway_log` columns from contracts §8.3, plus `run_id`, `finish_reason` and `stop_kind` (columns in contracts 8.3). A `chat.send` entry also carries `conversation_id`, `message_id` and the assistant `parts_json`, so the daemon's `VaultLogSink` writes the assistant row and the log row in one transaction (inference flow 1.1). Token IDs are little-endian `u32` blobs and logprobs little-endian `f32` blobs, as in `messages.token_ids`. `sampling_json` holds the sampling settings, the stop rules, the chat template hash and `template_source` (6.8), the Fast engine's `engine_build` (from `ModelInfo`, 7.8) and, for presets, `preset: <served name>@<content_hash>`, so a replay knows steering was on.
 
 **When.** Once per request, after the last token, also on errors and disconnects. The final chunk is sent only after the commit, as in the spike: a client that has seen the end marker knows the row exists.
 
 **Incognito** is decided in `privacy.rs` and enforced by the gateway:
 - the flag comes from the conversation (`chat.create` with `incognito`), from the `X-Rastai-Incognito: 1` header on `/v1`, or from `gateway.incognito_default`;
-- an incognito request never calls `LogSink` and returns `log_entry = None`; the server writes no conversation rows for it;
+- an incognito request never calls `LogSink` and returns `log_entry = None`; the server writes no conversation rows for it. Nothing reaches the vault, so nothing can reach the archive either (contracts 8.3);
 - requests to API adapters still send text to the provider; the egress badge shows it (§24).
 
 **Structured logs** (the JSON-lines logger in `rastai-diag`) never contain prompts, generated text or token IDs, incognito or not. `privacy.rs` has the one function that builds a request's log fields: request id, model ref, runtime, counts, timings, code.
 
-**Retention.** `retention_cutoff_unix_ms(settings, now_unix_ms)` in `privacy.rs` turns `gateway.retention_days` (default 30) into a cutoff. A daily timer in `rastai-server` deletes `gateway_log` rows older than the cutoff through `rastai-store`. Retention touches only `gateway_log`; conversations are deleted by the user, run logs with their run.
+**Retention.** `retention_cutoff_unix_ms(settings, now_unix_ms)` in `privacy.rs` turns `gateway.retention_days` (default 30) into a cutoff. A daily timer in `rastai-server` deletes `gateway_log` rows older than the cutoff through `rastai-store`. Retention touches only `gateway_log`; conversations are deleted by the user, run logs with their run. Retention is housekeeping, not user intent, so by default it deletes locally and does not enqueue a delete for the archive (section 12, question 20).
 
 ### 6.8 Chat templates and tokenization
 
@@ -994,8 +1026,9 @@ The gateway's one job that must be byte-exact (§27 category 3). Each rule below
 
 ### 6.10 Talking to API providers
 
-- `OpenAiAdapter` covers OpenAI and any OpenAI-compatible endpoint by base URL (Ollama as an external adapter, §22, or a vLLM server the user runs themselves). `AnthropicAdapter` covers the Messages API.
-- **An external endpoint is not the Fast runtime.** It takes text, holds no VRAM lease, and its chats replay as `proxy`, like any API model. The managed vLLM engine (section 7.8) is different: the node starts it, leases its VRAM, and sends it token IDs, so its output is logged and replayed like llama-server's.
+- `OpenAiAdapter` covers OpenAI and any OpenAI-compatible endpoint by base URL: Ollama (an external adapter, §22) or a **vLLM server the user runs themselves**. `AnthropicAdapter` covers the Messages API.
+- **An external endpoint is not the Fast runtime.** It takes text, holds no VRAM lease, and its chats replay as `proxy`, like any API model.
+- **An external vLLM is a proxy-fidelity endpoint** (owner decision 8). Rastai doesn't start, stop, lease memory for or re-adopt it, and it sends no token IDs: the request is chat text, the answer is text and logprobs. Reach it with a base URL that is `http://127.0.0.1:<port>` (this machine, or a port the user forwards with their own SSH tunnel; `HttpTarget::LoopbackHttp`) or `https://` (`HttpTarget::Https`, with an egress tag of purpose `api_adapter`). The data policy decides whether a request may go there, as for any adapter (`check_data_policy`, `RRS-C1009`); this crate doesn't special-case vLLM. A managed vLLM that the node starts, leases VRAM for and feeds token IDs is a later feature (7.8).
 - HTTPS through `rastai-transport` `http_client.rs`; events through `sse.rs`.
 - The API key comes from `SecretReader` on every request (keychain account `adapter.<adapter_name>.api_key`, contracts §8.5). It is never cached, logged or written to disk.
 - Messages translate from `ConversationMessage` parts to the provider's JSON in one function per provider. Logprobs are requested when the provider has them (OpenAI's `logprobs` and `top_logprobs`); Anthropic returns none.
@@ -1034,6 +1067,7 @@ The gateway's one job that must be byte-exact (§27 category 3). Each rule below
 ### 6.13 Tests
 
 - Unit tests at the bottom of `sampling.rs`, `stop_rules.rs`, `privacy.rs` (cutoff arithmetic, field filtering), `model_router.rs` (name resolution order), `template_methods.rs`, `tool_calls.rs`.
+- Fuzz: `tool_call_parse` (nightly, 10 minutes). Tool calls are parsed from model output, which is untrusted text.
 - Integration tests listed in the tree. They run on CPU with no model weights: tokenizer and template fixtures are small files, and the node runtime is mocked.
 - `tests/gpu/twin_token_parity.rs` (nightly): the same prompt IDs through the Inspectable runtime in fp32 and the Fast runtime with an f16 GGUF give identical greedy tokens, as in spike 04.
 - `tests/e2e/navi_chat.rs`: an OpenAI client library talks to `/v1`, with the runtime toggle flipped between turns; exit criterion of weeks 7–8 (§32).
@@ -1073,7 +1107,7 @@ The gateway's one job that must be byte-exact (§27 category 3). Each rule below
 
 ## 7. `crates/rastai-node`
 
-The node agent (§16, §22): supervises jobs in their own process groups, manages uv environments, grants VRAM leases, reads GPU telemetry, tails each run's event log for the daemon, manages llama-server, downloads weights, receives transfers, and hosts the sandbox manager and the node gateway. The same crate runs embedded in the daemon (own tokio runtime, serving `node.sock`) and as `rastai node serve`.
+The node agent (§16, §22): supervises jobs in their own process groups, manages uv environments, grants VRAM leases, reads GPU telemetry, tails each run's event log for the daemon, manages llama-server (the only managed Fast engine in the prototype), downloads weights, receives transfers, and hosts the sandbox manager and the node gateway. The same crate runs embedded in the daemon (own tokio runtime, serving `node.sock`) and as `rastai node serve`.
 
 ### 7.1 Tree
 
@@ -1083,16 +1117,16 @@ crates/rastai-node/
   Cargo.toml
   src/
     lib.rs
-    error.rs                 NodeError -> RRS-N, RRS-H, RRS-J and RRS-G3xxx codes
+    error.rs                 NodeError -> RRS-N, RRS-H, RRS-J, RRS-G3xxx and RRS-P2xxx codes
     node.rs                  run_node(): the thin entry; NodeState (all tables); start-up order
     identity.rs              Ed25519 key: load or create, node_id, sign and verify challenges (the daemon reuses it)
     handshake.rs             protocol version, capability flags, daemon key pinning, session token
     node_service.rs          tonic NodeService: one short function per RPC, each calling its owning module
     sandbox_service.rs       tonic SandboxService -> rastai-sandbox
     worker_host_service.rs   tonic WorkerHostService: job token -> job, permission check, then the owning module
-    hub_client.rs            NodeHubService client: heartbeats, ExecuteCommand, GatewayGenerate, GetSecret
+    hub_client.rs            NodeHubService client: heartbeats, ExecuteCommand, GatewayGenerate, GetSecret (HF token, MySQL dataset credential)
     heartbeat.rs             build a HeartbeatRequest from the tables; send now on any state change
-    permissions.rs           JobPermissions from a JobSpec: network hosts, sandbox count, plugin scopes
+    permissions.rs           JobPermissions from a JobSpec: network hosts, sandbox count, plugin scopes, the secret purposes the job may ask for
     jobs/
       supervisor.rs          JobTable, start_job, the job state machine (contracts §9.1), clean-up on terminal states
       spawn.rs               worker command line and environment; new session and process group; output to files
@@ -1106,43 +1140,44 @@ crates/rastai-node/
     live.rs                  WatchLive: per-subject bounded queues that drop the oldest item
     environments.rs          uv environments: pick the backend, uv sync --frozen, check, .rastai-ready marker, list, plugin layering
     engines.rs               pinned llama-server builds: download, SHA-256 check, unpack, record
-    hardware.rs              GPUs, driver, CPU, RAM, disk -> HardwareProfile; environment choice; hardware_profile.json
+    hardware.rs              GPUs, driver, CPU, RAM, disk (rastai_store::free_bytes) -> HardwareProfile; environment choice; hardware_profile.json
     telemetry.rs             long-running nvidia-smi and periodic rocm-smi readers -> NodeTelemetry
     vram_leases.rs           LeaseTable: decide, grant, deny, reclaim, release, resize (contracts §9.4)
-    models.rs                ModelTable: LoadModel, UnloadModel, the model state machine (contracts §9.3); FastEngine choice
+    models.rs                ModelTable: LoadModel, UnloadModel, the model state machine (contracts §9.3); FastEngine (one member today)
     generation_router.rs     Generate, ForkSession, CloseSession, SetInterventions, FetchTensor -> worker or llama-server
     fast_runtime.rs          llama-server: launch, health, generate, stop, re-adopt after a node restart, tokenizer parity probe
-    fast_runtime_vllm.rs     vLLM (optional, Linux NVIDIA): launch in the vllm-cuda13 environment, health, generate by token IDs,
-                             stop, re-adopt, tokenizer parity probe (section 7.8)
     hf_cache.rs              HF cache layout: snapshot paths, refs, blobs (Rust twin of the spike's hf_cache.py)
     downloads.rs             in-house HF Hub client: revision, file list, resumable downloads, gated-model errors,
                              huggingface_hub's per-file lock (section 7.9)
     hf_upload.rs             checkpoint.push: create the repo (private), upload files, skip files whose SHA-256 the Hub has
     transfers.rs             PutFile, GetFile, StatFile server side; allowed destination roots
     node_cache.rs            node.cache.list and node.cache.wipe; teardown of unpinned remote data
-    plugin_modules.rs        plugin_module jobs: network-off launch, HandleCommand forwarding
+    plugin_modules.rs        plugin_module jobs: namespace probe, network-off launch or the first-party fallback, restarts, HandleCommand forwarding (section 7.9)
     gateway_host.rs          the node's Gateway, JobEventLogSink, job: model refs, TokenizeChat
     gym_tools.rs             MCP tool servers inside sandboxes through rastai-mcp's client; WorkerHostService ListTools, CallTool
-    self_update.rs           UpdateNode: verify the release signature, swap the binary, restart
+    self_update.rs           UpdateNode: verify the release signature, swap the binary, restart; (L2) the watchdog and rollback
   tests/
     support/fake_worker.py        a tiny WorkerService for tests (stdlib + rastai_proto), scripted by a JSON file
     support/mock_llama_server.rs  llama-server stand-in: /health, streaming /completion, /tokenize
-    support/mock_vllm_server.rs   vLLM stand-in: /health, streaming /v1/completions with token IDs, /tokenize
     jobs.rs                       start, signals, cancel grace, process-group kill, exit causes
     reattach.rs                   node restart mid-run: reattach, no lost events, PID reuse refused (start ticks, process group,
-                                  boot id); llama-server and vLLM re-adopted
+                                  boot id); llama-server re-adopted
     run_events.rs                 good, torn-tail and corrupt-middle logs from fixtures/event-logs/
     hf_upload.rs                  upload to a local fake Hub, cut mid-upload, resume skips finished files; 403 refused
     leases.rs                     grant, deny, reclaim with grace, pinned never reclaimed, foreign VRAM counted; a pinned
                                   request with may_reclaim_evictable false is denied and its job stays queued; unset reads as true
     fast_runtime.rs               launch, stream, crash mid-stream, slot queue, parity probe mismatch
-    fast_runtime_vllm.rs          launch arguments, token IDs in and out, lease from --gpu-memory-utilization, parity probe,
-                                  re-adoption, refusal on a node without the vllm-cuda13 environment
+    plugin_modules.rs             a fake unshare on PATH: namespaces available -> unshare used; unavailable and third party -> RRS-P2001;
+                                  unavailable and first party (archive hash in a test release manifest) -> starts, RRS-P2005;
+                                  network permission -> no unshare; a fourth crash in 5 minutes stops the restarts
+    secrets.rs                    a GetSecret purpose outside JobPermissions is refused; the value never appears in job.json, logs or events (grep)
     environments.rs               backend choice table; uv sync with a fake uv on PATH
     downloads.rs                  resume after interrupt, gated 401 and 403, disk-space refusal (local HTTP fake); two concurrent
                                   download jobs for one file both finish, the file is fetched once and its hash matches; a lock
                                   held by another process makes the job wait with RRS-N3010
     handshake.rs                  version mismatch -> incompatible; unknown daemon key refused
+  fuzz/
+    fuzz_targets/handshake.rs     arbitrary Handshake requests and signatures never panic and never pair an unknown key (M9-E02, nightly)
 ```
 
 ### 7.2 Public API
@@ -1199,12 +1234,13 @@ pub fn release_lease(state: &NodeState, lease_id: &str);
 pub async fn resize_lease(state: &NodeState, lease_id: &str, vram_bytes: u64) -> Result<Lease, NodeError>;
 
 // models.rs
-/// Closed set. The engine follows from the model's files, so no wire field picks it (section 7.8).
-pub enum FastEngine { LlamaServer, Vllm }
+/// Closed set with one member today. The engine follows from the model's files, so no wire field picks it (section 7.8).
+/// A managed vLLM, after the prototype, would be a second member.
+pub enum FastEngine { LlamaServer }
 pub async fn load_model(state: &NodeState, request: LoadModelRequest, progress: mpsc::Sender<ModelLoadProgress>) -> Result<ModelInfo, NodeError>;
 pub async fn unload_model(state: &NodeState, model_ref: &str, runtime: RuntimeKind) -> Result<(), NodeError>;
-// a .gguf -> LlamaServer; safetensors weights -> Vllm when the vllm-cuda13 environment is ready, else RRS-G3011
-pub fn pick_fast_engine(snapshot_folder: &Path, vllm_environment_ready: bool) -> Result<FastEngine, NodeError>;
+// a .gguf -> LlamaServer; anything else -> RRS-G3008 (no GGUF for the Fast runtime)
+pub fn pick_fast_engine(snapshot_folder: &Path) -> Result<FastEngine, NodeError>;
 
 // generation_router.rs
 pub async fn route_generate(state: &NodeState, request: GenerateRequest, events: mpsc::Sender<GenerateEvent>) -> Result<(), NodeError>;
@@ -1217,12 +1253,10 @@ pub async fn stop_llama_server(server: LlamaServerProcess);          // SIGTERM,
 pub async fn reattach_llama_servers(state: &NodeState);              // after a node restart: re-adopt or fail each serve_fast job
 pub async fn reattach_llama_server(state: &NodeState, job: &JobRecord) -> Result<LlamaServerProcess, NodeError>;
 
-// fast_runtime_vllm.rs (section 7.8): the same shape as fast_runtime.rs, one function per step
-pub async fn start_vllm_server(state: &NodeState, launch: VllmLaunch) -> Result<VllmProcess, NodeError>;
-pub async fn generate_vllm(server: &VllmProcess, request: &GenerateRequest, events: mpsc::Sender<GenerateEvent>) -> Result<(), NodeError>;
-pub async fn check_vllm_tokenizer_parity(server: &VllmProcess, gateway: &Gateway, model_ref: &str) -> Result<(), NodeError>;
-pub async fn stop_vllm_server(server: VllmProcess);                  // SIGTERM, then KILL after VLLM_STOP_GRACE_SECONDS
-pub async fn reattach_vllm_servers(state: &NodeState);               // after a node restart, like reattach_llama_servers
+// plugin_modules.rs (section 7.9)
+pub async fn user_namespaces_available() -> bool;                          // runs `unshare --user --map-current-user --net -- true`; the answer is never cached
+pub fn is_trusted_first_party(paths: &DataPaths, spec: &JobSpec) -> bool;  // preinstalled archive whose hash is in the signed release manifest
+pub async fn start_plugin_module(state: &NodeState, spec: JobSpec) -> Result<JobInfo, NodeError>;
 
 // identity.rs: the one Ed25519 wrapper in the workspace; rastai-server uses it for daemon.key and release signatures
 pub struct NodeIdentity { pub signing_key: ed25519_dalek::SigningKey, pub public_id: String }
@@ -1253,7 +1287,6 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
     serve_worker_host(&state)?;                 // first, so live jobs can re-Register
     reattach_jobs(&state).await;                // section 7.4
     reattach_llama_servers(&state).await;       // pid, boot id, start ticks and /health with the saved key; re-adopt, never reload (7.8)
-    reattach_vllm_servers(&state).await;        // the same checks for vLLM serve_fast jobs
     adopt_and_sweep_sandboxes(&state).await;    // only after reattach (section 5.3)
     start_telemetry(&state);
     start_heartbeat_loop(&state);
@@ -1271,7 +1304,7 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 2. Make a job token (32 bytes from `/dev/urandom`, hex). Keep it in memory; write only its BLAKE3 hash (`rastai_formats::hashing::hash_bytes`) to `job.json`.
 3. Write `runs/<run_id>/job.json` atomically (write `job.json.tmp` with mode 0600, fsync, rename). Fields: the ones the worker reads (`layout/python.md` §7.3) plus the node's own: `job_id`, `run_id`, `kind`, `state`, `pid`, `process_group_id`, `process_start_ticks`, `boot_id` (from `/proc/sys/kernel/random/boot_id`), `job_token_hash`, `granted_leases[]`, `started_unix_ms`, and `final_state` (empty until the job ends). A `serve_fast` job adds `api_key` and `port` (section 7.8), which is why every `job.json` is 0600.
 4. Spawn (`spawn.rs`), then rewrite `job.json` with the pid, process group, start ticks and boot id.
-5. State `starting`. The worker must call `WorkerHostService.Register` within 60 s (contracts §9.1), or the job fails with `RRS-J0002` and its group is killed.
+5. State `starting`. The worker must call `WorkerHostService.Register` within `WORKER_REGISTER_TIMEOUT_SECONDS` (60; contracts §9.1), or the job fails with `RRS-J0002` and its group is killed.
 6. On `Register`, the node connects to `jobs/<job_id>.sock`, calls `Hello`, and moves the job to `running`.
 
 **How `spawn.rs` launches a worker:**
@@ -1282,9 +1315,10 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 | stdin | `/dev/null` | |
 | stdout, stderr | `runs/<run_id>/stdout.log`, `stderr.log`, opened for append | files, not pipes: a dead node sends no SIGPIPE, and a full pipe can't block the job (the spike's llama-server wrapper piped stderr and read it only on failure) |
 | Environment | cleared, then: `PATH`, `HOME`, `LANG`, `TZ`, `XDG_*`; `RASTAI_JOB_TOKEN`, `RASTAI_RUN_ID`; `CUDA_DEVICE_ORDER=PCI_BUS_ID`; `CUDA_VISIBLE_DEVICES` (or `HIP_VISIBLE_DEVICES`) = the leased GPUs in ascending physical order; `HF_HUB_OFFLINE=1`; `UV_OFFLINE=1`, `PIP_NO_INDEX=1`; `TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR` under `<cache>/torch/` | GPU numbering matches `nvidia-smi`; a job sees only its GPUs; jobs never download or install (§13, §27) |
+| Added for some jobs | A plugin module, or any job with `JobSpec.plugin_id`: `RASTAI_PLUGIN_DATA_DIR` = `<data>/plugin-data/<plugin_id>/`. (L2) Also `RASTAI_PLUGIN_DATA_READ_ONLY=1` when `plugin-data.json` `last_version` is newer than the plugin being started (the downgrade guard, contracts 8.1). A `data_import` job with a MySQL source: its short-lived credential (7.9) | a plugin writes its private files only in its own folder; a downgraded plugin must not rewrite newer data; the MySQL password never touches disk |
 | Removed if present | `HSA_OVERRIDE_GFX_VERSION` | forcing ROCm on an unsupported chip gave silently wrong matmuls (spike 05). Removing it logs `RRS-H4002` once. |
 
-**Signals** (`signals.rs`). Rust's std has no `killpg`, and `libc` would need `unsafe`, which contracts §12.2 forbids without an ADR. So group signals run the `kill` binary: `kill -s <SIGNAL> -- -<pgid>`. Signals are rare, so one process spawn each is fine. Before any group signal, the node re-checks the pid's boot id, start ticks and process group (see "Reattach" below), so it never signals a reused pid.
+**Signals** (`signals.rs`). Rust's std has no `killpg`, and `libc` would need `unsafe`, which contracts 12.2 allows only for ADR-0033's one `statvfs` file. So group signals run the `kill` binary: `kill -s <SIGNAL> -- -<pgid>`. Signals are rare, so one process spawn each is fine. Before any group signal, the node re-checks the pid's boot id, start ticks and process group (see "Reattach" below), so it never signals a reused pid.
 
 | `JobSignal` | Node action | Worker does | Used by |
 |---|---|---|---|
@@ -1292,7 +1326,7 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 | `STOP` | `WorkerService.Control(STOP)`; the same SIGKILL escalation after `STOP_GRACE_SECONDS` | final checkpoint, run `completed` with reason `stopped`, exit 0 | `train.stop` (and a chain's running child) |
 | `PAUSE`, `RESUME`, `CHECKPOINT_NOW`, `STEP` | `WorkerService.Control` only; `STEP` carries `sandbox_id` and `arguments_json` | as named | whole-run gym pause (designer flow B5), `train.checkpoint`, `gym.step` |
 | `TERMINATE` | `kill -s TERM -- -<pgid>` | treats it as preemption: checkpoint if it fits the budget, `train.preempted`, exit 75 | deliberate preemption that `train.resume` continues (flows/platform.md 5.2); the OS's own SIGTERM at shutdown takes the same worker path |
-| `KILL` | `SIGKILL` to the group at once | nothing; it writes no final record. Job `cancelled` (`RRS-J1003`); the daemon records the run `cancelled` (contracts §4.4). `train.resume` can reopen it from its last checkpoint (training-evaluation §4.2) | lease reclaim timeout (7.7); a `CANCEL` or `TERMINATE` past its grace; llama-server and vLLM after their stop grace (7.8) |
+| `KILL` | `SIGKILL` to the group at once | nothing; it writes no final record. Job `cancelled` (`RRS-J1003`); the daemon records the run `cancelled` (contracts §4.4). `train.resume` can reopen it from its last checkpoint (training-evaluation §4.2) | lease reclaim timeout (7.7); a `CANCEL` or `TERMINATE` past its grace; llama-server after its stop grace (7.8) |
 
 Node shutdown never stops jobs. They keep running and are reattached on the next start. The systemd user unit that runs the daemon or node uses `KillMode=process`, so restarting the unit doesn't kill the jobs' process groups.
 
@@ -1434,23 +1468,22 @@ flowchart TD
 
 - **Free memory** is computed from leases, not from current use: `total − compute.vram_reserve_bytes − granted leases − foreign use`. Foreign use is VRAM held by processes that aren't ours (from per-process telemetry), so a game or another tool on the GPU is accounted for.
 - **Classes:** `evictable` (chat, Psychology: `serve_inspectable`, `serve_fast`) and `pinned` (training, gym). Pinned leases are never reclaimed. Only a pinned request reclaims (contracts §9.4, flows/platform.md 5.3), and only when its `may_reclaim_evictable` is true or unset. Auto-run evals and Psychology analysis jobs set it `false` (plan §10 row 25; training flow 10.1, inference flow 4.2, 4.5 and 6.5): their request is denied, the job stays `queued` with the reason, and admission retries when a lease is released, so they never close the user's chat. The node copies the flag from the job's `ResourceRequest` into each `RequestLeaseRequest` it builds at admission and on `ResizeLease`. An evictable request is granted or denied with `RRS-H3001`, whose message names the holders. Switching chat models is the daemon's job: `model.unload` of the idle model, then `model.load` (inference flow 2.1, SWAP); the node never evicts one chat model for another.
-- **Reclaim** unloads the holder model: the Inspectable job gets `CANCEL`, llama-server gets `stop_llama_server`, vLLM gets `stop_vllm_server`. In-flight generations may finish for up to `EVICTION_GRACE_SECONDS = 10`; then they are cancelled with `RRS-H3004` (`finish_reason = evicted`). A holder still alive after the grace gets `KILL` (SIGKILL to its group). `EVICTION_GRACE_SECONDS` is the one grace constant for reclaim; there is no separate reclaim wait (plan §10 row 7).
-- **Enforcement inside processes:** the worker applies `set_per_process_memory_fraction` from its granted bytes (§22, `layout/python.md`). llama-server has no such switch, so its lease is sized from an estimate and corrected by measurement. vLLM gets its lease as `--gpu-memory-utilization` and preallocates exactly that (section 7.8).
+- **Reclaim** unloads the holder model: the Inspectable job gets `CANCEL`, llama-server gets `stop_llama_server`. In-flight generations may finish for up to `EVICTION_GRACE_SECONDS = 10`; then they are cancelled with `RRS-H3004` (`finish_reason = evicted`). A holder still alive after the grace gets `KILL` (SIGKILL to its group). `EVICTION_GRACE_SECONDS` is the one grace constant for reclaim; there is no separate reclaim wait (plan §10 row 7).
+- **Enforcement inside processes:** the worker applies `set_per_process_memory_fraction` from its granted bytes (§22, `layout/python.md`). llama-server has no such switch, so its lease is sized from an estimate and corrected by measurement (section 7.8).
 - **Over-lease:** a holder whose measured VRAM exceeds its lease by more than 10% for 3 samples in a row gets `RRS-H3005` as a warning diagnostic. An evictable holder is then reclaimed; a pinned one is only reported.
 - **Resize:** `WorkerHostService.ResizeLease` runs the same decision for the extra bytes.
 - **Persisted where:** in memory only. Leases are rebuilt at start-up from reattached jobs (their `job.json` lists `granted_leases`), and the daemon sees them in every heartbeat.
 - **Spike check:** Teach it with the chat model resident peaked at 4.7 GiB under an 8 GiB cap on the 5080 (spike 03). `tests/gpu/leases_chat_and_teach.rs` repeats that run with leases on: an evictable chat lease and a pinned training lease on one GPU.
 
-### 7.8 Models and the managed Fast engines (llama-server, vLLM)
+### 7.8 Models and the managed Fast engine (llama-server)
 
 **Model load** (`models.rs`, states from contracts §9.3):
 1. `downloading` if the weights are missing from the HF cache (`downloads.rs`, section 7.9).
 2. `waiting_for_lease` with an estimate:
    - Inspectable: weight bytes from the safetensors headers (`rastai-formats` reader; header only) + KV cache for the context length + `INSPECTABLE_OVERHEAD_PERCENT = 15`. The worker resizes the lease to its measured peak after warm-up.
    - Fast on llama-server: GGUF file size + KV cache from the GGUF header (layer count, KV heads, head size, context) + `FAST_COMPUTE_BUFFER_BYTES = 512 MiB`. After warm-up the node measures the process's VRAM and resizes the lease to that plus 5%.
-   - Fast on vLLM: weight bytes from the safetensors headers + KV cache for the context + `VLLM_OVERHEAD_BYTES`. The node rounds `estimate / total VRAM` up to two decimals, passes it as `--gpu-memory-utilization`, and leases exactly that fraction × total VRAM. vLLM preallocates its share at start, so this lease isn't resized after warm-up.
-3. `loading`: start a `serve_inspectable` job, or a `serve_fast` node-native job on the engine `pick_fast_engine` chose (llama-server or vLLM).
-4. `warming`: the worker captures its CUDA graphs (one capture stream per device; spike 02); a Fast engine passes its health check and the tokenizer parity probe.
+3. `loading`: start a `serve_inspectable` job, or a `serve_fast` node-native job (llama-server; `pick_fast_engine` refuses anything without a GGUF with `RRS-G3008`).
+4. `warming`: the worker captures its CUDA graphs (one capture stream per device; spike 02); llama-server passes its health check and the tokenizer parity probe.
 5. `ready`: the node sends a heartbeat at once; the daemon updates the gateway's served models.
 
 **llama-server** (`fast_runtime.rs`):
@@ -1499,61 +1532,22 @@ pub struct LlamaServerProcess { pub job_id: String, pub pid: u32, pub process_gr
 - **Why the key may sit on disk:** `job.json` is 0600 in the user's own data folder, the same trust boundary as `owner.token`; the server listens on loopback only. The key is never logged and never leaves the node.
 - **Failure branches:** binary hash mismatch → `RRS-G3005` and the build is re-downloaded once; not healthy within 120 s → `RRS-G3002` with the last 2,000 bytes of its log (as the spike did); crash while serving → `RRS-G3003`, the model goes `failed` then `unloaded` and its lease is released.
 
-**vLLM** (`fast_runtime_vllm.rs`; optional, Linux NVIDIA nodes; spec §8, ADR-0025, §27 "Engine (optional)"). A second engine behind the same `serve_fast` job kind and `RuntimeKind.FAST`. Leases, token IDs, logging, re-adoption and replay work as for llama-server; only the process and its HTTP API differ. An OpenAI-compatible vLLM the user runs elsewhere is not this: it is an `OpenAiAdapter` endpoint (section 6.10).
+**Not in the prototype: a managed vLLM engine** (owner decision 8). The Fast runtime is llama-server only, so a safetensors model can't be loaded on `FAST`: the load fails with `RRS-G3008`, whose fix is to download a GGUF or run `checkpoint.export`. Everything a managed vLLM needed is gone from this layout and from the plan: its own uv environment, a second launch file and test double, a capability flag, a lease sized from `--gpu-memory-utilization`, and the error `RRS-G3011`. What stays is the seam: `FastEngine` is a closed enum, `ModelInfo.engine_build` names the engine, and `gateway_log.sampling_json.engine_build` records it, so a second engine can be added after the prototype without a wire change. A vLLM server the user runs themselves is an `OpenAiAdapter` endpoint with `proxy` replays (6.10); the node knows nothing about it.
 
-```rust
-pub const VLLM_ENVIRONMENT_ID: &str = "vllm-cuda13";      // its own uv environment: vLLM pins its own torch (ADR-0025, spec §28 risk 11)
-pub const VLLM_STARTUP_TIMEOUT_SECONDS: u64 = 600;       // weight load plus CUDA graph capture; llama-server's 120 s is too short
-pub const VLLM_STOP_GRACE_SECONDS: u64 = 30;              // SIGTERM, then KILL, as for llama-server
-pub const VLLM_MAX_SEQUENCES: u32 = 16;                   // vLLM batches; equal to FAST_QUEUE_LIMIT so callers see one limit
-pub const VLLM_OVERHEAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;   // CUDA graphs and activations; first guess, measured in tests/gpu/vllm_cuda.rs
-
-pub struct VllmLaunch { pub snapshot_folder: PathBuf, pub gpu_index: u32, pub context_size: u32, pub gpu_memory_fraction: f32, pub log_path: PathBuf }
-pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id: u32, pub port: u16, pub api_key: String, pub in_flight: Mutex<u32> }
-```
-
-| Launch detail | Value | Why |
-|---|---|---|
-| Command | `setsid <data>/envs/vllm-cuda13-<lock_hash12>/bin/python -I -m vllm.entrypoints.openai.api_server --model <snapshot folder> --host 127.0.0.1 --port <free port> --max-model-len <context> --gpu-memory-utilization <fraction> --max-num-seqs 16 --tensor-parallel-size 1` | the HF cache snapshot, never a copy (§19); loopback only (§21); one GPU in the prototype |
-| Environment | cleared as for a worker (7.4), then `CUDA_VISIBLE_DEVICES=<gpu>`, `VLLM_API_KEY=<32 random bytes, hex>`, `HF_HUB_OFFLINE=1`, `VLLM_NO_USAGE_STATS=1`, `DO_NOT_TRACK=1` | the key stays out of `/proc/<pid>/cmdline`; the engine never downloads; vLLM's usage reporting is on by default and would be unannounced egress |
-| Install | `EnsureEnvironment` for `vllm-cuda13` from `python/envs/vllm-cuda13/uv.lock` (`system.env.install`), never at load time | no pip at run time (§27). Offered only on Linux NVIDIA nodes |
-| Request logging | off (the pinned version's default) | prompts and token IDs never reach logs (6.7); a test greps the log for the prompt |
-| stdout, stderr | `<state>/logs/vllm/<job_id>.log` | as llama-server |
-| `job.json` | as llama-server: `api_key`, `port`, `pid`, `process_group_id`, `process_start_ticks`, `boot_id` | re-adoption |
-
-| Request mapping (`POST /v1/completions`) | From `GenerateRequest` |
-|---|---|
-| `prompt` | `prompt_token_ids` as a list of IDs (never text) |
-| `max_tokens` | `max_new_tokens` |
-| `stream` | always true |
-| `return_token_ids` | always true: each streamed choice carries its token IDs. The node drops `text`, as for llama-server. The pinned vLLM version must support this field; `tests/gpu/vllm_cuda.rs` checks it |
-| `temperature`, `top_k`, `top_p`, `repetition_penalty`, `seed` | `SamplingSettings` |
-| `logprobs` | the top-alternatives count when `return_logprobs` |
-| `stop_token_ids` | `stop_token_ids` |
-
-- **Engine choice** (`pick_fast_engine`): a GGUF goes to llama-server; safetensors weights go to vLLM when the node has `vllm-cuda13` ready and an NVIDIA GPU, else the load fails with `RRS-G3011` (fix: `system.env.install`). The node announces the capability flag `generate.fast.vllm` in `Handshake`, so the daemon offers Fast for a safetensors model only where it can run.
-- **Tokenizer parity probe** (`check_vllm_tokenizer_parity`): the same probe strings, encoded by the gateway and by vLLM's `POST /tokenize` (`add_special_tokens: false`). A mismatch fails the load with `RRS-G1004`.
-- **Twins and fidelity:** vLLM loads the same safetensors files as the Inspectable runtime, so its rows carry the same `model_hash` and need no twin. Replays follow the same-weights rule (ADR-0025 #5): `exact`, lowered to `approximate` by the replay's consistency check (inference flow 6.1) when vLLM's kernels flipped a near-tie. vLLM's own quantization (`--quantization`) isn't used in the prototype.
-- **No pinned kernels:** vLLM batches sequences and can't pin attention per request. A request with `pin_attention_kernel` fails with `RRS-G3004`; exact runs (replays, eval answers) go to the Inspectable runtime.
-- **Concurrency:** up to `VLLM_MAX_SEQUENCES` requests in flight; beyond that `RRS-G3006`, as for llama-server's queue.
-- **Re-adoption:** as for llama-server (pid, boot id, start ticks, process group), but `GET /health` is unauthenticated in vLLM, so the node also calls `GET /v1/models` with the saved key to prove the server is ours.
-- **Reclaim:** `stop_vllm_server` (SIGTERM, then `KILL` after `VLLM_STOP_GRACE_SECONDS`), with the same `EVICTION_GRACE_SECONDS` for in-flight generations (7.7).
-- **Failure branches:** environment missing → `RRS-G3011`; not healthy within 600 s → `RRS-G3002` with the log tail (vLLM names CUDA out-of-memory there); crash while serving → `RRS-G3003`; a malformed stream event → `RRS-G3007`. Each ends as for llama-server: model `failed` then `unloaded`, lease released.
-- **Persisted where:** `job.json` and the log file, as for llama-server; `gateway_log.sampling_json.engine_build` holds `vllm <version>`.
-
-**Generation routing** (`generation_router.rs`): `Generate` looks up the model by `model_ref` and `runtime` in `ModelTable`, or the job for a `job:<job_id>` ref, then calls `WorkerService.Generate` on the job's channel, or `generate_fast` or `generate_vllm` by the model's `FastEngine` (a `match`). `ForkSession`, `CloseSession`, `SetInterventions` and `FetchTensor` go only to Inspectable jobs; on a Fast model they return `RRS-G3004`. The router also refuses a request whose model lease is in `reclaim_requested` (`RRS-H3004`), so new work doesn't start on a model being evicted.
+**Generation routing** (`generation_router.rs`): `Generate` looks up the model by `model_ref` and `runtime` in `ModelTable`, or the job for a `job:<job_id>` ref, then calls `WorkerService.Generate` on the job's channel, or `generate_fast` for a Fast model (`FastEngine` is a `match` with one arm today). `ForkSession`, `CloseSession`, `SetInterventions` and `FetchTensor` go only to Inspectable jobs; on a Fast model they return `RRS-G3004`. The router also refuses a request whose model lease is in `reclaim_requested` (`RRS-H3004`), so new work doesn't start on a model being evicted.
 
 ### 7.9 The other node parts
 
 **Handshake and heartbeats** (`handshake.rs`, `hub_client.rs`, `heartbeat.rs`)
-- `NodeService.Handshake`: protocol version 1 plus capability flags. Initial flags: `generate.inspectable`, `generate.fast`, `generate.fast.vllm` (the `vllm-cuda13` environment is ready on an NVIDIA GPU; 7.8), `sandbox.engine` (an engine socket was found), `transfer.resume`, `self_update` (standalone only), `lens.live`. The request also carries the daemon's resolved `tokenization_overrides` (6.8). A version the node can't speak returns `RRS-N0001`; the daemon moves the node to `incompatible` and offers `node.update`.
+- `NodeService.Handshake`: protocol version 1 plus capability flags. The flags are the list in contracts 8.6: `generate.inspectable`, `generate.fast`, `lens.live`, `sandbox.engine` (an engine socket was found), `transfer.resume`, `self_update` (standalone only) and `gym`. The request also carries the daemon's resolved `tokenization_overrides` (6.8). A version the node can't speak returns `RRS-N0001`; the daemon moves the node to `incompatible` and offers `node.update`.
 - Both sides sign the other's random challenge with Ed25519 (`identity.rs`). The node accepts only daemon keys pinned in `<data>/node/paired_daemons.json`; any other key gets `RRS-N0002`. The embedded node also checks socket peer credentials. The node returns a session token (random, in memory) that the daemon sends as gRPC metadata on later calls and the node sends on `NodeHubService` calls.
 - Heartbeat every `nodes.heartbeat_seconds` (5), and at once on any state change (section 7.5). A failed heartbeat is retried on the next tick. Jobs never stop because the daemon is gone.
 
 **Hardware detection** (`hardware.rs`)
 - NVIDIA: `nvidia-smi --query-gpu=index,pci.bus_id,name,driver_version,memory.total,compute_cap --format=csv,noheader,nounits` (the spike's query plus bus id and compute capability).
 - AMD: `rocm-smi --showproductname --showmeminfo vram --showbus --json`, and the gfx target from `/sys/class/kfd/kfd/topology/nodes/*/properties`.
-- CPU from `/proc/cpuinfo`, RAM from `/proc/meminfo`, free disk from `df -B1 --output=avail <path>` (std has no `statvfs`; `libc` would need `unsafe`).
+- CPU from `/proc/cpuinfo`, RAM from `/proc/meminfo`, free disk from `rastai_store::free_bytes` (the one `statvfs` call in the workspace, ADR-0033). The node doesn't call `df` or `libc` itself.
+- Every detection tool runs under `DETECTION_TOOL_TIMEOUT_SECONDS` (5). A tool that fails or times out leaves a partial profile and `RRS-H0002` (warning); no usable GPU gives `RRS-H0001` (info) and the `cpu` environment.
 - Output: `HardwareProfile`. The numerical self-test is the `doctor_selftest` Python job; this file only reads.
 
 **Downloads** (`downloads.rs`, `hf_cache.rs`) — node-native job kind `download`:
@@ -1565,21 +1559,47 @@ pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id:
   3. busy: report progress "waiting for another download" (info `RRS-N3010`) and retry every `HF_LOCK_POLL_SECONDS = 1` for up to `HF_LOCK_WAIT_SECONDS = 600`, then fail with `RRS-N3011`, partial file untouched;
   4. once locked, check `blobs/<etag>` again: if the other writer finished it, skip the download and only link the snapshot;
   5. hold the lock through the append, the hash check and the rename, then drop it.
-- LFS files are checked against their SHA-256 (the `X-Linked-Etag`), computed with the rustls crypto provider's SHA-256, so no new crate (the same reasoning as contracts §14 question 7).
+- LFS files are checked against their SHA-256 (the `X-Linked-Etag`), computed with the rustls crypto provider's SHA-256, so no new crate (contracts 2.5).
 - The HF token comes from `NodeHubService.GetSecret` (purpose `hf_download`) for this job only and is never written down.
-- Disk space is checked first: missing bytes + `storage.free_space_margin_bytes` against free space, else `RRS-S3001`.
+- Disk space is checked first: missing bytes + `storage.free_space_margin_bytes` against `rastai_store::free_bytes`, else `RRS-S3001`.
+- A dropped connection resumes with backoff (1 s doubling to 60 s) up to `DOWNLOAD_RETRY_LIMIT` (10) tries; then `RRS-N3009`, and the `.incomplete` file stays so a later job resumes it.
 - Gated model without access (401 or 403) → `RRS-N3005`, whose fix runs `hf.license.check`. Missing repo or file → `RRS-N3004`. `HF_HUB_OFFLINE=1` or `hf.offline` → `RRS-N3006` without any network call.
 - Progress goes out as ephemeral `download.progress` on `WatchLive`.
 
-**Transfers** (`transfers.rs`): `PutFile`, `GetFile`, `StatFile` on top of `rastai-transport` `transfer.rs`. Destinations are limited to `<data>/runs/<run_id>/`, `<data>/blobs/.incoming/`, `<cache>/uploads/` (private local data uploaded from the laptop, §22) and `<cache>/tokenizers/plugins/` (plugin tokenizer files, 6.8). Paths with `..`, absolute paths, or paths that resolve outside a root are refused with `RRS-N3001`.
+**Transfers** (`transfers.rs`): `PutFile`, `GetFile`, `StatFile` on top of `rastai-transport` `transfer.rs`. Destinations are limited to `<data>/runs/<run_id>/`, `<data>/blobs/.incoming/`, `<cache>/uploads/` (private local data uploaded from the laptop, §22) and `<cache>/tokenizers/plugins/` (plugin tokenizer files, 6.8). Paths with `..`, absolute paths, or paths that resolve outside a root are refused with `RRS-N3001`. A cancelled transfer keeps its `.partial` file and reports `RRS-N3012` (info).
 
 **Node cache** (`node_cache.rs`): `node.cache.list` reports HF cache models, uploads and run folders with sizes and pinned flags; `node.cache.wipe` and `node.unpair` delete unpinned items. Pinned state comes from the daemon in the request; the node keeps no catalog.
 
-**Plugin modules** (`plugin_modules.rs`): a `plugin_module` job without a network permission starts under `unshare --user --map-current-user --net -- setsid <python> -m rastai_worker plugin --plugin <plugin_id>`. The job's Unix sockets are files, so they still work inside the empty network namespace; nothing else does. If user namespaces are disabled, the node refuses to start the module with `RRS-P2001` and a fix text (contracts §14 question 6). `HandleCommand` forwards to the module's `WorkerService.HandleCommand`.
+**Secrets for jobs** (`hub_client.rs`, `permissions.rs`). Cloud and archive credentials never leave the daemon. A node gets only short-lived values from `NodeHubService.GetSecret`, named by purpose (`hf_download`, `hf_upload`, `adapter:<name>`, `mysql:<connection_name>`; contracts 4.4). The node gateway doesn't ask for `adapter:<name>` itself: API models go through `DaemonForward` (6.6).
+
+- **The MySQL dataset reader** (`rastai_data/readers/mysql_reader.py`, M5-E07) runs in a `data_import` job. The job's `JobSpec.network_hosts` holds the one MySQL host, and `JobPermissions` lists `mysql:<connection_name>` as the only secret purpose the job may ask for. Before it spawns the worker, the node calls `GetSecret` for that purpose, keeps the value in memory and hands it to that one process (never `job.json`, `stdout.log` or an event; the exact hand-over is section 12, question 18). The daemon refuses the request unless the purpose, the connection name and the job's `network_hosts` agree. The archive's credentials are different keychain accounts (`archive.mysql`, `archive.objects`) and are never returned here.
+- **Egress.** While that job runs, the node sends an `EgressReport` every `EGRESS_REPORT_INTERVAL_SECONDS` with purpose `mysql:<connection_name>`, the host and the job id, so the egress badge shows the read.
+- **What the node can't enforce.** It has no packet filter for ordinary worker jobs. The host list is a permission: the daemon releases a credential only for a host in `network_hosts`, and the reader connects only there. TLS is required except over loopback or a Unix socket, the same policy as the archive (contracts 8.7); the reader enforces it, and its failures use the `RRS-D3xxx` sources range owned by the Python layout. Plugin modules are stricter (below).
+
+**Plugin modules** (`plugin_modules.rs`, contracts 8.8). A `plugin_module` job runs with the network off unless its manifest declares a network permission. The isolation is a new user and network namespace made by `unshare`. The job's Unix sockets are files, so they still work inside the empty namespace and nothing else does.
+
+```mermaid
+flowchart TD
+  A["plugin_module job to start"] --> N{"network permission in JobPermissions?"}
+  N -->|yes| R1["start without a network namespace, as granted"]
+  N -->|no| U{"user_namespaces_available?"}
+  U -->|yes| R2["start under unshare --user --map-current-user --net"]
+  U -->|no| T{"is_trusted_first_party?"}
+  T -->|yes| R3["start without the namespace, warning RRS-P2005"]
+  T -->|no| R4["refuse the start, RRS-P2001 with the AppArmor fix text"]
+```
+
+- **Why a namespace can be unavailable.** Ubuntu 23.10 and later restrict unprivileged user namespaces. The `.deb` installs an AppArmor profile (`tools/release/apparmor/rastai`, installed as `/etc/apparmor.d/rastai`) that grants `userns` to the installed `rastai` binary. `unshare` is the process that actually creates the namespace, so the profile must let it run under the same profile (an inherited exec rule for `unshare`); a grant that covered only the node binary would change nothing. A release test on a clean Ubuntu 24.04 install starts a module that has no network permission. An AppImage or another distribution has no profile to install and ends in the fallback below.
+- **The probe.** `user_namespaces_available` runs `unshare --user --map-current-user --net -- true` before each module start. Nothing is cached, so installing the profile takes effect without restarting the node.
+- **Trusted first party** (`is_trusted_first_party`): the module's archive is one of the preinstalled `.rrsplugin` files in `<install prefix>/share/rastai/plugins/`, and its content hash equals the hash in the signed release manifest (`release.json`), checked with the `RELEASE_PUBLIC_KEY` that `self_update.rs` already holds. A node whose own install does not hold the archive can't prove this, so it treats the module as third party.
+- **The two outcomes that are not a clean start.** The fallback starts the module without the namespace, and the job's transition to `running` carries `RRS-P2005` (warning) in its `Diagnostic`, so the Plugins section shows it. The refusal returns the job `failed` with `RRS-P2001` and the fix text (install the AppArmor profile, or grant the plugin network permission); the plugin host disables the plugin with that diagnostic. A third-party module without network permission is never started without isolation.
+- **Restarts.** A crashed module restarts after 1 s, 5 s, then 30 s (`PLUGIN_MODULE_RESTART_DELAYS_SECONDS`). A fourth crash within 5 minutes stops the restarts and the daemon disables the plugin. `HandleCommand` forwards to the module's `WorkerService.HandleCommand`.
 
 **Gym tools** (`gym_tools.rs`): starts a harness's MCP tool servers inside the rollout's sandbox through `exec`, and connects `rastai-mcp`'s client to their stdio through the exec stream. Remote HTTP MCP servers are network permissions (§12), not sandbox tools.
 
-**Self-update** (`self_update.rs`, standalone node only): `UpdateNode` streams a header (version, Ed25519 signature by the release key over the binary's BLAKE3) and then the bytes into `<data>/node/rastai-<version>.partial`. The node checks the signature against `RELEASE_PUBLIC_KEY` (a constant in this file), marks the file executable, renames it over the installed binary, and exits with `RESTART_EXIT_CODE = 75`; the systemd unit restarts it on the new binary. Jobs survive (`KillMode=process`) and are reattached.
+**Self-update** (`self_update.rs`, standalone node only): `UpdateNode` streams a header (version, Ed25519 signature by the release key over the binary's BLAKE3) and then the bytes into `<data>/node/rastai-<version>.partial`. The node checks the signature against `RELEASE_PUBLIC_KEY` (a constant in this file), marks the file executable, renames it over the installed binary, and exits with `RESTART_EXIT_CODE = 75`; the systemd unit restarts it on the new binary. Jobs survive (`KillMode=process`) and are reattached. Build only this minimal path first.
+
+**(L2) The update watchdog.** Before the swap the node copies the running binary to `<data>/node/rastai.previous` and writes `<data>/node/update-attempt.json` (`from_version`, `to_version`, `starts`, `first_start_unix_ms`, `state`). The standalone unit runs `ExecStartPre=-<data>/node/rastai.previous node check-update`, which counts starts and puts the previous binary back when the new one has made `NODE_UPDATE_MAX_STARTS` (3) starts without a healthy handshake inside `NODE_UPDATE_HEALTH_SECONDS` (60). The node then reports `RRS-N4005`. None of this is on the path to L2 of the core loop, so it is built after it (contracts, Changes in v1.1, item 17).
 
 ### 7.10 Dependencies
 
@@ -1588,7 +1608,7 @@ pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id:
 | `rastai-core` | `DataPaths` and its path functions, settings resolution, ids, random bytes, principals |
 | `rastai-formats` | safetensors and GGUF header readers (lease estimates), `JobSpec` argument documents passed through untouched, zip reader for llama-server builds; `hashing::hash_bytes` and the stream hasher for token, lockfile, update and downloaded-file hashes (the one blake3 wrapper, contracts §2.4 rule 8) |
 | `rastai-proto` | every service it serves or calls |
-| `rastai-store` | the event-log reader only (`EventLogReader`); never the databases |
+| `rastai-store` | the event-log reader (`EventLogReader`) and `free_bytes`; never the databases |
 | `rastai-transport` | local sockets, gRPC channels, `http_client.rs`, `sse.rs`, `transfer.rs` |
 | `rastai-sandbox` | `SandboxManager` |
 | `rastai-gateway` | the node `Gateway`, the tokenizer for the parity probe |
@@ -1602,9 +1622,8 @@ pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id:
 | ed25519-dalek | `identity.rs`, `self_update.rs` | node identity, update signatures |
 | rustls crypto provider (via `rastai-transport`) | `downloads.rs`, `engines.rs` | SHA-256 checks for HF LFS files and llama-server builds |
 | uv, llama-server | `environments.rs`, `fast_runtime.rs` | external binaries (§27 foundation and engine) |
-| vLLM (optional) | `fast_runtime_vllm.rs` | an external engine process in its own uv environment (§27 "Engine (optional)"); never imported |
 | nvidia-smi, rocm-smi | `hardware.rs`, `telemetry.rs` | read-only tools from the GPU drivers |
-| `setsid`, `kill`, `unshare`, `df` | `spawn.rs`, `signals.rs`, `plugin_modules.rs`, `hardware.rs` | OS tools (util-linux, procps, coreutils), so the crate needs no `unsafe` and no `libc` |
+| `setsid`, `kill`, `unshare` | `spawn.rs`, `signals.rs`, `plugin_modules.rs` | OS tools (util-linux, procps), so the crate needs no `unsafe` and no `libc`. `df` is approved in §27 but not used here: free space is `rastai_store::free_bytes` |
 
 ### 7.11 Boundary rules
 
@@ -1612,8 +1631,9 @@ pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id:
 - Never writes a job's `events.log`. Only reads it.
 - Never runs uv or pip for a job at run time, and sets `UV_OFFLINE` and `PIP_NO_INDEX` in every job's environment.
 - Never sets `HSA_OVERRIDE_GFX_VERSION`, and strips it from job environments.
-- Never holds cloud credentials. The HF token lives only in a download job's memory.
-- Never listens on TCP. llama-server and vLLM are bound to `127.0.0.1` with a random key.
+- Never holds cloud or archive credentials, and never reads the archive. A `GetSecret` value (the HF token, the MySQL dataset credential) lives in memory for one job and is never written down.
+- Never starts a third-party plugin module without its network namespace unless the module holds network permission (7.9).
+- Never listens on TCP. llama-server is bound to `127.0.0.1` with a random key.
 - Never signals a process unless the pid, process group, start ticks and boot id match what it recorded.
 - Never imports blake3. Hashes go through `rastai_formats::hashing`.
 - Never takes an HF cache file without huggingface_hub's per-file lock (7.9).
@@ -1636,7 +1656,7 @@ pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id:
 | `llama_server_kill.rs` | kill llama-server mid-stream: `RRS-G3003`, model `failed` then `unloaded`, lease released |
 | `node_kill_with_sandboxes.rs` | section 5.7 |
 
-- GPU tests in `tests/gpu/` (nightly on the owner's box): `leases_chat_and_teach.rs` (section 7.7), `fast_runtime_cuda.rs` (real llama-server with the pinned CUDA 13 build, parity probe, token stream equal to the spike's f16 run), `two_gpu_jobs.rs` (chat on GPU 0, training on GPU 1, each seeing only its own GPU), `vllm_cuda.rs` (real vLLM in `vllm-cuda13`: `return_token_ids` present, token IDs in and out, parity probe, measured VRAM within the lease, no prompt text in its log).
+- GPU tests in `tests/gpu/` (nightly, `nightly-gpu.yml`, on the self-hosted runner under its own OS user; AMD from M10): `leases_chat_and_teach.rs` (section 7.7), `fast_runtime_cuda.rs` (real llama-server with the pinned CUDA 13 build, parity probe, token stream equal to the spike's f16 run), `two_gpu_jobs.rs` (chat on GPU 0, training on GPU 1, each seeing only its own GPU).
 - CI for llama-server uses the pinned CPU build and a tiny random-weight GGUF written by our own GGUF writer (`rastai-formats`).
 
 ### 7.13 Ported spike code
@@ -1657,11 +1677,10 @@ pub struct VllmProcess { pub job_id: String, pub pid: u32, pub process_group_id:
 | `node.rs`, `identity.rs`, `handshake.rs` (local), `node_service.rs` (jobs, run events, live), `worker_host_service.rs` (`Register`), `hub_client.rs`, `heartbeat.rs`, `jobs/*`, `run_events.rs`, `live.rs`, `hardware.rs`, `telemetry.rs` | 1 (daemon + embedded node; weeks 3–4: kill -9 and reattach with no lost events) |
 | `environments.rs`, `downloads.rs`, `hf_cache.rs` | 2 (Unified runtime: uv environments, model downloads including gated ones; weeks 5–6) |
 | `vram_leases.rs`, `models.rs`, `generation_router.rs`, `fast_runtime.rs`, `engines.rs` | 3 (Inference; weeks 7–8) |
-| Sessions, `SetInterventions`, `FetchTensor` routing; `plugin_modules.rs` | 4 (Psychology; the first plugin module) |
-| `gateway_host.rs` (`GatewayGenerate`, `TokenizeChat`, `JobEventLogSink`), `ResizeLease`, blob RPCs, `sandbox_service.rs` and sandbox RPCs in `worker_host_service.rs` | 5 (Training and Evaluation; judges, Pass@k) |
+| Sessions, `SetInterventions`, `FetchTensor` routing; `plugin_modules.rs` (the namespace probe and the first-party fallback; the AppArmor profile ships with the `.deb`) | 4 (Psychology; the first plugin module) |
+| `gateway_host.rs` (`GatewayGenerate`, `TokenizeChat`, `JobEventLogSink`), `ResizeLease`, blob RPCs, `sandbox_service.rs` and sandbox RPCs in `worker_host_service.rs`, the `mysql:` secret for the MySQL reader (M5-E07) | 5 (Training and Evaluation; judges, Pass@k, data import) |
 | `gym_tools.rs`, step-mode signals, `job:` refs | 7 (Agent Gym) |
-| `transfers.rs`, `node_cache.rs`, `self_update.rs`, SSH handshake and key pinning | 9 (Remote; weeks 11–12: `rastai node` over SSH, a remote job survives a network drop) |
-| `fast_runtime_vllm.rs`, `pick_fast_engine`, the `generate.fast.vllm` flag | 9 (Linux serving nodes); optional, not on the prototype's exit path |
+| `transfers.rs`, `node_cache.rs`, `self_update.rs` (minimal path; the watchdog is L2), SSH handshake and key pinning, the `handshake` fuzz target | 9 (Remote; weeks 11–12: `rastai node` over SSH, a remote job survives a network drop) |
 
 ---
 
@@ -1671,14 +1690,15 @@ One table for the plan. Each row is what this doc's crates must deliver for that
 
 | §31 step (§32 weeks) | `proto/` | `rastai-transport` | `rastai-sandbox` | `rastai-gateway` | `rastai-node` |
 |---|---|---|---|---|---|
-| 1 Foundation (3–4) | common, commands, events; node jobs, run events, live, heartbeat; worker Hello, Control, Register | local sockets, gRPC channels, local `NodeConnection` | | | entry, identity, local handshake, jobs and reattach, event tailing, live, hardware, telemetry, heartbeats |
-| 2 Unified runtime (5–6) | environments, `EgressActive` | `http_client.rs` | | | uv environments, HF downloads (with the HF cache lock), HF cache |
+| 1 Foundation (3–4) | common (with `Stability`), commands, events (with `ListEventTypes`); node jobs, run events, live, heartbeat; worker Hello, Control, Register | local sockets, gRPC channels, local `NodeConnection` | | | entry, identity, local handshake, jobs and reattach, event tailing, live, hardware, telemetry, heartbeats |
+| 2 Unified runtime (5–6) | environments, `EgressActive`, `GetSecret` (`hf_download`) | `http_client.rs` | | | uv environments, HF downloads (with the HF cache lock), HF cache |
 | 3 Inference (7–8) | leases (with `may_reclaim_evictable`), models, generation, `TokenizationOverride` | `sse.rs` | | endpoints, both runtimes through the node, API adapters, templates (with user overrides), tokenizer, logging, incognito, retention | leases, models, routing, llama-server |
-| 4 Psychology (9–10) | `interventions_json`, tensors, sessions, `command_call.proto` | | | live packets, steering presets | session routing, plugin modules |
-| 5 Training and Evaluation (11–12) | `GatewayGenerate`, `TokenizeChat`, blobs, `ResizeLease`, `GetSecret`, sandbox service | | create, exec, remove, caps, labels, deadlines, orphan sweep | node gateway, `DaemonForward`, target masks | `gateway_host.rs`, sandbox RPCs, blob RPCs |
+| 4 Psychology (9–10) | `interventions_json`, tensors, sessions, `command_call.proto` | | | live packets, steering presets | session routing, plugin modules (namespace probe, first-party fallback) |
+| 5 Training and Evaluation (11–12) | `GatewayGenerate`, `TokenizeChat`, blobs, `ResizeLease`, `GetSecret` (`hf_upload`, `mysql:`), sandbox service | | create, exec, remove, caps, labels, deadlines, orphan sweep | node gateway, `DaemonForward`, target masks | `gateway_host.rs`, sandbox RPCs, blob RPCs, the MySQL reader's credential |
 | 7 Agent Gym | | | pause and resume, pull progress | `job:` refs, tool-call deltas (L2) | gym tools, step mode |
 | 8 Plugins | | | | plugin chat templates and tokenizer files | |
-| 9 Remote (11–12) | files, `UpdateNode` | `ssh.rs`, SSH `NodeConnection`, `transfer.rs` | | | transfers, node cache, self-update, key pinning; vLLM on Linux serving nodes (optional) |
+| 9 Remote (11–12) | files, `UpdateNode` | `ssh.rs`, SSH `NodeConnection`, `transfer.rs` | | | transfers, node cache, self-update (minimal path), key pinning |
+| 11 Long-term storage (after the 90 days) | the `archive.*` event payloads | `http_client.rs` for an S3 target (M11-E04) | | | nothing: the node never talks to the archive |
 | Phase 2 / 3 | `provider/v1` (Phase 3) | `quic.rs` (iroh), named pipes | egress proxy for allowlists | | |
 
 Step 6 (Designer) needs nothing new from these crates beyond what earlier steps built.
@@ -1687,15 +1707,16 @@ Step 6 (Designer) needs nothing new from these crates beyond what earlier steps 
 
 ## 9. What this doc needs from other docs
 
-These crates call into components owned by other layout docs. The names below are what this doc assumes; reviewers reconcile them.
+These crates call into components owned by other layout docs. Names that contracts 15.1 already lists are used as written there; the ones it doesn't are requests, collected in section 12, question 22.
 
 | Owner | Needed | Used by |
 |---|---|---|
-| `rastai-core` | `DataPaths` and a path function for every path in sections 4–7 (new: `chat_template_override_path`, `hf_lock_path`); `random_bytes(count)` from `/dev/urandom`; `new_id(prefix)`; `Principal`; resolved `NodeSettings` and `GatewaySettings` | all four crates |
-| `rastai-store` | `EventLogReader` with a frame read that reports complete, torn or corrupt, and the next offset; the vault writer's oneshot commit; `delete_gateway_log_older_than(cutoff_unix_ms)`; indexing of `gateway.request_logged` into `gateway_log` | node, server's `VaultLogSink` |
-| `rastai-formats` | safetensors header reader; a header-only GGUF reader (new); zip reader with zip-slip and zip-bomb limits; `ConversationMessage`; `SteeringPreset` and `InterventionSet` with their JSON writer; `hashing::{hash_bytes, new_stream_hasher, update_stream_hasher, finish_stream_hasher}`; plugin manifest entries `contributes.chat_templates[]` and `contributes.tokenizers[]` (new) | node, gateway, transport |
-| `rastai-server` | `VaultLogSink`; a keyring-backed `SecretReader`; the auth layer that puts a `Principal` on gateway requests; the TCP listener with `TCP_NODELAY`; SSH reconnect with backoff; `NodeHubService` (heartbeat diffs into state events, `GatewayGenerate`, `GetSecret`); served-model and preset updates; the daily retention timer; copying tokenizer files to `<cache>/tokenizers/`; resolving chat template overrides (user files and plugin matches) into `TokenizationOverride` values and sending them in `Handshake` and `HeartbeatResponse`; pushing plugin tokenizer files to every node with `PutFile`; turning `EgressReport`s and node `EgressActive` items into `egress.active` bus events; offering Fast for a safetensors model only on a node with `generate.fast.vllm` (inference flows 2.1 and 2.2 today assume Fast means a GGUF with a twin) | gateway, node |
-| `layout/python.md` (environments) | `python/envs/vllm-cuda13/` (`pyproject.toml`, `uv.lock`) and its row in `python/envs/environments.json` (Linux NVIDIA only) | node (7.8) |
+| `rastai-core` | `DataPaths` and a path function for every path in sections 4–7 (the ones contracts 15.1 doesn't list yet are `chat_template_override_path` and `hf_lock_path`); `random_bytes(count)` from `/dev/urandom`; `new_id(prefix)`; `Principal`; resolved `NodeSettings` and `GatewaySettings` | all four crates |
+| `rastai-store` | `EventLogReader` with a frame read that reports complete, torn or corrupt, and the next offset; `free_bytes` (the one `statvfs` call, used by the node's hardware profile and download checks); the vault writer's oneshot commit, which also writes the `vault_changes` outbox row when an archive is configured; `delete_gateway_log_older_than(cutoff_unix_ms)` (local only, 12 question 20); indexing of `gateway.request_logged` into `gateway_log` | node, server's `VaultLogSink` |
+| `rastai-formats` | safetensors header reader; a header-only GGUF reader (`read_gguf_header`); zip reader with zip-slip and zip-bomb limits; `ConversationMessage`; `SteeringPreset` and `InterventionSet` with their JSON writer; `hashing::{hash_bytes, new_stream_hasher, update_stream_hasher, finish_stream_hasher}`; plugin manifest entries `contributes.chat_templates[]` and `contributes.tokenizers[]` | node, gateway, transport |
+| `rastai-server` | `VaultLogSink`; a keyring-backed `SecretReader`; the auth layer that puts a `Principal` on gateway requests; the TCP listener with `TCP_NODELAY`; SSH reconnect with backoff; `NodeHubService` (heartbeat diffs into state events, `GatewayGenerate`, `GetSecret`); served-model and preset updates; the daily retention timer; copying tokenizer files to `<cache>/tokenizers/`; resolving chat template overrides (user files and plugin matches) into `TokenizationOverride` values and sending them in `Handshake` and `HeartbeatResponse`; pushing plugin tokenizer files to every node with `PutFile`; turning `EgressReport`s and node `EgressActive` items into `egress.active` bus events; offering the Fast runtime only for a model with a GGUF (inference flows 2.1 and 2.2 already assume this, with a twin); releasing a `GetSecret` value only when the purpose, the connection and the job's `network_hosts` agree; disabling a plugin with the node's `RRS-P2001` diagnostic when the node refuses its module | gateway, node |
+| `tools/release/` | the AppArmor profile `tools/release/apparmor/rastai`, installed by the `.deb` as `/etc/apparmor.d/rastai`: `userns` for the `rastai` binary, and an inherited exec rule so `unshare` runs under the same profile | node (7.9) |
+| `rastai_data` (`layout/python.md`) | `readers/mysql_reader.py` reads the credential the node hands over and connects only to the host in `network_hosts` | node (7.9) |
 | `rastai_worker` (`layout/python.md`) | re-`Register` after a node restart before `Hello`; physical-to-visible GPU index mapping; writing `gateway.request_logged` from `GenerateFinished.gateway_log`; serving `Generate` for `job:` refs; the exit codes in section 7.4 | node, gateway |
 
 ---
@@ -1716,163 +1737,56 @@ These crates call into components owned by other layout docs. The names below ar
 
 ---
 
-## 11. New names
+## 11. Where the names live
 
-Names this doc uses that contracts.md doesn't define. Reviewers fold them into contracts.md in a contract PR before code uses them.
+Contracts v1.1 is the only list of shared names, so this doc keeps no "New names" list. If a name you need isn't in contracts, add it there first, in its own PR.
 
-### 11.1 Wire (protobuf)
-
-| Name | Where | Meaning |
-|---|---|---|
-| file names in section 3.1 | `proto/rastai/**` | one file per service or message group |
-| `NodeTelemetry`, `GpuTelemetry`, `ProcessVram` | `common/v1/hardware.proto` | telemetry in `Heartbeat` and `GetHardware` |
-| `JobKind`, `JobSignal` | `node/v1/jobs.proto` | enums for contracts §9.1 kinds and `SignalJob` |
-| `WatchRunEventsRequest`, `SandboxIdRequest`, `HandleCommandRequest`, `WatchLiveRequest` | `node/v1` | per-RPC requests |
-| `EnvironmentInfo`; `EnsureEnvironmentRequest.plugin_id`, `.plugin_version` | `node/v1/environments.proto` | environment listing; plugin environments |
-| `GatewayLogEntry`; `GenerateFinished.gateway_log` | `node/v1/generation.proto` | a node-gateway log record handed back to the job |
-| `GatewayGenerateRequest` | `node/v1/node_hub_service.proto` (also used by `WorkerHostService`) | gateway request from a node or job |
-| `TokenAlternative`, `TensorChunk` | `node/v1/generation.proto` | top alternatives; `FetchTensor` chunks |
-| `LiveEvent` | `node/v1/live.proto` | the `WatchLive` item |
-| `SandboxCaps`, `ExecFrame` | `node/v1/sandbox_service.proto` | sandbox caps; exec stream frames |
-| `BlobChunk`, `GetBlobRequest`, `DocumentEdit` | `worker/v1` | blob RPCs; `CommandReply.document_edits` |
-| `WorkerHostService.TokenizeChat`, `TokenizeChatRequest/Response` | `worker/v1` | defined in `layout/python.md` §14; implemented here (section 6.6) |
-| `GatewayRequestLogged` | `events/v1/payloads.proto` | payload of `gateway.request_logged` |
-| `EgressActive`; `LiveEvent.egress_active` | `events/v1/payloads.proto`, `node/v1/live.proto` | payload of `egress.active`; how a node's egress reports reach the daemon |
-| `TokenizationOverride`; `HandshakeRequest.tokenization_overrides`; `HeartbeatRequest.tokenization_overrides_hash`; `HeartbeatResponse.tokenization_overrides` | `node/v1/models.proto`, `node_service.proto`, `node_hub_service.proto` | daemon-resolved chat templates and tokenizer files for the node gateway (section 6.8) |
-| `RequestLeaseRequest` fields, including `optional bool may_reclaim_evictable` | `node/v1/leases.proto` | the lease request `decide_lease` reads (section 7.7); `ResourceRequest.may_reclaim_evictable` itself is training-evaluation §16's name |
-| `SetInterventionsRequest{session_id, interventions_json}` | `node/v1/generation.proto` | contracts §4.4's `SetInterventions` arguments as a message |
-| `ModelInfo.engine_build` | `node/v1/models.proto` | which Fast engine and build serves a model |
-
-### 11.2 Code, files, settings and conventions
-
-| Name | Kind | Meaning |
-|---|---|---|
-| `gateway.request_logged` | durable event, emitter worker | a node-gateway request's log record; the daemon indexes it into `gateway_log` |
-| `gateway_log.run_id`, `gateway_log.finish_reason` | `vault.db` columns | the run a request belonged to; why it ended |
-| `X-Rastai-Incognito: 1` | HTTP request header on `/v1` | marks a request incognito |
-| `:inspectable`, `:fast` | `/v1` model name suffixes | pick the runtime when a model is loaded on both |
-| `generate.inspectable`, `generate.fast`, `sandbox.engine`, `transfer.resume`, `self_update`, `lens.live` | node capability flags | announced in `Handshake` |
-| `rastai.job_id` | container label | the job that owns a sandbox |
-| `process_start_ticks`, `boot_id`, `job_token_hash`, `granted_leases[]`, `final_state` | `job.json` fields written by the node | PID-reuse guard (start ticks, process group and boot id together); token check after a restart; lease rebuild; the terminal state (platform flow 2.3 and 5.1 use the same names) |
-| `egress.active` | ephemeral event, emitter daemon or node (from an `EgressReport`) | payload `purpose`, `host`, `subject_id`; drives the egress badge |
-| `generate.fast.vllm` | node capability flag | the node can serve Fast on vLLM |
-| `gateway_log.sampling_json.template_source`, `.engine_build` | `vault.db` JSON keys | which chat template source and which Fast engine build produced a row |
-| `contributes.chat_templates[]{template_id, match{family, model_ref_glob}, file}`, `contributes.tokenizers[]{tokenizer_id, match, files[]}` | plugin manifest entries | declarative chat templates and tokenizer files (section 6.8) |
-| `vllm-cuda13` | environment id | vLLM's own uv environment (section 7.8) |
-| `<data>/node/ssh_known_hosts` | path | OpenSSH known-hosts file with pinned host keys |
-| `<runtime>/remote/<node_id>/node.sock`, remote `<runtime>/node-hub-<session_id>.sock` (fresh per SSH session) | paths | the two SSH-forwarded sockets |
-| `<config>/chat-templates/<model_hash12>.jinja` | path | the user's chat template override for one model |
-| `<cache>/.locks/<repo folder>/<etag>.lock` | path (huggingface_hub's own) | the per-file download lock Rastai shares with HF tools |
-| `<state>/logs/vllm/<job_id>.log` | path | vLLM output |
-| `<cache>/tokenizers/<model_hash12>/` | path | tokenizer files for models on other nodes |
-| `<cache>/tokenizers/plugins/<plugin_id>/<tokenizer_id>/` | path | a plugin's tokenizer files, on every node |
-| `<cache>/uploads/` | path | private data uploaded to a node |
-| `<state>/logs/llama-server/<job_id>.log` | path | llama-server output |
-| `<data>/python/` | path | uv-managed CPython 3.12 |
-| `<data>/node/rastai-<version>.partial` | path | self-update download |
-| `deps/engines/uv.json` | repo file | pinned uv version and hashes for release packaging |
-| `python/envs/environments.json` | repo file | per environment: selection rule, supported AMD gfx targets, expected download size |
-| `fixtures/chat-templates/`, `fixtures/sandbox/` | fixture folders | template goldens; sandbox specs, exec bytes, test images |
-| `tools/fixtures/render_chat_templates.py`, `tools/codegen/rewrite_python_imports`, `tools/bench/gateway-load/`, `tools/bench/tokenizer/` | dev tooling | never shipped |
-| Rust types in `rastai-transport` | types | `LocalListener`, `LocalStream`, `PeerIdentity`, `NodeTarget`, `NodeConnection`, `SshSession`, `SshOptions`, `SshForwards`, `RemoteOutput`, `HttpTarget`, `HttpRequest`, `HttpResponse`, `HttpStream`, `SseEvent`, `SseReader`, `PartialFile` |
-| Rust types in `rastai-sandbox` | types | `DockerEngine`, `SandboxManager`, `SandboxTable`, `SandboxRecord`, `SandboxReservation` |
-| Rust types in `rastai-gateway` | types | `Gateway`, `GatewayPlace`, `ChatRequest`, `CompletionRequest`, `PromptTokens`, `StreamItem`, `StreamedToken`, `TokenSink`, `FinishReason`, `TokenizedChat`, `ServedModel`, `ServedPreset`, `TokenizerFiles`, `TokenizerCache`, `RouteTarget`, `NamedAdapter`, `AdapterRequest`, `AdapterResult`, `DaemonForwardAdapter`, `SecretReader`, `LogCommit`, `ToolCallFormat` |
-| Rust types in `rastai-node` | types | `NodeOptions`, `NodeMode`, `NodeState`, `JobTable`, `JobRecord`, `WorkerLink`, `RunEventPositions`, `LiveHub`, `LeaseTable`, `LeaseDecision`, `ModelTable`, `FastEngine`, `NodeIdentity`, `LlamaServerLaunch`, `LlamaServerProcess`, `VllmLaunch`, `VllmProcess`, `FastQueue`, `EngineBuild`, `EnvironmentChoice`, `JobPermissions`, `HubConnection`, `JobEventLogSink` |
-| `VaultLogSink` | type in `rastai-server` | the daemon's `LogSink` |
-| `EVICTION_GRACE_SECONDS = 10`, `STOP_GRACE_SECONDS = 120`, `TAIL_POLL_MS = 50`, `LIVE_QUEUE_CAPACITY = 4096`, `RAM_RESERVE_BYTES = 4 GiB`, `FAST_RUNTIME_SLOTS = 1`, `FAST_QUEUE_LIMIT = 16`, `VLLM_MAX_SEQUENCES = 16`, `VLLM_STARTUP_TIMEOUT_SECONDS = 600`, `HF_LOCK_WAIT_SECONDS = 600` | constants | behavior other docs and tests depend on |
-| `RASTAI_TEST_SSH` | environment variable (tests only) | enables the real-SSH test |
-
-### 11.3 Initial error codes
-
-Within the ranges of contracts §10. Titles only; the catalog entries add messages and fixes.
-
-| Code | Title |
+| Kind of name | Where it is |
 |---|---|
-| `RRS-N0001` | Node protocol version not supported |
-| `RRS-N0002` | Daemon key not paired with this node |
-| `RRS-N0003` | A node is already running on this machine |
-| `RRS-N3001` | Transfer path outside the allowed folders |
-| `RRS-N3002` | Transfer chunk at the wrong offset |
-| `RRS-N3003` | Transferred file hash mismatch |
-| `RRS-N3004` | Model repository or file not found |
-| `RRS-N3005` | Gated model: license not accepted or no access |
-| `RRS-N3006` | Offline mode: download refused |
-| `RRS-N3008` | Outbound HTTPS request without an egress tag (bug) |
-| `RRS-N3010` | Waiting for another program's download of this file (info) |
-| `RRS-N3011` | Another program held this file's download lock for 10 minutes |
-| `RRS-H2001` | uv missing or its hash is wrong |
-| `RRS-H2002` | Environment lockfile can't be installed on this platform |
-| `RRS-H2003` | Environment import check failed |
-| `RRS-H3001` | Not enough GPU memory for this lease |
-| `RRS-H3004` | Model is being evicted; generation stopped |
-| `RRS-H3005` | Process uses more GPU memory than its lease (warning) |
-| `RRS-H4002` | `HSA_OVERRIDE_GFX_VERSION` removed from a job (warning) |
-| `RRS-J0002` | Worker didn't register in time |
-| `RRS-J1001` | Job killed by a signal |
-| `RRS-J1002` | Job killed by the kernel's out-of-memory killer |
-| `RRS-J1003` | Job killed by the node |
-| `RRS-J2001` | Worker couldn't start (bad launch) |
-| `RRS-J3002` | Job ended while no node was watching; no final state |
-| `RRS-J3003` | Job didn't reconnect after a node restart |
-| `RRS-G0001` | Invalid request |
-| `RRS-G0002` | Unknown model name |
-| `RRS-G0004` | Steering preset needs its model on the Inspectable runtime |
-| `RRS-G0005` | Model not ready |
-| `RRS-G0006` | The model's node is unreachable |
-| `RRS-G0007` | Tool calls not supported for this model family |
-| `RRS-G1001` | Tokenizer couldn't be loaded |
-| `RRS-G1002` | Chat template error |
-| `RRS-G1003` | No tokenizer files for this model |
-| `RRS-G1004` | Tokenizer mismatch between the gateway and llama-server |
-| `RRS-G1005` | Prompt longer than the model's context |
-| `RRS-G1006` | Template can't produce a training mask for this conversation |
-| `RRS-G1007` | Two plugins contribute a chat template or tokenizer for this model; neither is used (warning) |
-| `RRS-G2001` | API key missing for this adapter |
-| `RRS-G2002` | API provider returned an error |
-| `RRS-G2003` | API provider rate limit |
-| `RRS-G3002` | Fast engine (llama-server or vLLM) didn't become healthy |
-| `RRS-G3003` | Fast engine (llama-server or vLLM) stopped unexpectedly |
-| `RRS-G3004` | Needs the Inspectable runtime |
-| `RRS-G3005` | llama-server build hash mismatch |
-| `RRS-G3006` | Fast runtime busy |
-| `RRS-G3007` | Malformed event from the Fast engine |
-| `RRS-G3011` | vLLM isn't available on this node (needs Linux NVIDIA and the `vllm-cuda13` environment) |
-| `RRS-G4001` | Gateway log write failed |
-| `RRS-R1001` | Sandbox cap reached |
-| `RRS-R1002` | No container engine found |
-| `RRS-R1003` | Container engine API version not supported |
-| `RRS-R1004` | Sandbox image pull failed |
-| `RRS-R1005` | Sandbox container exited at start |
-| `RRS-R1006` | Sandbox time cap reached |
-| `RRS-R1007` | Container engine can't pause sandboxes |
-| `RRS-R1008` | Not enough RAM for the requested sandboxes |
-| `RRS-R1009` | Requested sandboxes exceed the node's sandbox cap |
-| `RRS-R1010` | Sandbox egress network or proxy unavailable; refusing an open network |
-| `RRS-P2001` | Network-off plugin modules need user namespaces |
-| `RRS-S3001` | Not enough disk space (shared with `rastai-store`; use its number if it already assigned one) |
+| Wire messages, fields and RPCs | contracts 4 and 4.9; the file layout is section 3.1 here |
+| Documents and their types | contracts 5 |
+| Commands, events, tables | contracts 6, 7 and 8 |
+| Paths | contracts 8.1 |
+| Ids, hashes, capability flags, container labels | contracts 8.6 |
+| Rust names by crate | contracts 15.1 |
+| Constants other docs depend on | contracts 15.10; each also sits at the top of the file that owns it |
+| Settings (`compute.*`, `nodes.*`, `sandbox.*`, `gateway.*`, `hf.*`, `archive.*`) | contracts 11.2 |
+| Fixtures, CI jobs, environment variables | contracts 12.5, 15.8, 15.9 |
+| Names that were proposed and replaced, including every managed-vLLM name | contracts 15.11 |
+| Error codes and their titles | contracts 10.3 |
+
+### 11.1 Which file raises which code
+
+Numbers only; titles are in contracts 10.3. A file may raise a code only if it is in its range (contracts 10.1).
+
+| Place | Codes |
+|---|---|
+| `rastai-transport` `transfer.rs`, `http_client.rs` | `RRS-N3002`, `RRS-N3003`, `RRS-N3008`, `RRS-N3012` |
+| `rastai-sandbox` | `RRS-R1001` to `RRS-R1013` (cap, engine, API version, pull, start, time cap, pause, RAM, over-cap request, egress network, socket permission, memory cap, engine failure) |
+| `rastai-gateway` | `RRS-G0001`, `G0002`, `G0004` to `G0007`, `G0009`, `G0010`, `G1001` to `G1007`, `G2001` to `G2004`, `G3004`, `G3006`, `G4001` |
+| `rastai-node` handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `RRS-H0001`, `H0002`, `RRS-S3001` |
+| `rastai-node` environments, leases | `RRS-H2001` to `H2006`, `RRS-H3001`, `H3004` to `H3007`, `RRS-H4002` |
+| `rastai-node` jobs and reattach | `RRS-J0001`, `J0002`, `J1001` to `J1004`, `J2001` to `J2003`, `J3002`, `J3003`, `RRS-S2002`, `RRS-S3002` |
+| `rastai-node` Fast runtime | `RRS-G1003`, `G1004`, `G3002`, `G3003`, `G3005`, `G3007`, `G3008` |
+| `rastai-node` plugin modules | `RRS-P2001`, `RRS-P2005` |
+| `rastai-node` self-update | `RRS-N4001` to `N4004`; `RRS-N4005` (L2) |
+
+`RRS-G3011` (vLLM unavailable) is withdrawn with the managed engine (contracts 10.2).
 
 ---
 
-## 12. Open questions and reconciliation
+## 12. Open questions
 
-Each has the default this doc follows until the owner decides.
+Each has the default this doc follows until the owner decides. Row numbers are stable and match the numbering of earlier drafts; decided rows are removed, not renumbered. Rows 1 to 6, 8 to 11 and 14 to 17 of the first draft were settled by contracts v1.1 or the owner decisions of 2026-10-10 and are gone: the sandbox crate's `rastai-proto` dependency, `tower`, the sandbox network proxy, `LogCommit`, the `gateway_log` columns, the reattach order, SHA-256 from the rustls provider, the header-only GGUF reader, uv distribution, the OS tools, BLAKE3 only through `rastai_formats::hashing`, the managed vLLM engine (out of the prototype), `contributes.chat_templates[]` and `tokenizers[]`, and `may_reclaim_evictable` as an `optional bool`.
 
 | # | Question | Default |
 |---|---|---|
-| 1 | `rastai-sandbox` uses the generated sandbox types, which adds `rastai-proto` to its internal deps (contracts §2.1 lists only `rastai-core` and `rastai-diag`). | Add it; the alternative is a second definition of the same types. |
-| 2 | `tower` as a direct dependency of `rastai-transport`, for the connector tonic needs on Unix sockets. | Add it to §27's foundation row next to axum and tonic; it is already in the tree through both. |
-| 3 | Sandbox network allowlists can't be enforced in the prototype. | Prototype: `none`, or unrestricted with the trust prompt saying so. Phase 2: a per-run internal engine network plus a proxy container running the `rastai` binary in a proxy mode that allows CONNECT only to listed hosts. |
-| 4 | `LogSink::log_request` returns `LogCommit` (contracts §12.2 shows no return value). | Adopt, so the gateway can await the commit as the spike did. |
-| 5 | New `gateway_log` columns `run_id` and `finish_reason`; new event `gateway.request_logged`. | Add to contracts §8.3 and §7.3. |
-| 6 | Reattach order: this doc waits for the worker's re-`Register` (which carries the token) before `Hello`; `layout/python.md` §7.5 draws `Hello` first. | Re-`Register` first. Only the token's hash is on disk. |
 | 7 | `CUDA_VISIBLE_DEVICES` hides other GPUs, so a job's visible index differs from the physical `gpu_index` in `job.json` `granted_leases`. | Visible order is ascending physical index; `rastai_worker/vram.py` maps it. |
-| 8 | SHA-256 for HF LFS files and llama-server builds. | Use the rustls crypto provider's SHA-256 (no new crate); confirm with contracts §14 question 7 in the security ADR. |
-| 9 | Lease sizing for Fast models needs a header-only GGUF reader; `rastai-formats` has only a writer. | Add `read_gguf_header` to `rastai-formats`, codes in `RRS-E6500–6999`. |
-| 10 | uv distribution. | Ship the pinned uv next to the `rastai` binary; the daemon pushes both to paired nodes. |
-| 11 | OS tools used instead of `unsafe` system calls: `setsid`, `kill`, `unshare`, `df`, plus `nvidia-smi` and `rocm-smi`. | List them in §27 under "Foundation: the OS and GPU drivers". macOS and Windows (tier 2) get their own branches later. |
 | 12 | One llama-server slot. | Keep for the prototype (L1). Revisit at L2 when Navi and the app chat at the same time; `--parallel N` needs per-slot queueing in the node. |
 | 13 | Node-originated durable state travels in heartbeats sent at once on change. | Keep one path. Revisit if heartbeats grow large (many sandboxes) by adding a node event stream. |
-| 14 | BLAKE3 outside the wrapper: contracts §2.1 lists blake3 as an external dep of `rastai-node`, and `rastai-transport` hashes files. | Every BLAKE3 call goes through `rastai_formats::hashing` (contracts §2.4 rule 8, control-plane layout §6.5, plan M1-14); the control-plane layout's cargo-deny `wrappers` rule already allows blake3 only under `rastai-formats`. Drop blake3 from `rastai-node`'s external deps and add `rastai-formats` to `rastai-transport`'s internal deps in contracts §2.1. |
-| 15 | vLLM as a managed Fast engine (spec §8 and §17, ADR-0025) had no home; the gateway reached it only as an `OpenAiAdapter` endpoint, outside leases and the token-ID path. | `fast_runtime_vllm.rs` (7.8), optional, step 9 on Linux NVIDIA. Needs a plan epic, `python/envs/vllm-cuda13/` (python layout), inference flow 2.1's Fast check to accept a safetensors model on a node with `generate.fast.vllm`, and 2.2's FAST branch to treat a vLLM row as same weights (no twin needed). A vLLM the user runs elsewhere stays an `OpenAiAdapter` endpoint with `proxy` replays. |
-| 16 | Plugin manifest `contributes` gains `chat_templates[]` and `tokenizers[]` (contracts §8 manifest row). | Add both, files only. Code tokenizers wait for the WASM tier (Phase 2). |
-| 17 | `may_reclaim_evictable` is a proto3 `optional bool` whose unset value reads as `true`. | Adopt. A plain bool defaults to `false`, which would stop every pinned job from reclaiming unless the daemon remembered to set it. |
+| 18 | **How the short-lived MySQL credential reaches the worker.** Contracts 4.4 and 3.2 say the reader gets it from `NodeHubService.GetSecret`, but a worker is a client of `WorkerHostService`, which has no secret RPC, and the environment of a worker is cleared (7.4). | The node calls `GetSecret` before it spawns the `data_import` worker and passes the value in one environment variable of that process only. Needs a name in contracts 15.9; the value is never in `job.json`, logs or events. The alternative, a `GetSecret` RPC on `WorkerHostService`, adds a wire row and lets a running job ask for more later, so it is not the default. |
+| 19 | `GetSecretRequest` and `GetSecretResponse` have no fields in contracts 4.9. | `purpose`, `job_id` and `value`, `expires_unix_ms`, `Diagnostic` (3.2). Add them to 4.9. |
+| 20 | **Retention versus the archive.** `gateway.retention_days` deletes old `gateway_log` rows locally. Contracts 8.3 says a `delete` in `vault_changes` always reaches the archive. | Retention is housekeeping, not user intent: it writes no `delete` outbox row, and archived `gateway_log` rows (opt-in per project) stay until `archive.purge`. A user who wants age-based removal in the archive too would add a setting; not in M11. |
+| 21 | **Who proves "first-party" for a plugin module.** Contracts 8.8 says "content hash matching the release", but a `JobSpec` has no field for it. | The node proves it itself (7.9): the archive sits in `<install prefix>/share/rastai/plugins/` and its hash is in the signed `release.json`. A remote node whose install lacks the archive treats the module as third party. |
+| 22 | **Cross-crate names this doc uses that contracts 15.1 doesn't list.** `chat_template_override_path`, `hf_lock_path`, `random_bytes`, `new_id`, `delete_gateway_log_older_than`, `retention_cutoff_unix_ms`, `set_served_models`, `set_tokenization_overrides`, `gateway_routes`, `GenerateSummary`, `StopKind`, the SHA-256 and HMAC-SHA256 helpers in `http_client.rs`. | Add them to contracts 15.1 in the next contracts PR. Until then this doc's sections name them where they are used. |
+| 23 | **Fuzz targets for `rastai-sandbox` (`connect_request`, `exec_stream`) and `rastai-gateway` (`tool_call_parse`)** are not in contracts 12.5 or the repo tree (`fuzz/` is listed for `rastai-node` and others, not these). | Add the rows. The CONNECT parser reads bytes from sandboxed code, so it is the one that matters most. |

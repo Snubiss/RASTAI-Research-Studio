@@ -30,7 +30,7 @@
    | 3. Meaning | shape inference, references resolve, ranges don't overlap, the graph is acyclic unless recurrent | `RRS-E2xxx` |
    | 4. Environment | plugins installed, fits on the GPU, adapter supports it. **Warnings, not failures** | `RRS-E3xxx` |
 
-8. **Untrusted imports** are checked before anything is allocated: limits on size, nesting depth, node count and parameter count; zip-bomb caps (total uncompressed size and ratio); zip-slip entries (`..` or absolute paths) rejected. Codes `RRS-E5xxx`. The limits are constants at the top of the limits module.
+8. **Untrusted imports** are checked before anything is allocated: limits on size, nesting depth, node count and parameter count; zip-bomb caps (total uncompressed size and ratio); zip-slip entries (`..` or absolute paths) rejected. Codes `RRS-E5xxx`. The limits are constants at the top of the limits module. *(Note since acceptance, 2026-10-10: the zip container and its caps stay in-house; DEFLATE itself goes through `miniz_oxide` in `zip/inflate.rs`, and every in-house parser here has a fuzz target (ADR-0037).)*
 9. **Missing plugins never fail a load.** A file whose `requires` names a missing plugin opens with placeholder nodes and a banner listing the plugins to install (`plugin.suggest`).
 10. **Standards for everything else:** `.safetensors` and `.gguf` for weights, `.jsonl` and `.parquet` for data, `.onnx` for interop. Never pickled `.pt` (ADR-0024).
 
@@ -61,4 +61,4 @@
 
 - Spec: [§2](../spec/rastai_spec_v5.md#2-principles), [§13](../spec/rastai_spec_v5.md#13-plugins-and-ecosystem) (dependencies), [§15](../spec/rastai_spec_v5.md#15-file-formats), [§23](../spec/rastai_spec_v5.md#23-validation)
 - Contracts: [§5 documents](../architecture/contracts.md#5-documents-owned-by-rastai-formats), [§10 RRS-E ranges](../architecture/contracts.md#10-error-catalog), [§12.5 fixtures](../architecture/contracts.md#12-naming-and-code-conventions)
-- Related: [ADR-0004](0004-schema-ownership.md), [ADR-0024](0024-no-pickle-checkpoints.md), [ADR-0029](0029-strict-safetensors-contract.md), [ADR-0030](0030-diagnostics-catalog.md)
+- Related: [ADR-0004](0004-schema-ownership.md), [ADR-0024](0024-no-pickle-checkpoints.md), [ADR-0029](0029-strict-safetensors-contract.md), [ADR-0030](0030-diagnostics-catalog.md), [ADR-0037](0037-borrowed-decoders-and-parser-fuzzing.md)

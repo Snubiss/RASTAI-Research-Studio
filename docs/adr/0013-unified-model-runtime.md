@@ -34,6 +34,11 @@
 
 **Checked by:** the parity suite per family, in fp32 and bf16, on NVIDIA and (once the card is in) AMD; the §32 weeks 5–6 exit criterion (Gemma 3 and Llama pass parity on both vendors); an import test that an unknown architecture yields an opaque node, not an error.
 
+*Note since acceptance (2026-10-10):*
+- *M2 closes on NVIDIA. The AMD parity gate moves to M10, and the owner buys a discrete RDNA3+ card before M10 (owner decision 11). The parity criteria are unchanged.*
+- *Real-weight parity runs on a self-hosted GPU runner (`nightly-gpu.yml`: schedule and manual triggers on main only, a separate OS user, a read-only `HF_READ_TOKEN` for gated weights) once the repo is public (owner decision 12).*
+- *One owner per algorithm: each ModelSpec op has one golden file, `fixtures/ops/<op>.json` (shapes, parameter count, FLOPs), that both the Rust live stats and this compiler must match; layer placement is planned only in Rust and the compiler applies the `placement{}` field (contracts §2.4 rule 10).*
+
 ## Consequences
 
 **Good**

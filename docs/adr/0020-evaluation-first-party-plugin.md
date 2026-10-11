@@ -50,6 +50,12 @@ class DriftMetric(Metric):
 
 *Note since acceptance (2026-10-10): registry names are namespaced by plugin id (`eval.drift`, `eval.pass_at_k`; plan §10 row 17). Only the examples changed; the decision is unchanged.*
 
+*Note since acceptance (2026-10-10), owner decisions 9 and 15 and contracts v1.1:*
+- *Decision 7's trust bar is fixed: a judge's verdicts count only after calibration reaches at least 0.8 agreement (`eval.judge_min_agreement`) on at least 10 hand-labeled examples (`eval.judge_min_labels`); below it, `RRS-V1001` and `RRS-V1002` (contracts §9.6).*
+- *Decision 8's Elo reads blind A/B votes from the project document `evals/votes.rrsdata` (inline preference rows with `source = blind_vote` and `chosen_side`), like any preference dataset. `eval.vote` is undoable and journaled. There is no `votes.jsonl` plugin data.*
+- *Decision 4's exit `2` also covers a run that was cancelled or refused (contracts §16 row 35).*
+- *The decisions are unchanged.*
+
 **Checked by:** the §32 weeks 11–12 exit criterion (the suite catches the spike's invented fact that keyword checks miss); `check-imports` showing `rastai_eval` imports only the public API; a CLI test for each exit code; a judge test where swapping the answer order flips the verdict, which must score as a tie.
 
 ## Consequences

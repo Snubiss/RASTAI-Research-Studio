@@ -5,7 +5,7 @@
 ## Context
 
 - Every action must be reachable from the UI, the command palette, keybindings, menus, CLI verbs, MCP tools and "Copy as CLI / Python / MCP" (§7, §21).
-- If each surface got its own endpoint, each new action would touch proto, the TS client, the CLI parser and the MCP server by hand, and those four would drift.
+- If each surface got its own endpoint, each new action would touch proto, the JavaScript client, the CLI parser and the MCP server by hand, and those four would drift.
 - Plugins add commands at runtime, so the set isn't known at compile time.
 - Team mode (Phase 3) needs to know who did what, so every call needs a principal from day one.
 - Undo is expected in editors, but side effects (a training run, a download) can't be undone honestly.
@@ -20,7 +20,7 @@
    - an `undoable` flag.
 2. **One generic RPC:** `CommandService.Execute(command_id, arguments_json, project_id, idempotency_key, dry_run)`, plus `ListCommands`. Both are served by the daemon.
 3. **The registry is a plain table plus a `match`.**
-   - `COMMANDS: &[CommandDescriptor]` lives in `rastai-core`;
+   - `COMMANDS: &[CommandRow]` lives in `rastai-core`; the registry turns each row into the generated `CommandDescriptor` (`descriptor_from_row`) for `ListCommands`;
    - `dispatch()` in `rastai-server` is one `match` on the id;
    - unknown ids fall through to the plugin host, which knows plugin commands from manifests.
    - No macros, no reflection (contracts §6.2).
@@ -46,6 +46,14 @@ pub fn dispatch(context: &CommandContext, command_id: &str, arguments_json: &str
 ```
 
 *Note since acceptance (2026-10-10): the example now matches contracts §6.2 (handlers return `Vec<Diagnostic>`; `parse_arguments` takes the command id to find the argument description it checks the JSON against, control-plane layout §4). The decision is unchanged.*
+
+*Note since acceptance (2026-10-10), contracts v1.1:*
+- *Decision 3: the static table is `COMMANDS: &[CommandRow]`; `ListCommands` returns the generated `CommandDescriptor` built from each row (contracts §2.4 rule 3, §6.2). The "TS client" in the context is the JavaScript client (ADR-0036).*
+- *Every command and event type carries `stability` (`preview`, `stable`, `deprecated`); all are `preview` until the stable commands API 1.0 subset in Phase 2. `buf breaking` can't see inside `arguments_json` and `result_json`, so a schema-diff check over `schemas/commands/` is planned with that subset (contracts §4, §6.1).*
+- *A fifth generated surface: one typed JavaScript wrapper per command (`modelLoad(executor, args)`), generated against the small `CommandExecutor` shape that both `DaemonClient` and `PluginHost` satisfy (contracts §12.4).*
+- *Decision 2: `ExecuteRequest` also carries `acting_plugin_id`, set only by the UI plugin host. It can only narrow the principal to that plugin's grant, never widen it (contracts §4.2, §16 row 3).*
+- *`apps/web` holds no domain logic: anything stateful or computed is a command, so every surface gets it (contracts §2.4 rule 9).*
+- *The decisions are unchanged.*
 
 **Checked by:**
 - a test that every `COMMANDS` row has a `match` arm, argument and result types, and a CLI and MCP name;
@@ -78,4 +86,4 @@ pub fn dispatch(context: &CommandContext, command_id: &str, arguments_json: &str
 
 - Spec: [§7](../spec/rastai_spec_v5.md#7-ux-system), [§13](../spec/rastai_spec_v5.md#13-plugins-and-ecosystem), [§21](../spec/rastai_spec_v5.md#21-command-layer-and-local-api-security)
 - Contracts: [§4.2 CommandService](../architecture/contracts.md#4-wire-contracts), [§6 commands](../architecture/contracts.md#6-commands)
-- Related: [ADR-0004](0004-schema-ownership.md), [ADR-0007](0007-local-api-security.md), [ADR-0030](0030-diagnostics-catalog.md)
+- Related: [ADR-0004](0004-schema-ownership.md), [ADR-0007](0007-local-api-security.md), [ADR-0030](0030-diagnostics-catalog.md), [ADR-0036](0036-frontend-plain-javascript.md)

@@ -21,7 +21,7 @@
 | **ALiBi** | An `alibi` op producing a per-head distance bias, passed to attention as a mask. This rules out the fastest SDPA kernel, which only affects the older families that use ALiBi. | Same as other attention | BLOOM, MPT |
 | **AttnRes** (experimental) | An `attn_res` op: each layer attends over earlier layers' outputs instead of adding to one running sum. Designer node first; imported families follow once public weights use it. | Each layer's depth-attention weights. The logit lens and SAEs read each layer's output and are labeled **approximate**, because they assume one residual stream. | none yet |
 
-- **Layer placement across GPUs:** `placement{node_id: gpu_index}` in ModelSpec. Placement failures use `RRS-M5xxx`. DeepSeek-V2-Lite runs across the 5080 and the 3090.
+- **Layer placement across GPUs:** `placement{node_id: gpu_index}` in ModelSpec. Placement failures use `RRS-M5xxx`. DeepSeek-V2-Lite runs across the 5080 and the 3090. *(Note since acceptance, 2026-10-10: the field is `placement{graph_node_id: gpu_index}`. One owner per algorithm: only the Rust planner `plan_layer_placement` (`rastai-server`, ModelSpec analysis) writes it, and `rastai_models` only applies it with `apply_placement` (contracts §2.4 rule 10). The decision is unchanged.)*
 - **Parity** (ADR-0013 rules): CI uses tiny random-weight configs of each new family. Real-weight parity runs nightly on OLMoE-1B-7B (one GPU) and DeepSeek-V2-Lite (both GPUs). MLA parity is checked in both the plain and the absorbed form.
 
 **Training** (`rastai_train` recipes, each also usable on its own):

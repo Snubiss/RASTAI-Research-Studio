@@ -1,6 +1,6 @@
 # Rastai Research Studio: Product and Technical Scope v5
 
-**Status:** draft v5.3, 2026-10-10. v5.1 added the business model (§36). v5.2 applies the spike's findings (`spike/README.md`) and locks the license. v5.3 closes the technique coverage gaps and makes Evaluation a first-party plugin (§10).
+**Status:** draft v5.4, 2026-10-10. v5.1 added the business model (§36). v5.2 applies the spike's findings (`spike/README.md`) and locks the license. v5.3 closes the technique coverage gaps and makes Evaluation a first-party plugin (§10). v5.4 applies the owner's 2026-10-10 decisions: the design review, MySQL as an optional long-term archive, theming and custom-frontend groundwork, and plain JavaScript instead of TypeScript (§0.19–§0.22, §37).
 
 **Merges:**
 - v4.1 (three reviews: ecosystem/interop, product, compute/cloud);
@@ -39,6 +39,26 @@ v4 (`rastai_spec_v4.md`) is kept for history.
     - training: reward models, PPO, the full RLHF chain, and GSPO (§10, §12);
     - evaluation: LLM-as-a-judge, Pass@k, Elo ratings and perplexity (§10).
 18. **Evaluation is a first-party plugin,** the second after Psychology. It tests models the way a test suite tests code (§10).
+19. **Design-review decisions accepted (2026-10-10),** each with the recommended default:
+    - §27 gains the dependencies the design docs rely on, each behind one wrapper file (§27).
+    - The spec now matches the design docs: Connect for the UI transport (§16), settings in files (§19), generated Python dataclasses (§20), an in-house JSON-lines logger (§25), first-party plugins in `plugins/` (§29).
+    - Sign-in (ADR-0034): one-time login codes exchanged for an HttpOnly session cookie; the Tauri shell only runs `rastai open --print-url`; a loopback Host rule; the daemon refuses to start on a too-open `owner.token`; a fixed reattach order. It supersedes the affected parts of ADR-0001, ADR-0006 and ADR-0007 (§21).
+    - `unsafe` is allowed for one `statvfs` call in `rastai-store/src/disk_space.rs` only (ADR-0033).
+    - `miniz_oxide` and `torchvision.io.decode_image` replace the in-house DEFLATE and PNG/JPEG decoders. Every remaining in-house parser of untrusted input gets a fuzz target (§23, ADR-0037).
+    - JSON Schema and generated types come from hand-written `describe_<type>()` tables; switch to `schemars` once more than about 20 document types make the tables a recurring review cost (§20).
+    - `ruff` and `prettier` join the dev tooling now (M1).
+    - A managed vLLM engine comes after the prototype. An external vLLM server is reachable now through the OpenAI-compatible adapter (§8).
+    - Blind A/B votes are a project document, `evals/votes.rrsdata`: undoable, journaled, and read by Elo like any preference dataset (§10).
+    - Two work lanes; the plan is redone after M1 with measured velocity (§29, §32).
+    - M2 closes on NVIDIA. The AMD parity gate moves to M10, and the owner buys a discrete RDNA3+ card before M10 (§4).
+    - A self-hosted GPU runner for the repo once it's public, with a read-only HF token for gated real-weight parity (§4, §29).
+    - The default data policy stays `local-only`, with a one-click fix on the first refusal (`RRS-C1009`, §24).
+    - Live-panel overhead budget: at most +35% at CUDA-graph speed (§9).
+    - Judge trust bar: at least 0.8 agreement on at least 10 hand-labeled examples (§10).
+    - Anchors are on by default for DPO too (§10).
+20. **MySQL as a long-term archive, plus a MySQL data reader** (ADR-0035). SQLite stays the live store on every machine. A user-run MySQL or MariaDB server is an optional long-term archive that each daemon replicates to, one way and idempotently (§19). A MySQL dataset reader imports query results as dataset snapshots, and runs and metrics are exported through the archive's tables and views (§14). MySQL and MariaDB are never bundled or distributed.
+21. **Theming and custom-frontend groundwork now (M1).** A fixed token contract with `--rr-*` CSS variables, theme-aware renderers, and a locked security UI no theme can change (§7). Other frontends work through the generated client and the commands API; cross-origin browser clients are refused in v1, with two Phase 2 routes (§13).
+22. **Plain JavaScript instead of TypeScript** (ADR-0036). The owner reviews all code, and TypeScript isn't their strength. Hand-written frontend, plugin-UI and SDK code is JavaScript ES modules with React and JSX (`.js` and `.jsx`), with short JSDoc types checked by the TypeScript compiler in `checkJs` mode as a dev-only check. Nobody writes TypeScript syntax (§16).
 
 **Open**
 - Nothing blocking.
@@ -106,13 +126,13 @@ Those surfaces exist here to serve the loop.
 | Tier | Platform | Status |
 |---|---|---|
 | 1 | Linux + NVIDIA (CUDA 13; RTX 5080 16 GB and RTX 3090 24 GB on hand) | Built and tested in the prototype |
-| 1 | Linux + AMD (ROCm; needs a discrete RDNA3+ card, not yet on hand) | Built and tested in the prototype once the card is in |
+| 1 | Linux + AMD (ROCm; needs a discrete RDNA3+ card, bought before M10) | Built in the prototype; the AMD parity gate is at M10 (M2 closes on NVIDIA) |
 | 1 | Linux CPU-only | Built and tested (CI, small models) |
 | 2 | macOS Apple Silicon (MPS) | Designed for; untested until a Mac is available |
 | 2 | Windows (native or WSL2) | Designed for; Phase 2+ |
 
 Design rules that keep tier 2 cheap later:
-- The UI is web-based, with Tauri as the shell.
+- The UI is web-based (plain JavaScript + React, no TypeScript; §16), with Tauri as the shell.
 - Local IPC uses an abstraction that works over Unix sockets and Windows named pipes.
 - Sandboxes work with any Docker-API engine.
 - Paths are never hard-coded.
@@ -123,7 +143,7 @@ Design rules that keep tier 2 cheap later:
 - **GPU rental:** only for testing Phase 3 cloud providers and hardware you don't own.
 - **A Mac:** needed to bring macOS to tier 1.
 - **A discrete AMD GPU (RDNA3+):** needed to test ROCm for real. The Ryzen's integrated graphics (gfx1036) has no ROCm kernels, and forcing it gives silently wrong results (spike).
-- **The owner's box as a CI runner** (optional): lets GPU tests run automatically every night instead of by hand.
+- **The owner's box as a self-hosted GPU runner**, once the repo is public: runs on a schedule and by manual trigger on `main` only, under a separate runner user, with a read-only HF token for gated real-weight parity. Until then GPU tests run by hand.
 
 ## 5. Definition of Done
 Every feature is rated on four levels:
@@ -153,6 +173,13 @@ This is the target experience. In the prototype the steps work at L1 for the own
 - **Basic/Advanced:** one global setting, overridable per panel. Advanced adds controls and never hides or moves Basic ones; switching keeps all state.
 - **Command palette** (Ctrl/Cmd-K) over the command layer, showing each command's shortcut and "copy as CLI / Python / MCP".
 - **Design system:** one in-house package (`packages/ui`) used by first-party sections and plugins alike.
+- **Theming tokens (M1):**
+  - A theme is a `rastai.theme/1` document with fixed token keys: color roles, type (font family, weight, line height), density, motion, focus ring and elevation.
+  - The tokens become `--rr-*` CSS variables. Those variables are the public styling surface for sections and plugins.
+  - The canvas and viz renderers take the same tokens: `canvasColors(tokens)` for the graph renderer, and `setColors()` on `GraphRenderer` and every viz class, so a theme switch never recreates a WebGL context. The glyph atlas takes its font from the tokens.
+  - No hard-coded colors in canvas, viz or sections; a CI check fails on them.
+  - Settings: `ui.theme` (light, dark, `system`, or a theme id) and `ui.density`.
+- **Locked security UI:** the egress badge, the trust prompt, the permission list, the signed-out screen and the error severity colors use fixed tokens that no theme or plugin can change. The threat model has a row for themes and plugin UIs that hide or disguise UI.
 - **One catalog** covers error diagnostics and plain-English definitions of terms.
 - **Tutorials** check real app state through commands. The assistant can "show me" or "do it". (Phase 2 for polish.)
 - **Accessibility (WCAG 2.2 AA):** colorblind-safe palettes, a table behind every chart, a keyboard-driven token timeline, reduced motion for 3D views.
@@ -167,7 +194,7 @@ This is the target experience. In the prototype the steps work at L1 for the own
 - Adjustable generation settings for local models: temperature, top-k, top-p, repetition penalty, max tokens, seed.
 - **Two runtimes per local model:**
   - **Inspectable (in-house):** the model runs through Rastai's own runtime (§17), with every layer observable and editable.
-  - **Fast (external engine):** llama.cpp's `llama-server`, managed by Rastai. vLLM is optional, for Linux serving nodes.
+  - **Fast (external engine):** llama.cpp's `llama-server`, managed by Rastai. A managed vLLM engine comes after the prototype (§33). Until then an external vLLM server can be added through the OpenAI-compatible adapter; its chats are logged and replayed like API-model chats, labeled "proxy".
   - One toggle in chat switches between them.
 - **Replay twins:** a quantized Fast-runtime model maps to its full-precision weights for inspection, with the fidelity labeled ("approximate: Q4 → bf16").
 - **API-model chats** log text plus any logprobs the API returns. They replay through a local observer model the user picks, labeled "proxy".
@@ -218,7 +245,7 @@ Inference plus analysis tools for seeing inside a model. It's all built in-house
   - no extra GPU→CPU sync per lens: the whole readout is one packed tensor, one copy per token;
   - decoding runs as a captured static-shape step (a CUDA graph); a Python decode loop is launch-bound at a third of the speed (spike).
 - **Measured budget (spike, Gemma 3 1B, bf16):** the full panel costs +16–31% (1.5–2.4 ms per token) at CUDA-graph speed, the packet is 8.3 KB per token, and the whole stack peaks at 2.7 GiB.
-- The measured overhead budget is shown in the UI (tokens/s with the panel on vs off).
+- **Overhead budget (decided, §0.19):** at most +35% at CUDA-graph speed. The UI shows it (tokens/s with the panel on vs off), and a nightly GPU test fails above it.
 - **Remote models:**
   - Summaries are computed on the node, about 20 KB per token.
   - Full tensors are fetched only when the user zooms in.
@@ -227,6 +254,7 @@ Inference plus analysis tools for seeing inside a model. It's all built in-house
 **Interventions and branching**
 - Boost or suppress concepts, ablate heads, apply steering vectors.
 - Rewind to any token, intervene, regenerate, and compare branches side by side.
+- Interactive controls (sliders, ablations, steering) call core commands directly from the UI, with a local round-trip budget of p95 under 50 ms (tested in M4). The plugin's Python module handles validation and offline jobs.
 
 **Edits become training (the loop)**
 - **Prefer this branch:** a branch pair saves as a DPO pair or SFT target, linked to its replay.
@@ -256,8 +284,10 @@ All on the in-house trainer (§17).
 - **LoRA is native to ModelSpec:** any node can be set to freeze, LoRA or train. No separate adapter library is needed.
 - **Teach it keeps everything else in place (spike):**
   - training mixes in *anchors*, the base model's own answers to a fixed set of unrelated questions, by default; in the spike this cut drift on unseen prompts by 83–87% with no loss of the new facts;
+  - anchors are on by default for DPO too, as an SFT term beside the DPO loss; a GPU drift test must pass before DPO reaches L2;
   - Verify reports drift (KL from the base model on a fixed general prompt set) next to the behavior tests, because keyword checks missed both a style change and an invented fact;
-  - measured: ~10 s end to end for 40 examples on the 5080 under an 8 GiB cap, with the chat model resident, peaking at 4.7 GiB.
+  - measured: ~10 s end to end for 40 examples on the 5080 under an 8 GiB cap, with the chat model resident, peaking at 4.7 GiB;
+  - Teach it and offline analyses keep Gemma 3 1B as the First Run default, and any pause in chat while they run is shown clearly. Read-only CUDA IPC sharing of the frozen base between chat and training is on the M5 completion list, behind a measurement gate.
 - **Training memory defaults (spike):** loss computed only at answer positions (full-vocabulary logits everywhere cost gigabytes), LoRA master weights in float32 with bf16 compute, gradient checkpointing on.
 - **QLoRA** uses an external 4-bit kernel (bitsandbytes) behind our kernel interface until in-house kernels exist.
 - **Hardware-aware defaults:** dtype, quantization, batch size and recipe availability come from the hardware profile plus the designer's memory estimate. A capability matrix enables recipes per backend (e.g. bf16 needs Ampere or newer; QLoRA availability depends on the kernel backend).
@@ -287,10 +317,10 @@ Evaluation tests a model the way a test suite tests code. It's the second first-
   - **LLM-as-a-judge:**
     - any model reachable through the gateway, local or API, grades answers against a rubric, with a reference answer for factual tests;
     - in pairwise comparisons the judge sees both orders, and a disagreement counts as a tie;
-    - before a judge is trusted, it's checked against a few hand-labeled examples and its agreement rate is shown;
+    - a judge's verdicts count only after it agrees with at least 0.8 of at least 10 hand-labeled examples; its agreement rate is shown;
     - the judge's prompt and verdict are logged with every result.
   - **Pass@k** for code and agent tasks: n samples per task run in the sandbox manager (§12) and are scored with the unbiased estimator.
-  - **Elo ratings** come from pairwise preferences: branch picks, blind A/B in chat, or judge verdicts. They're fit with a Bradley-Terry model, which doesn't depend on the order the comparisons happened in, and shown on the Elo scale with bootstrap confidence intervals.
+  - **Elo ratings** come from pairwise preferences: branch picks, blind A/B in chat, or judge verdicts. Blind A/B votes are a project document (`evals/votes.rrsdata`), undoable and journaled, and Elo reads them like any preference dataset. They're fit with a Bradley-Terry model, which doesn't depend on the order the comparisons happened in, and shown on the Elo scale with bootstrap confidence intervals.
   - **Perplexity** on held-out text, plus bits per byte, because perplexity can't be compared across tokenizers.
   - **Drift:** KL from the base model on a fixed general prompt set (spike, above).
   - **Reward-model scores**, and Psychology's model diff (§9).
@@ -317,6 +347,7 @@ A professional architecture tool built on an in-house canvas renderer. Basic use
   - shape errors;
   - a time estimate per target.
   - It warns when the model is far larger than the dataset.
+  - Stats are computed in Rust, and the Python compiler builds the same model, so one shared golden fixture per op (shapes, parameter count, FLOPs) is checked by both.
 - In Basic mode, text-generation goals are steered toward fine-tuning, with an explanation of why.
 
 **Pro, from scratch**
@@ -385,7 +416,7 @@ An in-house RL engine on the in-house trainer, gateway and sandbox manager.
 - Every contribution registers commands, so every plugin feature becomes an MCP tool and a CLI verb automatically.
 
 **Plugin anatomy (`.rrsplugin`):** a manifest plus any of:
-- **Frontend UI:** a sandboxed iframe using our in-house bridge, which is compatible with MCP Apps (`ui://` resources, JSON-RPC over postMessage). Plugins use the shared design-system package, so they look native.
+- **Frontend UI:** a sandboxed iframe using our in-house bridge, which is compatible with MCP Apps (`ui://` resources, JSON-RPC over postMessage). Plugins use the shared design-system package, so they look native. First-party UI is plain JavaScript + React; a plugin author may use any language inside their iframe.
 - **Python job module:** runs as its own process under the node, with network off by default.
 - **Provider process:** an out-of-process gRPC compute-target provider (§22).
 - **WASM module (deferred):** comes when first-party code needs it, on wasmtime with WASI 0.3 component interfaces.
@@ -396,8 +427,8 @@ An in-house RL engine on the in-house trainer, gateway and sandbox manager.
 - Third-party UI runs in iframes.
 
 **SDK: a plugin in an afternoon** (Phase 1 basics, Phase 2 complete)
-- `rastai plugin new <template>`, with templates for panel, section, converter, recipe, designer-node, lens, metric, reward, adapter, importer, exporter and theme.
-- **Typed SDKs from one source:** `rastai-plugin` (Rust), `@rastai/plugin` (TS) and `rastai_plugin` (Python).
+- `rastai plugin new <template>`, with templates for panel, section, converter, recipe, designer-node, lens, metric, reward, adapter, importer, exporter and theme. UI templates are `.jsx`.
+- **Typed SDKs from one source:** `rastai-plugin` (Rust), `@rastai/plugin` (plain JavaScript with short JSDoc types and generated declarations) and `rastai_plugin` (Python).
 - `rastai plugin dev`: loads the plugin unpacked into a running app, hot-reloads UI, restarts the Python module on save, and opens devtools.
 - `rastai plugin test`: a headless host with a mock worker, tiny fixture models and UI snapshot tests.
 - `rastai plugin lint | pack | publish`. Plugin errors get `RRS-Pxxxx` codes.
@@ -426,8 +457,29 @@ An in-house RL engine on the in-house trainer, gateway and sandbox manager.
 - The gallery shows fork and remix trees. "Remix" forks with attribution filled in automatically.
 
 **Malleability**
-- **Macros:** recording UI actions produces a Python or TS script against the SDK client, which can be shared.
+- **Macros:** recording UI actions produces a Python or JavaScript script against the SDK client, which can be shared.
 - **Embeds:** a read-only `<rastai-viewer>` web component embeds live designs and replays in docs, blogs, READMEs and HF Spaces (Phase 2).
+
+**Themes**
+- **Now (M1):** the token contract (§7). A theme is declarative: a `themes[]` contribution holding a `rastai.theme/1` document.
+- **M8:** theme plugins end to end, with an accessibility checker in `rastai-formats` (WCAG 2.2 AA: contrast 4.5:1 for text and 3:1 for UI and focus, 24 px targets) and a theme picker; follow-OS and high-contrast themes; a font assets path; icon sets (`rastai.icon_set/1`).
+- **M8 or Phase 2:** a per-panel `theme_override`.
+- **Phase 2:** an unsupported user stylesheet. The security UI (§7) sits in closed shadow roots, so a stylesheet can't reach it.
+
+**Custom frontends**
+- **What works now:**
+  - The web app holds no domain logic: anything stateful or computed is a command (§21). So every feature the app has is reachable from the CLI, MCP, scripts and other frontends. A surfaces test grows each milestone, and M10 runs the core loop through the API alone.
+  - The generated client takes a credential option (session cookie or bearer token). Typed command wrappers are generated against a small `CommandExecutor` interface, which both `PluginHost` and `DaemonClient` satisfy.
+  - Non-browser clients (scripts, Navi, MCP clients, a terminal UI) use bearer tokens (§21).
+  - Cross-origin browser clients are refused in v1 (ADR-0034).
+- **Phase 2 routes:**
+  - alternative UIs hosted by the daemon on its own origin;
+  - an origin allowlist with pairing and CORS, only on demand;
+  - `token.pair` for non-browser clients;
+  - JSON for `EventService` through a generated proto-JSON codec (M9 if needed, else Phase 2);
+  - a stable commands API 1.0 subset, with schema-diff CI;
+  - built packages published to npm, with PacketStore and token decoding moved into a shared package;
+  - a reference terminal UI run in CI.
 
 ## 14. Import / Export
 All importers and exporters are in-house.
@@ -436,10 +488,17 @@ All importers and exporters are in-house.
 |---|---|---|
 | Conversations | Rastai schema; OpenAI messages JSONL (with tools); ShareGPT; ChatGPT export (branches kept); Claude export | Open WebUI, LM Studio, SillyTavern (and character cards), LibreChat, Gemini/Grok takeouts |
 | Models | HF Hub pull/push; safetensors; LoRA adapters (PEFT layout read/write); GGUF export; Ollama Modelfile; ONNX export | MLX, CoreML, ExecuTorch, TensorRT-LLM, AWQ/GPTQ/EXL2 loading, model merging |
-| Datasets | HF datasets (including streaming); JSONL, Parquet, CSV; Alpaca and chat formats; DPO pairs; Croissant metadata | WebDataset, Kafka and other streams, SQL/DuckDB, S3, audio/video folders |
+| Datasets | HF datasets (including streaming); JSONL, Parquet, CSV; Alpaca and chat formats; DPO pairs; Croissant metadata; MySQL / MariaDB queries (below) | WebDataset, Kafka and other streams, other SQL engines and DuckDB, S3, audio/video folders |
 | Harnesses | MCP configs, server.json, .mcpb, Agent Skills; Harbor tasks | LangGraph, CrewAI, OpenAI Agents SDK, Inspect, lm-eval-harness tasks |
 | Designs | HF config.json, torch.export, ONNX | Keras, JAX/Flax, timm, nanoGPT configs |
-| Runs | Trackio / W&B / TensorBoard log import | MLflow, Aim |
+| Runs | Trackio / W&B / TensorBoard log import; export of runs and metrics to MySQL / MariaDB through the long-term archive (M11, §19) | MLflow, Aim |
+
+**MySQL / MariaDB (§0.20)**
+- **Dataset reader:** `rastai_data/readers/mysql_reader.py`, the only file that imports PyMySQL. It runs on the node, in the job sandbox, and streams the query through a server-side cursor into a dataset snapshot (a JSONL or Parquet blob). Training reads the snapshot, never the live database, so runs stay reproducible.
+  - Credentials are short-lived, fetched by the job through `NodeHubService.GetSecret`.
+  - The connection is a `MysqlConnection` document in `rastai-formats`.
+- **Runs and metrics export:** the archive's typed tables plus two stable views, `v_runs` and `v_metrics`, for SQL tools and dashboards.
+- **Shared by both:** one type-mapping table (MySQL types to Rastai types) with golden fixtures checked in Rust and Python, one TLS policy (§24), and one CI MySQL service.
 
 **Conversation schema `rastai.conversation/1`**
 - A JSONL message tree with branches, tool calls and results, and multimodal parts.
@@ -483,7 +542,7 @@ The long tail of importers ships as community plugins and doubles as the showcas
 - CI also runs the local node over the real network transport, so local and remote never drift apart.
 
 **The pieces:**
-- **Daemon (Rust):** API, scheduling, model gateway, storage, the command layer, the plugin host, import/export, ModelSpec analysis.
+- **Daemon (Rust):** API, scheduling, model gateway, storage, the command layer, the plugin host, import/export, ModelSpec analysis, and the optional long-term archive sync (§19).
 - **Node (Rust, inside the daemon or standalone):**
   - transport and pairing, file transfers;
   - GPU telemetry and VRAM leases;
@@ -493,10 +552,16 @@ The long tail of importers ships as community plugins and doubles as the showcas
 - **Python jobs:** each job runs as a process in its own process group under the node, talking to it over a local socket.
   - A crash or OOM is reported with its cause.
   - A daemon crash orphans nothing: on restart, the daemon reattaches to running jobs.
-- **UI:** a React web app talking to the daemon **only over HTTP** (REST + server-sent events / WebSocket).
-  - Tauri is just a shell: the window, file associations and the updater.
+- **UI:** a React web app talking to the daemon **only over HTTP**, using Connect (protobuf over HTTP): unary `CommandService.Execute` for commands and a server stream from `EventService.Subscribe` for events.
+  - Tauri is just a shell: the window, file associations and the updater. It only runs `rastai open --print-url` and opens that URL, which carries a one-time login code (§21).
   - A plain browser and headless mode are full clients.
   - This also hedges against WebKitGTK on Linux.
+  - **The web app holds no domain logic.** Anything stateful or computed is a command, so the CLI, MCP and other frontends get every feature (§13).
+- **Frontend language: plain JavaScript + React (§0.22).**
+  - Hand-written frontend, plugin-UI and SDK code is JavaScript ES modules with React and JSX: `.js` and `.jsx` files only. No TypeScript syntax anywhere hand-written.
+  - Types live in short JSDoc comments (`@typedef`, `@param`, `@returns`), kept minimal and readable. No JSDoc type gymnastics: no conditional or mapped types, no long generic templates.
+  - `just check` runs the TypeScript compiler as a dev-only checker (`tsc --noEmit` over a `jsconfig.json`, `checkJs` mode). It never ships.
+  - Generated code (protobuf-es with target `js+dts`, document types, the catalog) may be `.d.ts` declarations or JSDoc `@typedef` `.js` modules. It lives in generated folders, is never edited by hand, and isn't part of review. connect-es is used from JavaScript.
 - **Headless:** `rastai serve --headless` runs the API and MCP with no UI. On a GPU box, the UI connects over an SSH tunnel.
 
 **Parsing boundary**
@@ -527,6 +592,7 @@ The in-house policy turns two things into one: the Designer's compiler *is* the 
   - **AttnRes:** a depth-attention node over earlier layers' outputs. It starts as a Designer node, and imported families follow once public weights use it.
 - **Models bigger than one GPU:** most real MoE and MLA models don't fit on one consumer GPU.
   - The runtime can place layers across GPUs. For example, DeepSeek-V2-Lite (MLA + MoE, about 31 GB in bf16) fits across the 5080 and the 3090.
+  - There is one layer-placement planner, in Rust. It writes the ModelSpec `placement{}` field, and the Python runtime and SDK only apply it.
   - CI parity uses tiny random-weight configs of each family, as it does for the core families. Real-weight parity runs on OLMoE-1B-7B (one GPU) and DeepSeek-V2-Lite (both GPUs).
 - **Spike result:** an in-house Gemma 3 1B is bit-identical to Hugging Face in fp32 with eager attention, within 6×10⁻⁴ with SDPA, and every greedy generation matches.
 - **Parity rules (spike):**
@@ -541,7 +607,7 @@ The in-house policy turns two things into one: the Designer's compiler *is* the 
   - gradient checkpointing for training.
   - In-house kernels (Triton) come later, where measurement shows they're needed.
 - **Unsupported architectures:** they import as opaque nodes. An optional compat runtime uses HF `transformers`, so they can still chat and train, with Psychology limited to the edges of the opaque node. `transformers` is otherwise only a test-time reference for parity.
-- **Fast runtime:** external engines behind the adapter interface (`llama-server`, optional vLLM). They are separate processes, not linked libraries, so they can be swapped. An in-house fast runtime is a long-term option.
+- **Fast runtime:** external engines behind the adapter interface (`llama-server` in the prototype; a managed vLLM after it). They are separate processes, not linked libraries, so they can be swapped. An in-house fast runtime is a long-term option.
 - **Trainer:** in-house loops on the same compiled modules.
   - LoRA and freezing are node attributes.
   - Optimizers and distributed training come from PyTorch.
@@ -570,22 +636,53 @@ The in-house policy turns two things into one: the Designer's compiler *is* the 
 - Large payloads go to the blob store; events carry only their hash.
 
 **Stores**
-- **`rastai.db` (SQLite, WAL mode):** runs, metrics, nodes, the artifact catalog, lineage, the command journal and settings. It's an index, rebuildable from the event logs plus the blob store.
+- **`rastai.db` (SQLite, WAL mode):** runs, metrics, nodes, the artifact catalog, lineage and the command journal. It's an index, rebuildable from the event logs plus the blob store.
+- **Settings live in files,** not in `rastai.db`: `<config>/settings.json`, a project's `settings.json`, `keybindings.json` and layout files. They're written atomically (temp file, fsync, rename) and every change is a journaled command. Settings can't be rebuilt from logs, so the index never holds them.
 - **`vault.db` (SQLite):** conversations (as a tree of message rows) and gateway logs. It's a separate file so it can be switched to SQLCipher encryption in Phase 2 with the same schema and no migration.
 - **Blob store:** a folder of files named by their BLAKE3 hash, holding artifacts, replays, checkpoints and dataset snapshots.
 - **Model weights** stay in the user's existing Hugging Face cache, never copied.
-- **No Postgres.** One user for now; the principal on every command (§21) keeps team mode possible.
+- **No database server for the live store.** SQLite is the live store on every machine. One user for now; the principal on every command (§21) keeps team mode possible.
 
 **Crash and disk safety**
 - kill -9 tests run in CI for the daemon, node and jobs.
 - Disk quotas and garbage collection for blobs, checkpoints and logs, with a "pinned" flag.
 - Free space is checked before downloads and training.
+- The minimal durable path is built first: event logs, reattach, atomic writes. Daily `VACUUM INTO` snapshots with salvage come after the core loop reaches L2 (§25).
+
+**Optional long-term archive: MySQL or MariaDB (§0.20, ADR-0035, M11)**
+
+SQLite stays the live store. A MySQL or MariaDB server is an optional long-term archive that each daemon replicates to, one way and idempotently, fed from its event logs and index. The user runs the server; Rastai never bundles or distributes it.
+- **Where:** the owner's own MySQL or MariaDB on the LAN or a NAS (the same code serves both), written only by the owner's machines. Each daemon has its own revocable MySQL user, and every row carries `source_id = daemon_<base32 of the daemon key>`. Nodes never get archive credentials.
+- **What's archived:**
+  - raw durable event records (keyed by `source_id`, `log_id`, `sequence`; the protobuf body plus its CRC);
+  - runs, `run_tags`, job final states, checkpoint metadata, `run_metrics`, eval results;
+  - artifacts and lineage (metadata and hashes only);
+  - the redacted `command_journal`.
+- **Never archived:** tokens, nodes, plugins, projects, settings, `undo_steps`, transfers, and HF weights (only the `model_ref` and hash).
+- **Conversations, messages, annotations and `gateway_log`:** off by default. A project opts in with `archive.include_conversations`; local-only projects never can. They go only into tables that report encryption (MySQL `ENCRYPTION='Y'`, MariaDB `ENCRYPTED=YES`). A `vault_changes` outbox in `vault.db` (migration 0001), written only when an archive is configured, feeds it.
+- **Blobs:** MySQL holds no bytes, only a `blob_objects` table (content hash, size, media type, target, verified time).
+  - Bytes go to a folder target first (NAS, USB, NFS or SMB; the same `ab/<hash>` layout as the blob store; written to `.incoming` and then renamed). S3-compatible storage comes later, with in-house SigV4 signing over `rastai-transport`'s HTTPS client.
+  - Archived: pinned checkpoints, LoRA adapters, dataset snapshots. Not intermediate checkpoints.
+  - Object first, row second. BLAKE3 is verified on restore. Vault-class blobs go under `vault/<source_id>/`.
+- **Sync:**
+  - Triggered by the indexer's commit, a timer (`archive.interval_seconds`, 60), `rastai archive sync`, and a catch-up at daemon start.
+  - At-least-once delivery with idempotent upserts. The local `archive_cursors` in `rastai.db` are stored only after the MySQL commit. The upsert builder is one function, tested against MySQL and MariaDB.
+  - `archive_meta` holds `schema_version` and `min_writer_version`. Migrations are additive and idempotent and run under `GET_LOCK('rastai_archive_migrate')`.
+  - **Server down:** backoff from 5 s to 5 min; `archive.status` shows the lag; a warning after 24 h; local pruning pauses.
+- **Prune is not delete:**
+  - **Prune** frees local space only. It touches only items the archive has acknowledged and verified, never pinned items or running jobs. It leaves stub rows (`runs.archive_state = pruned`) and restores on open. Local pruning is off until `archive.prune_after_days` is set.
+  - **Delete** is user intent and reaches the archive. `conversation.delete` adds the archive to its "every copy" set (queued in the outbox if the archive is down); `run.delete` writes a tombstone; `rastai archive purge`, with admin credentials, removes rows physically.
+- **Restore:** `archive.restore` (a run, a conversation, an artifact, or `--source <id> --all`) rewrites frames into `events.log`, checks CRCs, and indexes them through the indexer's own `apply_event_record`. Rebuilding the index gains a step that pulls pruned runs back from the archive.
+- **Security:** the archive is a remote destination under the data policy (§24). TLS is required except over loopback or a Unix socket. Credentials live in the keychain (`archive.mysql`, `archive.objects`). The egress badge shows during sync.
+- **Code:** a new crate, `rastai-archive`. Its `src/mysql.rs` is the only file that imports `mysql_async`, and `deny.toml` enforces that. Commands `archive.configure | status | sync | restore | verify | purge`, settings section `archive`, error range `RRS-S5xxx`, archive events, and kill -9 rows 20–24 (archiver killed between the MySQL commit and the local ack; mid blob upload; prune between row delete and file delete; restore mid-write; migration mid-statement). contracts.md holds the exact names.
 
 ## 20. Schemas, Protocols and Versioning
 **One owner per schema; no type is defined twice**
 - **Wire (between processes):** protobuf, managed with buf (prost + tonic in Rust, connect-es in the browser, grpcio in Python).
-- **Documents and command arguments:** the `rastai-formats` Rust types. JSON Schema, TypeScript types and Python (pydantic) types are generated from them.
+- **Documents and command arguments:** the `rastai-formats` Rust types. JSON Schema, JavaScript types (`.d.ts` declarations or JSDoc `@typedef` modules) and Python types (plain `@dataclass` classes) are generated from them. Validation stays in Rust; Python reaches it through the PyO3 wheel.
+  - The generator reads hand-written `describe_<type>()` tables next to each struct, checked against the struct by a test. Once more than about 20 document types make the tables a recurring review cost, switch to `schemars`.
 - Golden test messages are checked in and round-tripped in every language, and `buf breaking` runs in CI.
+- **Stability:** every command and event type carries `stability` (`preview`, `stable` or `deprecated`). All are `preview` until Phase 2. `buf breaking` can't see inside `arguments_json` and `result_json`, so a schema-diff check on `schemas/commands` is planned for the stable subset (§13).
 
 **Protocols**
 - **Node protocol:** daemon ↔ node, over a Unix socket / named pipe locally, and SSH (later QUIC) remotely.
@@ -606,11 +703,14 @@ The in-house policy turns two things into one: the Designer's compiler *is* the 
 - Undo covers document edits only (designs, harnesses, datasets), not side effects like training runs.
 - The MCP server and client are in-house: JSON-RPC, generated from the registry.
 
-**Local API security**
+**Local API security** (ADR-0007, with ADR-0034's sign-in)
 - Listen on loopback plus a Unix socket / named pipe.
-- The access token lives in a file only the user can read (mode 0600).
-- Host and Origin headers are checked to block DNS-rebinding attacks.
-- Navi and MCP clients get scoped tokens (for example "chat only").
+- The owner token lives in a file only the user can read (mode 0600). The daemon refuses to start if the file is more open than that.
+- **Browser sign-in:** `rastai open --print-url` prints a URL with a one-time login code. The web app exchanges the code for an HttpOnly session cookie. The session is bound to the origin that redeemed the code, because cookies aren't isolated by port.
+- A cookie request with no Origin header is accepted only for GET and HEAD with `Sec-Fetch-Site` of `same-origin` or `none`.
+- Host and Origin headers are checked to block DNS-rebinding attacks. Any loopback Host on any port is accepted (an SSH tunnel often forwards another local port), and Origin must equal `http://` plus the Host.
+- Cross-origin browser clients are refused in v1. The Phase 2 routes are daemon-hosted alternative UIs on its own origin, and an origin allowlist with pairing (§13).
+- Navi and MCP clients get scoped bearer tokens (for example "chat only").
 - The remote UI goes through an SSH tunnel; no port is ever opened to the network by default.
 
 ## 22. Compute, Nodes and Data
@@ -697,33 +797,40 @@ The in-house policy turns two things into one: the Designer's compiler *is* the 
   - zip-slip paths (`..` in archive entries) rejected;
   - no remote code execution from model repos: in-house runtime, and `trust_remote_code` is off in the compat runtime.
 - **Strict safetensors contract (spike):** no duplicate JSON keys; integers must be real integers (booleans and floats rejected); byte sizes computed with overflow checks (a shape of [2³², 2³²] must not wrap to 0); tensors must tile the data section exactly, with no overlaps, gaps or trailing bytes; metadata maps strings to strings. Writing this corpus found four gaps in the spike's own first reader.
-- **Testing:** fuzz the parsers (cargo-fuzz), round-trip property tests, and a golden corpus of broken files with expected error codes. The spike's 33-file safetensors corpus (6 valid, 27 malformed) is its seed.
+- **One owner per parser:** Python never re-implements the safetensors contract. It calls `check_safetensors_header` from the `rastai_formats` wheel and only reads tensor bytes itself.
+- **Decoders we don't write (§0.19):** zip DEFLATE goes through `miniz_oxide` behind one wrapper file (`rastai-formats/src/zip/inflate.rs`); the zip container itself, with its limits, stays in-house. Images decode through `torchvision.io.decode_image` behind `rastai_data/image_decode.py` (ADR-0037).
+- **Testing:** every in-house parser of untrusted input has a fuzz target (cargo-fuzz for the Rust ones), plus round-trip property tests and a golden corpus of broken files with expected error codes. The spike's 33-file safetensors corpus (6 valid, 27 malformed) is its seed.
 - **Beyond files:** typed errors in libraries, catch-all errors only at the edges, and every user-facing error mapped to a catalog code.
 
 ## 24. Trust and Privacy
 - No telemetry and no account. Crash reports go out only if the user opts in.
-- A visible badge shows whenever data leaves the machine.
+- A visible badge shows whenever data leaves the machine, including during archive sync. It is part of the locked security UI (§7).
 - **Gateway logs:** retention setting, incognito chats, and PII/secret redaction on dataset export. Encryption at rest arrives in Phase 2 (`vault.db` → SQLCipher).
 - **Secrets** live in the OS keychain and never go into `.rrsproj`. Headless Linux has no keychain service, so it falls back to the kernel keyring or an encrypted file.
 - Cloud credentials never leave the daemon. Nodes get short-lived scoped tokens.
-- **Data policy per project:** `local-only`, `trusted-remote` or `any`.
+- **Data policy per project:** `local-only` (the default), `trusted-remote` or `any`. The first time the policy refuses something, the refusal (`RRS-C1009`) offers a one-click fix that changes the project's policy.
+- **The long-term archive is a remote destination** under the data policy (§19). TLS is required except over loopback or a Unix socket; credentials live in the keychain; conversations reach it only by per-project opt-in, never from a local-only project, and only into tables that report encryption.
 - **Fine-grained plugin permissions:**
   - `network:[hosts]`, `fs:project|ro`, `secrets`;
   - `gpu`, `weights.read`, `conversations.read` (sensitive);
   - `gateway.spend`, `sandbox.spawn`, `commands:[scopes]`.
 - Any network or data permission triggers the trust prompt, even for a declarative plugin.
 - **Enforcement:** Python plugin modules run as separate processes with network off by default. They are still trusted code, and the trust prompt says so.
+  - On Linux, network-off is a new user and network namespace. Ubuntu 23.10 and later restrict unprivileged user namespaces, so the `.deb` ships an AppArmor profile that grants them to Rastai.
+  - Where namespaces are still unavailable, trusted preinstalled first-party plugin modules run without the network namespace and a warning is shown. Only third-party modules that don't declare a network permission are refused.
+- **Themes and plugin UIs can't hide or disguise the security UI** (§7); the threat model has a row for it.
 - **Phase 2:** Sigstore signing, a verified-publisher badge, scanning of every version, and a signed revocation list. An update that adds permissions asks again.
 - **We own our security now:** in-house protocols (gateway, MCP, node) get a threat model, fuzzing and review. Crypto, TLS/QUIC and SSH are never written in-house.
 
 ## 25. Observability, Updates and Maintenance (new)
-- **Logs:** structured JSON logs (Rust `tracing`), with run IDs carried into Python jobs.
+- **Logs:** structured JSON-lines logs from an in-house logger in `rastai-diag` (no `tracing`), with run IDs carried into Python jobs through `RASTAI_RUN_ID`.
 - `rastai doctor --bundle` packs logs, the hardware profile and versions into one file for bug reports.
 - **Self-update:**
   - Linux packages: AppImage and `.deb` in the prototype, through the Tauri updater.
   - Remote nodes get the matching binary pushed by the daemon.
 - **Model downloads:** gated HF models (token, license acceptance), resumable downloads, and disk checks.
-- **Disk:** quotas, garbage collection, pinned items, and a storage view in settings.
+- **Disk:** quotas, garbage collection, pinned items, and a storage view in settings (Settings > Storage, with an Archive page for §19 in M11).
+- **Built after the core loop reaches L2:** daily `VACUUM INTO` snapshots with salvage, the node self-update watchdog with rollback, plugin-data downgrade guards, crash-report rate limits, and plugin event deliveries beyond what Evaluation's auto-run needs.
 
 ## 26. Code and Reproducibility
 - **Escape hatches in both directions:**
@@ -739,10 +846,10 @@ The in-house policy turns two things into one: the Designer's compiler *is* the 
 1. **Foundations** that are impractical to rebuild: language runtimes, PyTorch and its GPU backends, the browser engine, the OS, the container engine.
 2. **Security-critical** code where writing our own is dangerous: crypto, TLS/QUIC, SSH, database encryption, sandboxing runtimes.
 3. **Byte-exact compatibility surfaces** that must match an ecosystem exactly: tokenizers, Jinja chat templates, protobuf.
-4. **External engines:** whole processes behind the adapter interface, optional and swappable (`llama-server`, vLLM).
+4. **External engines:** whole processes or servers behind our own interface, optional and swappable (`llama-server`; vLLM after the prototype; a user-run MySQL or MariaDB archive).
 5. **Dev tooling** that never ships in the product: linters, test runners, release tools.
 
-Thin utility libraries are written in-house when it's cheap to do so. Every external dependency is listed here, with a reason and a replacement path. CI enforces the list (cargo-deny, a license allowlist, hash-pinned lockfiles).
+Thin utility libraries are written in-house when it's cheap to do so. Every external dependency is listed here, with a reason and a replacement path. A library with a narrow job (a client, a parser, a binding, a decoder) is imported by exactly one wrapper file in the crate or package that owns it; foundations such as tokio, serde, React and PyTorch are used directly. CI enforces the list (cargo-deny, a license allowlist, hash-pinned lockfiles, `deps/allowlist-*.json`).
 
 **In-house (ours)**
 
@@ -766,31 +873,52 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Diagnostics renderer | Compiler-style error output |
 | Transfers | Whole-file BLAKE3 + resumable transfer protocol |
 | Installer, `rastai doctor`, hardware detection | Reads nvidia-smi, rocm-smi and sysfs |
+| Logger | JSON-lines logs in `rastai-diag` |
+| Zip container | Central directory, limits, zip-bomb and zip-slip checks (DEFLATE itself is `miniz_oxide`) |
+| Long-term archive sync | `rastai-archive`: event and index replication, blob targets (folder, later S3 with in-house SigV4), prune and restore |
+| Theme tokens and checker | `rastai.theme/1`, `--rr-*` variables, the WCAG contrast checker (M8) |
 
 **External (allowlist)**
 
 | Category | Dependency | Why | Replacement path |
 |---|---|---|---|
 | Foundation | Rust toolchain, tokio, axum, serde | Language runtime and HTTP | — |
-| Foundation | Python 3.12, PyTorch (CUDA / ROCm / CPU; MPS later), `torch.distributed`, `torch.onnx` | GPU math, autograd, kernels | Native Rust compute (Burn / tch-rs) is a long-term option |
+| Foundation | hyper, hyper-util, tokio-rustls, webpki-roots, tower | The HTTPS client (API adapters, HF Hub, later S3) and the Docker socket; tonic channels over Unix sockets. Same family as axum, tonic and rustls, already in the tree through them. One wrapper file per use (contracts §2) | — |
+| Foundation | pyo3, wasm-bindgen | Language bindings for the two `rastai-formats` builds: the Python wheel and the browser's WASM validator | — |
+| Foundation | libc | One `statvfs` call for free disk space, the only hand-written `unsafe` (ADR-0033), in `rastai-store/src/disk_space.rs` | Run `df --output=avail -B1` |
+| Foundation | OS tools: `setsid`, `kill`, `unshare`, `df`, `nvidia-smi`, `rocm-smi` | Process groups, signals, namespaces, disk and GPU readings. Run as child processes, never linked | — |
+| Foundation | Python 3.12, PyTorch (CUDA / ROCm / CPU; MPS later), `torch.distributed`, `torch.onnx` (with `onnx` and `onnxscript`, which its exporter imports; only in `rastai_models/onnx_export.py`) | GPU math, autograd, kernels, ONNX export | Native Rust compute (Burn / tch-rs) is a long-term option; an in-house ONNX writer from ModelSpec if the exporter's packages churn |
+| Foundation | `torchvision.io.decode_image` | PNG and JPEG decoding of untrusted images, only in `rastai_data/image_decode.py`. A hand-written decoder is weeks of parser risk | An in-house decoder behind the same function |
 | Foundation | uv | Python environments and lockfiles; packaging is a swamp | — |
-| Foundation | React + TypeScript, Tauri 2 | UI framework and desktop shell | The browser is already a full client |
-| Foundation | SQLite (rusqlite) | Embedded database | — |
+| Foundation | React | UI framework, used from plain JavaScript and JSX (§16) | — |
+| Foundation | Tauri 2 (with `tauri-build` and the Tauri updater plugin) | Desktop shell and its signed updates | The browser is already a full client |
+| Foundation | SQLite (rusqlite) | Embedded database, the live store on every machine | — |
 | Foundation | Docker / Podman engine, OpenSSH | Containers and remote access | — |
-| Security | blake3, ed25519-dalek, rustls, OS keychain bindings | Crypto, identity, TLS | — |
+| Security | blake3, ed25519-dalek, rustls, keyring (OS keychain bindings) | Crypto, identity, TLS, secrets | — |
 | Security (later) | SQLCipher, iroh / quinn, wasmtime, Sigstore | Encryption at rest, QUIC/NAT traversal, WASM sandbox, signing | — |
+| Compatibility | miniz_oxide | DEFLATE for zip files from untrusted sources, only in `rastai-formats/src/zip/inflate.rs`. A hand-written decompressor is parser risk for no gain; the zip container stays in-house and fuzzed | — |
 | Compatibility | HF `tokenizers` | Exact token IDs for every model | — |
 | Compatibility | minijinja | HF chat templates are Jinja | — |
-| Compatibility | protobuf: prost / tonic, connect-es, grpcio | The wire format | — |
+| Compatibility | protobuf: prost / tonic, protobuf-es (target `js+dts`) / connect-es, grpcio / Python `protobuf` | The wire format, generated for Rust, JavaScript and Python | — |
+| Compatibility | pyarrow | Parquet read and write | An in-house Parquet reader |
+| Compatibility (client) | mysql_async (MIT OR Apache-2.0; features `default-rustls-ring`) | The MySQL wire protocol for the long-term archive (§19), only in `rastai-archive/src/mysql.rs`. Not sqlx (RUSTSEC-2023-0071 through `rsa`), not Oracle's connectors | — |
+| Compatibility (client) | PyMySQL (MIT) | The MySQL dataset reader (§14), only in `rastai_data/readers/mysql_reader.py`. Not mysqlclient, not Oracle's connectors | — |
 | Engine | llama.cpp `llama-server` | Fast runtime on every backend. Official CUDA 13 Linux builds ship their runtime libraries, so no CUDA toolkit is needed; pin a build and check its SHA-256 | An in-house fast runtime (long term) |
-| Engine (optional) | vLLM | High-throughput serving on Linux nodes | — |
+| Engine (optional, user-run) | MySQL 8.4+ or MariaDB server | The optional long-term archive (§19). GPL-2.0, so never bundled or distributed: the user installs and runs it | None needed: the archive is optional and SQLite stays the live store |
+| Engine (optional, after the prototype) | vLLM | Managed high-throughput serving on Linux nodes. Before then, an external vLLM is reachable through the OpenAI-compatible adapter | — |
 | Engine (optional) | HF `transformers` | Compat runtime for unsupported architectures; parity reference in tests | Add the architecture to ModelSpec |
 | Kernel (optional) | bitsandbytes | 4-bit kernels for QLoRA | In-house Triton kernels |
-| Dev tooling | buf, cargo-deny, cargo-fuzz, Playwright, maturin, dist, release-please, just | Build, test, release | — |
+| Dev tooling | buf, cargo-deny, cargo-fuzz, Playwright, maturin, wasm-bindgen-cli, dist, release-please, just | Build, test, release | — |
+| Dev tooling | pytest, vitest, `@vitest/browser`, vite, pnpm, axe-core, the Tauri CLI | Python and JavaScript tests, browser-mode renderer tests, accessibility checks, the frontend build, JavaScript workspaces, desktop packaging | — |
+| Dev tooling | ruff, prettier | Python and JavaScript formatting and linting (M1) | — |
+| Dev tooling (checker only) | the `typescript` package | Runs `tsc --noEmit` in `checkJs` mode over `jsconfig.json` in `just check`, checking the JSDoc types in plain JavaScript. Never ships; nobody writes TypeScript (§0.22) | Drop the check; the code is plain JavaScript either way |
+| Dev tooling (CI services) | MySQL 8.4 and 9.7, MariaDB, MinIO | Archive and reader tests (M11); test targets only, never shipped | — |
 | Data (not code) | Gemma Scope 2, Llama Scope SAE weights; Neuronpedia labels | Pretrained dictionaries and labels | Train our own with the SAE recipe |
 | Service (Phase 3) | Payment provider / merchant of record (e.g. Paddle or Stripe) | Payments and global tax are compliance-critical; never built in-house | Another provider |
 
 **Dropped (prior art, not dependencies):** Unsloth, TRL, PEFT, Accelerate, nnsight, TransformerLens, SAELens, circuit-tracer, rLLM, Harbor (its task format is imported), React Flow, three.js, deck.gl, uPlot, miette, Extism, Trackio (its logs are imported). Never: LiteLLM, which was compromised on PyPI in March 2026.
+
+**Not used, with what replaces them:** `tracing` (the in-house logger, §25), pydantic (generated dataclasses, §20), `schemars` (the `describe_<type>()` tables until about 20 document types, §20), an in-house DEFLATE and PNG/JPEG decoder (`miniz_oxide`, `torchvision.io.decode_image`), TypeScript as a source language (plain JavaScript with JSDoc, §16), sqlx, mysqlclient and Oracle's MySQL connectors (`mysql_async`, PyMySQL).
 
 **The cost, stated honestly:** in-house adds months to the CTO's 9–12 month estimate for the wrapped stack. The model families, trainer, interpretability stack, RL engine and canvas are each multi-week efforts. The payoff: one runtime where everything is observable, no upstream churn, no license traps, and depth nobody can copy by wrapping the same libraries. AI agents plus parity tests make the extra work tractable.
 
@@ -800,59 +928,75 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | 1 | Scope outruns a single human reviewer | High | High | L0–L3 bar; at most 2 work tracks merging at once; a demo every week; contracts land first |
 | 2 | In-house model families have parity bugs or lag behind new architectures | High | High | A parity suite per family (fp32 + bf16); opaque node + compat runtime fallback; start with 2 families |
 | 3 | In-house trainer is slower or hungrier for VRAM than Unsloth | Medium | Medium | SDPA, `torch.compile`, gradient checkpointing, published benchmarks; Triton kernels where measured |
-| 4 | Live Psychology slows generation | High | Medium | Batched unembedding, attention for the last token only, top-k on the GPU; overhead shown in the UI |
+| 4 | Live Psychology slows generation | High | Medium | Batched unembedding, attention for the last token only, top-k on the GPU; overhead shown in the UI; a nightly GPU test fails above the +35% budget |
 | 5 | Chat, training and Psychology compete for an 8–16 GB GPU | Medium | High | VRAM leases, eviction, memory fractions, clear OOM diagnostics |
 | 6 | ROCm gaps (kernels, 4-bit support) | Medium | Medium | AMD GPU as a tier-1 CI target; QLoRA falls back to LoRA; capability matrix |
 | 7 | Blackwell (sm_120) gaps in external kernels | Medium | Medium | The 3090 as a fallback test GPU; minimal external kernels |
-| 8 | Schemas drift between Rust, Python and TS | Medium | High | One owner per schema; codegen; `buf breaking`; golden messages in every language |
+| 8 | Schemas drift between Rust, Python and JavaScript | Medium | High | One owner per schema; codegen; `buf breaking`; golden messages in every language |
 | 9 | Durability bugs: orphaned workers, torn logs, full disks | Medium | High | Checksummed logs, process groups, quotas, kill -9 tests |
 | 10 | Security bugs in in-house protocols (gateway auth, MCP, node) | Medium | High | Threat model, fuzzing, scoped tokens, loopback only; never in-house crypto |
-| 11 | Version pins conflict (torch, vLLM, bitsandbytes) across backends | Medium | Medium | Fewer dependencies now; one environment per backend; CI resolves every lockfile |
+| 11 | Version pins conflict (torch, bitsandbytes; vLLM after the prototype) across backends | Medium | Medium | Fewer dependencies now; one environment per backend; CI resolves every lockfile |
 | 12 | Licenses (Gemma/Llama model terms, SAE weights) and supply chain | Medium | High | License display and checks; hash-pinned lockfiles; no pip installs at runtime; Trusted Publishing |
 | 13 | Tier-2 platforms rot while unsupported | Medium | Medium | The portability design rules (§4); CPU tests on macOS and Windows CI runners from day one |
 | 14 | Real MoE and MLA models are bigger than the GPUs on hand | High | Medium | Tiny random-weight configs for parity in CI; layer placement across both GPUs; quantized Fast runtime for chat |
-| 15 | LLM judges are biased or wrong, so a passing suite gives false confidence | Medium | High | Both-order pairwise judging; agreement with hand labels shown before a judge is trusted; prompts and verdicts logged; drift and model diff always run alongside |
+| 15 | LLM judges are biased or wrong, so a passing suite gives false confidence | Medium | High | Both-order pairwise judging; verdicts count only at 0.8 or better agreement on at least 10 hand labels; prompts and verdicts logged; drift and model diff always run alongside |
+| 16 | The long-term archive loses, duplicates or leaks data | Medium | High | Idempotent upserts with cursors stored after the MySQL commit; object before row and BLAKE3 on restore; prune only what is acknowledged and verified; conversations opt-in into encrypted tables only; kill -9 rows 20–24; CI against MySQL and MariaDB |
+| 17 | JSDoc types catch less than TypeScript would | Medium | Low | `checkJs` in `just check`; generated declarations for every wire and document type; plain data and small functions; tests |
 
 ## 29. Repo and Engineering Setup
-**Monorepo layout (everything runs through `just`)**
+**Monorepo layout (everything runs through `just`; contracts §1 has the full tree)**
 ```
-proto/rastai/{node,worker,events,commands}/v1
+proto/rastai/{common,commands,events,node,worker,provider}/v1
 crates/
+  rastai-diag         # diagnostics catalog + renderer, JSON-lines logger
+  rastai-proto        # generated prost + tonic code
   rastai-formats      # documents, schemas, validation; WASM + PyO3 builds
-  rastai-core         # command registry, domain types
-  rastai-store        # rastai.db, vault.db, blob store
+  rastai-core         # command registry, domain types, settings resolution
+  rastai-plugin       # Rust plugin SDK (provider processes)
+  rastai-store        # rastai.db, vault.db, blob store, event logs
+  rastai-archive      # optional MySQL/MariaDB long-term archive (M11)
   rastai-node         # node agent: jobs, envs, VRAM leases, telemetry
   rastai-sandbox      # Docker HTTP API client, caps, cleanup
   rastai-gateway      # endpoints, adapters, tokenization, logging
   rastai-mcp          # MCP server/client (JSON-RPC)
-  rastai-transport    # local IPC, SSH, (later) QUIC
-  rastai-diag         # diagnostics catalog + renderer
-  rastai-server       # daemon: HTTP API, scheduling, plugin host
+  rastai-transport    # local IPC, SSH, HTTPS client, (later) QUIC
+  rastai-server       # daemon: Connect HTTP API, scheduling, plugin host
   rastai-cli          # the `rastai` binary
 python/
   rastai              # SDK: load(), observe(), log()
+  rastai_formats      # PyO3 wheel + generated dataclasses
+  rastai_proto        # generated protobuf + grpcio code
+  rastai_plugin       # Python plugin SDK
   rastai_worker       # job runtime, worker protocol
   rastai_models       # ModelSpec compiler + model families
   rastai_train        # trainer, LoRA, recipes
-  rastai_lens         # interpretability
+  rastai_lens         # interpretability readouts
   rastai_rl           # RL engine
-  rastai_eval         # Evaluation plugin: model tests, metrics, judges
-  rastai_data         # dataset tooling, converters
+  rastai_data         # dataset tooling, converters, readers (incl. MySQL)
   envs/<backend>/uv.lock
-apps/
+apps/                 # plain JavaScript + React (.js, .jsx)
   web                 # React app
   desktop             # Tauri shell
-packages/
-  ui                  # design system
-  client              # generated API client
+  viewer              # static replay and design viewer
+packages/             # JS packages (@rastai/*), plain JavaScript + JSDoc
+  ui                  # design system, theme tokens
+  proto               # generated protobuf-es + connect-es code
+  formats             # generated document types + WASM validator
+  catalog             # generated error and term catalog
+  client              # daemon client
   canvas              # designer renderer
   viz                 # charts, vector space, 3D
-schemas/  catalog/  fixtures/  docs/adr/  docs/spec/
-tests/{parity,e2e,gpu,crash}
+  plugin              # JS plugin SDK
+plugins/              # first-party plugins, public API only, preinstalled
+  psychology          # ui/ (@rastai/psychology-ui), python/ (rastai_psychology)
+  evaluation          # ui/ (@rastai/eval-ui), python/ (rastai_eval)
+templates/  schemas/  catalog/  fixtures/  tools/  deps/  docs/
+tests/{parity,e2e,gpu,crash,loop}
 ```
 
 **CI**
-- Linters, `buf breaking`, schema snapshot checks, cargo-deny (licenses + advisories).
+- Linters (clippy, ruff, prettier), the `checkJs` type check, `buf breaking`, schema snapshot checks, cargo-deny (licenses, advisories, one wrapper file per library).
+- A check that fails on hard-coded colors in canvas, viz and sections (§7).
 - CPU tests on Linux, plus CPU tests on macOS and Windows runners to keep tier 2 honest.
 - **A full CPU loop in under 10 minutes,** using TextCNN and tiny random-weight HF configs:
   - design → train → eval → ONNX export → re-import, and the outputs must match;
@@ -860,7 +1004,8 @@ tests/{parity,e2e,gpu,crash}
 - Model-family parity tests against the HF reference.
 - Playwright end-to-end tests against the web build.
 - kill -9 crash tests.
-- **GPU tests:** run nightly on a self-hosted runner on the owner's box (5080, 3090, AMD), or by hand if the runner isn't set up.
+- **GPU tests:** nightly on a self-hosted runner on the owner's box (5080, 3090; AMD once the card is in), including the live-panel overhead budget and the DPO anchor drift test. Once the repo is public, the runner takes only scheduled and manual runs on `main`, under a separate runner user, with a read-only HF token for gated real-weight parity. Until then, by hand.
+- **Archive CI (M11):** MySQL 8.4 and 9.7, MariaDB and MinIO as CI services.
 
 **Making AI coding agents productive**
 - A root `CLAUDE.md` holds the architecture map and the hard rules:
@@ -870,6 +1015,7 @@ tests/{parity,e2e,gpu,crash}
   - in-house by default, and new dependencies need an entry in §27;
   - every user-facing error gets a catalog code.
 - The `CLAUDE.md` also holds the owner's code style:
+  - frontend code is plain JavaScript + React (`.js`, `.jsx`) with short JSDoc types; no TypeScript syntax anywhere hand-written;
   - constants at the top of each file;
   - human-readable names (`embedding_size`, not `n_embd`);
   - comments that explain why, not restate syntax;
@@ -877,8 +1023,8 @@ tests/{parity,e2e,gpu,crash}
   - a thin `main` that is mostly a sequence of calls;
   - no clever one-liners.
 - A `CLAUDE.md` in each crate and package with its local rules.
-- Contract changes (proto, schemas, commands) land in their own PR first, before any code that uses them.
-- One git worktree per work track.
+- Contract changes (proto, schemas, commands) land in their own PR first, before any code that uses them. `contracts.md` is the only list of shared names.
+- Two work lanes, one git worktree each; the plan is redone after M1 with measured velocity.
 - "Done" means `just check` passes and a test was added.
 
 ## 30. ADRs to Write Now
@@ -887,7 +1033,7 @@ tests/{parity,e2e,gpu,crash}
 3. **Storage:** SQLite (WAL) for `rastai.db`; a separate `vault.db` (plain now, SQLCipher in Phase 2); a BLAKE3-named blob store; the HF cache is never copied.
 4. **Schema ownership:** protobuf for the wire, `rastai-formats` for documents; everything else is generated.
 5. **Commands:** one generic `Execute` endpoint; undo for document edits only; a principal on every call; MCP generated from the registry.
-6. **UI transport:** HTTP only; Tauri is a shell; the browser is a full client.
+6. **UI transport:** HTTP only, using Connect (protobuf over HTTP); Tauri is a shell; the browser is a full client.
 7. **Local API security:** loopback plus socket, a 0600 token file, Host/Origin checks, scoped tokens.
 8. **Tokenization:** owned by the gateway (HF `tokenizers` + minijinja); token IDs are sent to runtimes.
 9. **Python environments:** uv, Python 3.12, one lockfile per backend.
@@ -897,6 +1043,13 @@ tests/{parity,e2e,gpu,crash}
 13. **Unified model runtime:** ModelSpec is the Inspectable runtime; parity suite; opaque-node + compat fallback.
 14. **Platform tiers:** Linux NVIDIA + AMD + CPU at tier 1; macOS and Windows at tier 2 with portability rules.
 15. **Plugins and licensing:** WASM tier deferred; Apache-2.0 + DCO (decided, §0.12); dependency license allowlist.
+
+ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five:
+- **ADR-0033:** `unsafe` allowed for one `statvfs` call in `rastai-store/src/disk_space.rs` only.
+- **ADR-0034:** sign-in with one-time login codes and an HttpOnly session cookie bound to its origin, the loopback Host rule, refusing a too-open `owner.token`, the reattach order; cross-origin browser clients refused in v1. Supersedes parts of ADR-0001, ADR-0006 and ADR-0007.
+- **ADR-0035:** the optional MySQL/MariaDB long-term archive. Supersedes ADR-0003 decision 6 in part (still no server for the live store, but an optional archive) and amends ADR-0002 decision 7 (a rebuild may read pruned runs from the archive).
+- **ADR-0036:** frontend language: plain JavaScript + React with JSDoc checked by `checkJs`. Supersedes ADR-0023's TypeScript section and, in part, ADR-0019 decision 5 ("a renderer is a TS class"); other ADRs get language-name fixes as notes since acceptance.
+- **ADR-0037:** borrowed decoders: `miniz_oxide` for DEFLATE and `torchvision.io.decode_image` for images, each behind one wrapper file; one implementation per in-house parser (Python calls the `rastai_formats` wheel for safetensors headers); a fuzz target for every remaining in-house parser of untrusted input. Supersedes ADR-0029 decision 1 in part.
 
 ---
 
@@ -910,7 +1063,8 @@ tests/{parity,e2e,gpu,crash}
    - storage and durability;
    - `rastai` daemon + embedded node;
    - installer + `rastai doctor`;
-   - the plugin host and manifest (first-party sections load through it from day one).
+   - the plugin host and manifest (first-party sections load through it from day one);
+   - the web shell in plain JavaScript + React, with the theme token contract and the locked security UI (§7).
 2. **Unified runtime:** the ModelSpec compiler, Gemma 3 + Llama families with parity tests, the uv environments.
 3. **Inference:**
    - gateway + tokenization;
@@ -946,11 +1100,13 @@ tests/{parity,e2e,gpu,crash}
    - Psychology on agent traces.
 8. **Plugins:** SDK basics + `rastai plugin new | dev | test | pack`, local install of `.rrsplugin`, "install missing".
 9. **Remote:** SSH pairing, headless `rastai serve`, resumable transfers, remote jobs that survive network drops, preemption-safe resume.
+10. **Long-term storage (M11, after the 90-day plan; it doesn't gate the prototype exit):** contracts, ADR-0035 and the archive schema; `rastai-archive` sync for run and daemon logs; vault sync opt-in and delete propagation; blob targets (folder, then S3); prune, restore, rebuild and kill -9 rows 20–24; Settings > Storage > Archive; CI against MySQL 8.4 and 9.7, MariaDB and MinIO. Its outbox lands earlier, with the vault (M3), and the MySQL dataset reader with the data tooling (M5).
 
 **Prototype done when:** every section is at L1, the core loop is at L2, and it all runs on Linux NVIDIA, Linux AMD and a paired SSH box.
 
 **Phase 2: Harden, open the ecosystem, everyone-ready**
 - Basic mode and novice First Run polish, guided tutorials, accessibility pass (the L3 work).
+- Custom frontends (§13): daemon-hosted alternative UIs, `token.pair`, the stable commands API 1.0 subset with schema-diff CI, npm packages, a reference terminal UI, and an origin allowlist with CORS only on demand. Per-panel theme overrides if not done in M8, and the unsupported user stylesheet.
 - Plugin API 1.0 extracted from the prototype's first-party code; compatibility CI; the git-index registry; Sigstore signing; the revocation list.
 - Publish `rastai-formats` and the SDKs to crates.io, PyPI and npm; schemas at stable URLs; HF library registration; `<rastai-viewer>` embeds.
 - iroh pairing codes and QR; chunked, deduplicated transfers; the offline bundle.
@@ -975,15 +1131,17 @@ The weeks are estimates; the exit criteria decide when a milestone is done.
 - *Exit:* a report with the numbers, draft ADRs, TextCNN ported off torchtext and `.pt`.
 
 **Weeks 3–4: Skeleton**
-- The monorepo and CI.
+- Contracts v1.1 first: every other task waits for it.
+- The monorepo and CI, with ruff, prettier and the `checkJs` check.
 - The daemon with SQLite and 3 commands, reachable over HTTP, the CLI and the in-house MCP.
+- The theme token contract (§7) and the client's credential option and command wrappers (§13).
 - Worker protocol v0 running TextCNN training.
-- *Exit:* kill -9 the daemon mid-run; it restarts and reattaches with no lost events.
+- *Exit:* kill -9 the daemon mid-run; it restarts and reattaches with no lost events. The plan is then redone with the measured velocity.
 
 **Weeks 5–6: Unified runtime**
 - The ModelSpec compiler; the Gemma 3 + Llama families with parity tests in CI.
 - uv environments per backend, `rastai doctor`, model downloads (including gated ones).
-- *Exit:* both families pass parity in fp32 and bf16 on NVIDIA and AMD.
+- *Exit:* both families pass parity in fp32 and bf16 on NVIDIA. The AMD parity gate is at M10.
 
 **Weeks 7–8: Inference**
 - Gateway + tokenization; Fast + Inspectable runtimes; VRAM leases.
@@ -1017,6 +1175,7 @@ The weeks are estimates; the exit criteria decide when a milestone is done.
 - Keras/JAX importers; parsing PyTorch from source.
 - MLX, CoreML and TensorRT exporters; model merging.
 - Native Rust compute.
+- A managed vLLM engine. Until then an external vLLM server is reached through the OpenAI-compatible adapter (§8).
 - JEV template (after custom data and input/output are finished).
 - Streaming and single-input training (needs a definition).
 - MicroVM sandboxes (Firecracker); gym training on macOS and Windows.
@@ -1045,8 +1204,8 @@ The weeks are estimates; the exit criteria decide when a milestone is done.
     - a GitHub org (e.g. `rastai-research`, since user `rastai` is taken);
     - a domain (rastai.dev or rastairesearch.com appeared unregistered).
   - Publish small working packages rather than empty placeholders; PyPI's naming policy discourages squatting.
-- **AMD GPU:** get a discrete RDNA3+ card; its model decides the ROCm target architecture and whether 4-bit kernels are available.
-- **Live overhead budget:** the spike measured +16–31% for the full panel. *Proposed:* at most +35% at CUDA-graph speed, shown in the UI.
+- **AMD GPU:** the owner buys a discrete RDNA3+ card before M10 (§0.19); its model decides the ROCm target architecture and whether 4-bit kernels are available.
+- **Live overhead budget:** *decided* (§0.19): at most +35% at CUDA-graph speed (the spike measured +16–31%), shown in the UI, with a nightly GPU test that fails above it.
 - **Verify before building on these** (flagged by the compute review): vLLM batch invariance's minimum GPU; the SkyPilot v0.13 release; the bandwidth and cost rules of thumb; RunPod field names (Phase 3).
 
 ## 35. Licensing and Community
@@ -1145,6 +1304,26 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4 (owner decisions of 2026-10-10)**
+- §0.19–§0.22: four new decisions: the design-review defaults accepted, MySQL as a long-term archive plus a data reader, theming and custom-frontend groundwork, and plain JavaScript instead of TypeScript.
+- §16: the UI transport is Connect (protobuf over HTTP), not REST + SSE/WebSocket; the Tauri shell only runs `rastai open --print-url`; the web app holds no domain logic; the frontend language is plain JavaScript + React with JSDoc checked by `checkJs`.
+- §19: settings live in files, not `rastai.db`; the optional MySQL/MariaDB long-term archive (sync, prune vs delete, restore, blob targets, security, `rastai-archive`); `VACUUM INTO` snapshots after L2.
+- §20: generated Python types are plain dataclasses, not pydantic; JavaScript types are generated declarations; `describe_<type>()` tables with a `schemars` threshold; a `stability` field on commands and events.
+- §21: ADR-0034 sign-in (login code to an origin-bound HttpOnly cookie, the no-Origin rule, the loopback Host rule, refusing a too-open `owner.token`); cross-origin browser clients refused in v1.
+- §25: an in-house JSON-lines logger in `rastai-diag` replaces `tracing`; the hardening items tagged for after L2.
+- §27: new rows for hyper, hyper-util, tokio-rustls, webpki-roots, tower, pyo3, wasm-bindgen, wasm-bindgen-cli, libc, the OS tools, onnx and onnxscript, `torchvision.io.decode_image`, keyring, `miniz_oxide`, protobuf-es and Python `protobuf`, pyarrow, `mysql_async`, PyMySQL, a user-run MySQL/MariaDB, pytest, vitest, vite, pnpm, ruff, prettier, and the `typescript` package as a dev-only checker. "React + TypeScript" is split into React (foundation) and that checker. vLLM moves after the prototype.
+- §29: first-party plugins in `plugins/`; the new crates (`rastai-proto`, `rastai-plugin`, `rastai-archive`) and packages from contracts.md; JS packages; CI gains ruff, prettier, `checkJs`, the hard-coded color check, the public-repo GPU runner rules and archive CI.
+- §7 / §13: the theme token contract, theme-aware renderers and the locked security UI; theme plugins in M8; custom frontends now and their Phase 2 routes; the JavaScript plugin SDK with `.jsx` templates.
+- §8 / §17 / §33: a managed vLLM is after the prototype; an external vLLM works through the OpenAI-compatible adapter.
+- §9 / §34: the +35% live-panel budget is decided, with a nightly GPU test; interactive controls call core commands with a p95 under 50 ms.
+- §10: anchors on by default for DPO; the judge trust bar (0.8 on at least 10 hand labels); blind A/B votes as `evals/votes.rrsdata`; Teach it keeps 1B as the First Run default.
+- §11 / §17 / §23: one owner per algorithm (Rust layer placement, shared per-op golden fixtures, safetensors header checks only in `rastai_formats`); `miniz_oxide` and `torchvision.io.decode_image`; a fuzz target for every in-house parser of untrusted input.
+- §14: the MySQL dataset reader and runs/metrics export through the archive's views.
+- §24: the archive as a remote destination; `local-only` stays the default with a one-click fix (`RRS-C1009`); the AppArmor profile for user namespaces on Ubuntu 23.10+.
+- §4 / §32: M2 closes on NVIDIA and the AMD parity gate moves to M10; the self-hosted GPU runner rules; contracts v1.1 first in M1; the plan is redone after M1.
+- §28: risks for the archive and for JSDoc types.
+- §30 / §31: ADR-0033 to ADR-0037; step 10, Long-term storage (M11).
+
 **v5.3 (technique coverage, Evaluation plugin)**
 - All 12 missing techniques from the coverage check are in scope (§0.17).
 - §11 / §17: MoE, MLA, ALiBi and AttnRes blocks; MoE, MLA and ALiBi families; layer placement across GPUs.

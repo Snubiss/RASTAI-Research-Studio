@@ -31,6 +31,11 @@
 4. **Budget:** Teach it completes in under 180 s on an 8 GiB cap with the chat model resident. A nightly GPU test checks this on Gemma 3 1B.
 5. **Users can turn anchors off** per run (Advanced mode). The run record keeps the choice, and Verify still reports drift.
 
+*Note since acceptance (2026-10-10):*
+- *Anchors are on by default for DPO too (owner decision 16): `training.anchors_default` adds the anchor answers as an SFT term beside the DPO loss. A GPU drift test (`tests/gpu/test_dpo_anchor_drift.py`) must pass before DPO reaches L2.*
+- *Teach it keeps Gemma 3 1B as the First Run default, and the UI shows any pause of the chat model clearly while training runs. Read-only CUDA IPC sharing of the frozen base between chat and training is on the M5 completion list, behind a measurement gate.*
+- *The decisions are unchanged.*
+
 **Checked by:** the nightly Teach it test (time, peak VRAM, held-out accuracy, drift); the §32 weeks 11–12 exit criteria (the full loop in under 10 minutes from a cold start, and the eval suite catches the invented fact).
 
 ## Consequences

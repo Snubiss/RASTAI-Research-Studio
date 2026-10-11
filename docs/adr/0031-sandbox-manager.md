@@ -12,13 +12,13 @@
 
 ## Decision
 
-1. **`rastai-sandbox`** is an in-house client for the Docker Engine HTTP API, at a pinned API version, over the engine's Unix socket. It runs inside the node. HTTP over the socket goes through one wrapper module in `rastai-sandbox` (hyper, pending its §27 entry per contracts §14 item 1). There's no Docker SDK crate.
+1. **`rastai-sandbox`** is an in-house client for the Docker Engine HTTP API, at a pinned API version, over the engine's Unix socket. It runs inside the node. HTTP over the socket goes through one wrapper module in `rastai-sandbox` (hyper, pending its §27 entry per contracts §14 item 1). There's no Docker SDK crate. *(Note since acceptance, 2026-10-10: `hyper` and `hyper-util` are on §27 now (owner decision 1); the wrapper is `rastai-sandbox/src/engine_http.rs`.)*
 2. **Engine choice:** `sandbox.engine_socket`, default auto: the Podman user socket first (`/run/user/<uid>/podman/podman.sock`), then `/var/run/docker.sock`. Any engine that speaks the API works.
 3. **Containers:**
-   - every container carries the labels `rastai.node_id`, `rastai.run_id` and `rastai.sandbox_id`;
+   - every container carries the labels `rastai.node_id`, `rastai.run_id` and `rastai.sandbox_id`; *(note since acceptance: and `rastai.job_id`, contracts §8.6)*
    - caps come from the harness, defaulting to `sandbox.default_caps` (2 CPUs, 4 GiB RAM, 600 s);
    - each node has a sandbox cap (`compute.sandbox_cap`, default 8);
-   - network is off unless the harness lists hosts, and then only those hosts;
+   - network is off unless the harness lists hosts, and then only those hosts; *(note since acceptance: enforced by the in-house HTTP CONNECT egress proxy on a per-run network `rastai-egress-<run_id>`, M7-E02, contracts §16 row 27)*
    - containers never see a Rastai socket or token.
 4. **Access goes through the node.** Workers call `WorkerHostService.CreateSandbox` / `ExecInSandbox` / `RemoveSandbox` with their job's sandbox cap. The daemon uses `SandboxService`. Exec streams are proxied.
 5. **Orphan sweep:** on node start and on `sandbox.cleanup`, any container with Rastai labels and no live owning job moves `orphaned → removed`. `ListSandboxes` shows orphans.
