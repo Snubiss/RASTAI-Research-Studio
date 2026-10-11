@@ -40,6 +40,11 @@ const NO_EOL_CONVERSION_LINE = "* -text";
 const FUZZ_ENTRY_LINE = /^ *- \{ crate: ([a-z0-9-]+), target: ([a-z0-9_]+) \}$/;
 // The name of a `[[bin]]` (a fuzz target) in a cargo-fuzz Cargo.toml.
 const BIN_NAME_LINE = /^name = "([a-z0-9_]+)"$/;
+// nightly.yml caches the cargo-fuzz binary and builds it only when that cache misses, so no job rebuilds it nightly.
+const CARGO_FUZZ_CACHE_PATH_LINE = "path: ~/.cargo/bin/cargo-fuzz";
+const CARGO_FUZZ_INSTALL_CONDITION_LINE = "if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'";
+// The cpu environment's interpreter has one spelling in the justfile, cpu_python, which is right on every OS.
+const CPU_PYTHON_BY_HAND = "{{cpu_environment}}/bin/python";
 
 /**
  * @param {string} path a path relative to the repository root
@@ -232,6 +237,17 @@ test("the macOS and Windows Python jobs leave out the posix_only tests", () => {
 
 test("nightly.yml fuzzes every cargo-fuzz target in crates/", () => {
   expect(fuzzTargetsInNightly()).toEqual(fuzzTargetsInCrates());
+});
+
+test("nightly.yml builds cargo-fuzz only when its cached binary is missing", () => {
+  const lines = readLines(NIGHTLY_WORKFLOW).map((line) => line.trim());
+  expect(lines).toContain(CARGO_FUZZ_CACHE_PATH_LINE);
+  expect(lines).toContain(CARGO_FUZZ_INSTALL_CONDITION_LINE);
+});
+
+test("the justfile reaches the cpu environment's Python only through cpu_python", () => {
+  const justfileText = readLines(JUSTFILE).join("\n");
+  expect(justfileText).not.toContain(CPU_PYTHON_BY_HAND);
 });
 
 test("install-dev-tools installs the versions the repo pins elsewhere", () => {

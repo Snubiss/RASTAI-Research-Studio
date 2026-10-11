@@ -48,10 +48,6 @@ jobs:
       - name: Install the nightly toolchain the justfile pins for fuzzing
         # cargo-fuzz builds with sanitizer flags, which need nightly. The justfile's fuzz_toolchain is the one pin.
         run: rustup toolchain install "$(just --evaluate fuzz_toolchain)" --profile minimal
-      - name: Install cargo-fuzz
-        # Built from crates.io, as the justfile header says, so it targets this runner's gnu host; cargo checks the
-        # crate against the index's checksum. The justfile's cargo_fuzz_version is the one pin.
-        run: cargo install --locked "cargo-fuzz@$(just --evaluate cargo_fuzz_version)"
       - name: Restore the cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -63,6 +59,23 @@ jobs:
             crates/${{ matrix.crate }}/fuzz/target
           key: fuzz-${{ matrix.crate }}-${{ matrix.target }}-${{ hashFiles('crates/*/fuzz/Cargo.lock') }}
           restore-keys: fuzz-${{ matrix.crate }}-${{ matrix.target }}-
+      - name: Read the cargo-fuzz pin
+        # The justfile's cargo_fuzz_version is the one pin; the next step keys its cache on it.
+        id: pins
+        run: echo "cargo_fuzz_version=$(just --evaluate cargo_fuzz_version)" >> "$GITHUB_OUTPUT"
+      - name: Restore the cargo-fuzz binary
+        # ~/.cargo/bin is not in the cargo cache above, so without this every job would rebuild cargo-fuzz every
+        # night. A new pin is a new key, so a version bump still builds the new version once.
+        id: cargo-fuzz-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ runner.os }}-${{ steps.pins.outputs.cargo_fuzz_version }}
+      - name: Install cargo-fuzz
+        # Built from crates.io, as the justfile header says, so it targets this runner's gnu host; cargo checks the
+        # crate against the index's checksum. Only on a cache miss: a restored binary is already this exact version.
+        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked "cargo-fuzz@${{ steps.pins.outputs.cargo_fuzz_version }}"
       - name: just fuzz
         run: just fuzz "${{ matrix.crate }}" "${{ matrix.target }}" "$FUZZ_SECONDS"
       - name: Keep the crashing inputs
