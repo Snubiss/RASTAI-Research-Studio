@@ -1,11 +1,13 @@
 """JSON Lines rows: one JSON object per line (layout python.md section 4.1).
 
 The file is untrusted, so the reader returns rows or raises DataError, never another exception
-(tests/test_reader_mutations.py). It is stricter than json.loads alone: every row is an object, a key appears once
-per object, and NaN or Infinity are refused, the same rules the Rust JSON core keeps (contracts 5.1).
+(tests/test_reader_mutations.py). It is stricter than json.loads alone, with the same rules the Rust JSON core
+keeps (contracts 5.1): every row is an object, a key appears once per object, NaN, Infinity and numbers too big for
+a 64-bit float are refused, and so is a lone UTF-16 surrogate in any string or key.
 """
 
 import json
+import math
 from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
@@ -16,7 +18,7 @@ from rastai_data.errors import RRS_D1001, RRS_D3001, DataError
 # training text and still small next to a job's memory.
 MAX_LINE_BYTES = 16 * 1024 * 1024
 # The start of a file saved as "UTF-8 with BOM" by some editors; it isn't part of the first row.
-UTF8_BOM = "﻿"
+UTF8_BOM = "\ufeff"
 # The characters JSON allows around a value, so a line holding only these is blank.
 JSON_WHITESPACE = " \t\r\n"
 # Error messages quote at most this much of a parser's own explanation.
@@ -65,14 +67,24 @@ def decode_line(line_bytes: bytes, path: Path, line_number: int) -> str:
 
 def parse_row(text: str, path: Path, line_number: int) -> dict:
     try:
-        value = json.loads(text, object_pairs_hook=object_without_repeated_keys, parse_constant=refuse_constant)
+        value = json.loads(
+            text,
+            object_pairs_hook=object_without_repeated_keys,
+            parse_constant=refuse_constant,
+            parse_float=finite_float,
+            parse_int=int_that_fits_a_float,
+        )
     except ValueError as error:
-        # JSONDecodeError is a ValueError, and so are the two refusals below and the integer-digits limit.
+        # JSONDecodeError is a ValueError, and so are the refusals below and the integer-digits limit.
         raise DataError(RRS_D1001, f"{path}, line {line_number}: not valid JSON ({short_reason(error)})") from None
     except RecursionError:
         raise DataError(RRS_D1001, f"{path}, line {line_number}: the JSON is nested too deeply") from None
     if not isinstance(value, dict):
         raise DataError(RRS_D1001, f"{path}, line {line_number}: each line must be a JSON object")
+    if holds_a_lone_surrogate(value):
+        raise DataError(
+            RRS_D1001, f"{path}, line {line_number}: a string holds a lone UTF-16 surrogate escape, which isn't text"
+        )
     return value
 
 
@@ -88,6 +100,57 @@ def object_without_repeated_keys(pairs: list[tuple[str, object]]) -> dict:
 
 def refuse_constant(name: str) -> float:
     raise ValueError(f"{name} isn't a JSON number")
+
+
+def finite_float(number_text: str) -> float:
+    """json.loads quietly turns 1e999 into inf; a number a 64-bit float can't hold is refused instead."""
+    number = float(number_text)
+    if not math.isfinite(number):
+        raise ValueError(f"{number_text[:MAX_REASON_CHARACTERS]} is too big for a 64-bit float")
+    return number
+
+
+def int_that_fits_a_float(number_text: str) -> int:
+    """An integer stays a Python int, but one beyond a 64-bit float's range is refused, as the Rust core does.
+
+    int() itself refuses more digits than sys.get_int_max_str_digits() with a ValueError, so a huge number can't
+    make this slow.
+    """
+    number = int(number_text)
+    try:
+        float(number)
+    except OverflowError:
+        raise ValueError(f"an integer of {len(number_text)} characters is too big for a 64-bit float") from None
+    return number
+
+
+def holds_a_lone_surrogate(value: object) -> bool:
+    """Whether any string or key in `value` holds a lone UTF-16 surrogate.
+
+    json.loads turns an escape like "\\ud800" without its partner into a lone surrogate character. That isn't text:
+    it can't be written as UTF-8, so a later step (assign_split encodes the row key) would fail with an error that
+    isn't a DataError. A proper pair such as "\\ud83d\\ude00" becomes one character and is fine. The walk keeps its
+    own list of values to visit instead of recursing, so a deeply nested row can't hit the recursion limit here.
+    """
+    values_to_visit = [value]
+    while values_to_visit:
+        current = values_to_visit.pop()
+        if isinstance(current, dict):
+            values_to_visit.extend(current.keys())
+            values_to_visit.extend(current.values())
+        elif isinstance(current, list):
+            values_to_visit.extend(current)
+        elif isinstance(current, str) and not is_utf8_text(current):
+            return True
+    return False
+
+
+def is_utf8_text(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def short_reason(error: ValueError) -> str:

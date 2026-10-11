@@ -7,7 +7,7 @@ Small datasets for the `rastai_data` tests and the TextCNN training tests (contr
 | `textcnn_tiny.jsonl` | 2,000 short English sentences in 4 labels (`weather`, `sports`, `cooking`, `music`), 500 each, in shuffled order. One JSON object per line: `{"id": "tiny-0000", "text": "...", "label": "weather"}`. The ids are unique and are the split keys. |
 | `textcnn_tiny.csv` | the first 200 rows of `textcnn_tiny.jsonl` as CSV with the header `id,text,label`; texts that hold a comma are quoted |
 
-**Where the data comes from.** We wrote it: every sentence is a random pick of a subject, a verb phrase and an ending from small word lists per label, with an optional opener ("Honestly, ", "Yesterday ") and closer ("!", ", right?"), drawn by a `random.Random` seeded with the string `textcnn_tiny/1`. No third-party text is in it, so no data license applies. A few words appear under more than one label ("the", "in", "at"), so a model has to learn from the label-specific words, not from punctuation or length.
+**Where the data comes from.** We wrote it: every sentence is a random pick of a subject, a verb phrase and an ending from small word lists per label, with an optional opener ("Honestly, ", "Yesterday ") and closer ("!", ", right?"), drawn by a `random.Random` seeded with the string `textcnn_tiny/1`. The generator is `tools/fixtures/make_textcnn_tiny.py`, with the word lists in it; `tools/fixtures/tests/test_make_textcnn_tiny.py` checks that it writes these exact bytes. No third-party text is in it, so no data license applies. A few words appear under more than one label ("the", "in", "at"), so a model has to learn from the label-specific words, not from punctuation or length.
 
 **Who reads them.**
 
