@@ -19,7 +19,7 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
 use crate::error::TransportError;
 use crate::peer::PeerIdentity;
 #[cfg(unix)]
-use crate::peer::{check_same_user, current_user_id, peer_identity_of};
+use crate::peer::{check_same_user, credentials_unreadable, current_user_id, peer_identity_of};
 
 /// The socket folder's mode: only its owner may list, enter or create files in it (contracts 8.1).
 pub const SOCKET_DIRECTORY_MODE: u32 = 0o700;
@@ -91,7 +91,7 @@ pub async fn connect_local_socket(socket_path: &Path) -> Result<LocalStream, Tra
     let stream = tokio::net::UnixStream::connect(socket_path)
         .await
         .map_err(|error| not_reachable(socket_path, error))?;
-    let server = peer_identity_of(&stream)?;
+    let server = peer_identity_of(&stream).map_err(credentials_unreadable)?;
     check_same_user(&server)?;
     Ok(LocalStream::Unix(stream))
 }
@@ -202,23 +202,33 @@ fn remove_stale_socket(socket_path: &Path) -> Result<(), TransportError> {
             "a file that isn't a socket is in the way; it is never deleted",
         ));
     }
-    // A blocking connect is fine here: on a local socket it answers at once, accepted or refused.
+    // A blocking connect is fine here: on a local socket it answers at once, accepted or refused. If it is
+    // accepted, the live listener later sees this probe as a client that has already hung up.
     if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
         return Err(not_created(socket_path, "another process is listening on this socket"));
     }
     fs::remove_file(socket_path).map_err(|error| not_created(socket_path, error))
 }
 
+/// Accepts until a client is still there to be served. macOS can't read the credentials of a client that hung up
+/// before we looked (ENOTCONN), such as the probe of a second `bind_local_socket`; there is nobody to serve, so
+/// that connection is skipped. Linux keeps the credentials, and the closed connection simply reads as ended.
 #[cfg(unix)]
 async fn accept_unix(listener: &tokio::net::UnixListener) -> Result<(LocalStream, PeerIdentity), TransportError> {
-    let (stream, _client_address) = listener
-        .accept()
-        .await
-        .map_err(|error| crate::error::connection_failed(format!("accepting a connection: {error}")))?;
-    let peer = peer_identity_of(&stream)?;
-    // Returning early drops `stream`, which closes the refused connection.
-    check_same_user(&peer)?;
-    Ok((LocalStream::Unix(stream), peer))
+    loop {
+        let (stream, _client_address) = listener
+            .accept()
+            .await
+            .map_err(|error| crate::error::connection_failed(format!("accepting a connection: {error}")))?;
+        let peer = match peer_identity_of(&stream) {
+            Ok(peer) => peer,
+            Err(error) if error.kind() == ErrorKind::NotConnected => continue,
+            Err(error) => return Err(credentials_unreadable(error)),
+        };
+        // Returning early drops `stream`, which closes the refused connection.
+        check_same_user(&peer)?;
+        return Ok((LocalStream::Unix(stream), peer));
+    }
 }
 
 #[cfg(unix)]
