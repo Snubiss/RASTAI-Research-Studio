@@ -1,0 +1,4 @@
+warning[RRS-E3003]: Model has more parameters than the dataset has tokens
+ --> #/layers
+  = 12000000 parameters, 3000000 tokens
+  = fix: use a smaller model or more data

@@ -1,0 +1,13 @@
+{
+  "title": "Model has more parameters than the dataset has tokens",
+  "basic_text": "This model is big for this much data; it may memorize instead of learning.",
+  "diagnostic": {
+    "code": "RRS-E3003",
+    "severity": "warning",
+    "message": "12000000 parameters, 3000000 tokens",
+    "path": "#/layers",
+    "fix_text": "use a smaller model or more data",
+    "fix_command_id": "",
+    "fix_arguments_json": ""
+  }
+}

@@ -1,0 +1,3 @@
+info[RRS-E4001]: File from a newer schema version; opened read-only
+ --> designs/textcnn.rrsmodel  #/schema_version
+  = schema version 2 is newer than this build's 1

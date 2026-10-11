@@ -8,8 +8,10 @@ version.workspace = true
 publish.workspace = true
 
 # The bottom crate: no rastai dependencies, and it must build for wasm32-unknown-unknown (layout section 3.4).
-# serde and serde_json arrive with render_json.rs and logger.rs (M1-11).
+# serde_json is used only by render_json.rs and logger.rs (layout section 3.3). serde itself isn't needed: nothing
+# here derives Serialize, the JSON is built from serde_json values by hand.
 [dependencies]
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

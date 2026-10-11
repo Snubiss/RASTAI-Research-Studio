@@ -1,0 +1,2 @@
+This model is big for this much data; it may memorize instead of learning.
+Fix: use a smaller model or more data

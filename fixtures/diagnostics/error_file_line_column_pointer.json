@@ -1,0 +1,14 @@
+{
+  "title": "Input ranges overlap",
+  "basic_text": "Two inputs read the same part of the text, so the model would see it twice.",
+  "source_file": "textcnn_source.txt",
+  "diagnostic": {
+    "code": "RRS-E2004",
+    "severity": "error",
+    "message": "overlaps input \"title\" (0..64)",
+    "path": "designs/textcnn.rrsmodel:14:9#/inputs/1/range",
+    "fix_text": "shrink one of the ranges, or merge the two inputs",
+    "fix_command_id": "",
+    "fix_arguments_json": ""
+  }
+}

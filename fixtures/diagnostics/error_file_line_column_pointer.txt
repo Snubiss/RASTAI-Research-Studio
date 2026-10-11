@@ -1,0 +1,6 @@
+error[RRS-E2004]: Input ranges overlap
+  --> designs/textcnn.rrsmodel:14:9  #/inputs/1/range
+   |
+14 |         "range": [0, 128],
+   |         ^^^^^^^^^^^^^^^^^ overlaps input "title" (0..64)
+   = fix: shrink one of the ranges, or merge the two inputs

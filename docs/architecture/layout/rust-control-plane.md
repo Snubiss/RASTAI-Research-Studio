@@ -253,7 +253,7 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 
 | Recipe | Runs | Used by |
 |---|---|---|
-| `just check` | `fmt-check lint test-rust codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29) |
+| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29) |
 | `just build` | `cargo build --workspace --locked` | dev |
 | `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`; MySQL tests skip themselves without a server) | CI on Linux, macOS, Windows runners (CPU) |
 | `just test-crash` | `cargo test -p rastai-crash-tests -- --test-threads=1` | CI on Linux |
@@ -261,7 +261,7 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 | `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (the targets of contracts §12.5) | nightly CI, 10 minutes per target |
 | `just codegen` | `buf generate` (proto doc; protobuf-es with target `js+dts`), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen`, then `--bin rastai-names-codegen` (last: it reads the catalog, the tables and the migrations) | after any catalog, document or command change |
 | `just codegen-check` | `tools/checks/check-generated` | CI |
-| `just wasm` | `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir packages/formats/src/wasm/` | `packages/formats` build, the viewer |
+| `just wasm` | `cargo build -p rastai-diag --target wasm32-unknown-unknown` (M1, section 3.4); from M4 also `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir packages/formats/src/wasm/` | `just check`; `packages/formats` build, the viewer |
 | `just wheel` | `maturin build --release -m crates/rastai-formats/bindings/python/Cargo.toml` into `python/rastai_formats/dist/` | the uv environments |
 | `just deny` | `cargo deny check` | CI |
 | `just check-deps` | `tools/checks/check-deps` | CI |
@@ -426,6 +426,7 @@ crates/rastai-diag/
     render_json.rs            Diagnostic as a JSON object (CLI --json, logs)
     logger.rs                 JSON-lines logger: init_logger(), log_info(), log_warn(), log_error(), file rotation
     generated/
+      mod.rs                  pub mod lines for the two tables
       catalog_table.rs        pub const CATALOG: &[CatalogEntry], from catalog/errors/*.json and the first-party plugin catalogs
       terms_table.rs          pub const TERMS: &[TermEntry], from catalog/terms/terms.json
   tests/
@@ -481,6 +482,10 @@ pub fn plugin_diagnostic(catalog: &RuntimeCatalog, code: &str, values: &[(&str, 
 pub enum RenderStyle { Plain, Color }
 pub fn render_text(diagnostic: &Diagnostic, source_text: Option<&str>, style: RenderStyle) -> String
 pub fn render_basic(diagnostic: &Diagnostic) -> String
+/// The same renderers with the catalog text passed in, for a code the compiled catalog doesn't hold
+/// (a third-party PLG- code, and the snapshot tests, which must not depend on the real catalog's wording).
+pub fn render_text_with_title(diagnostic: &Diagnostic, title: &str, source_text: Option<&str>, style: RenderStyle) -> String
+pub fn render_basic_with_text(diagnostic: &Diagnostic, basic_text: &str) -> String
 pub fn render_json(diagnostic: &Diagnostic) -> serde_json::Value
 
 // logger.rs

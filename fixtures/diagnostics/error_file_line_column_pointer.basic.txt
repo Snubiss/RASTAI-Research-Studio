@@ -1,0 +1,2 @@
+Two inputs read the same part of the text, so the model would see it twice.
+Fix: shrink one of the ranges, or merge the two inputs
