@@ -60,10 +60,13 @@ pub enum StoreError {
         expected_sequence: u64,
         found_sequence: u64,
     },
-    /// Opening, reading, writing or syncing an event log failed for another reason; `reason` keeps the operating
-    /// system's words. Reads that fail this way (a missing file, a permission) share the write code until the
-    /// catalog has one for them.
-    EventLogIoFailed { path: PathBuf, reason: String },
+    /// Opening or reading an event log failed: a missing file, a permission, an I/O error. `reason` keeps the
+    /// operating system's words. The store's read code, `RRS-S0006`, like `DatabaseReadFailed`: nothing was written,
+    /// so the user is never told a write failed.
+    EventLogReadFailed { path: PathBuf, reason: String },
+    /// Creating, writing, truncating or syncing an event log failed for a reason other than a full disk; `reason`
+    /// keeps the operating system's words.
+    EventLogWriteFailed { path: PathBuf, reason: String },
 }
 
 impl StoreError {
@@ -81,20 +84,29 @@ impl StoreError {
             StoreError::WriterStopped => CODE_WRITE_FAILED,
             StoreError::EventLogCorrupt { .. } => CODE_EVENT_LOG_CORRUPT,
             StoreError::EventSequenceGap { .. } => CODE_EVENT_SEQUENCE_GAP,
-            StoreError::EventLogIoFailed { .. } => CODE_WRITE_FAILED,
+            StoreError::EventLogReadFailed { .. } => CODE_READ_FAILED,
+            StoreError::EventLogWriteFailed { .. } => CODE_WRITE_FAILED,
         }
     }
 }
 
-/// Sorts an I/O error on an event log into its variant: a full disk gets its own code, everything else keeps the
-/// operating system's reason.
-pub(crate) fn event_log_io_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
+/// An I/O error while opening or reading an event log.
+pub(crate) fn event_log_read_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
+    StoreError::EventLogReadFailed {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    }
+}
+
+/// Sorts an I/O error while writing an event log into its variant: a full disk gets its own code, everything else
+/// keeps the operating system's reason.
+pub(crate) fn event_log_write_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
     if error.kind() == std::io::ErrorKind::StorageFull {
         return StoreError::DiskFull {
             reason: format!("{}: {error}", path.display()),
         };
     }
-    StoreError::EventLogIoFailed {
+    StoreError::EventLogWriteFailed {
         path: path.to_path_buf(),
         reason: error.to_string(),
     }
@@ -151,21 +163,27 @@ mod tests {
             expected_sequence: 3,
             found_sequence: 4,
         };
-        let failed = StoreError::EventLogIoFailed {
+        let read_failed = StoreError::EventLogReadFailed {
+            path: path.clone(),
+            reason: "r".to_string(),
+        };
+        let write_failed = StoreError::EventLogWriteFailed {
             path,
             reason: "r".to_string(),
         };
         assert_eq!(corrupt.code(), "RRS-S2002");
         assert_eq!(gap.code(), "RRS-S2003");
-        assert_eq!(failed.code(), "RRS-S3005");
+        assert_eq!(read_failed.code(), "RRS-S0006");
+        assert_eq!(write_failed.code(), "RRS-S3005");
     }
 
     #[test]
-    fn a_full_disk_is_sorted_into_its_own_variant() {
+    fn event_log_io_errors_are_sorted_by_read_write_and_full_disk() {
         let path = std::path::Path::new("events.log");
         let full = std::io::Error::from(std::io::ErrorKind::StorageFull);
         let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-        assert_eq!(event_log_io_error(path, &full).code(), "RRS-S3002");
-        assert_eq!(event_log_io_error(path, &denied).code(), "RRS-S3005");
+        assert_eq!(event_log_write_error(path, &full).code(), "RRS-S3002");
+        assert_eq!(event_log_write_error(path, &denied).code(), "RRS-S3005");
+        assert_eq!(event_log_read_error(path, &denied).code(), "RRS-S0006");
     }
 }

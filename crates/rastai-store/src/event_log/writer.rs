@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use rastai_proto::events::v1::EventRecord;
 
-use crate::error::{StoreError, event_log_io_error};
+use crate::error::{StoreError, event_log_write_error};
 use crate::event_log::frame::{EVENT_LOG_HEADER, EVENT_RECORD_FORMAT_VERSION, FIRST_SEQUENCE, encode_frame};
 use crate::event_log::reader::{FrameRead, open_event_log, read_next_frame, reader_offset};
 
@@ -59,10 +59,10 @@ pub fn create_event_log(path: &Path) -> Result<EventLogWriter, StoreError> {
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|error| event_log_io_error(path, &error))?;
+        .map_err(|error| event_log_write_error(path, &error))?;
     file.write_all(EVENT_LOG_HEADER)
-        .map_err(|error| event_log_io_error(path, &error))?;
-    file.sync_all().map_err(|error| event_log_io_error(path, &error))?;
+        .map_err(|error| event_log_write_error(path, &error))?;
+    file.sync_all().map_err(|error| event_log_write_error(path, &error))?;
     sync_parent_folder(path)?;
     Ok(new_writer(file, path, EVENT_LOG_HEADER.len() as u64, FIRST_SEQUENCE, 0))
 }
@@ -76,8 +76,11 @@ pub fn open_event_log_for_append(path: &Path) -> Result<EventLogWriter, StoreErr
         .read(true)
         .write(true)
         .open(path)
-        .map_err(|error| event_log_io_error(path, &error))?;
-    let file_length = file.metadata().map_err(|error| event_log_io_error(path, &error))?.len();
+        .map_err(|error| event_log_write_error(path, &error))?;
+    let file_length = file
+        .metadata()
+        .map_err(|error| event_log_write_error(path, &error))?
+        .len();
     if valid_bytes < file_length {
         cut_file_to(&file, path, valid_bytes)?;
     }
@@ -107,7 +110,7 @@ pub fn append_event(
     record.sequence = writer.next_sequence;
     record.format_version = EVENT_RECORD_FORMAT_VERSION;
     let Some(frame) = encode_frame(record) else {
-        return Err(StoreError::EventLogIoFailed {
+        return Err(StoreError::EventLogWriteFailed {
             path: writer.path.clone(),
             reason: FRAME_TOO_LARGE_REASON.to_string(),
         });
@@ -126,7 +129,7 @@ pub fn sync_event_log(writer: &mut EventLogWriter) -> Result<(), StoreError> {
         writer
             .file
             .sync_data()
-            .map_err(|error| event_log_io_error(&writer.path, &error))?;
+            .map_err(|error| event_log_write_error(&writer.path, &error))?;
         writer.has_unsynced_bytes = false;
     }
     writer.last_sync = Instant::now();
@@ -186,7 +189,7 @@ fn write_frame_at_end(writer: &mut EventLogWriter, frame: &[u8]) -> Result<(), S
     if let Err(error) = written {
         // Best effort: if even the cut fails, the next open_event_log_for_append cuts the torn frame instead.
         let _ = writer.file.set_len(writer.end_offset);
-        return Err(event_log_io_error(&writer.path, &error));
+        return Err(event_log_write_error(&writer.path, &error));
     }
     writer.end_offset += frame.len() as u64;
     writer.has_unsynced_bytes = true;
@@ -195,16 +198,17 @@ fn write_frame_at_end(writer: &mut EventLogWriter, frame: &[u8]) -> Result<(), S
 
 /// Truncates the file to `length` and fsyncs, so the cut is durable before anything new is appended after it.
 fn cut_file_to(file: &File, path: &Path, length: u64) -> Result<(), StoreError> {
-    file.set_len(length).map_err(|error| event_log_io_error(path, &error))?;
-    file.sync_all().map_err(|error| event_log_io_error(path, &error))
+    file.set_len(length)
+        .map_err(|error| event_log_write_error(path, &error))?;
+    file.sync_all().map_err(|error| event_log_write_error(path, &error))
 }
 
 fn write_header_at_start(file: &mut File, path: &Path) -> Result<(), StoreError> {
     file.seek(SeekFrom::Start(0))
-        .map_err(|error| event_log_io_error(path, &error))?;
+        .map_err(|error| event_log_write_error(path, &error))?;
     file.write_all(EVENT_LOG_HEADER)
-        .map_err(|error| event_log_io_error(path, &error))?;
-    file.sync_all().map_err(|error| event_log_io_error(path, &error))
+        .map_err(|error| event_log_write_error(path, &error))?;
+    file.sync_all().map_err(|error| event_log_write_error(path, &error))
 }
 
 /// For `SyncPolicy::Batched`: whether the last fsync is old enough that this append should fsync.
@@ -225,8 +229,8 @@ fn sync_parent_folder(path: &Path) -> Result<(), StoreError> {
     } else {
         folder
     };
-    let handle = File::open(folder).map_err(|error| event_log_io_error(folder, &error))?;
-    handle.sync_all().map_err(|error| event_log_io_error(folder, &error))
+    let handle = File::open(folder).map_err(|error| event_log_write_error(folder, &error))?;
+    handle.sync_all().map_err(|error| event_log_write_error(folder, &error))
 }
 
 #[cfg(not(unix))]

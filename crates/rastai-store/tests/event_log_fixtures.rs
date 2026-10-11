@@ -47,6 +47,10 @@ const CRAFTED_TAIL_BYTES: usize = 1024 * 1024;
 /// A generous bound for one read of that tail. With the reader's CRC budget it takes milliseconds, even unoptimized;
 /// without it, minutes.
 const CRAFTED_TAIL_SECONDS_ALLOWED: u64 = 10;
+/// The zeros a power cut can leave after a torn frame: one file-system block the size was extended over.
+const ZEROED_BLOCK_BYTES: usize = 4096;
+/// How many bytes after the quoted frame the torn record of `a_frame_quoted_inside_a_torn_record_is_not_proof` keeps.
+const BYTES_KEPT_AFTER_THE_QUOTE: usize = 1;
 
 // ---- The recipes ----
 
@@ -578,6 +582,166 @@ fn a_zero_filled_tail_is_a_torn_tail() {
     let writer = open_event_log_for_append(&path).unwrap();
     assert_eq!(truncated_tail_bytes(&writer), 100);
     assert_eq!(std::fs::read(&path).unwrap(), good_log());
+}
+
+/// A whole, checksum-valid, version-1 frame for `sequence` whose every byte is ASCII, so it can sit inside a record's
+/// text, as a user's text could quote it. The run id is varied until the frame's CRC-32 bytes are ASCII too.
+fn ascii_frame_for_sequence(sequence: u64) -> Vec<u8> {
+    for attempt in 0.. {
+        let record = EventRecord {
+            format_version: 1,
+            sequence,
+            run_id: format!("run_quoted_{attempt}"),
+            event_type: "run.metrics".to_string(),
+            ..EventRecord::default()
+        };
+        let frame = encode_frame(&record).unwrap();
+        if frame.iter().all(|byte| *byte < 0x80) {
+            return frame;
+        }
+    }
+    unreachable!("the attempts never end")
+}
+
+/// The good log's first three records, then a fourth whose `reason` text quotes a whole frame for each of `quoted`.
+fn records_with_a_quoting_fourth(quoted: &[u64]) -> Vec<EventRecord> {
+    let mut quote = String::new();
+    for sequence in quoted {
+        quote.push_str(&String::from_utf8(ascii_frame_for_sequence(*sequence)).unwrap());
+    }
+    let mut records = good_records()[..3].to_vec();
+    let mut fourth = good_records()[0].clone();
+    fourth.sequence = 4;
+    fourth.payload = Some(EventPayload {
+        payload: Some(Payload::RunStateChanged(RunStateChanged {
+            reason: quote,
+            state: Some(State::RunState(RunState::Completed as i32)),
+        })),
+    });
+    records.push(fourth);
+    records
+}
+
+fn position_of(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .unwrap()
+}
+
+#[test]
+fn a_frame_quoted_inside_a_whole_record_is_just_text() {
+    let records = records_with_a_quoting_fourth(&[5]);
+    let scratch = ScratchFolder::new("quoted_whole");
+    let path = scratch.file("events.log");
+    std::fs::write(&path, log_of(&frames_of(&records))).unwrap();
+    let (read_records, outcome, _) = read_until_not_a_record(&path);
+    assert_eq!(read_records, records);
+    assert_eq!(outcome, Ok(FrameRead::EndOfFile));
+}
+
+#[test]
+fn a_frame_quoted_inside_a_torn_record_is_not_proof() {
+    // The writer died partway through record 4, whose text quotes whole, checksum-valid frames with later sequences
+    // (5, and 4 itself). The quotes lie inside the torn record's own body, so they say nothing about its length: the
+    // frame is the torn tail, cut off on the next open, not corruption that would stop the run from resuming. The
+    // quoted records are never read as records either way.
+    let records = records_with_a_quoting_fourth(&[5, 4]);
+    let ends = frame_ends(&records);
+    let frames = frames_of(&records);
+    let fourth = &frames[3];
+    let quote_end = position_of(fourth, &ascii_frame_for_sequence(4)) + ascii_frame_for_sequence(4).len();
+    let kept = quote_end + BYTES_KEPT_AFTER_THE_QUOTE;
+    assert!(kept < fourth.len());
+    let mut bytes = log_of(&frames[..3]);
+    bytes.extend_from_slice(&fourth[..kept]);
+    let scratch = ScratchFolder::new("quoted_torn");
+    let path = scratch.file("events.log");
+    std::fs::write(&path, &bytes).unwrap();
+
+    let (read_records, outcome, _) = read_until_not_a_record(&path);
+    assert_eq!(read_records, records[..3].to_vec());
+    assert_eq!(outcome, Ok(FrameRead::Incomplete { valid_bytes: ends[2] }));
+
+    let writer = open_event_log_for_append(&path).unwrap();
+    assert_eq!(truncated_tail_bytes(&writer), kept as u64);
+    assert_eq!(std::fs::read(&path).unwrap(), log_of(&frames[..3]));
+}
+
+#[test]
+fn a_damaged_header_and_body_start_with_whole_frames_after_it_is_corrupt() {
+    // Worse than one flipped bit: the second frame's header and the start of its body are garbage, so its bytes
+    // don't read as the record it should be. Every offset is then a candidate, and the whole frames 3 and 4 after it
+    // show it is corruption, not a tail to cut off with them.
+    let second_frame_start = frame_ends(&good_records())[0] as usize;
+    let mut bytes = good_log();
+    for byte in &mut bytes[second_frame_start..second_frame_start + FRAME_HEADER_BYTES + 4] {
+        *byte = 0xFF;
+    }
+    assert_corrupt_and_left_alone("damaged_header_and_body", &bytes, 1, second_frame_start as u64);
+}
+
+#[test]
+fn a_whole_header_with_a_zeroed_body_and_zeros_after_it_is_a_torn_tail() {
+    // A power cut can keep a frame's header but not its body, and leave the rest of the block zeros: the header isn't
+    // zero, but nothing after the frame is, so no record follows it. That is a torn tail, not corruption.
+    let records = good_records();
+    let ends = frame_ends(&records);
+    let mut bytes = good_log();
+    for byte in &mut bytes[ends[2] as usize + FRAME_HEADER_BYTES..] {
+        *byte = 0;
+    }
+    bytes.extend_from_slice(&[0u8; ZEROED_BLOCK_BYTES]);
+    assert_torn_at_and_cut_by_the_writer("zeroed_body", &bytes, 3, ends[2]);
+}
+
+#[test]
+fn a_half_written_body_with_zeros_after_it_is_a_torn_tail() {
+    let records = good_records();
+    let ends = frame_ends(&records);
+    let mut bytes = good_log();
+    let half_body = (ends[3] - ends[2]) as usize / 2;
+    for byte in &mut bytes[ends[2] as usize + half_body..] {
+        *byte = 0;
+    }
+    bytes.extend_from_slice(&[0u8; ZEROED_BLOCK_BYTES]);
+    assert_torn_at_and_cut_by_the_writer("half_zeroed_body", &bytes, 3, ends[2]);
+}
+
+#[test]
+fn a_zeroed_body_with_a_record_after_it_is_still_corrupt() {
+    // The zero rule never hides a record: zeros inside a frame with a whole frame after it are damage in the middle.
+    let records = good_records();
+    let ends = frame_ends(&records);
+    let mut bytes = good_log();
+    for byte in &mut bytes[ends[1] as usize + FRAME_HEADER_BYTES..ends[2] as usize] {
+        *byte = 0;
+    }
+    assert_corrupt_and_left_alone("zeroed_middle_body", &bytes, 2, ends[1]);
+}
+
+/// Reads `bytes` as a log and checks that the read stops at a torn tail at `valid_bytes` after `whole_records` good
+/// records, and that the writer cuts the file back to there.
+fn assert_torn_at_and_cut_by_the_writer(test_name: &str, bytes: &[u8], whole_records: usize, valid_bytes: u64) {
+    let scratch = ScratchFolder::new(test_name);
+    let path = scratch.file("events.log");
+    std::fs::write(&path, bytes).unwrap();
+    let (records, outcome, _) = read_until_not_a_record(&path);
+    assert_eq!(records, good_records()[..whole_records].to_vec());
+    assert_eq!(outcome, Ok(FrameRead::Incomplete { valid_bytes }));
+    let writer = open_event_log_for_append(&path).unwrap();
+    assert_eq!(truncated_tail_bytes(&writer), bytes.len() as u64 - valid_bytes);
+    assert_eq!(std::fs::read(&path).unwrap(), bytes[..valid_bytes as usize].to_vec());
+}
+
+#[test]
+fn opening_a_missing_log_is_a_read_failure_rrs_s0006() {
+    // Nothing was written, so the error is the store's read code, never "a write failed".
+    let scratch = ScratchFolder::new("missing_log");
+    let path = scratch.file("events.log");
+    assert_eq!(open_event_log(&path).unwrap_err().code(), "RRS-S0006");
+    assert_eq!(open_event_log_for_append(&path).unwrap_err().code(), "RRS-S0006");
+    assert!(!path.exists());
 }
 
 #[test]
