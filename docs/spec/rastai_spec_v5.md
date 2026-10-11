@@ -1342,7 +1342,7 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 
 ## 37. Changes From v4.1
 **v5.4.2 (owner decision of 2026-10-11, PROC-01; the status line stays v5.4)**
-- §0.23 / §5 / §29: the verification rule's first condition is now `just check` passing locally (the pre-push hook `tools/hooks/pre-push`) and on the verifier's fresh clone of the exact PR head, not green CI. The private repository's free GitHub Actions minutes ran out, so CI runs only when started by hand until the repository is public or a self-hosted runner takes the jobs; macOS and Windows are re-checked then. This replaces the "CI is green" wording of v5.4.1 below.
+- §0.23 / §5: the verification rule's first condition is now `just check` passing locally (the pre-push hook `tools/hooks/pre-push`) and on the verifier's fresh clone of the exact PR head, not green CI. The private repository's free GitHub Actions minutes ran out, so CI runs only when started by hand until the repository is public or a self-hosted runner takes the jobs; macOS and Windows are re-checked then. This replaces the "CI is green" wording of v5.4.1 below.
 
 **v5.4.1 (owner approvals of 2026-10-11; the status line stays v5.4)**
 - §0.23 and ADR-0038: names and command schemas are enforced by CI, and work is closed only after independent verification.

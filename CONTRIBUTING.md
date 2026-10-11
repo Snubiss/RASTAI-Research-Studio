@@ -18,7 +18,7 @@ Run this once in every clone:
 just install-hooks
 ```
 
-It sets `core.hooksPath` to `tools/hooks` in the clone's own git config. Git then runs `tools/hooks/pre-push` before every push: the hook runs `just check` and refuses the push if it fails, or if tracked files have uncommitted changes (the check would test files that aren't what you push). GitHub CI runs only when started by hand while the repository is private, so this hook is what keeps a broken branch from leaving your machine.
+It sets `core.hooksPath` to `tools/hooks` in the clone's own git config. Git then runs `tools/hooks/pre-push` before every push: the hook runs `just check` and refuses the push if it fails. It also refuses, before running the check, when the working tree has uncommitted changes or untracked files that `.gitignore` doesn't cover, or when a pushed branch or tag is not the checked-out commit, because the check tests the files on disk and those would not be what you push. Check out the branch you push; deleting a remote branch skips the check. GitHub CI runs only when started by hand while the repository is private, so this hook is what keeps a broken branch from leaving your machine.
 
 In an emergency, for example to save work in progress before a machine goes away, skip it with `git push --no-verify`. Nothing merges on that alone: the verifier runs `just check` on a fresh clone of the pull request's head before the issue closes.
 

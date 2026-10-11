@@ -22,12 +22,56 @@ refuse_push() {
     exit 1
 }
 
-# `just check` tests the files on disk, not the commits being pushed. An uncommitted change to a tracked file could
-# make it pass for a tree that isn't the one pushed (or fail for one that is), so the hook asks for a clean tree.
+# In a linked worktree git runs the hook with GIT_DIR pointing at this repository, and a `git -c` on the push
+# arrives as GIT_CONFIG_PARAMETERS. `just check` runs tests that make and commit to scratch repositories; with these
+# set, their git commands would act on this repository instead. Git finds the repository from the working folder
+# without them (it runs the hook from the top of the working tree).
+forget_git_environment() {
+    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_CONFIG_PARAMETERS
+}
+
+# Git writes an all-zero object name for the local side of a branch or tag deletion.
+is_deletion() {
+    object_name="$1"
+    case "$object_name" in
+        *[!0]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# The commit an object names, so an annotated tag on the checked-out commit counts as that commit. Prints nothing
+# when the object is not a commit or a tag of one.
+commit_of() {
+    object_name="$1"
+    git rev-parse --verify --quiet "$object_name^{commit}"
+}
+
+# `just check` tests the checked-out tree, so it says nothing about any other commit. Git gives one line per ref to
+# update on stdin: `<local ref> <local object> <remote ref> <remote object>`. The hook refuses any update that is not
+# the checked-out commit, skips deletions (they push no commits), and prints "yes" when anything is left to check.
+read_pushed_refs() {
+    checked_out_commit=$(git rev-parse --verify --quiet HEAD)
+    pushes_commits="no"
+    while read -r local_ref local_object remote_ref remote_object; do
+        if is_deletion "$local_object"; then
+            continue
+        fi
+        if [ "$(commit_of "$local_object")" != "$checked_out_commit" ]; then
+            refuse_push "$local_ref is not the checked-out commit, so \`just $CHECK_RECIPE\` would not test it." \
+                "Check out the branch you push (git switch), then push again."
+        fi
+        pushes_commits="yes"
+    done
+    echo "$pushes_commits"
+}
+
+# `just check` tests the files on disk, not the commits being pushed. An uncommitted change, or a new file that was
+# never added (say, a module the code uses), could make it pass for a tree that isn't the one pushed, so the hook asks
+# for a clean tree. Ignored files (build output, virtual environments) don't count: .gitignore keeps them out.
 require_committed_tree() {
-    if ! git diff --quiet HEAD --; then
-        refuse_push "tracked files have uncommitted changes, so \`just $CHECK_RECIPE\` would not test what you push." \
-            "Commit or stash them, then push again."
+    if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+        refuse_push "the working tree has uncommitted changes or untracked files, so \`just $CHECK_RECIPE\` would not" \
+            "test what you push. Commit or stash them (git stash --include-untracked), then push again."
     fi
 }
 
@@ -37,7 +81,7 @@ require_just() {
     fi
 }
 
-# Git hands the hook the refs to push on stdin; `just check` has no use for them, so it reads from /dev/null.
+# The hook has already read git's stdin, so `just check` reads from /dev/null.
 run_check() {
     if ! just "$CHECK_RECIPE" </dev/null; then
         refuse_push "\`just $CHECK_RECIPE\` failed (its output is above)." \
@@ -45,16 +89,12 @@ run_check() {
     fi
 }
 
-# In a linked worktree git runs the hook with GIT_DIR pointing at this repository, and a `git -c` on the push
-# arrives as GIT_CONFIG_PARAMETERS. `just check` runs tests that make and commit to scratch repositories; with these
-# set, their git commands would act on this repository instead. Git finds the repository from the working folder
-# without them (it runs the hook from the top of the working tree).
-forget_git_environment() {
-    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_CONFIG_PARAMETERS
-}
-
 main() {
     forget_git_environment
+    pushes_commits=$(read_pushed_refs) || exit 1
+    if [ "$pushes_commits" = "no" ]; then
+        exit 0
+    fi
     require_committed_tree
     require_just
     run_check
