@@ -39,8 +39,14 @@ pub(crate) fn current_user_id() -> Result<u32, TransportError> {
         socket_path: std::path::PathBuf::new(),
         reason: format!("socket pair for reading our own user id: {error}"),
     })?;
-    let ourselves = peer_identity_of(&one_end)?;
+    let ourselves = peer_identity_of(&one_end).map_err(credentials_unreadable)?;
     Ok(ourselves.user_id)
+}
+
+/// The peer's credentials couldn't be read, keeping the operating system's words.
+#[cfg(unix)]
+pub(crate) fn credentials_unreadable(error: std::io::Error) -> TransportError {
+    crate::error::connection_failed(format!("reading the peer's credentials: {error}"))
 }
 
 /// Windows has no Unix user ids; its named pipes (tier 2) will check the pipe's owner instead.
@@ -51,12 +57,11 @@ pub(crate) fn current_user_id() -> Result<u32, TransportError> {
     })
 }
 
-/// The peer of a connected Unix socket, as the kernel reports it.
+/// The peer of a connected Unix socket, as the kernel reports it. The operating system's error is kept as it is,
+/// because the accept loop treats one kind of it (a client that already hung up) differently.
 #[cfg(unix)]
-pub(crate) fn peer_identity_of(stream: &tokio::net::UnixStream) -> Result<PeerIdentity, TransportError> {
-    let credentials = stream
-        .peer_cred()
-        .map_err(|error| crate::error::connection_failed(format!("reading the peer's credentials: {error}")))?;
+pub(crate) fn peer_identity_of(stream: &tokio::net::UnixStream) -> std::io::Result<PeerIdentity> {
+    let credentials = stream.peer_cred()?;
     Ok(PeerIdentity {
         user_id: credentials.uid(),
         process_id: credentials.pid(),
