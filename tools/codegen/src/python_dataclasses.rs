@@ -19,7 +19,7 @@ use crate::type_modules::{
     DESCRIPTIONS_SOURCE_FILE, TypeModule, group_types_into_modules, holds_a_described_type, module_of_type,
     referenced_type_names,
 };
-use crate::write_if_changed::write_if_changed;
+use crate::write_if_changed::{remove_unwritten_files, write_if_changed};
 
 const GENERATED_FOLDER: &str = "python/rastai_formats/rastai_formats/generated";
 const IMPORT_PACKAGE: &str = "rastai_formats.generated";
@@ -46,26 +46,35 @@ from __future__ import annotations
 from dataclasses import dataclass
 ";
 
-const INIT_DOCSTRING: &str = "\"\"\"Every type rastai-formats describes, as frozen dataclasses with from_json and to_json functions (contracts 5.4).
+// A `\` at the end of a line drops the line break, so the string starts with the docstring's opening quotes.
+const INIT_DOCSTRING: &str = "\
+\"\"\"Every type rastai-formats describes, as frozen dataclasses with from_json and to_json functions (contracts 5.4).
 
 Import them from here: `from rastai_formats.generated import SharedHeader, shared_header_from_json`.
 \"\"\"
 ";
 
-/// Writes every module and `__init__.py` under `output_root`. Returns how many files changed.
+/// Writes every module and `__init__.py` under `output_root`, then deletes the modules it no longer writes (the
+/// folder is this generator's alone; `__pycache__/` is left alone). Returns how many files changed or were deleted.
 pub fn write_python_dataclasses(output_root: &Path, all_types: &[TypeDescription]) -> Result<usize, CodegenError> {
     let modules = group_types_into_modules(all_types)?;
     let folder = output_root.join(GENERATED_FOLDER);
     let mut changed_count = 0;
+    let mut written_paths = Vec::new();
     for module in &modules {
         let contents = render_python_module(module, all_types)?;
-        if write_if_changed(&folder.join(format!("{}.py", module.name)), &contents)? {
+        let path = folder.join(format!("{}.py", module.name));
+        if write_if_changed(&path, &contents)? {
             changed_count += 1;
         }
+        written_paths.push(path);
     }
-    if write_if_changed(&folder.join(INIT_FILE), &render_python_init(&modules))? {
+    let init_path = folder.join(INIT_FILE);
+    if write_if_changed(&init_path, &render_python_init(&modules))? {
         changed_count += 1;
     }
+    written_paths.push(init_path);
+    changed_count += remove_unwritten_files(&folder, &written_paths)?;
     Ok(changed_count)
 }
 
@@ -212,6 +221,10 @@ fn python_fields(description: &TypeDescription) -> Result<Vec<PythonField<'_>>, 
                 "can't be a Python attribute name; JSON keys must be snake_case words",
             )
         })?;
+        // `Literal[]` is a Python syntax error, and an enum no value satisfies is a mistake in the description.
+        if holds_an_empty_enum(&field.kind) {
+            return Err(field_error(description, field, "is an enum with no values"));
+        }
         if fields.iter().any(|existing| existing.attribute == attribute) {
             return Err(field_error(
                 description,
@@ -225,6 +238,14 @@ fn python_fields(description: &TypeDescription) -> Result<Vec<PythonField<'_>>, 
         });
     }
     Ok(fields)
+}
+
+fn holds_an_empty_enum(kind: &FieldKind) -> bool {
+    match kind {
+        FieldKind::Enum(values) => values.is_empty(),
+        FieldKind::List(inner) | FieldKind::Map(inner) => holds_an_empty_enum(inner),
+        _ => false,
+    }
 }
 
 fn field_error(description: &TypeDescription, field: &FieldDescription, problem: &str) -> CodegenError {
@@ -336,10 +357,9 @@ fn field_comment(field: &PythonField) -> String {
 
 fn render_from_json(description: &TypeDescription, fields: &[PythonField]) -> String {
     let type_name = &description.name;
-    let mut text = format!(
-        "def {}_{FROM_JSON_SUFFIX}(data: dict[str, Any]) -> {type_name}:\n{INDENT}\"\"\"A {type_name} from its JSON object.\"\"\"\n",
-        snake_case(type_name)
-    );
+    let function_name = format!("{}_{FROM_JSON_SUFFIX}", snake_case(type_name));
+    let mut text = format!("def {function_name}(data: dict[str, Any]) -> {type_name}:\n");
+    text.push_str(&format!("{INDENT}\"\"\"A {type_name} from its JSON object.\"\"\"\n"));
     if fields.is_empty() {
         text.push_str(&format!("{INDENT}return {type_name}()\n"));
         return text;
@@ -361,10 +381,11 @@ fn render_from_json(description: &TypeDescription, fields: &[PythonField]) -> St
 
 fn render_to_json(description: &TypeDescription, fields: &[PythonField]) -> String {
     let type_name = &description.name;
-    let mut text = format!(
-        "def {}_{TO_JSON_SUFFIX}(value: {type_name}) -> dict[str, Any]:\n{INDENT}\"\"\"The JSON object of a {type_name}; optional fields that are None are left out.\"\"\"\n",
-        snake_case(type_name)
-    );
+    let function_name = format!("{}_{TO_JSON_SUFFIX}", snake_case(type_name));
+    let mut text = format!("def {function_name}(value: {type_name}) -> dict[str, Any]:\n");
+    text.push_str(&format!(
+        "{INDENT}\"\"\"The JSON object of a {type_name}; optional fields that are None are left out.\"\"\"\n"
+    ));
     text.push_str(&format!("{INDENT}data: dict[str, Any] = {{}}\n"));
     for field in fields {
         let key = json_string_literal(&field.description.name);
@@ -572,6 +593,22 @@ class Tree:
         let modules = group_types_into_modules(&all_types).unwrap();
         let error = render_python_module(&modules[0], &all_types).unwrap_err();
         assert!(error.problem.contains("gives the attribute `schema` twice"), "{error}");
+    }
+
+    #[test]
+    fn an_enum_with_no_values_is_refused() {
+        let all_types = vec![TypeDescription {
+            name: "Empty".to_string(),
+            schema_id: "rastai.empty/1".to_string(),
+            doc: String::new(),
+            fields: vec![field("modes", list_of(FieldKind::Enum(Vec::new())), REQUIRED, "")],
+        }];
+        let modules = group_types_into_modules(&all_types).unwrap();
+        let error = render_python_module(&modules[0], &all_types).unwrap_err();
+        assert!(
+            error.problem.contains("Empty.modes is an enum with no values"),
+            "{error}"
+        );
     }
 
     #[test]

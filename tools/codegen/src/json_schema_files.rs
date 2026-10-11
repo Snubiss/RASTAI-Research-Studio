@@ -21,7 +21,7 @@ use serde_json::{Map, Value, json};
 use crate::command_source::CommandDescription;
 use crate::error::{CodegenError, codegen_error};
 use crate::type_modules::DESCRIPTIONS_SOURCE_FILE;
-use crate::write_if_changed::write_if_changed;
+use crate::write_if_changed::{remove_unwritten_files, write_if_changed};
 
 const SCHEMAS_FOLDER: &str = "schemas";
 const INDEX_FILE: &str = "index.json";
@@ -52,7 +52,10 @@ pub struct SchemaFile {
     pub schema: Value,
 }
 
-/// Writes every document and command schema and the index under `output_root`. Returns how many files changed.
+/// Writes every document and command schema and the index under `output_root`, and deletes the command schemas
+/// it no longer writes: `schemas/commands/` is this generator's alone. The rest of `schemas/` is not
+/// (`schemas/names.json` joins it in M1-57), so a document schema it stops writing is deleted by hand; check-generated
+/// names it. Returns how many files changed or were deleted.
 pub fn write_json_schema_files(
     output_root: &Path,
     document_types: &[DocumentType],
@@ -64,16 +67,19 @@ pub fn write_json_schema_files(
     files.sort_by(|left, right| left.schema_id.cmp(&right.schema_id));
     let schemas_folder = output_root.join(SCHEMAS_FOLDER);
     let mut changed_count = 0;
+    let mut written_paths = Vec::new();
     for file in &files {
         let path = schemas_folder.join(&file.relative_path);
         if write_if_changed(&path, &pretty_text(&file.schema, &path)?)? {
             changed_count += 1;
         }
+        written_paths.push(path);
     }
     let index_path = schemas_folder.join(INDEX_FILE);
     if write_if_changed(&index_path, &pretty_text(&schema_index(&files), &index_path)?)? {
         changed_count += 1;
     }
+    changed_count += remove_unwritten_files(&schemas_folder.join(COMMANDS_FOLDER), &written_paths)?;
     Ok(changed_count)
 }
 
