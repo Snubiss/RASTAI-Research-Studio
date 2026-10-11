@@ -78,11 +78,18 @@ deny = [
   { crate = "tokenizers", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (tokenizer.rs)" },
   { crate = "minijinja", wrappers = ["rastai-gateway"], reason = "one owner: rastai-gateway (chat templates)" },
   { crate = "rusqlite", wrappers = ["rastai-store"], reason = "one owner: rastai-store (sqlite.rs)" },
-  # cpufeatures (under blake3, M1-14) reads CPU features through libc on ARM Linux and Android.
+  # cpufeatures (under blake3, M1-14) reads CPU features through libc on ARM Linux and Android. tokio and the crates
+  # under its sockets (mio, socket2, tokio-util), and hyper-util under tonic and rastai-transport's HTTP client, make
+  # their system calls through it (M1-41).
   { crate = "libc", wrappers = [
     "rastai-store",
     "cpufeatures",
-  ], reason = "rastai-store (disk_space.rs, ADR-0033) and cpufeatures (CPU feature detection under blake3)" },
+    "tokio",
+    "mio",
+    "socket2",
+    "tokio-util",
+    "hyper-util",
+  ], reason = "rastai-store (disk_space.rs, ADR-0033); the system calls of blake3, tokio and hyper-util underneath" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },
   { crate = "keyring", wrappers = ["rastai-server"], reason = "one owner: rastai-server (secrets.rs)" },

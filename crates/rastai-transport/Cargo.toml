@@ -1,0 +1,37 @@
+[package]
+name = "rastai-transport"
+description = "Rastai's byte pipes: local sockets with peer checks, gRPC channels over them, and the HTTP client"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# M1-41 lands the local half (layout: rust-node-gateway-proto.md section 4, build-order step 1): local sockets,
+# peer checks, tonic channels and servers over them, the local NodeConnection and plain HTTP over a local socket or
+# loopback. HTTPS (rustls), ssh.rs, sse.rs and transfer.rs arrive with their own tasks, and with them rastai-formats
+# (hashing) and the rest of rastai-proto's types.
+[dependencies]
+rastai-diag = { path = "../rastai-diag" }
+# DataPaths, which open_node_connection takes (node_connection.rs).
+rastai-core = { path = "../rastai-core" }
+# Sockets, timers and the accept loop's channel. "macros" is for tokio::select! in grpc_channel.rs.
+tokio = { workspace = true, features = ["net", "rt", "time", "sync", "io-util", "macros"] }
+# Channels and servers over local sockets; only grpc_channel.rs and node_connection.rs use it. "router" is what
+# `Server::add_service` returns, the type serve_grpc_on_socket takes; "codegen" re-exports tokio_stream, whose
+# ReceiverStream hands the accepted connections to tonic.
+tonic = { workspace = true, features = ["channel", "server", "router", "codegen"] }
+# Only http_client.rs imports these two (contracts 2.5; tools/checks/check-imports). HTTP/1.1 client connections
+# only: no pool, one connection per request, which is all a local socket or loopback needs.
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+
+[dev-dependencies]
+# tests/grpc_local.rs serves the generated WorkerService over a Unix socket. The tonic service code is behind
+# rastai-proto's grpc feature, which only the crates that serve or call a gRPC service turn on.
+rastai-proto = { path = "../rastai-proto", features = ["grpc"] }
+# #[tokio::test]
+tokio = { workspace = true, features = ["net", "rt", "time", "sync", "io-util", "macros"] }
+
+[lints]
+workspace = true

@@ -14,6 +14,7 @@ members = [
   "crates/rastai-formats",
   "crates/rastai-core",
   "crates/rastai-store",
+  "crates/rastai-transport",
   "tools/codegen",
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
@@ -53,8 +54,13 @@ prost = "=0.14.4"
 # turn on only the tonic features they use: rastai-proto needs `codegen` alone (buf.gen.yaml: no_transport).
 tonic = { version = "=0.14.6", default-features = false }
 tonic-prost = "=0.14.6"
+# HTTP/1.1 for rastai-transport's http_client.rs (M1-41). tonic's channel and server pull in the same two crates, so
+# the lock holds one copy of each. hyper is 1.11.1, not the newest 1.12.0, which was five days old when this was
+# pinned.
+hyper = { version = "=1.11.1", default-features = false }
+hyper-util = { version = "=0.1.21", default-features = false }
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
-# hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc,
+# rustls, tokio-rustls, webpki-roots, tower, libc,
 # miniz_oxide, ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build,
 # tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 
