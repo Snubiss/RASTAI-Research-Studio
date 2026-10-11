@@ -52,5 +52,4 @@ pub struct ControlResponse {
     #[prost(message, optional, tag="1")]
     pub diagnostic: ::core::option::Option<super::super::common::v1::Diagnostic>,
 }
-include!("rastai.worker.v1.tonic.rs");
 // @@protoc_insertion_point(module)

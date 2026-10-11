@@ -278,6 +278,7 @@ name = "rastai-proto"
 version = "0.1.0"
 dependencies = [
  "prost",
+ "rastai-proto",
  "tonic",
  "tonic-prost",
 ]
