@@ -50,6 +50,26 @@
     "retired": false
   },
   {
+    "code": "RRS-N0006",
+    "severity": "error",
+    "title": "An identity key or the pinned-keys file can't be used",
+    "message": "The identity file {path} can't be used: {reason}.",
+    "basic_text": "Rastai couldn't read or save this computer's identity key.",
+    "fix_text": "Make sure the file belongs to you and only you can read it (chmod 600). If it is damaged, move it aside and pair this computer again.",
+    "docs_anchor": "rrs-n0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-N0007",
+    "severity": "error",
+    "title": "Handshake refused: its challenge is stale or was used before",
+    "message": "The handshake from {daemon_id} was refused: {reason}.",
+    "basic_text": "Your Rastai and this computer couldn't confirm each other.",
+    "fix_text": "Check that the clocks of both computers are right, then connect again.",
+    "docs_anchor": "rrs-n0007",
+    "retired": false
+  },
+  {
     "code": "RRS-N1001",
     "severity": "error",
     "title": "SSH authentication failed",

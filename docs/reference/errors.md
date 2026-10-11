@@ -1381,6 +1381,24 @@ Source: `catalog/errors/RRS-N.json`.
 - **In plain words:** This feature is planned but not built yet in this version of Rastai.
 - **Fix:** Nothing to fix on your side: the feature arrives in a later version.
 
+<a id="rrs-n0006"></a>
+
+### RRS-N0006: An identity key or the pinned-keys file can't be used
+
+- **Severity:** error
+- **Message:** The identity file {path} can't be used: {reason}.
+- **In plain words:** Rastai couldn't read or save this computer's identity key.
+- **Fix:** Make sure the file belongs to you and only you can read it (chmod 600). If it is damaged, move it aside and pair this computer again.
+
+<a id="rrs-n0007"></a>
+
+### RRS-N0007: Handshake refused: its challenge is stale or was used before
+
+- **Severity:** error
+- **Message:** The handshake from {daemon_id} was refused: {reason}.
+- **In plain words:** Your Rastai and this computer couldn't confirm each other.
+- **Fix:** Check that the clocks of both computers are right, then connect again.
+
 <a id="rrs-n1001"></a>
 
 ### RRS-N1001: SSH authentication failed

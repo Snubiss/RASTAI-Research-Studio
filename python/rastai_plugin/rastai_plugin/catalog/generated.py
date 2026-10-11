@@ -228,6 +228,8 @@ RRS_N0002 = "RRS-N0002"
 RRS_N0003 = "RRS-N0003"
 RRS_N0004 = "RRS-N0004"
 RRS_N0005 = "RRS-N0005"
+RRS_N0006 = "RRS-N0006"
+RRS_N0007 = "RRS-N0007"
 RRS_N1001 = "RRS-N1001"
 RRS_N1002 = "RRS-N1002"
 RRS_N1003 = "RRS-N1003"
@@ -2538,6 +2540,28 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Nothing to fix on your side: the feature arrives in a later version.",
         fix_command_id="",
         docs_anchor="rrs-n0005",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N0006,
+        severity="error",
+        title="An identity key or the pinned-keys file can't be used",
+        message="The identity file {path} can't be used: {reason}.",
+        basic_text="Rastai couldn't read or save this computer's identity key.",
+        fix_text="Make sure the file belongs to you and only you can read it (chmod 600). If it is damaged, move it aside and pair this computer again.",
+        fix_command_id="",
+        docs_anchor="rrs-n0006",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N0007,
+        severity="error",
+        title="Handshake refused: its challenge is stale or was used before",
+        message="The handshake from {daemon_id} was refused: {reason}.",
+        basic_text="Your Rastai and this computer couldn't confirm each other.",
+        fix_text="Check that the clocks of both computers are right, then connect again.",
+        fix_command_id="",
+        docs_anchor="rrs-n0007",
         retired=False,
     ),
     CatalogEntry(

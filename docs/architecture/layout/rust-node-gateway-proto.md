@@ -1547,7 +1547,7 @@ pub struct LlamaServerProcess { pub job_id: String, pub pid: u32, pub process_gr
 
 **Handshake and heartbeats** (`handshake.rs`, `hub_client.rs`, `heartbeat.rs`)
 - `NodeService.Handshake`: protocol version 1 plus capability flags. The flags are the list in contracts 8.6: `generate.inspectable`, `generate.fast`, `lens.live`, `sandbox.engine` (an engine socket was found), `transfer.resume`, `self_update` (standalone only) and `gym`. The request also carries the daemon's resolved `tokenization_overrides` (6.8). A version the node can't speak returns `RRS-N0001`; the daemon moves the node to `incompatible` and offers `node.update`.
-- Both sides sign the other's random challenge with Ed25519 (`identity.rs`). The node accepts only daemon keys pinned in `<data>/node/paired_daemons.json`; any other key gets `RRS-N0002`. The embedded node also checks socket peer credentials. The node returns a session token (random, in memory) that the daemon sends as gRPC metadata on later calls and the node sends on `NodeHubService` calls.
+- Both sides sign the other's random challenge with Ed25519 (`identity.rs`). The node accepts only daemon keys pinned in `<data>/node/paired_daemons.json`; any other key gets `RRS-N0002`. A request whose `sent_unix_ms` is more than 5 minutes off the node's clock, or whose `daemon_nonce` the node has seen before, gets `RRS-N0007`. A key file or `paired_daemons.json` that can't be read or written, is damaged, or is open to group or others gets `RRS-N0006`; the node never makes a new key in place of a damaged one. The embedded node also checks socket peer credentials. The node returns a session token (random, in memory) that the daemon sends as gRPC metadata on later calls and the node sends on `NodeHubService` calls.
 - Heartbeat every `nodes.heartbeat_seconds` (5), and at once on any state change (section 7.5). A failed heartbeat is retried on the next tick. Jobs never stop because the daemon is gone.
 
 **Hardware detection** (`hardware.rs`)
@@ -1772,7 +1772,7 @@ Numbers only; titles are in contracts 10.3. A file may raise a code only if it i
 | `rastai-transport` `transfer.rs`, `http_client.rs` | `RRS-N3002`, `RRS-N3003`, `RRS-N3008`, `RRS-N3012` |
 | `rastai-sandbox` | `RRS-R1001` to `RRS-R1013` (cap, engine, API version, pull, start, time cap, pause, RAM, over-cap request, egress network, socket permission, memory cap, engine failure) |
 | `rastai-gateway` | `RRS-G0001`, `G0002`, `G0004` to `G0007`, `G0009`, `G0010`, `G1001` to `G1007`, `G2001` to `G2004`, `G3004`, `G3006`, `G4001` |
-| `rastai-node` handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `RRS-H0001`, `H0002`, `RRS-S3001` |
+| `rastai-node` identity, handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N0006`, `N0007`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `RRS-H0001`, `H0002`, `RRS-S3001` |
 | `rastai-node` environments, leases | `RRS-H2001` to `H2006`, `RRS-H3001`, `H3004` to `H3007`, `RRS-H4002` |
 | `rastai-node` jobs and reattach | `RRS-J0001`, `J0002`, `J1001` to `J1004`, `J2001` to `J2003`, `J3002`, `J3003`, `RRS-S2002`, `RRS-S3002` |
 | `rastai-node` Fast runtime | `RRS-G1003`, `G1004`, `G3002`, `G3003`, `G3005`, `G3007`, `G3008` |
