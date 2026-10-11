@@ -1,0 +1,17 @@
+# rastai_plugin: the Python plugin SDK (contracts 2.2; layout frontend-and-plugins.md 11). M1-12 lands the package
+# skeleton and its generated catalog (rastai_plugin/catalog/generated.py, written by `just codegen`); M1-37 fills in
+# the registry, the base classes, the module loader and the host client, and adds their dependencies here.
+
+[project]
+name = "rastai-plugin"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_plugin/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""

@@ -15,7 +15,7 @@ One uv project and one hash-pinned `uv.lock` per backend (ADR-0009; layout `docs
 
 ## The cpu environment
 
-- `cpu/pyproject.toml` pins torch (CPU build, from the PyTorch index), tokenizers, grpcio and protobuf exactly, with pytest, ruff and grpcio-tools (the generators `just codegen` runs) in the `dev` group. Workspace packages are installed editable from their folder through `[tool.uv.sources]`, with no version pin: `rastai-proto` so far. The packages later tasks need (pyarrow, torchvision, PyMySQL, onnx, onnxscript and the other workspace packages) join with those tasks.
+- `cpu/pyproject.toml` pins torch (CPU build, from the PyTorch index), tokenizers, grpcio and protobuf exactly, with pytest, ruff and grpcio-tools (the generators `just codegen` runs) in the `dev` group. Workspace packages are installed editable from their folder through `[tool.uv.sources]`, with no version pin: `rastai-proto`, `rastai-data` and `rastai-plugin` so far. The packages later tasks need (pyarrow, torchvision, PyMySQL, onnx, onnxscript and the other workspace packages) join with those tasks.
 - `just env-cpu` syncs it into `.dev/envs/cpu` (git-ignored). Until M2-16 the embedded node uses that folder, and every `just check` runs pytest and ruff from it. After one online run it works offline from the uv cache.
 - `tests/test_cpu_environment.py` is the smoke test: Python 3.12, the CPU build of torch, the direct runtime packages (torch, tokenizers, grpcio and protobuf) importable, the installed versions equal to the pins, and the workspace packages installed.
 

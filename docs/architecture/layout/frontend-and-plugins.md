@@ -2661,8 +2661,9 @@ python/rastai_plugin/
     manifest.py                read_manifest (through the rastai_formats wheel); expected ids per kind
     module_loader.py           load_plugin_module: import, call register(), compare names with the manifest (RRS-P0103)
     errors.py                  PluginError(code, message)
-    catalog.py                 generated error-code constants (RRS_M4001, ...) and lookups, the plugin's own
-                               catalog/errors.json included
+    catalog/
+      __init__.py              lookups (M1-37), the plugin's own catalog/errors.json included
+      generated.py             generated error-code constants (RRS_M4001, ...) and entries, from rastai-catalog-codegen
     types.py                   plain dataclasses shared by extension points (TrainingContext, Batch, StepResult,
                                EvalCase, EvalContext, ModelOutput, MetricResult, ...)
     testing/

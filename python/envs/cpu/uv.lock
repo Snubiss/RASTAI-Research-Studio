@@ -343,6 +343,7 @@ dependencies = [
     { name = "grpcio" },
     { name = "protobuf" },
     { name = "rastai-data" },
+    { name = "rastai-plugin" },
     { name = "rastai-proto" },
     { name = "tokenizers" },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
@@ -361,6 +362,7 @@ requires-dist = [
     { name = "grpcio", specifier = "==1.84.0" },
     { name = "protobuf", specifier = "==7.36.2" },
     { name = "rastai-data", editable = "../../rastai_data" },
+    { name = "rastai-plugin", editable = "../../rastai_plugin" },
     { name = "rastai-proto", editable = "../../rastai_proto" },
     { name = "tokenizers", specifier = "==0.23.2" },
     { name = "torch", specifier = "==2.14.1", index = "https://download.pytorch.org/whl/cpu" },
@@ -372,6 +374,11 @@ dev = [
     { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff", specifier = "==0.16.9" },
 ]
+
+[[package]]
+name = "rastai-plugin"
+version = "0.1.0"
+source = { editable = "../../rastai_plugin" }
 
 [[package]]
 name = "rastai-proto"

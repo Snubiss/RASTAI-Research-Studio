@@ -12,6 +12,7 @@ members = [
   "crates/rastai-diag",
   "crates/rastai-proto",
   "crates/rastai-formats",
+  "tools/codegen",
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
 exclude = [

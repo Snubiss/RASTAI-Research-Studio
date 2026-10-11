@@ -260,7 +260,7 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 | `just test-archive` | `rastai-archive` tests and crash rows 20–24 against the MySQL 8.4 and 9.7, MariaDB and MinIO containers (section 14.9) | CI job `mysql-archive` (M11-E07) |
 | `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (the targets of contracts §12.5) | nightly CI, 10 minutes per target |
 | `just codegen` | `buf generate` (proto doc; protobuf-es with target `js+dts`), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen`, then `--bin rastai-names-codegen` (last: it reads the catalog, the tables and the migrations) | after any catalog, document or command change |
-| `just codegen-check` | `tools/checks/check-generated` | CI |
+| `just codegen-check [base]` | `tools/checks/check-generated`, then `cargo test -p rastai-codegen -- --ignored` with `RASTAI_BASE_REF=<base>` (default `origin/main`): the catalog's merge-base check and the outputs check (4.9), which need git history and both environments | CI |
 | `just wasm` | `cargo build -p rastai-diag --target wasm32-unknown-unknown` (M1, section 3.4); from M4 also `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir packages/formats/src/wasm/` | `just check`; `packages/formats` build, the viewer |
 | `just wheel` | `maturin build --release -m crates/rastai-formats/bindings/python/Cargo.toml` into `python/rastai_formats/dist/` | the uv environments |
 | `just deny` | `cargo deny check` | CI |
@@ -295,7 +295,7 @@ catalog/
                    never reuse, retire instead; also maps withdrawn draft numbers (contracts §10.2)
 ```
 
-`RRS-L` and `RRS-V` live in `plugins/psychology/catalog/` and `plugins/evaluation/catalog/` (contracts §10); the catalog codegen reads them too. One entry:
+`RRS-L` and `RRS-V` live in `plugins/psychology/catalog/errors.json` and `plugins/evaluation/catalog/errors.json` (contracts §10), with each plugin's terms in `catalog/terms.json` beside it; the catalog codegen reads them too. Every catalog file is a JSON array of entries, read by `rastai-formats`' strict reader (a key written twice is an error), and every entry has exactly the fields below (`fix_command_id` may be left out). A source that doesn't exist yet holds no entries, so the generated tables are empty until M1-13 writes the files. One entry:
 
 ```json
 {
@@ -535,7 +535,7 @@ error[RRS-E2004]: Input ranges overlap
 | Unit | bottom of `path.rs`, `catalog.rs`, `render_text.rs` | path round trip; a missing placeholder value stays visible as `{name}`; snippet and caret at line 1, at the last line, with tabs and multi-byte characters |
 | Snapshots | `tests/render_snapshots.rs`, `fixtures/diagnostics/` (new) | plain, color-stripped and Basic output for one case per severity and path shape |
 | Catalog rules | `tools/codegen/tests/catalog_checks.rs` | codes well formed and unique; each code in its owner's range (contracts §10); placeholders in call sites exist in the entry; every `fix_command_id` exists in the core table or a first-party manifest |
-| Append-only | `tools/checks/check-generated` | a code present at the merge base can be marked `retired` but never deleted or renumbered |
+| Append-only | `tools/codegen/tests/catalog_checks.rs` (the `#[ignore]`d merge-base test, run by `just codegen-check`) | a code present at the merge base can be marked `retired` but never deleted or renumbered |
 
 ### 3.6 Ported from the spike
 
@@ -1095,10 +1095,18 @@ tools/codegen/
   Cargo.toml                  depends on rastai-formats, rastai-core, rastai-diag, serde_json (cargo metadata is run as a
                               process by the names bin; no crate for it)
   src/
+    lib.rs                    pub mod lines only
     bin/
       rastai_formats_codegen.rs   main: load descriptions, then write each output in turn
-      rastai_catalog_codegen.rs   main: read catalog JSON, then write each output in turn
+      rastai_catalog_codegen.rs   main: read catalog JSON, then write each output in turn; --output <folder> writes
+                                  into another tree laid out like the repository (check-generated uses it)
       rastai_names_codegen.rs     main: collect every name, then write schemas/names.json (M1)
+    error.rs                  CodegenError: the file at fault and a sentence (no catalog code: the catalog is the output)
+    repo_root.rs              find_repo_root: two folders above this crate's manifest
+    catalog_source.rs         read_catalog: catalog/errors/*.json, catalog/terms/terms.json and plugins/*/catalog/ into
+                              ErrorRecord and TermRecord lists, sorted; exact fields, strict JSON
+    catalog_ranges.rs         CATALOG_PREFIXES: contracts §10.1 as data (prefix, owner's file, ranges); split_code
+    literals.rs               the generated-file notice, string literals for Rust and for JSON (JavaScript, Python)
     json_schema_files.rs      schemas/<type>/<version>.json, schemas/commands/*, schemas/events/*, schemas/index.json;
                               each command and event file carries `x-rastai-stability`
     names_registry.rs         NameRegistry: one sorted list per kind (2.8), collected from the tables, catalog, store
@@ -1111,17 +1119,21 @@ tools/codegen/
                               modelLoad(executor, args), each taking a CommandExecutor (contracts §12.4)
     python_dataclasses.rs     python/rastai_formats/generated/*.py (frozen @dataclass per type, from_json/to_json functions;
                               Proto fields as dict with a docstring line naming the message)
-    catalog_rust.rs           crates/rastai-diag/src/generated/catalog_table.rs and terms_table.rs
+    catalog_rust.rs           crates/rastai-diag/src/generated/: mod.rs (marks both tables #[rustfmt::skip]),
+                              catalog_table.rs and terms_table.rs
     catalog_javascript.rs     packages/catalog/src/generated/catalog.js (entries plus a JSDoc @typedef for one entry)
-    catalog_python.rs         python/rastai_plugin/catalog/generated.py
+    catalog_python.rs         python/rastai_plugin/rastai_plugin/catalog/generated.py (constants RRS_E1003, frozen
+                              dataclasses CatalogEntry and TermEntry, CATALOG and TERMS)
     reference_docs.rs         docs/reference/commands.md (with each command's stability), errors.md, settings.md
     write_if_changed.rs       write a file only when its bytes differ, so timestamps stay stable
   tests/
-    catalog_checks.rs         the catalog rules of 3.5
+    catalog_checks.rs         the catalog rules of 3.5 (well formed, unique, owner's file and range, never deleted
+                              since the merge base); the merge-base test is #[ignore]d and run by `just codegen-check`
     names_registry.rs         a sample tree yields the expected names.json; output is sorted and stable; a dropped
                               column or a renamed command shows in the diff
-    outputs_check.rs          the generated JS passes `just check-js` (tsc --noEmit in checkJs mode), the generated Python
-                              imports (run by just, not cargo)
+    outputs_check.rs          the generated JS passes `just check-js` (tsc --noEmit in checkJs mode), the generated JS and
+                              Python read back the entries they came from (#[ignore]d; run by `just codegen-check`, not
+                              a plain cargo test, because it needs both environments)
 ```
 
 ```rust
