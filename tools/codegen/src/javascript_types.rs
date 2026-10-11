@@ -14,26 +14,33 @@ use rastai_formats::describe::types::{FieldDescription, FieldKind, TypeDescripti
 use crate::error::{CodegenError, codegen_error};
 use crate::literals::{FORMATS_SOURCE_NOTE, GENERATED_NOTICE, json_string_literal};
 use crate::type_modules::{DESCRIPTIONS_SOURCE_FILE, TypeModule, group_types_into_modules, module_of_type};
-use crate::write_if_changed::write_if_changed;
+use crate::write_if_changed::{remove_unwritten_files, write_if_changed};
 
 const TYPES_FOLDER: &str = "packages/formats/src/generated";
 const INDEX_MODULE_FILE: &str = "index.js";
 const JAVASCRIPT_EXTENSION: &str = ".js";
 
-/// Writes every type module and index.js under `output_root`. Returns how many files changed.
+/// Writes every type module and index.js under `output_root`, then deletes the modules it no longer writes (the
+/// folder is this generator's alone). Returns how many files changed or were deleted.
 pub fn write_javascript_types(output_root: &Path, all_types: &[TypeDescription]) -> Result<usize, CodegenError> {
     let modules = group_types_into_modules(all_types)?;
     let folder = output_root.join(TYPES_FOLDER);
     let mut changed_count = 0;
+    let mut written_paths = Vec::new();
     for module in &modules {
         let contents = render_type_module(module, all_types)?;
-        if write_if_changed(&folder.join(javascript_file_name(&module.name)), &contents)? {
+        let path = folder.join(javascript_file_name(&module.name));
+        if write_if_changed(&path, &contents)? {
             changed_count += 1;
         }
+        written_paths.push(path);
     }
-    if write_if_changed(&folder.join(INDEX_MODULE_FILE), &render_types_index(&modules))? {
+    let index_path = folder.join(INDEX_MODULE_FILE);
+    if write_if_changed(&index_path, &render_types_index(&modules))? {
         changed_count += 1;
     }
+    written_paths.push(index_path);
+    changed_count += remove_unwritten_files(&folder, &written_paths)?;
     Ok(changed_count)
 }
 

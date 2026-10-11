@@ -1134,7 +1134,8 @@ tools/codegen/
     catalog_python.rs         python/rastai_plugin/rastai_plugin/catalog/generated.py (constants RRS_E1003, frozen
                               dataclasses CatalogEntry and TermEntry, CATALOG and TERMS)
     reference_docs.rs         docs/reference/commands.md (with each command's stability), errors.md, settings.md
-    write_if_changed.rs       write a file only when its bytes differ, so timestamps stay stable
+    write_if_changed.rs       write a file only when its bytes differ, so timestamps stay stable; in a folder a
+                              generator owns whole, delete the files it no longer writes
   tests/
     catalog_checks.rs         the catalog rules of 3.5 (well formed, unique, owner's file and range, never deleted
                               since the merge base); catalog_ranges.rs equals the contracts §10.1 table; the

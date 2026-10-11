@@ -4,8 +4,9 @@
 #
 # Direct dependencies are pinned exactly (==), like the crates in Cargo.toml, so uv.lock and
 # deps/allowlist-python.json agree and an update is a deliberate PR. Workspace packages (rastai-proto, rastai-formats,
-# rastai-data and rastai-plugin so far) have no pin: they come from their folder (tool.uv.sources). The packages the later tasks
-# need (pyarrow, torchvision, PyMySQL, onnx, onnxscript and the other workspace packages) join with those tasks.
+# rastai-data and rastai-plugin so far) have no pin: they come from their folder (tool.uv.sources). The packages the
+# later tasks need (pyarrow, torchvision, PyMySQL, onnx, onnxscript and the other workspace packages) join with those
+# tasks.
 
 [project]
 name = "rastai-env-cpu"
