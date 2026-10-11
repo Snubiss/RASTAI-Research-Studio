@@ -27,8 +27,9 @@ pub struct Principal {
     pub scopes: Vec<Scope>,
 }
 
-/// The owner, with every fixed scope. A plugin's own scope (`Scope::Plugin`) can't be listed ahead of time, so the
-/// command check lets the owner kind through for those (contracts 6.3: the owner has every scope).
+/// The owner, with every fixed scope. A plugin's own scope (`Scope::Plugin`) can't be listed ahead of time, so
+/// `scopes_allow` says no to the owner for one: `check_scope` (M1-21) lets the owner kind through for those
+/// (contracts 6.3: the owner has every scope).
 pub fn owner_principal() -> Principal {
     Principal {
         kind: PrincipalKind::Owner,

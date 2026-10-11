@@ -25,7 +25,7 @@
 3. **One implementation per in-house parser.** When Rust and Python both need a check, `rastai-formats` owns it and Python calls the wheel (contracts §2.4 rule 10):
    - **safetensors headers:** Python calls `rastai_formats.check_safetensors_header`, then `rastai_models/io/safetensors_reader.py` memory-maps and reads tensor bytes only after the header was accepted. Both languages report the same `RRS-E60xx` code because there is one implementation;
    - GGUF byte encoding, BLAKE3 and document validation work the same way.
-4. **Every remaining in-house parser of untrusted input has a fuzz target,** run nightly for 10 minutes each (contracts §12.5): `json_reader`, `read_document`, `safetensors_header`, `gguf_header`, `zip_reader`, `inflate` (the wrapper's caps), `conversation_import`, `event_frame`, `request_gate`, `connect_json`, `sse_reader`, `jsonrpc_decode`, `handshake`, `archived_frame`, `connect_request` and `exec_stream` (rastai-sandbox; the CONNECT line is bytes written by untrusted sandboxed code), `tool_call_parse` (rastai-gateway; model output is untrusted text). That is 17 targets. Python parsers (no fuzzing dependency) get seeded mutation tests marked `fuzz`: the lm-eval YAML subset, the run-log readers, the CSV and JSONL readers. JavaScript parsers get vitest seeded mutation tests: `parse-markdown.js` and the iframe bridge's message validation (contracts §12.5). A new parser lands with its target in the same PR.
+4. **Every remaining in-house parser of untrusted input has a fuzz target,** run nightly for 10 minutes each (contracts §12.5): `json_reader`, `read_document`, `safetensors_header`, `gguf_header`, `zip_reader`, `inflate` (the wrapper's caps), `conversation_import`, `base32_decode` and `rfc3339_parse` (rastai-core's id and timestamp parsers, added by M1-20), `event_frame`, `request_gate`, `connect_json`, `sse_reader`, `jsonrpc_decode`, `handshake`, `archived_frame`, `connect_request` and `exec_stream` (rastai-sandbox; the CONNECT line is bytes written by untrusted sandboxed code), `tool_call_parse` (rastai-gateway; model output is untrusted text). That is 19 targets. Python parsers (no fuzzing dependency) get seeded mutation tests marked `fuzz`: the lm-eval YAML subset, the run-log readers, the CSV and JSONL readers. JavaScript parsers get vitest seeded mutation tests: `parse-markdown.js` and the iframe bridge's message validation (contracts §12.5). A new parser lands with its target in the same PR.
 5. **Replacement paths** (§27): an in-house inflate or image decoder can come back behind the same function if either library ever fails us. No caller changes.
 
 **Checked by:**
@@ -48,7 +48,7 @@
 - `pillow` and `numpy` enter every backend lock. Their licenses must pass the allowlist; `pillow`'s MIT-CMU (HPND) license may need a named entry in `deps/allowlist-python.json`.
 - The image path runs native decoder code we didn't write. Running it only in jobs bounds the damage.
 - Python now needs the `rastai_formats` wheel to read any safetensors file, including in the standalone SDK. It already needed the wheel for documents.
-- Fuzz targets cost nightly CI time (17 targets × 10 minutes).
+- Fuzz targets cost nightly CI time (19 targets × 10 minutes).
 
 ## Alternatives considered
 

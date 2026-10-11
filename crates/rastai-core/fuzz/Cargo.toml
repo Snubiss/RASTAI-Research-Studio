@@ -1,0 +1,37 @@
+# The cargo-fuzz crate for rastai-core (contracts 12.5, ADR-0037): one target per in-house parser of untrusted
+# input. Ids and timestamps arrive in files and requests, so the base32 decoder and the RFC 3339 parser each have
+# one. It is its own workspace (the root Cargo.toml excludes this folder) because it builds only on the nightly
+# toolchain `just fuzz` pins. Run a target with: just fuzz rastai-core base32_decode 60
+[package]
+name = "rastai-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly, like every external crate (root Cargo.toml); a dev dependency of the fuzz crates only.
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.rastai-core]
+path = ".."
+
+# An independent workspace for the fuzz targets.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "base32_decode"
+path = "fuzz_targets/base32_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rfc3339_parse"
+path = "fuzz_targets/rfc3339_parse.rs"
+test = false
+doc = false
+bench = false

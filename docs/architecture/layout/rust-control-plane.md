@@ -155,8 +155,9 @@ members = [
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
 exclude = [
-  "crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz", "crates/rastai-mcp/fuzz",
-  "crates/rastai-transport/fuzz", "crates/rastai-node/fuzz", "crates/rastai-archive/fuzz", "spike",
+  "crates/rastai-formats/fuzz", "crates/rastai-core/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz",
+  "crates/rastai-mcp/fuzz", "crates/rastai-transport/fuzz", "crates/rastai-node/fuzz", "crates/rastai-archive/fuzz",
+  "spike",
 ]
 
 [workspace.package]
@@ -1304,6 +1305,10 @@ crates/rastai-core/
     settings_precedence.rs    defaults < user < project < environment < flags, per key
     wire_round_trip.rs        the Diagnostic and CommandRow twins list the proto messages' fields; golden round trip
     proto_json_golden.rs      proto_json output equals fixtures/proto-golden/ JSON from protobuf-es, and decodes back
+  fuzz/                       cargo-fuzz crate, own workspace, nightly (contracts §12.5)
+    fuzz_targets/
+      base32_decode.rs        decode_base32 on any text never panics; what it accepts re-encodes to the same text
+      rfc3339_parse.rs        parse_rfc3339 on any text never panics; format_rfc3339 output always parses back
 ```
 
 ### 5.2 Public API
@@ -1461,9 +1466,10 @@ pub fn gateway_settings(resolved: &ResolvedSettings) -> GatewaySettings      // 
 pub struct PathEnvironment { pub rastai_home: Option<PathBuf>, pub home: PathBuf, pub xdg_config_home: Option<PathBuf>,
                              pub xdg_data_home: Option<PathBuf>, pub xdg_cache_home: Option<PathBuf>,
                              pub xdg_state_home: Option<PathBuf>, pub xdg_runtime_dir: Option<PathBuf>,
-                             pub hf_hub_cache: Option<PathBuf>, pub hf_home: Option<PathBuf> }
+                             pub hf_hub_cache: Option<PathBuf>, pub hf_home: Option<PathBuf>,
+                             pub user_id: Option<u32> }       // names /tmp/rastai-<uid> without XDG_RUNTIME_DIR (contracts §8.1)
 pub struct DataPaths { pub config: PathBuf, pub data: PathBuf, pub cache: PathBuf, pub state: PathBuf, pub runtime: PathBuf }
-pub fn read_path_environment() -> Result<PathEnvironment, CoreError>    // HomeNotFound when neither HOME nor the user database names one
+pub fn read_path_environment() -> Result<PathEnvironment, CoreError>    // home: HOME, the user database, else RASTAI_HOME; HomeNotFound with none
 pub fn resolve_paths(environment: &PathEnvironment) -> DataPaths
 pub fn rastai_db_path(paths: &DataPaths) -> PathBuf
 pub fn vault_db_path(paths: &DataPaths) -> PathBuf
@@ -1483,7 +1489,11 @@ pub fn worker_host_socket_path(paths: &DataPaths) -> PathBuf               // <r
 pub fn job_socket_path(paths: &DataPaths, job_id: &str) -> PathBuf         // <runtime>/jobs/<job_id>.sock
 pub fn remote_node_socket_path(paths: &DataPaths, node_id: &str) -> PathBuf   // <runtime>/remote/<node_id>/node.sock, the ssh -L end
 pub fn plugin_dir(paths: &DataPaths, plugin_id: &str, version: &str) -> PathBuf
-// ... one function per remaining row of contracts §8.1
+pub fn rastai_db_pre_update_path(paths: &DataPaths, version: &str) -> PathBuf   // <data>/rastai.db.pre-<version>
+pub fn vault_db_pre_update_path(paths: &DataPaths, version: &str) -> PathBuf    // <data>/vault.db.pre-<version>
+pub fn rastai_db_broken_path(paths: &DataPaths, unix_ms: i64) -> PathBuf         // <data>/rastai.db.broken-<unix_ms>
+pub fn daemon_events_segment_path(paths: &DataPaths, segment_number: u64) -> PathBuf   // <data>/daemon/events-<n>.log
+// ... one function per remaining row of contracts §8.1 (contracts §15.1 lists the rows that get theirs later)
 pub fn hf_cache_dir(environment: &PathEnvironment) -> PathBuf             // HF_HUB_CACHE, else HF_HOME/hub, else ~/.cache/huggingface/hub
 
 // versions.rs
@@ -1502,13 +1512,13 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 |---|---|---|---|
 | Internal | `rastai-diag` | diagnostics | |
 | Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver | |
-| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `proto_json.rs` |
+| Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `commands/descriptor.rs`, `proto_json.rs` |
 | External | serde, serde_json | settings values, proto JSON values | `settings.rs`, `proto_json.rs` |
 
 ### 5.4 Boundary rules
 
 - Synchronous. Never depends on tokio, axum, tonic, rusqlite or any network crate.
-- No file or socket I/O. The only OS reads are environment variables (`read_path_environment`, `settings_from_environment`) and `/dev/urandom`.
+- No file or socket I/O. The only OS reads are environment variables (`read_path_environment`, `settings_from_environment`), the owner of `/proc/self` (the user id, read by `read_path_environment` for `/tmp/rastai-<uid>`) and `/dev/urandom`.
 - `COMMANDS` lists core commands only. Plugin commands come from manifests at runtime (section 12).
 - Never defines a document or command-argument type (those are `rastai-formats`) or a wire type (those are `rastai-proto`). State enums are proto's; this crate only adds names and transition tables.
 - No other crate builds a data path or reads `RASTAI_*`/`XDG_*`/`HF_*` path variables (contracts §8.1).
@@ -1521,9 +1531,10 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 | Command table | `tests/command_table.rs` | ids follow contracts §6.1 and sit in a core area; no duplicates; scope, kind and section valid; `since_version` set; every row `Stability::Preview` until Phase 2 chooses the stable subset (`check-schema-diff` guards a row from then on, 2.8) |
 | Naming | `tests/naming_round_trip.rs` | every id survives `cli_words` → `command_id_from_cli_words` and `mcp_tool_name` → back; the CLI and MCP columns of `fixtures/command-golden/copy-as.json` (frontend doc) match |
 | Settings | `tests/settings_precedence.rs` | a later layer overrides single keys, not whole sections; `RASTAI_DAEMON__PORT=8899` sets `daemon.port`; bad `--set` text gives a diagnostic |
-| Wire | `tests/wire_round_trip.rs` | the rastai-diag `Diagnostic` and `CommandRow` list the proto messages' fields (`CommandRow` minus the five registration fields); `fixtures/proto-golden/common/Diagnostic.binpb` round-trips |
+| Wire | `tests/wire_round_trip.rs` | the rastai-diag `Diagnostic` and `CommandRow` list the proto messages' fields (`CommandRow` minus the five registration fields); `fixtures/proto-golden/common/Diagnostic.json` round-trips, and the golden row becomes `fixtures/proto-golden/commands/CommandDescriptor.json` |
 | Proto JSON | `tests/proto_json_golden.rs` | `JobSpec`, `HardwareFingerprint` and `SamplingSettings` encode to the protobuf-es JSON in `fixtures/proto-golden/` (64-bit integers as strings, enums as names) and decode back; a wrong kind gives `RRS-E1002` at the given path |
-| Paths | bottom of `paths.rs` | `RASTAI_HOME` puts all five roots under one folder; XDG fallbacks; HF cache order |
+| Paths | bottom of `paths.rs` | `RASTAI_HOME` puts all five roots under one folder, and stands in for a missing home folder; XDG fallbacks; `/tmp/rastai-<uid>` without `XDG_RUNTIME_DIR`; every socket path fits in 107 bytes; HF cache order |
+| Fuzz | `fuzz/fuzz_targets/` | `base32_decode` and `rfc3339_parse` (contracts §12.5), nightly, 10 minutes each |
 
 ### 5.6 Ported from the spike
 
