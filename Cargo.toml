@@ -10,6 +10,7 @@ resolver = "3"
 # Cargo refuses a member folder that doesn't exist yet, which is why the list starts short.
 members = [
   "crates/rastai-diag",
+  "crates/rastai-proto",
   "crates/rastai-formats",
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
@@ -38,10 +39,13 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 rusqlite = { version = "=0.40.2", features = ["bundled"] }
 blake3 = "=1.8.7"
+# The derive and std features (the defaults) are what the generated messages in rastai-proto use. Its version
+# matches what protoc-gen-prost 0.5.0 generates for (prost 0.14, the justfile header pins the plugin).
+prost = "=0.14.4"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
-# prost, tonic, hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc, miniz_oxide,
-# ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build, tauri-plugin-updater,
-# mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
+# tonic (with the first service, M1-09), hyper, hyper-util, rustls, tokio-rustls, webpki-roots, tower, libc,
+# miniz_oxide, ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build,
+# tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 
 [workspace.lints.rust]
 unsafe_code = "deny"           # deny, not forbid, so ADR-0033 can allow one named function; check-unsafe keeps the list honest

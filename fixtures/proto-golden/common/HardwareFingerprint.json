@@ -1,0 +1,21 @@
+{
+  "environment_hash": "blake3:6d0b1f4e3a2c5b7d9e8f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f",
+  "gpus": [
+    {
+      "index": 1,
+      "name": "NVIDIA GeForce RTX 5080",
+      "architecture": "sm_120",
+      "vram_bytes": "17094934528",
+      "vendor": "nvidia",
+      "driver_version": "580.82.09"
+    }
+  ],
+  "driver_version": "580.82.09",
+  "backend_version": "13.0",
+  "torch_version": "2.14.1+cu130",
+  "dtype": "bfloat16",
+  "quantization": "q4_k_m",
+  "attention_kernel": "flash",
+  "seed": "18446744073709551557",
+  "deterministic": true
+}

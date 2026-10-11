@@ -1,0 +1,2 @@
+
+	RRS-H3001UNot enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.",models/tiny.rrsmodel:12:5#/nodes/3/placement*&Unload the chat model, then try again.2model.unload: {"model_ref":"hf:org/tiny-chat"}

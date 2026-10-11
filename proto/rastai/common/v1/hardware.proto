@@ -1,0 +1,79 @@
+// What a node has and how busy it is (contracts 4.1; node layout 3.2 and 7.7, 7.9).
+// HardwareProfile is detected at node start (hardware.rs) and returned by Handshake and GetHardware.
+// HardwareFingerprint is what a run record and a replay keep, so a result can be traced to the machine and
+// software that produced it. NodeTelemetry is sampled for Heartbeat and GetHardware.
+syntax = "proto3";
+
+package rastai.common.v1;
+
+// One GPU as detected by nvidia-smi or rocm-smi.
+message GpuInfo {
+  // The physical index the driver reports; jobs see GPUs in ascending physical order.
+  uint32 index = 1;
+  string name = 2;
+  // The compute target, for example "sm_120" or "gfx1100".
+  string architecture = 3;
+  uint64 vram_bytes = 4;
+  // "nvidia" or "amd".
+  string vendor = 5;
+  string driver_version = 6;
+}
+
+// The node's hardware as detected at start. The numerical self-test result joins it in M2 (plan M2 contract task).
+message HardwareProfile {
+  string cpu_model = 1;
+  uint32 cpu_count = 2;
+  uint64 ram_total_bytes = 3;
+  // Free space in the node's data directory, from rastai_store::free_bytes (ADR-0033).
+  uint64 disk_free_bytes = 4;
+  repeated GpuInfo gpus = 5;
+  string driver_version = 6;
+  // The environment the node picked for this hardware: "cuda13", "cuda126", "rocm" or "cpu" (node layout 7.6).
+  string backend = 7;
+}
+
+// Everything that can change a run's numbers. Stored in run records and replays as protobuf JSON (contracts 4).
+message HardwareFingerprint {
+  // "blake3:<64 hex>" of the environment's uv.lock (ADR-0009 decision 8).
+  string environment_hash = 1;
+  repeated GpuInfo gpus = 2;
+  string driver_version = 3;
+  // The CUDA or HIP runtime version torch reports; empty on CPU.
+  string backend_version = 4;
+  string torch_version = 5;
+  // The compute dtype, for example "bfloat16".
+  string dtype = 6;
+  // The weight quantization, for example "q4_k_m"; empty when the weights aren't quantized.
+  string quantization = 7;
+  // The attention kernel the run used, so a replay can pin the same one (ADR-0027).
+  string attention_kernel = 8;
+  uint64 seed = 9;
+  bool deterministic = 10;
+}
+
+// The VRAM one process holds on one GPU, from nvidia-smi --query-compute-apps or rocm-smi --showpids.
+message ProcessVram {
+  uint32 pid = 1;
+  uint64 vram_bytes = 2;
+}
+
+// One GPU's load at one moment.
+message GpuTelemetry {
+  uint32 gpu_index = 1;
+  uint32 utilization_percent = 2;
+  uint64 vram_used_bytes = 3;
+  uint64 vram_total_bytes = 4;
+  float temperature_celsius = 5;
+  float power_watts = 6;
+  // Per-process VRAM lets the node see a holder that uses more than its lease (node layout 7.7).
+  repeated ProcessVram processes = 7;
+}
+
+// The node's load at one moment, carried in Heartbeat and GetHardware.
+message NodeTelemetry {
+  int64 sampled_unix_ms = 1;
+  repeated GpuTelemetry gpus = 2;
+  uint64 ram_used_bytes = 3;
+  uint64 ram_total_bytes = 4;
+  uint64 disk_free_bytes = 5;
+}

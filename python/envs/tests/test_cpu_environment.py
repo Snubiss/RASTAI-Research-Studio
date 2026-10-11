@@ -17,15 +17,28 @@ CPU_PROJECT_FILE = Path("python/envs/cpu/pyproject.toml")
 IMPORT_NAMES = {"torch": "torch", "tokenizers": "tokenizers", "grpcio": "grpc", "protobuf": "google.protobuf"}
 
 
-def read_pinned_versions(project_file: Path) -> dict[str, str]:
-    """Reads the exact `name==version` pins of a uv project's dependencies and dev group."""
-    project = tomllib.loads(project_file.read_text(encoding="utf-8"))
+def read_project(project_file: Path) -> dict:
+    return tomllib.loads(project_file.read_text(encoding="utf-8"))
+
+
+def read_pinned_versions(project: dict) -> dict[str, str]:
+    """Reads the exact `name==version` pins of a uv project's dependencies and dev group. Workspace packages have
+    no pin: they are installed from their folder (read_workspace_packages)."""
+    workspace_packages = read_workspace_packages(project)
     pins = project["project"]["dependencies"] + project["dependency-groups"]["dev"]
     versions = {}
     for pin in pins:
+        if pin in workspace_packages:
+            continue
         name, version = pin.split("==")
         versions[name] = version
     return versions
+
+
+def read_workspace_packages(project: dict) -> list[str]:
+    """The dependencies [tool.uv.sources] installs from a folder in this repository (python layout 11.2)."""
+    sources = project["tool"]["uv"]["sources"]
+    return sorted(name for name, source in sources.items() if "path" in source)
 
 
 def installed_version(distribution_name: str) -> str:
@@ -38,9 +51,16 @@ def test_python_is_3_12() -> None:
 
 
 def test_installed_versions_match_the_pins(repo_root: Path) -> None:
-    pinned = read_pinned_versions(repo_root / CPU_PROJECT_FILE)
+    pinned = read_pinned_versions(read_project(repo_root / CPU_PROJECT_FILE))
     installed = {name: installed_version(name) for name in pinned}
     assert installed == pinned
+
+
+def test_workspace_packages_are_installed(repo_root: Path) -> None:
+    workspace_packages = read_workspace_packages(read_project(repo_root / CPU_PROJECT_FILE))
+    assert "rastai-proto" in workspace_packages
+    for name in workspace_packages:
+        importlib.metadata.distribution(name)  # raises PackageNotFoundError when `just env-cpu` didn't install it
 
 
 @pytest.mark.parametrize("distribution_name", sorted(IMPORT_NAMES))

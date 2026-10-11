@@ -1,0 +1,13 @@
+{
+  "name": "@rastai/proto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generated protobuf-es messages and service descriptors for Rastai's wire contracts (proto/). Never edited by hand: run `just codegen`.",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.15.0"
+  }
+}

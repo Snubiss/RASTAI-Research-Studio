@@ -23,7 +23,17 @@
 #     corepack enable --install-directory ~/.local/bin pnpm
 #     package.json `packageManager` pins pnpm 12.7.0 with its sha512, and corepack refuses a download that differs.
 #
-# Later tasks add their recipes here: codegen (M1-12), proto (M1-08), check-names (M1-57) and
+# Protobuf tools for `just codegen`, `just codegen-check` and `just proto-check`, also for your user only:
+#   buf 1.73.0. Download https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-x86_64,
+#     check it with `sha256sum`: 8f2986298ad08f0cc1bf999b9797b7c383adf32d7edf0f73d6f1e1a701baeac1,
+#     and install it as ~/.local/bin/buf (chmod +x).
+#   The Rust plugins buf runs:
+#     cargo install --locked protoc-gen-prost@0.5.0
+#     cargo install --locked protoc-gen-tonic@0.5.0
+#   The Python and JavaScript plugins need no install of their own: grpcio-tools is in the cpu environment's dev group
+#   (python/envs/cpu/uv.lock) and protoc-gen-es in package.json (pnpm-lock.yaml).
+#
+# Later tasks add their recipes here: the rastai-codegen steps of codegen (M1-12), check-names (M1-57) and
 # check-schema-diff (M1-58).
 
 # `deny` refuses any other cargo-deny version, so every machine reads deny.toml the same way.
@@ -31,6 +41,13 @@ cargo_deny_version := "0.20.2"
 # `fuzz` runs on this exact nightly and cargo-fuzz, so a crash found one night reproduces the next.
 fuzz_toolchain := "nightly-2026-09-27"
 cargo_fuzz_version := "0.13.2"
+# buf and the Rust protoc plugins its codegen runs. `codegen` and `proto-check` refuse other versions, so every
+# machine generates the same bytes and lints by the same rules.
+buf_version := "1.73.0"
+protoc_gen_prost_version := "0.5.0"
+protoc_gen_tonic_version := "0.5.0"
+# `proto-check` runs `buf breaking` against the proto files where this branch left this one.
+proto_base := "origin/main"
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
 # The repo checks in tools/checks are standard-library Python scripts. They run on the cpu environment's Python,
@@ -42,7 +59,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: CI's `dco` job runs it
 # on a pull request's commits.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
-check: fmt-check lint check-js test-rust test-python test-js wasm deny \
+check: fmt-check lint check-js test-rust test-python test-js wasm deny proto-check \
     check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check
 
 # Build every crate in the workspace. --locked: Cargo.lock is checked in and never silently changes.
@@ -53,13 +70,14 @@ build:
 test-rust:
     cargo test --workspace --locked
 
-# Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml and
-# tools/github/pyproject.toml extend it), JavaScript, JSON, CSS and YAML by prettier (.prettierrc.json,
-# .prettierignore). All three use 120 columns.
+# Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
+# tools/codegen/pyproject.toml and tools/github/pyproject.toml extend it), JavaScript, JSON, CSS and YAML by prettier
+# (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is left as its generator wrote it:
+# rustfmt doesn't follow include!, ruff skips the generated Python (python/pyproject.toml) and prettier src/generated/.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
-    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/github
+    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/github
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -71,7 +89,7 @@ wasm:
 # clippy and ruff check; every warning fails.
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/github
+    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/github
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one
@@ -86,12 +104,14 @@ env-js:
     pnpm install --frozen-lockfile
 
 # Settings and markers are in python/pyproject.toml; python/conftest.py skips gpu tests without a device and
-# posix_only tests on Windows. tools/checks/tests runs every repo check on passing and failing fixture trees, and
-# tools/github/tests runs the backlog sync against a fake gh; each has its own settings in its pyproject.toml.
-# pytest over python/, tools/checks/tests and tools/github/tests in the cpu environment.
+# posix_only tests on Windows. tools/checks/tests runs every repo check on passing and failing fixture trees,
+# tools/codegen/tests runs buf's Python plugin on a small request, and tools/github/tests runs the backlog sync
+# against a fake gh; each has its own settings in its pyproject.toml.
+# pytest over python/, tools/checks/tests, tools/codegen/tests and tools/github/tests in the cpu environment.
 test-python: env-cpu
     cd python && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/checks && "{{cpu_environment}}/bin/python" -m pytest
+    cd tools/codegen && "{{cpu_environment}}/bin/python" -m pytest
     cd tools/github && "{{cpu_environment}}/bin/python" -m pytest
 
 # The test files are listed in vitest.config.js.
@@ -163,10 +183,56 @@ check-colors: env-cpu
 check-no-typescript: env-cpu
     "{{check_python}}" tools/checks/check-no-typescript
 
-# Until M1-08 and M1-12 add the generators it passes with a note.
+# ---- Code generation (layout rust-control-plane.md 2.5; rust-node-gateway-proto.md 3.4) ----
+
+# buf.gen.yaml runs the Rust plugins from your PATH, grpcio-tools from the cpu environment and protoc-gen-es from
+# node_modules, so it needs both environments. rastai-codegen's binaries join after buf in M1-12.
+# Regenerate every generated folder: today the protobuf code of proto/ for Rust, Python and JavaScript.
+codegen: env-cpu env-js
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Compare whole version lines, so 0.5.0 never passes for 0.5.01. `|| true` turns a missing tool into the
+    # install line below instead of "command not found".
+    require_version() {
+        local installed
+        installed="$($1 --version 2>/dev/null || true)"
+        if [ "$installed" != "$2" ]; then
+            echo "$1 $2 is required, but found: ${installed:-nothing}. The justfile header says how to install it."
+            exit 1
+        fi
+    }
+    require_version buf "{{buf_version}}"
+    require_version protoc-gen-prost "{{protoc_gen_prost_version}}"
+    require_version protoc-gen-tonic "{{protoc_gen_tonic_version}}"
+    buf generate
+
+# It runs the same generators as `codegen`, so it needs the same tools and both environments.
 # Checked-in generated code equals a fresh codegen run into a temporary tree.
-codegen-check: env-cpu
+codegen-check: env-cpu env-js
     "{{check_python}}" tools/checks/check-generated
+
+# buf breaking can't see inside arguments_json and the other _json strings; check-schema-diff covers those (M1-58).
+# buf lint, and buf breaking against the proto files where this branch left `base` (contracts 4).
+proto-check base=proto_base:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    installed_version="$(buf --version 2>/dev/null || true)"
+    if [ "$installed_version" != "{{buf_version}}" ]; then
+        echo "buf {{buf_version}} is required, but found: ${installed_version:-no buf}. The justfile header says how."
+        exit 1
+    fi
+    buf lint
+    # The merge base, not the tip of base: a field main added after this branch started isn't a removal here.
+    merge_base="$(git merge-base HEAD "{{base}}")"
+    if ! git cat-file -e "$merge_base:buf.yaml" 2>/dev/null; then
+        echo "proto-check: buf lint passed; $merge_base has no buf.yaml, so there is nothing to compare against yet"
+        exit 0
+    fi
+    base_folder="$(mktemp -d)"
+    trap 'rm -rf "$base_folder"' EXIT
+    git archive "$merge_base" buf.yaml proto | tar -x -C "$base_folder"
+    buf breaking --against "$base_folder"
+    echo "proto-check: buf lint passed; no breaking change against $merge_base"
 
 # CI's `dco` job passes the pull request's range; locally it checks the commits not yet on origin/main.
 # Every commit in the range carries a Signed-off-by matching its author (CONTRIBUTING.md).

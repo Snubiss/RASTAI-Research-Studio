@@ -1,0 +1,18 @@
+{
+  "gpu_index": 1,
+  "utilization_percent": 87,
+  "vram_used_bytes": "12884901888",
+  "vram_total_bytes": "17094934528",
+  "temperature_celsius": 61.5,
+  "power_watts": 212.25,
+  "processes": [
+    {
+      "pid": 48213,
+      "vram_bytes": "7516192768"
+    },
+    {
+      "pid": 48377,
+      "vram_bytes": "5368709120"
+    }
+  ]
+}

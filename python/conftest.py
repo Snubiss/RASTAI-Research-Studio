@@ -4,15 +4,37 @@ The markers themselves are registered in python/pyproject.toml. The tiny-model f
 rastai_models, the first package that can build a model.
 """
 
+import importlib
 import os
 from pathlib import Path
 
 import pytest
 
-# This file sits one folder below the repository root.
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# This file sits in python/, one folder below the repository root.
+PYTHON_FOLDER = Path(__file__).resolve().parent
+REPO_ROOT = PYTHON_FOLDER.parent
 # The shared test inputs of contracts 12.5. Tests read from it and never write into it.
 FIXTURES_FOLDER = REPO_ROOT / "fixtures"
+# A workspace package's import package: python/<name>/<name>/__init__.py (python/CLAUDE.md).
+WORKSPACE_PACKAGE_INIT_FILES = "rastai*/rastai*/__init__.py"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    import_workspace_packages()
+
+
+def import_workspace_packages() -> None:
+    """Imports every workspace package before pytest collects a test.
+
+    pytest's importlib mode names python/rastai_proto/tests/test_golden.py `rastai_proto.tests.test_golden`, after
+    its path below python/. If `rastai_proto` isn't imported yet, pytest imports the folder python/rastai_proto/ for
+    it, which has no __init__.py, as a namespace package, and that hides the real package (python/rastai_proto/
+    rastai_proto/) from the test. With the real packages already in sys.modules, pytest uses them.
+    """
+    for init_file in sorted(PYTHON_FOLDER.glob(WORKSPACE_PACKAGE_INIT_FILES)):
+        package_folder = init_file.parent
+        if package_folder.name == package_folder.parent.name:
+            importlib.import_module(package_folder.name)
 
 
 @pytest.fixture

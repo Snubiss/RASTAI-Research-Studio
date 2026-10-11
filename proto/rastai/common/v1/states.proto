@@ -1,0 +1,151 @@
+// The shared state enums (contracts 4.1). Each state machine mirrors contracts section 9, which names the
+// transitions; the flow docs draw them. Values follow the order section 9 lists them in, after the zero value.
+// Field numbers are never reused, so a new state is always added at the end.
+syntax = "proto3";
+
+package rastai.common.v1;
+
+// Contracts 9.1. Terminal: succeeded, failed, cancelled.
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_STARTING = 2;
+  JOB_STATE_RUNNING = 3;
+  JOB_STATE_PAUSED = 4;
+  JOB_STATE_STOPPING = 5;
+  JOB_STATE_SUCCEEDED = 6;
+  JOB_STATE_FAILED = 7;
+  JOB_STATE_CANCELLED = 8;
+  // The node is unreachable or the process is gone without an exit record; a reconnect may bring it back.
+  JOB_STATE_LOST = 9;
+}
+
+// Contracts 9.5. Only completed is always terminal: train.resume reopens a failed or cancelled run that has a
+// complete checkpoint.
+enum RunState {
+  RUN_STATE_UNSPECIFIED = 0;
+  RUN_STATE_CREATED = 1;
+  RUN_STATE_PREPARING = 2;
+  RUN_STATE_RUNNING = 3;
+  RUN_STATE_CHECKPOINTING = 4;
+  RUN_STATE_PAUSED = 5;
+  RUN_STATE_PREEMPTED = 6;
+  RUN_STATE_RESUMING = 7;
+  // Teach it and RLHF chains only.
+  RUN_STATE_VERIFYING = 8;
+  RUN_STATE_COMPLETED = 9;
+  RUN_STATE_FAILED = 10;
+  RUN_STATE_CANCELLED = 11;
+}
+
+// Contracts 9.3.
+enum ModelState {
+  MODEL_STATE_UNSPECIFIED = 0;
+  MODEL_STATE_UNLOADED = 1;
+  MODEL_STATE_DOWNLOADING = 2;
+  MODEL_STATE_WAITING_FOR_LEASE = 3;
+  MODEL_STATE_LOADING = 4;
+  // CUDA-graph capture, one capture stream per device (spike).
+  MODEL_STATE_WARMING = 5;
+  MODEL_STATE_READY = 6;
+  MODEL_STATE_EVICTING = 7;
+  MODEL_STATE_FAILED = 8;
+}
+
+// Contracts 9.4. Terminal: released, denied.
+enum LeaseState {
+  LEASE_STATE_UNSPECIFIED = 0;
+  LEASE_STATE_REQUESTED = 1;
+  LEASE_STATE_GRANTED = 2;
+  LEASE_STATE_RECLAIM_REQUESTED = 3;
+  LEASE_STATE_RELEASED = 4;
+  LEASE_STATE_DENIED = 5;
+}
+
+// Contracts 9.2: the daemon's view of its connection to one node.
+enum NodeState {
+  NODE_STATE_UNSPECIFIED = 0;
+  NODE_STATE_UNPAIRED = 1;
+  NODE_STATE_PAIRING = 2;
+  NODE_STATE_CONNECTING = 3;
+  NODE_STATE_HANDSHAKING = 4;
+  NODE_STATE_CONNECTED = 5;
+  NODE_STATE_UNREACHABLE = 6;
+  // Protocol version or capability mismatch; node.update fixes it.
+  NODE_STATE_INCOMPATIBLE = 7;
+}
+
+// Contracts 9.8. Terminal: removed.
+enum SandboxState {
+  SANDBOX_STATE_UNSPECIFIED = 0;
+  SANDBOX_STATE_REQUESTED = 1;
+  SANDBOX_STATE_PULLING = 2;
+  SANDBOX_STATE_CREATING = 3;
+  SANDBOX_STATE_RUNNING = 4;
+  // Step mode in the Agent Gym.
+  SANDBOX_STATE_PAUSED = 5;
+  SANDBOX_STATE_STOPPING = 6;
+  SANDBOX_STATE_REMOVED = 7;
+  SANDBOX_STATE_FAILED = 8;
+  // A container with Rastai labels but no live owner; the orphan sweep removes it.
+  SANDBOX_STATE_ORPHANED = 9;
+}
+
+// Contracts 9.7. Terminal: uninstalled.
+enum PluginState {
+  PLUGIN_STATE_UNSPECIFIED = 0;
+  PLUGIN_STATE_DISCOVERED = 1;
+  PLUGIN_STATE_RESOLVING = 2;
+  PLUGIN_STATE_AWAITING_TRUST = 3;
+  PLUGIN_STATE_INSTALLING = 4;
+  PLUGIN_STATE_INSTALLED = 5;
+  PLUGIN_STATE_ENABLED = 6;
+  PLUGIN_STATE_DISABLED = 7;
+  PLUGIN_STATE_INCOMPATIBLE = 8;
+  PLUGIN_STATE_FAILED = 9;
+  PLUGIN_STATE_UNINSTALLED = 10;
+}
+
+// Contracts 9.6. Terminal: passed, failed, errored, cancelled. Failed means tests failed; errored means the suite
+// could not be evaluated.
+enum EvalRunState {
+  EVAL_RUN_STATE_UNSPECIFIED = 0;
+  EVAL_RUN_STATE_CREATED = 1;
+  EVAL_RUN_STATE_RESOLVING = 2;
+  EVAL_RUN_STATE_GENERATING = 3;
+  EVAL_RUN_STATE_JUDGING = 4;
+  EVAL_RUN_STATE_SCORING = 5;
+  EVAL_RUN_STATE_PASSED = 6;
+  EVAL_RUN_STATE_FAILED = 7;
+  EVAL_RUN_STATE_ERRORED = 8;
+  EVAL_RUN_STATE_CANCELLED = 9;
+}
+
+// Contracts 7: durable events are in a run's events.log; ephemeral ones only on the bus.
+enum EventClass {
+  EVENT_CLASS_UNSPECIFIED = 0;
+  EVENT_CLASS_DURABLE = 1;
+  EVENT_CLASS_EPHEMERAL = 2;
+}
+
+// On every command and event type (owner decision N3). Every one is PREVIEW until Phase 2. The zero value reads as
+// PREVIEW, so a descriptor from an older daemon that lacks the field is treated as PREVIEW (node layout 3.2).
+enum Stability {
+  STABILITY_UNSPECIFIED = 0;
+  STABILITY_PREVIEW = 1;
+  STABILITY_STABLE = 2;
+  STABILITY_DEPRECATED = 3;
+}
+
+// Which runtime serves a model (contracts 13).
+enum RuntimeKind {
+  RUNTIME_KIND_UNSPECIFIED = 0;
+  // Rastai's own runtime (a compiled ModelSpec); every layer observable.
+  RUNTIME_KIND_INSPECTABLE = 1;
+  // A managed external engine: llama-server in the prototype.
+  RUNTIME_KIND_FAST = 2;
+  // HF transformers for unsupported architectures.
+  RUNTIME_KIND_COMPAT = 3;
+  // A third-party API or OpenAI-compatible endpoint.
+  RUNTIME_KIND_API = 4;
+}
