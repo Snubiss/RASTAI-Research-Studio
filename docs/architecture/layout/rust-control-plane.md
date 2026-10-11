@@ -110,7 +110,8 @@ RASTAI/
     checks/
       check-deps             reads `cargo metadata`, compares each member crate's direct deps with the allowlist table
       check-imports          (frontend doc) the wrapper-file and public-API rules for JS and Python
-      check-generated        regenerate everything into a temp tree, diff, fail on any change
+      check-generated        regenerate everything into a temp tree, diff, fail on any change; a generator that fails
+                             is reported with its own error (and a recovery hint), and its outputs aren't compared
       check-unsafe           fails if any file outside the ADR exception list contains `unsafe`; the list has one file,
                              crates/rastai-store/src/disk_space.rs (ADR-0033)
       check-no-pickle        greps Python for `pickle` and `torch.load` (contracts §12.3)

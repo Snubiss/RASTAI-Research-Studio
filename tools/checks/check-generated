@@ -27,11 +27,15 @@ class Generator:
     repository root. The command writes those outputs under OUTPUT_ROOT_PLACEHOLDER instead of in place.
 
     An output is a folder the generator owns whole, or a single file in a folder that also holds other things
-    (generated.py beside a hand-written __init__.py, errors.md beside the other reference pages)."""
+    (generated.py beside a hand-written __init__.py, errors.md beside the other reference pages).
+
+    failure_hint, when set, is printed after the generator's own error lines when it fails: where to look when the
+    usual fix (run `just codegen`) can't work because the generator itself no longer builds."""
 
     name: str
     command: list[str]
     outputs: list[str]
+    failure_hint: str = ""
 
 
 # The codegen steps of `just codegen`, in its order (layout rust-control-plane.md 2.5). buf's --output puts every
@@ -69,6 +73,11 @@ GENERATORS: list[Generator] = [
             "python/rastai_plugin/rastai_plugin/catalog/generated.py",
             "docs/reference/errors.md",
         ],
+        # rastai-codegen builds on rastai-diag, so a broken generated table breaks the generator too.
+        failure_hint=(
+            "if a generated table in crates/rastai-diag no longer compiles, crates/rastai-diag/CLAUDE.md "
+            "says how to recover"
+        ),
     ),
 ]
 
@@ -84,7 +93,12 @@ def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
     with tempfile.TemporaryDirectory(prefix="rastai-check-generated-") as temporary_folder:
         output_root = Path(temporary_folder)
         for generator in generators:
-            problems.extend(run_generator(root, generator, output_root))
+            generator_problems = run_generator(root, generator, output_root)
+            if generator_problems:
+                # A generator that failed wrote nothing (or only part of its outputs), so comparing would call every
+                # checked-in output stale and say "delete it". Its own error lines are the whole report.
+                problems.extend(generator_problems)
+                continue
             for output in generator.outputs:
                 problems.extend(compare_output(root, output_root, output))
     return problems
@@ -99,7 +113,10 @@ def run_generator(root: Path, generator: Generator, output_root: Path) -> list[s
     if result.returncode == 0:
         return []
     error_lines = result.stderr.strip().splitlines()[-ERROR_OUTPUT_LINES:]
-    return [f"{generator.name} failed (exit {result.returncode}):"] + error_lines
+    problems = [f"{generator.name} failed (exit {result.returncode}):"] + error_lines
+    if generator.failure_hint:
+        problems.append(f"{generator.name}: {generator.failure_hint}")
+    return problems
 
 
 def compare_output(root: Path, output_root: Path, output: str) -> list[str]:
