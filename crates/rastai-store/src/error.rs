@@ -10,6 +10,7 @@ const CODE_DAEMON_LOCK_HELD: &str = "RRS-S0001";
 const CODE_SCHEMA_TOO_NEW: &str = "RRS-S0002";
 const CODE_INDEX_DAMAGED: &str = "RRS-S0003";
 const CODE_DATA_DIRECTORY_NOT_WRITABLE: &str = "RRS-S0004";
+const CODE_READ_FAILED: &str = "RRS-S0006";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
 
@@ -32,10 +33,12 @@ pub enum StoreError {
     DataDirectoryNotWritable { path: PathBuf, reason: String },
     /// SQLite reported a full disk during a write.
     DiskFull { reason: String },
-    /// A database call failed for any other reason (a constraint, an I/O error, a lock held past the busy timeout).
-    /// `reason` keeps SQLite's own words. Nearly every such failure is a write; a read that fails this way (on a
-    /// healthy file only an I/O error or the busy timeout can do it) shares the code until the catalog has one for it.
-    DatabaseCallFailed { reason: String },
+    /// A write failed for any other reason (a constraint, an I/O error, a lock held past the busy timeout).
+    /// `reason` keeps SQLite's own words.
+    DatabaseWriteFailed { reason: String },
+    /// A read on a reader's connection failed on a file that isn't damaged: on a healthy file only an I/O error or
+    /// the busy timeout can do it. `reason` keeps SQLite's own words.
+    DatabaseReadFailed { reason: String },
     /// The writer thread has stopped (the store was closed, or the thread ended), so the write was never applied.
     WriterStopped,
 }
@@ -49,7 +52,8 @@ impl StoreError {
             StoreError::IndexDamaged { .. } => CODE_INDEX_DAMAGED,
             StoreError::DataDirectoryNotWritable { .. } => CODE_DATA_DIRECTORY_NOT_WRITABLE,
             StoreError::DiskFull { .. } => CODE_DISK_FULL,
-            StoreError::DatabaseCallFailed { .. } => CODE_WRITE_FAILED,
+            StoreError::DatabaseWriteFailed { .. } => CODE_WRITE_FAILED,
+            StoreError::DatabaseReadFailed { .. } => CODE_READ_FAILED,
             StoreError::WriterStopped => CODE_WRITE_FAILED,
         }
     }
@@ -82,7 +86,10 @@ mod tests {
         assert_eq!(damaged.code(), "RRS-S0003");
         assert_eq!(not_writable.code(), "RRS-S0004");
         assert_eq!(StoreError::DiskFull { reason: reason.clone() }.code(), "RRS-S3002");
-        assert_eq!(StoreError::DatabaseCallFailed { reason }.code(), "RRS-S3005");
+        let write_failed = StoreError::DatabaseWriteFailed { reason: reason.clone() };
+        let read_failed = StoreError::DatabaseReadFailed { reason };
+        assert_eq!(write_failed.code(), "RRS-S3005");
+        assert_eq!(read_failed.code(), "RRS-S0006");
         assert_eq!(StoreError::WriterStopped.code(), "RRS-S3005");
     }
 }

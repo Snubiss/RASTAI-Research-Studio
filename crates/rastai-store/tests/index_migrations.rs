@@ -1,18 +1,21 @@
 //! Migration 1 of `rastai.db` (layout rust-control-plane.md section 6.7): the migrated tables and columns are exactly
-//! the ones contracts 8.2 lists (no `settings` table), `runs.archive_state` starts `local`, reopening migrates
-//! nothing twice, and a file a newer app migrated is refused with `RRS-S0002` and left byte for byte as it was.
+//! the ones contracts 8.2 lists (no `settings` table), `runs.archive_state` starts `local`, and reopening migrates
+//! nothing twice. The refusal of a file a newer app migrated is tested at the bottom of `src/store.rs`, because
+//! modelling the newer app takes the crate's own migration functions, which no other crate may call.
 
 #![allow(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
 
-use rastai_core::paths::{DataPaths, rastai_db_path};
+use rastai_core::paths::rastai_db_path;
 use rastai_store::index::reads::{TableColumns, list_table_columns, open_index_reader, read_index_schema_version};
 use rastai_store::index::runs::{RunRow, get_run};
 use rastai_store::index::writes::IndexWrite;
-use rastai_store::sqlite::{Migration, open_database_for_writing};
-use rastai_store::store::{INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS, Store, close_store, open_store};
+use rastai_store::store::{Store, close_store, open_store};
 use rastai_store::writer_thread::write_index;
+
+mod common;
+use common::{remove_test_folder, test_paths};
 
 // Where contracts 8.2's table of rastai.db tables starts (its first table) and where the next section begins.
 const CONTRACTS_PATH: &str = "docs/architecture/contracts.md";
@@ -20,20 +23,6 @@ const INDEX_TABLES_HEADING: &str = "### 8.2 ";
 const NEXT_HEADING: &str = "### 8.3 ";
 // A table row of 8.2 starts with its backticked table name.
 const TABLE_ROW_START: &str = "| `";
-// The migration a newer app would have added; this build doesn't know it.
-const NEWER_MIGRATION_SQL: &str = "CREATE TABLE added_by_a_newer_app (note TEXT NOT NULL) STRICT;";
-
-fn test_paths(test_name: &str) -> DataPaths {
-    let root = std::env::temp_dir().join(format!("rastai-store-migrations-{}-{test_name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    DataPaths {
-        config: root.join("config"),
-        data: root.join("data"),
-        cache: root.join("cache"),
-        state: root.join("state"),
-        runtime: root.join("runtime"),
-    }
-}
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -45,12 +34,14 @@ fn close(store: Store) {
 }
 
 fn migrated_tables(test_name: &str) -> Vec<TableColumns> {
-    let store = open_store(&test_paths(test_name)).unwrap();
+    let paths = test_paths(test_name);
+    let store = open_store(&paths).unwrap();
     let tables = {
         let reader = open_index_reader(&store.index_readers).unwrap();
         list_table_columns(&reader).unwrap()
     };
     close(store);
+    remove_test_folder(&paths);
     tables
 }
 
@@ -152,7 +143,8 @@ fn the_migrated_schema_has_no_settings_table() {
 
 #[test]
 fn a_new_run_starts_with_archive_state_local() {
-    let store = open_store(&test_paths("archive-state")).unwrap();
+    let paths = test_paths("archive-state");
+    let store = open_store(&paths).unwrap();
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     runtime
         .block_on(write_index(&store.index, IndexWrite::UpsertRun(run_row("run_a"))))
@@ -161,8 +153,9 @@ fn a_new_run_starts_with_archive_state_local() {
         let reader = open_index_reader(&store.index_readers).unwrap();
         get_run(&reader, "run_a").unwrap().unwrap()
     };
-    assert_eq!(run.archive_state, "local");
     runtime.block_on(close_store(store));
+    assert_eq!(run.archive_state, "local");
+    remove_test_folder(&paths);
 }
 
 #[test]
@@ -174,33 +167,9 @@ fn reopening_migrates_nothing_twice() {
         let reader = open_index_reader(&store.index_readers).unwrap();
         read_index_schema_version(&reader).unwrap()
     };
-    assert_eq!(version, 1);
     close(store);
-}
-
-#[test]
-fn a_newer_schema_version_is_refused_and_the_file_is_unchanged() {
-    let paths = test_paths("newer-schema");
-    close(open_store(&paths).unwrap());
-    let database_path = rastai_db_path(&paths);
-    // A newer app is this one plus a migration: it migrates the file to version 2 and closes it cleanly.
-    let newer_migrations = [
-        Migration {
-            version: 1,
-            sql: INDEX_MIGRATIONS[0].sql,
-        },
-        Migration {
-            version: 2,
-            sql: NEWER_MIGRATION_SQL,
-        },
-    ];
-    drop(open_database_for_writing(&database_path, &INDEX_DATABASE_SETTINGS, &newer_migrations).unwrap());
-    let bytes_before = std::fs::read(&database_path).unwrap();
-
-    let error = open_store(&paths).err().unwrap();
-
-    assert_eq!(error.code(), "RRS-S0002");
-    assert_eq!(std::fs::read(&database_path).unwrap(), bytes_before);
+    assert_eq!(version, 1);
+    remove_test_folder(&paths);
 }
 
 #[test]
@@ -210,6 +179,7 @@ fn a_file_that_is_not_a_database_is_refused_as_damaged() {
     std::fs::write(rastai_db_path(&paths), vec![0x5a; 4096]).unwrap();
     let error = open_store(&paths).err().unwrap();
     assert_eq!(error.code(), "RRS-S0003");
+    remove_test_folder(&paths);
 }
 
 #[test]
