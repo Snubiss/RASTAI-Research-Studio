@@ -128,5 +128,15 @@
     "fix_text": "Run it again.",
     "docs_anchor": "rrs-j3005",
     "retired": false
+  },
+  {
+    "code": "RRS-J3006",
+    "severity": "error",
+    "title": "Another worker is already writing this run's event log",
+    "message": "Another process is writing the event log {path}, so this worker stopped before writing to it.",
+    "basic_text": "This task is already running, so Rastai didn't start a second copy of it.",
+    "fix_text": "Wait for the running copy to finish, or cancel it, then try again.",
+    "docs_anchor": "rrs-j3006",
+    "retired": false
   }
 ]

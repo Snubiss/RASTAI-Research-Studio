@@ -200,6 +200,7 @@ RRS_J3002 = "RRS-J3002"
 RRS_J3003 = "RRS-J3003"
 RRS_J3004 = "RRS-J3004"
 RRS_J3005 = "RRS-J3005"
+RRS_J3006 = "RRS-J3006"
 RRS_M0001 = "RRS-M0001"
 RRS_M0002 = "RRS-M0002"
 RRS_M0003 = "RRS-M0003"
@@ -2233,6 +2234,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Run it again.",
         fix_command_id="",
         docs_anchor="rrs-j3005",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_J3006,
+        severity="error",
+        title="Another worker is already writing this run's event log",
+        message="Another process is writing the event log {path}, so this worker stopped before writing to it.",
+        basic_text="This task is already running, so Rastai didn't start a second copy of it.",
+        fix_text="Wait for the running copy to finish, or cancel it, then try again.",
+        fix_command_id="",
+        docs_anchor="rrs-j3006",
         retired=False,
     ),
     CatalogEntry(
