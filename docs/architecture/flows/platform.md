@@ -784,12 +784,12 @@ sequenceDiagram
     SRV-->>WEB: 403 RRS-C1004, the code stays unused
   else code valid and unused
     SRV->>SRV: new session bound to the Origin that redeemed the code
-    SRV-->>WEB: Set-Cookie rastai_session, HttpOnly, SameSite Strict
-    WEB->>WEB: remove the code from the address bar
+    SRV-->>WEB: Set-Cookie rastai_session, HttpOnly, SameSite Strict, and the session key in the body
+    WEB->>WEB: keep the key in memory only, remove the code from the address bar
   else expired or already used
     SRV-->>WEB: 401 RRS-C1007, the app shows RRS-U0002
   end
-  WEB->>SRV: Execute and Subscribe with the cookie and the same Origin
+  WEB->>SRV: Execute and Subscribe with the cookie, the same Origin and Rastai-Session-Key
   Note over SRV,WEB: a daemon restart drops every session
   SH->>SH: every 5 s, daemon.lock free means the daemon died
   SH->>CLI: rastai open --print-url again
@@ -802,13 +802,14 @@ sequenceDiagram
 - `rastai open` without a flag creates a code the same way and opens the default browser. `rastai open --print-url` prints one `DesktopLaunchInfo` JSON line (`{url, cli_version, daemon_version, runtime_dir, config_dir, updates}`) instead; the shell parses it, and on a headless GPU box reached through an SSH tunnel the user copies `url` to the laptop.
 - Sessions live in daemon memory and expire after 24 h idle. A restart signs everyone out. The Tauri shell notices (its 5 s check finds `daemon.lock` free) and runs `rastai open --print-url` again. A plain browser tab shows `RRS-U0003` (signed out; frontend layout) with the `rastai open` hint.
 - **Sessions are bound to the origin that redeemed the code** (ADR-0034, decision N4). `POST /api/login` must carry Origin; the session records it, and every later cookie request must carry the same Origin (4.2). Why: the Host rule accepts any loopback port (SSH tunnels need it), and browsers send a cookie to every port on `127.0.0.1`. Without the binding, a page served by another local program on another port, which forwards its requests to the daemon, would pass both the Host and the Origin check with the user's cookie.
+- **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `POST /api/login` returns 32 random bytes in the response body, and the daemon keeps only their hash. The web app holds the key in memory only and sends it as `Rastai-Session-Key` on every cookie request other than `GET` or `HEAD`; a missing or wrong key is `RRS-C1002`. A page reload loses it: a browser tab signs in again with a new code from `rastai open`, and the desktop shell does that on its own.
 - Cookie name `rastai_session_<daemon id prefix>`; flags HttpOnly, SameSite=Strict, Path=/. No Secure flag on plain-HTTP loopback.
 - The web app never asks the shell for anything; it only talks to the daemon over HTTP, so a plain browser is a full client. `@rastai/client`'s `connectToDaemon` takes a `credential` option: the web app uses the cookie, scripts and tools use a bearer token (4.3).
 - **Cross-origin browser clients are refused in v1.** A web page on any other origin can't use the session. Two routes are designed for later, both Phase 2: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand). Non-browser clients use scoped bearer tokens today.
 - **The signed-out screen is locked UI** (decision N7). `SignedOutScreen`, like the egress badge, the trust prompt and the permission list, is drawn by the shell with `LOCKED_TOKENS` (`@rastai/ui`), which no theme can change, so a theme or a plugin UI can't fake or hide it.
-- **Residual risk** (for the threat model, M1-56): a program of another OS user listening on a loopback port the user's browser visits receives the cookie in its request headers and could replay it outside a browser with forged headers. The 24 h idle expiry and a daemon restart bound it.
+- **Residual risk** (for the threat model, M1-56): a program of another OS user listening on a loopback port the user's browser visits receives the cookie in its request headers and could replay it outside a browser with forged headers. Without the session key it can't run a command or upload (`RRS-C1002`); it could only `GET` a blob whose hash it already knows. The 24 h idle expiry and a daemon restart bound it.
 
-**Persisted:** `<config>/auth/owner.token` (durable, 0600; the desktop shell never reads it). Login codes and sessions (with their bound origin) are ephemeral.
+**Persisted:** `<config>/auth/owner.token` (durable, 0600; the desktop shell never reads it). Login codes and sessions (with their bound origin and key hash) are ephemeral.
 
 **Tests:** Playwright: valid code → signed in; reused code → `RRS-C1007`; code after 61 s → `RRS-C1007`; daemon restart → a browser tab shows `RRS-U0003`. **Origin binding:** redeem a code at `127.0.0.1:47820`, then send the same cookie through a fixture forwarder on `127.0.0.1:9000` (Host and Origin both port 9000) → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards. CLI: `rastai open --print-url` prints exactly one JSON line that parses as `DesktopLaunchInfo` and whose `url` fragment holds a working code.
 
@@ -837,10 +838,14 @@ flowchart TD
   SK -->|"yes"| SO{"Origin present?"}
   SO -->|"yes"| SB{"Same Origin that redeemed the code?"}
   SB -->|"no, another loopback port"| R5["403 RRS-C1004"]
-  SB -->|"yes"| OWN
+  SB -->|"yes"| KM{"GET or HEAD?"}
   SO -->|"no"| SF{"GET or HEAD, and Sec-Fetch-Site<br/>is same-origin or none?"}
   SF -->|"yes"| OWN
   SF -->|"no"| R5
+  KM -->|"yes"| OWN
+  KM -->|"no"| KEY{"Rastai-Session-Key matches<br/>the session's key hash?"}
+  KEY -->|"no"| R3
+  KEY -->|"yes"| OWN
   CR -->|"Bearer owner token"| OWN
   CR -->|"Bearer scoped token"| TK{"Hash known and not revoked?"}
   TK -->|"unknown"| R3
@@ -859,6 +864,7 @@ pub fn check_request_gate(request: &RequestHead, listener: &Listener, auth: &Aut
 - Nothing listens on a non-loopback interface by default (§21). The remote UI goes through an SSH tunnel.
 - The Host check blocks DNS rebinding: a page that resolves `attacker.test` to 127.0.0.1 still sends `Host: attacker.test`.
 - **Any loopback port is accepted** (plan §10 row 22, ADR-0034, superseding ADR-0007 decision 4): an SSH tunnel to a headless box often forwards a different local port, and the browser then sends that port in Host. Two checks tie a cookie to the page that loaded the app: Origin must equal `http://` plus the Host header, and it must equal the origin the session was redeemed from (4.1).
+- **A cookie request other than `GET` or `HEAD` needs the session key** (ADR-0034 decision 10). Origin and `Sec-Fetch-Site` are enforced only by browsers, so a non-browser process on another loopback port that receives the cookie could forge both and pass the Origin checks; it never sees the key, so its `Execute` is `RRS-C1002`.
 - **A cookie request without Origin** passes only for `GET` and `HEAD` with `Sec-Fetch-Site` `same-origin` or `none`: the app's own blob downloads and images, and a URL the user typed. Browsers send Origin on every POST, so every Connect call carries it. Why the rule: `<img src>` on a page served from another loopback port sends the daemon's cookie (same site, since cookies ignore ports) with no Origin, and its `Sec-Fetch-Site` is `same-site`, so it is refused. A browser that sends no `Sec-Fetch-Site` gets `RRS-C1004` on such GETs.
 - Bearer requests may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed plugin iframe) is refused, so a third-party iframe can't call the daemon directly. The Tauri window loads the web app from the daemon, so its Origin is the daemon's own and no Tauri origin needs to be accepted.
 - Scoped tokens are looked up by BLAKE3 hash; plain tokens are never stored.
@@ -868,7 +874,7 @@ pub fn check_request_gate(request: &RequestHead, listener: &Listener, auth: &Aut
 
 **Persisted:** `tokens` rows (hashes and scopes). Sessions and their bound origins are memory only. Nothing is written per request, except command journal rows.
 
-**Tests:** a table test with one request head per branch; a DNS-rebinding test sending `Host: attacker.test`; a tunnel test: redeem a code with `Host: 127.0.0.1:9000` and a matching Origin → later calls pass, the same Host with Origin `http://127.0.0.1:47820` → `RRS-C1004`, and a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET of `/api/blobs/<hash>` with no Origin and `Sec-Fetch-Site: same-origin` → passes, with `same-site` → `RRS-C1004`, a cookie POST without Origin → `RRS-C1004`; an Origin `null` test; the desktop smoke test checks that the Tauri webview sends `Sec-Fetch-Site`; cargo-fuzz on the header parsing.
+**Tests:** a table test with one request head per branch; a DNS-rebinding test sending `Host: attacker.test`; a tunnel test: redeem a code with `Host: 127.0.0.1:9000` and a matching Origin → later calls pass, the same Host with Origin `http://127.0.0.1:47820` → `RRS-C1004`, and a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET of `/api/blobs/<hash>` with no Origin and `Sec-Fetch-Site: same-origin` → passes, with `same-site` → `RRS-C1004`, a cookie POST without Origin → `RRS-C1004`; a cookie POST with the right Origin and no `Rastai-Session-Key`, or a wrong one → `RRS-C1002`, and a cookie GET of a blob with no key passes; an Origin `null` test; the desktop smoke test checks that the Tauri webview sends `Sec-Fetch-Site`; cargo-fuzz on the header parsing.
 
 ### 4.3 Scoped tokens for Navi and MCP clients
 

@@ -165,10 +165,11 @@ export function createStore(initialValue) {
 ### 2.1 Talking to the daemon
 
 - **Base URL** is the page's own origin (`http://127.0.0.1:47820` by default). The daemon serves the app at `/` (contracts §3.3), so there is nothing to configure.
-- **Sign-in:** the start URL carries `#login=<code>` in the fragment (contracts §3.2–3.3). Browsers never send a fragment to a server or put it in a Referer header, so the code stays out of the daemon's request log. `main.jsx` reads `login` from the fragment before routing (2.6), exchanges it with `POST /api/login` for the HttpOnly session cookie, then removes it from the fragment with `history.replaceState`. The browser app never holds a token. A `login` in the real query string is ignored.
-- **Credential:** the app calls `connectToDaemon({ baseUrl: location.origin, credential: { kind: "cookie" } })`. The cookie is sent by the browser; no `Authorization` header is ever set. The bearer form (`{ kind: "bearer", token }`) exists for scripts and other clients (2.11), never for the browser app.
+- **Sign-in:** the start URL carries `#login=<code>` in the fragment (contracts §3.2–3.3). Browsers never send a fragment to a server or put it in a Referer header, so the code stays out of the daemon's request log. `main.jsx` reads `login` from the fragment before routing (2.6), exchanges it with `POST /api/login` for the HttpOnly session cookie and the session key, then removes it from the fragment with `history.replaceState`. The browser app never holds a token; the session key lives only in the window's memory (never a cookie, `localStorage` or `sessionStorage`). A `login` in the real query string is ignored.
+- **Credential:** the app calls `connectToDaemon({ baseUrl: location.origin, credential: { kind: "cookie", sessionKey } })`. The cookie is sent by the browser; no `Authorization` header is ever set. The client sends `sessionKey` as `Rastai-Session-Key` on every request other than `GET` or `HEAD` (`Execute`, `Subscribe`, `PUT /api/blobs`). Origin and Fetch Metadata are enforced only by browsers, so a non-browser process on another loopback port that receives the cookie could forge them; it never sees the key (ADR-0034 decision 10, contracts §3.2). A missing or wrong key is `RRS-C1002`. The bearer form (`{ kind: "bearer", token }`) exists for scripts and other clients (2.11), never for the browser app.
 - **The session is bound to the origin that redeemed the code** (ADR-0034, contracts §3.2). Browsers don't isolate cookies by port, so a page on another loopback port gets the same cookie; the daemon refuses its requests because their Origin differs (`RRS-C1004`). Same-origin `POST` and `PUT` requests always carry Origin. Same-origin `GET`s without Origin (an `<img>` of a blob, a download, the app's own files) pass only with `Sec-Fetch-Site` `same-origin` or `none` (ADR-0034 decision 5). A browser that sends no Fetch Metadata fails closed.
 - **Sessions don't survive a daemon restart** (contracts §16). After a restart every window is signed out (`RRS-U0003`); the desktop shell reruns `rastai open --print-url` and reloads (9.3), and a browser tab shows `SignedOutScreen`.
+- **A page reload loses the session key**, so it signs the window out too: a browser tab shows `SignedOutScreen` with the `rastai open` hint, and the desktop shell signs in again on its own (9.3). Unsent drafts survive it (2.3).
 - **Commands:** Connect unary `CommandService.Execute` with protobuf binary. `?wire=json` switches to Connect JSON for debugging in devtools.
 - **Events:** one `EventService.Subscribe` stream per window (2.2). Binary only in the prototype (contracts §4).
 - **Blobs:** `GET /api/blobs/<hash>` (immutable, so the browser caches it by hash) and `PUT /api/blobs` with upload progress.
@@ -664,7 +665,8 @@ export const LOGIN_CODE_PARAMETER = "login";   // a key in the URL fragment's qu
  * How the client proves who it is. The browser app always uses the cookie.
  * @typedef {object} Credential
  * @property {"cookie" | "bearer"} kind
- * @property {string} [token]   only for "bearer": a scoped token from token.create
+ * @property {string} [sessionKey]   only for "cookie": the key exchangeLoginCode returned, held in memory only
+ * @property {string} [token]        only for "bearer": a scoped token from token.create
  */
 
 /**
@@ -714,7 +716,8 @@ export async function connectToDaemon(options) {
   if (!health.ok) {
     return clientDiagnostic("RRS-U0001", { base_url: options.baseUrl });
   }
-  const transport = createTransport(options);   // adds "Authorization: Bearer" only for a bearer credential
+  const transport = createTransport(options);   // "Authorization: Bearer" for a bearer credential; "Rastai-Session-Key"
+                                                // on non-GET requests for a cookie credential
   const client = {
     baseUrl: options.baseUrl,
     daemonVersion: health.version,
@@ -742,9 +745,11 @@ export async function checkHealth(baseUrl) {}
 export function readLoginCode(location) {}
 
 /**
+ * Redeems the code for the session cookie (set by the browser) and the session key (ADR-0034 decision 10).
  * @param {string} baseUrl
  * @param {string} code
- * @returns {Promise<Diagnostic | null>}   null on success; RRS-U0002 when the code is rejected or expired
+ * @returns {Promise<{ sessionKey: string | null, diagnostic: Diagnostic | null }>}   RRS-U0002 when the code is
+ *   rejected or expired; the caller keeps sessionKey in memory only and passes it in the cookie credential
  */
 export async function exchangeLoginCode(baseUrl, code) {}
 
@@ -839,14 +844,14 @@ Behavior worth stating:
 ### 3.4 Boundary rules
 
 - Never imports React, `@rastai/ui` or any app code.
-- In the browser, never holds a token: the session cookie is HttpOnly and the app uses the cookie credential. A bearer token lives only in a script's memory, passed in by its caller; the client never stores a credential anywhere.
+- In the browser, never holds a token: the session cookie is HttpOnly and the app uses the cookie credential. The session key and a bearer token live only in memory, passed in by the caller; the client never stores a credential anywhere. The key goes out only as `Rastai-Session-Key`, from the transport in `connection.js` and from `uploadBlob` in `blobs.js`.
 - Never opens more than one event stream per `DaemonClient`. The app creates one client per window.
 - Never reads local files or opens other sockets (contracts §2.4 rule 4).
 
 ### 3.5 Tests
 
 - Unit tests next to each file, run by vitest in Node. The fake daemon is connect-es's in-memory router transport.
-- `connection.test.js`: a bearer credential sets `Authorization: Bearer <token>` on commands, the stream and blob reads; a cookie credential never sets it; `useJsonWire` picks the JSON format; an unreachable daemon gives RRS-U0001.
+- `connection.test.js`: a bearer credential sets `Authorization: Bearer <token>` on commands, the stream and blob reads; a cookie credential never sets it, and sends `Rastai-Session-Key` on `Execute`, `Subscribe` and blob uploads but not on blob reads; `useJsonWire` picks the JSON format; an unreachable daemon gives RRS-U0001.
 - `event-stream.test.js`: resume with the right `after_bus_sequence`; the backoff sequence; RRS-C0401 calls `onResync`; a refused session ends in `signed_out`; `stop()` ends the loop.
 - `login.test.js`: the cases in `fixtures/ui/fragments.json`. `#login=abc` and `#/open?path=x&login=abc` give `abc`; after removal the fragments are `#/home` and `#/open?path=x`; `?login=abc` in the real query string gives `null`.
 - `proto-golden.test.js`: every message in `fixtures/proto-golden/` decodes and re-encodes byte-identical.
@@ -2151,7 +2156,7 @@ sequenceDiagram
   S->>W: open window at url, fragment carries the code and maybe an open route
   W->>W: read login from the fragment, then replaceState without it
   W->>D: POST /api/login with the code
-  D-->>W: session cookie
+  D-->>W: session cookie, and the session key in the body
   W->>D: settings.get, ListCommands, plugin.list
   W->>D: EventService.Subscribe
   W->>W: load plugin UIs, render, handle the open route
@@ -2159,8 +2164,8 @@ sequenceDiagram
 
 - In a plain browser the first steps are `rastai` (or `rastai open`) opening the default browser at the same kind of URL, `http://127.0.0.1:<port>/#login=<code>`.
 - The fragment grammar is in 2.6. With a file path on a cold start, the shell merges the open route into the CLI's fragment (`#/open?path=<enc>&login=<code>`, 9.3). The code is read and removed before the router runs, so it never stays in the address bar or the history, and the router sees only `#/open?path=<enc>`.
-- The login code is single-use and expires after 60 s (contracts §3.3). Reloading after sign-in works because the cookie is set; by then the code is gone from the fragment.
-- What's persisted: the browser keeps only the session cookie (and the localStorage conveniences of 2.3). Settings live in the `settings.json` files (contracts §11.1), commands in the daemon's registry, plugin state in `rastai.db`; the window refetches them on every boot.
+- The login code is single-use and expires after 60 s (contracts §3.3). A reload after sign-in finds no code in the fragment and no session key in memory, so `signIn` renders `SignedOutScreen` (RRS-U0003) in a browser tab; the desktop shell sees the reload and signs in again with a new code (9.3).
+- What's persisted: the browser keeps only the session cookie (and the localStorage conveniences of 2.3). The session key is never persisted. Settings live in the `settings.json` files (contracts §11.1), commands in the daemon's registry, plugin state in `rastai.db`; the window refetches them on every boot.
 - Failure: if `POST /api/login` fails, the app shows `SignedOutScreen` (RRS-U0002). If `plugin.list` reports an incompatible plugin, that plugin is disabled with its RRS-P1xxx diagnostic and the app still starts.
 
 ### 8.4 Notable behaviors
@@ -2420,6 +2425,7 @@ sequenceDiagram
 **Daemon lifetime:**
 - Closing the window never stops the daemon. Training and other jobs keep running (spec §19).
 - `daemon_watch.rs` checks every 5 s whether `daemon.lock` can be taken. If it can, the daemon has died: the shell runs `rastai open --print-url` again and reloads the window with the new URL.
+- **A reload signs in again.** A page reload loses the web app's in-memory session key (ADR-0034 decision 10). When the main window loads the daemon origin with no `login` in its fragment (the user pressed reload, or RRS-U0004's "Reload to update"), `window.rs` runs `rastai open --print-url` again and loads the new URL. Second windows are open question 24 (contracts §14).
 - Whether a daemon started by the desktop exits when idle is an open question (section 19).
 
 **AppImage:** the daemon must not run from the AppImage's mount, which disappears when the shell exits. When `$APPIMAGE` is set, the CLI copies itself to `<data>/bin/rastai-<version>`, checks the hash, and starts `serve` from that copy. That's the CLI's job; it's listed here because only the desktop bundle triggers it.

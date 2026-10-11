@@ -19,7 +19,7 @@ Conventions in this file:
 
 ### Changes in v1.2
 
-Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR.
+Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass and its review fixes, for the owner's review in its PR. Item 14 is M1-01a's check of the frontend contracts, for the owner's review in its PR.
 
 1. **`check-schema-diff` moves from Phase 2 into M1** (4, 12.6). Codegen writes `schemas/commands/` and the new `schemas/events/`; CI diffs them against the base branch. Every change needs a matching change to this file in the same PR. A breaking change to a `stable` command or event fails; `preview` items may break, with the contracts change.
 2. **`check-names` in M1** (12.6, 15). A new codegen binary, `rastai-names-codegen`, writes `schemas/names.json` from the code: command ids, event types, error codes, `rastai.db` and `vault.db` tables and columns, settings keys, document schema ids, crate, package and module names, and CLI verbs. CI compares it with section 15 and the tables of sections 2.1–2.3, 5.2, 6, 7, 8, 10 and 11, both ways. Names here but not yet in code need a milestone marker (conventions above).
@@ -34,6 +34,7 @@ Items 1–10 owner-approved on 2026-10-11. Items 11–13 are M1-01's marker pass
 11. **Every registered name carries its milestone** (M1-01; 12.6 "Landing"). No code exists yet, so each name `check-names` reads has a marker: the crates and packages of 2.1–2.3 and 15.1–15.3, the schema ids of 5.2, the commands of 6.4, the event types of 7.3, the tables of 8.2 and 8.3, the 10.3 codes (the heading's "(M1)", with the plugin ranges `RRS-L` (M4) and `RRS-V` (M5)) and the settings sections of 11.2. Each milestone is the one whose task builds or registers the name. When markers nest, the nearest wins (conventions).
 12. **Fixes found while marking.** Tutorials and assistant skills are Phase 2 (plan §10 row 45: `tutorial.list`, `tutorial.check`, `rastai.tutorial/1`). `vault_changes` is built in M3 by M3-E02, not M11 (8.3). `archive_cursors` arrives with M11's migration, as plan M1-23 says; the control-plane layout follows. The settings example is `RASTAI_DAEMON__PORT` (11.1), because `gateway.port` isn't a key. 15.6 registers the settings page id `psychology.settings`. 2.5 cites ADR-0037 beside `miniz_oxide` and `torchvision.io.decode_image`. The node layout's build table puts the egress proxy at step 7 (plan §10 row 27).
 13. **Review fixes (PR #164).** `sandbox.list`, `sandbox.kill` and `sandbox.cleanup` are (M5): M5-E10 builds them and M5-E01 registers them, so M7-E01 no longer claims `sandbox.*` (6.4). `checkpoint.resumed` is (M5) with `train.preempted`, because `train.resume` and M5-E14 are M5 (7.3). Row 45 reaches every tutorial and assistant-skill name: the `assistant_skills` key, `assistant.skill@1` (now unsupported until Phase 2, refused with `RRS-P1002`), `core.assistant`, `assistant-skills.js` and `templates/tutorials/` carry "(Phase 2)" (§1, 5.2, 5.5, 15.3, 15.6, 15.8), and its reasoning cites ADR-0017 and spec §31 rather than spec §7. The plugin permission names of spec §24 and ADR-0015 decision 5 get their own table beside the scopes (6.3). A marker in a list cell's notes covers nothing (conventions, 12.6). `gateway.port` is recorded as replaced by `daemon.port` (15.11). Round 2: `gpu` is marked sensitive with `weights.read` and `conversations.read`, reading spec §24's "(sensitive)" as covering its whole line (6.3).
+14. **Frontend-contract check (M1-01a).** The session key of ADR-0034 decision 10 (3.2) reaches the client: the cookie credential is `{kind: "cookie", sessionKey}`, and `exchangeLoginCode` returns the key (12.4, 15.3). The layout and flow docs follow: the request gate checks the key (control-plane 8.3a, platform flow 4.1–4.2), a reload signs the window out and the desktop shell signs in again (frontend 2.1, 8.3, 9.3). Open question 24 asks how a second window gets the key (14). `TypographyTokens`, `ThemeOptions` and `Renderer`, already in the frontend layout's `@rastai/ui` API, are registered (15.3).
 
 ### Changes in v1.1
 
@@ -2444,8 +2445,9 @@ All hand-written frontend, plugin-UI and SDK code is plain JavaScript ES modules
  */
 
 // packages/client/src/connection.js
-// The credential is a cookie in the browser and a bearer token anywhere else.
-const client = connectToDaemon({ baseUrl: location.origin, credential: { kind: "cookie" } });
+// The credential is a cookie in the browser and a bearer token anywhere else. With the cookie, the client
+// also sends the session key from exchangeLoginCode on every request other than GET or HEAD (3.2).
+const client = connectToDaemon({ baseUrl: location.origin, credential: { kind: "cookie", sessionKey } });
 
 // packages/client/src/generated/commands.js (generated from the registry; not reviewed)
 /**
@@ -2459,7 +2461,7 @@ export function modelLoad(executor, args) {
 ```
 
 - **`CommandExecutor`** is defined once in `@rastai/client`. `DaemonClient` and `PluginHost` both satisfy it, so a typed wrapper (`modelLoad(executor, args)`) works in the app, in a plugin panel and in a script. `@rastai/plugin` re-exports the wrappers. Plugins get the same wrappers for their own commands from `plugin.codegen`.
-- **`connectToDaemon(options)`** takes `credential: {kind: "cookie"}` or `{kind: "bearer", token}`. The browser app always uses the cookie; a bearer token is for scripts and future non-browser clients (`token.pair`, Phase 2).
+- **`connectToDaemon(options)`** takes `credential: {kind: "cookie", sessionKey}` or `{kind: "bearer", token}`. `sessionKey` is the key `exchangeLoginCode` returns; the client keeps it in memory only and sends it as `Rastai-Session-Key` on every cookie request other than `GET` or `HEAD` (3.2, ADR-0034 decision 10). The browser app always uses the cookie; a bearer token is for scripts and future non-browser clients (`token.pair`, Phase 2).
 
 ### 12.5 Fixtures and fuzzing
 
@@ -2663,6 +2665,7 @@ Each has the default to use until the owner decides. Docs and code follow the de
 | 14 | **Third-party plugin ids** collide without a registry (Phase 1). | Local installs reject an id already installed; reserved core areas (6.1) are rejected always (`RRS-P0002`). The Phase 2 registry assigns ids. |
 | 17 | **Archive rows with no project** (daemon-level runs, the command journal) under the data policy. | Follow the user-level `privacy.data_policy`; with the default `local-only` they stay local until the owner changes it (8.7). |
 | 18 | **MariaDB version in the archive CI matrix** (M11-E07). | The current MariaDB LTS (11.4) beside MySQL 8.4 and 9.7, plus MinIO for the S3 target. |
+| 24 | **How a second window gets the session key** (ADR-0034 decision 10). A window from `view.window.open` shares the cookie but not the opener's memory, so without the key it can't run commands. | The opener hands the key to the window it opened with `postMessage`, targeting its own origin only; the key never goes into a URL. Settled when second windows are built (frontend layout 9.3, step 5). |
 
 **Gaps left to the tasks that build them** (owner, 2026-10-11). Each is small and is settled in its owning task's contract PR, not now. Each owning task lists its gap in its backlog body so it isn't lost. Until then `check-names` needs the milestone marker on any draft name below.
 
@@ -2722,7 +2725,7 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | Package | Names |
 |---|---|
 | `@rastai/client` (M1) | `DaemonClient`, `connectToDaemon` (`credential` option), `CommandExecutor`, `ExecuteFunction`, `execute`, `listCommands`, `ExecuteOutcome`, `ExecuteOptions`, `openEventStream`, `EventStream`, `EventStreamStatus`, `uploadBlob`, `blobUrl`, `readBlobBytes`, `readLoginCode`, `removeLoginCodeFromUrl`, `exchangeLoginCode` (returns the session key, kept in memory; the cookie credential sends it as `Rastai-Session-Key` on every non-GET request), `checkHealth`, `clientDiagnostic`; `src/generated/commands.js` (one typed wrapper per core command); `MAX_BROWSER_UPLOAD_BYTES` (256 MiB) |
-| `@rastai/ui` (M1) | `UiMode`, `ModeProvider`, `useMode`, `AdvancedOnly`; `ThemeTokens`, `builtInTheme`, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS` (`tokens/locked.js`); `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen` (shell-only security UI); `FieldSpec`, `FieldForm`, `ChartFrame`, `DiagnosticView`, `useRenderer` |
+| `@rastai/ui` (M1) | `UiMode`, `ModeProvider`, `useMode`, `AdvancedOnly`; `ThemeTokens`, `TypographyTokens`, `ThemeOptions`, `builtInTheme`, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS` (`tokens/locked.js`); `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen` (shell-only security UI); `FieldSpec`, `FieldForm`, `ChartFrame`, `DiagnosticView`, `useRenderer`, `Renderer` (the `setColors` and `destroy` shape `useRenderer` takes) |
 | `@rastai/plugin` (M1) | `PluginHost` (a `CommandExecutor`), `PluginUi`, `Section`, `Panel`, `LensView`, `MetricView`, `SettingsPage`, `registerPluginUi`, `usePluginHost`, `useQuery`, `useCommand`, `createStore`, `useStore`, `createLiveBuffer`, `useLiveBuffer`, `loadDraft`, `saveDraft`, `clearDraft`, `CommandForm`, `JobProgress`, `ModelPicker`, `FileBrowser`, `FileDrop`, `createBridgeHost`, `connectToHost`, `createMockHost`; plugin codegen output `ui/src/generated/commands.js` |
 | `@rastai/canvas` (M4) | `GraphRenderer` (`setColors`), `createGraphRenderer`, `GraphScene`, `CanvasColors`, `createGlyphAtlas`, `layoutLayered`, `attachInteraction`, `MAX_GRAPH_NODES` (50,000, measured) |
 | `@rastai/viz` (M4) | `LineChart`, `BarChart`, `Heatmap`, `Histogram`, `Scatter2d`, `DataFlowView`, `VectorSpaceView` (each with `setColors`), `TableData`, `VizColors` |
