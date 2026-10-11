@@ -1,0 +1,76 @@
+// NodeService: served by every node, called by the daemon (contracts 3.2 and 4.4). The embedded node serves it on
+// node.sock; a remote node serves the same service through an SSH forward. This file has the RPCs of the M1
+// skeleton; every other RPC of contracts 4.4 arrives with the milestone that uses it (node layout 3.6).
+syntax = "proto3";
+
+package rastai.node.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+import "rastai/common/v1/hardware.proto";
+import "rastai/events/v1/event_record.proto";
+import "rastai/node/v1/jobs.proto";
+import "rastai/node/v1/live.proto";
+
+service NodeService {
+  // The first call on every connection: versions, capabilities and a challenge signed both ways (designer flow
+  // C3). Handshake never changes in a way an older node can't answer, so any version can update any other.
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  // The node's hardware and a fresh telemetry sample.
+  rpc GetHardware(GetHardwareRequest) returns (GetHardwareResponse);
+  // Python jobs and node-native jobs. A refused job comes back in state failed with last_error set.
+  rpc StartJob(JobSpec) returns (JobInfo);
+  rpc SignalJob(SignalJobRequest) returns (SignalJobResponse);
+  // A snapshot of every job, for reconciliation after a reconnect.
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // Tails runs/<run_id>/events.log from after the daemon's acked sequence; the daemon's ack is that sequence.
+  rpc WatchRunEvents(WatchRunEventsRequest) returns (stream rastai.events.v1.EventRecord);
+  // The node's ephemeral events, for the daemon's bus.
+  rpc WatchLive(WatchLiveRequest) returns (stream LiveEvent);
+}
+
+// The daemon's half of the handshake. The daemon signs ("rastai-node-handshake-v1", node_id, daemon_nonce,
+// sent_unix_ms, hub_socket_path) with daemon.key (ADR-0011). tokenization_overrides joins in M3 (node layout 3.6).
+message HandshakeRequest {
+  // The daemon's node protocol version, NODE_PROTOCOL_VERSION; starts at 1.
+  uint32 protocol_version = 1;
+  // The capability flags the daemon itself supports, in the form of contracts 8.6.
+  repeated string capabilities = 2;
+  string app_version = 3;
+  // "daemon_<base32 of the daemon's Ed25519 public key>" (contracts 8.6).
+  string daemon_id = 4;
+  // Random bytes the node must not have seen before, so a recorded handshake can't be replayed.
+  bytes daemon_nonce = 5;
+  // The daemon's clock; the node refuses a handshake more than 5 minutes off its own.
+  int64 sent_unix_ms = 6;
+  // Ed25519 signature over the tuple above.
+  bytes daemon_signature = 7;
+  // The node-hub socket the node dials for NodeHubService: node-hub.sock for the embedded node, a fresh
+  // <runtime>/node-hub-<session_id>.sock per session for a remote one (designer flow C3).
+  string hub_socket_path = 8;
+}
+
+// The node's half. The node signs ("rastai-node-handshake-v1", daemon_id, daemon_nonce, BLAKE3 of
+// session_token) with node.key; the daemon checks it against the key it pinned at pairing.
+message HandshakeResponse {
+  // "node_<base32 of the node's Ed25519 public key>" (contracts 8.6).
+  string node_id = 1;
+  // The node's own protocol version and app version, for the daemon's compatibility decision (designer flow C3b).
+  uint32 protocol_version = 2;
+  string app_version = 3;
+  // The node's capability flags, stored in the daemon's nodes row (contracts 8.6).
+  repeated string capabilities = 4;
+  rastai.common.v1.HardwareProfile hardware = 5;
+  // Authenticates every later call both ways, in gRPC metadata. A reconnect gets a new one.
+  string session_token = 6;
+  bytes node_signature = 7;
+  // Why the node refused the handshake, for example a daemon key it hasn't paired (RRS-N0002); unset on success.
+  rastai.common.v1.Diagnostic diagnostic = 8;
+}
+
+// GetHardware takes no arguments yet; the empty request lets fields be added without a breaking change.
+message GetHardwareRequest {}
+
+message GetHardwareResponse {
+  rastai.common.v1.HardwareProfile hardware = 1;
+  rastai.common.v1.NodeTelemetry telemetry = 2;
+}

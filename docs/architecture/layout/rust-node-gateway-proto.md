@@ -116,7 +116,7 @@ proto/rastai/
   node/v1/
     node_service.proto        NodeService: the RPC list only, plus the small per-RPC request messages
                               (HandshakeRequest/Response, GetHardwareRequest/Response, HandleCommandRequest, ...)
-    jobs.proto                JobSpec, JobInfo, JobKind, JobSignal, SignalJobRequest, ListJobsRequest/Response,
+    jobs.proto                JobSpec, JobInfo, JobKind, JobSignal, SignalJobRequest/Response, ListJobsRequest/Response,
                               WatchRunEventsRequest
     environments.proto        EnsureEnvironmentRequest, EnvironmentProgress, EnvironmentInfo
     leases.proto              Lease, RequestLeaseRequest, ReleaseLeaseRequest, ListLeasesRequest/Response
@@ -134,7 +134,8 @@ proto/rastai/
     node_hub_service.proto    NodeHubService; HeartbeatRequest/Response, GatewayGenerateRequest,
                               GetSecretRequest/Response (purposes in 3.2; ExecuteCommand reuses commands.v1 messages)
   worker/v1/
-    worker_service.proto      WorkerService; HelloRequest, WorkerInfo, ControlRequest
+    worker_service.proto      WorkerService; HelloRequest, WorkerInfo, ControlRequest/Response (WatchLive reuses
+                              node.v1's WatchLiveRequest and LiveEvent)
     worker_host_service.proto WorkerHostService; RegisterRequest/Response, ResizeLeaseRequest/Response,
                               BlobChunk, GetBlobRequest, TokenizeChatRequest/Response (TokenizeChat is defined in layout/python.md),
                               ListToolsRequest/Response, CallToolRequest/Response (gym tools in sandboxes)
@@ -199,7 +200,7 @@ Contracts §4 defines the services and the main messages, and 4.9 fixes the fiel
 
 | Output | Folder | Tool (dev tooling, §27) | Notes |
 |---|---|---|---|
-| Rust | `crates/rastai-proto/src/generated/rastai.<package>.v1.rs` | buf with the prost and tonic plugins | `crates/rastai-proto/src/lib.rs` is the one hand-written file: a module tree that `include!`s each generated file. No `build.rs`, so building never needs `protoc`. The tonic plugin skips `CommandService` and `EventService`: the daemon serves them as Connect with prost alone (control-plane layout 8.4, 11.3), so tonic arrives with the first gRPC service, `NodeService` (M1-10). |
+| Rust | `crates/rastai-proto/src/generated/rastai.<package>.v1.rs` | buf with the prost and tonic plugins | `crates/rastai-proto/src/lib.rs` is the one hand-written file: a module tree that `include!`s each generated file. No `build.rs`, so building never needs `protoc`. The tonic plugin skips `CommandService` and `EventService`: the daemon serves them as Connect with prost alone (control-plane layout 8.4, 11.3), so tonic arrives with the first gRPC service, `NodeService` (M1-10). The plugin runs with `no_transport`: the clients get no `connect(url)`, because `rastai-transport` opens every channel over a Unix socket itself (`grpc_channel.rs`), so `rastai-proto` needs only tonic's `codegen` feature, plus `tonic-prost`, the codec the generated code calls. The generated server traits are `#[async_trait]` traits; a handler implements one with `#[tonic::async_trait]` (contracts 12.2). |
 | Python | `python/rastai_proto/rastai_proto/<package>/v1/*_pb2.py`, `*_pb2_grpc.py` | buf with the protobuf and grpcio plugins | protoc writes `from rastai.common.v1 import ...`, which would collide with the public `rastai` SDK package. `tools/codegen/rewrite_python_imports` rewrites `rastai.` to `rastai_proto.` in generated imports. It has its own test. |
 | JavaScript | `packages/proto/src/generated/rastai/<package>/v1/*_pb.js` and `*_pb.d.ts` | buf with protoc-gen-es, `target=js+dts` | protobuf-es v2 emits service descriptors that connect-es uses directly from JavaScript. The `.d.ts` files are generated, never edited and not part of review; `tools/checks/check-no-typescript` allows them only in generated folders (ADR-0036). Nobody writes TypeScript. |
 
@@ -214,6 +215,7 @@ The typed command wrappers in `@rastai/client` are not made by buf. Arguments ar
 | Lint and breaking | CI step `just proto-check` | `buf lint`; `buf breaking --against` the main branch |
 | Golden messages | `fixtures/proto-golden/<package>/<MessageName>.binpb` and `.json` | one filled instance per message; round-tripped in `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py`, `packages/proto/src/golden.test.js`; binary bytes must match exactly across the three |
 | Unset stability | `fixtures/proto-golden/{commands,events}/without_stability/`: a `CommandDescriptor` and an `EventTypeDescriptor` without the field | decode as `STABILITY_UNSPECIFIED`, the zero value every reader treats as `PREVIEW` (3.2), and round-trip unchanged, in Rust, JS and Python; the filled goldens decode as `STABILITY_PREVIEW` |
+| Service stubs | `crates/rastai-proto/tests/services.rs`, `python/rastai_proto/tests/test_services.py` | a tonic server stub of every service builds and serves under its proto name; every service has exactly the RPCs of its build-order step (3.6); every grpcio servicer registers on a server, and `WorkerService` answers `Hello` and `WatchLive` over a Unix socket |
 | Import rewrite | `tools/codegen/tests/` | a generated file with nested imports rewrites correctly and imports cleanly |
 | Generated-code freshness | `tools/checks/check-generated` | regenerate, diff, fail on change |
 

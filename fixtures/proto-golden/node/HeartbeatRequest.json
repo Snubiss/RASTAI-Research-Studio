@@ -1,0 +1,46 @@
+{
+  "node_id": "node_4HPN8Q3W6ZT2KX5M9RV7C1DBAEFGJS0Y3NW8QK5ZM2PT6RX4VC9BH",
+  "telemetry": {
+    "sampled_unix_ms": "1791700000123",
+    "gpus": [
+      {
+        "gpu_index": 1,
+        "utilization_percent": 87,
+        "vram_used_bytes": "12884901888",
+        "vram_total_bytes": "17094934528",
+        "temperature_celsius": 61.5,
+        "power_watts": 212.25,
+        "processes": [
+          {
+            "pid": 48213,
+            "vram_bytes": "7516192768"
+          }
+        ]
+      }
+    ],
+    "ram_used_bytes": "21474836480",
+    "ram_total_bytes": "68719476736",
+    "disk_free_bytes": "1099511627776"
+  },
+  "jobs": [
+    {
+      "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+      "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2S",
+      "kind": "JOB_KIND_TRAIN",
+      "state": "JOB_STATE_FAILED",
+      "pid": 48213,
+      "process_group_id": 48213,
+      "started_unix_ms": "1791700000123",
+      "exit_code": 137,
+      "last_error": {
+        "code": "RRS-J1002",
+        "severity": "SEVERITY_ERROR",
+        "message": "Job killed by the kernel's out-of-memory killer.",
+        "path": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2S/stderr.log:2048:1",
+        "fix_text": "Lower the micro-batch size, then resume the run.",
+        "fix_command_id": "train.resume",
+        "fix_arguments_json": "{\"run_id\":\"run_01JA2B3C4D5E6F7G8H9J0K1M2S\"}"
+      }
+    }
+  ]
+}

@@ -288,7 +288,7 @@ def python_import_problem(module: str, package: str, module_path: str) -> str | 
         return python_internal_problem(top_name, package, module_path)
     if top_name in sys.stdlib_module_names:
         return python_forbidden_module_problem(top_name, module_path)
-    return python_library_problem(module, module_path)
+    return python_library_problem(module, package, module_path)
 
 
 def python_forbidden_module_problem(top_name: str, module_path: str) -> str | None:
@@ -303,7 +303,7 @@ def python_internal_problem(imported: str, package: str, module_path: str) -> st
     return f"`{package}` may import only {', '.join(allowed) or 'no other package'} (contracts 2.2)"
 
 
-def python_library_problem(module: str, module_path: str) -> str | None:
+def python_library_problem(module: str, package: str, module_path: str) -> str | None:
     library = longest_listed_prefix(module, PYTHON_LIBRARY_FILES)
     if library is None:
         return "not a §27 library (contracts 2.5); add it to the allowlist and its wrapper row first"
@@ -313,6 +313,11 @@ def python_library_problem(module: str, module_path: str) -> str | None:
     if rule == TESTS_ONLY:
         return None if is_python_test(module_path) else f"`{library}` is for tests only"
     if any(fnmatch(module_path, pattern) for pattern in rule):
+        return None
+    if is_python_test(module_path) and any(fnmatch(f"{package}/{module_path}", pattern) for pattern in rule):
+        # A package that may use a library throughout ("rastai_proto/*") may use it in its own tests too:
+        # rastai_proto's tests start grpcio servers from the generated servicers. The tests folder sits beside
+        # the import package, so its module path ("tests/test_services.py") doesn't carry the package name.
         return None
     return f"`{library}` is imported only in {', '.join(rule)} (contracts 2.5); call that wrapper instead"
 

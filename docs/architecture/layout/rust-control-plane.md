@@ -207,7 +207,7 @@ cognitive_complexity = "warn"
 | clippy with `-D warnings` | `just lint` | the lints above; `too_many_lines` keeps functions small |
 | `unsafe_code = "deny"` + `tools/checks/check-unsafe` | workspace lints | contracts §12.2: `unsafe` only with an ADR naming the file; today only `rastai-store/src/disk_space.rs` (ADR-0033) |
 | no `anyhow`, `thiserror`, `reqwest`, `memmap2`, `openssl`, `sqlx` | `deny.toml` `[bans]` | contracts §2.5, §12.2 |
-| no `async-trait` | `deny.toml` `[bans]` | async polymorphism is an enum |
+| no `async-trait` | `deny.toml` `[bans]` | async polymorphism is an enum; tonic is its one allowed parent, for the generated service traits (contracts §12.2) |
 | every direct dependency in the allowlist table, used only by the listed crates | `tools/checks/check-deps` | §27; one wrapper module per library |
 | every name in code is registered in contracts, and every registered name is in code or marked with its milestone | `tools/checks/check-names` | one registry (contracts §15); agents and people can't invent a name unnoticed (2.8) |
 | a change to a command or event schema comes with a contracts update, and a breaking change to a stable one is refused | `tools/checks/check-schema-diff` | what `buf breaking` can't see inside `arguments_json` and `result_json` (2.8, 11.1) |
@@ -218,7 +218,7 @@ cognitive_complexity = "warn"
 - `[licenses] allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CC0-1.0", "MPL-2.0", "BSL-1.0", "CDLA-Permissive-2.0"]` (the ADR-0015 #7 list); anything else fails. `confidence-threshold = 0.9`. `mysql_async` is MIT OR Apache-2.0; its transitive crates go through the same check on the M11-E01 PR that adds it.
 - `[advisories]`: the RustSec database; `yanked = "deny"`. This is why `sqlx` is banned: RUSTSEC-2023-0071 reaches it through `rsa` (contracts §2.5).
 - `[sources]`: crates.io only; no git dependencies.
-- `[bans]`: `multiple-versions = "warn"`; `deny = ["anyhow", "thiserror", "reqwest", "memmap2", "openssl", "openssl-sys", "async-trait", "schemars", "sqlx"]`. `schemars` comes back only by the rule in contracts §5.4 (more than about 20 document types).
+- `[bans]`: `multiple-versions = "warn"`; `deny = ["anyhow", "thiserror", "reqwest", "memmap2", "openssl", "openssl-sys", "async-trait", "schemars", "sqlx"]`. `schemars` comes back only by the rule in contracts §5.4 (more than about 20 document types). `anyhow` and `async-trait` each have one allowed third-party parent, `prost-derive` and `tonic` (contracts §2.5).
 - **Single-owner wrappers** (contracts §2.5 "Enforced owners"). A `[[bans.deny]]` entry with `wrappers = [<owner>]` lets only the owner depend on the crate directly:
   - `tokenizers`, `minijinja` → `rastai-gateway`
   - `rusqlite` → `rastai-store`

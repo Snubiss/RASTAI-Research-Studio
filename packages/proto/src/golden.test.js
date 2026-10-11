@@ -1,6 +1,7 @@
 // Golden messages (layout: rust-node-gateway-proto.md section 3.5). Every message of rastai.common.v1,
-// rastai.commands.v1 and rastai.events.v1 has a golden in fixtures/proto-golden/<package>/: <Name>.binpb decodes and
-// encodes back to exactly the same bytes, the <Name>.json encodes to those bytes and the bytes print as that JSON.
+// rastai.commands.v1, rastai.events.v1, rastai.node.v1 and rastai.worker.v1 has a golden in
+// fixtures/proto-golden/<package>/: <Name>.binpb decodes and encodes back to exactly the same bytes, the <Name>.json
+// encodes to those bytes and the bytes print as that JSON.
 // The Rust and Python tests compare against the same .binpb files, so the three encoders agree byte for byte.
 
 // @ts-expect-error -- no Node.js type definitions in this workspace (@types/node is not in spec §27)
@@ -22,6 +23,12 @@ import {
   file_rastai_events_v1_event_record,
   file_rastai_events_v1_event_service,
   file_rastai_events_v1_payloads,
+  file_rastai_node_v1_jobs,
+  file_rastai_node_v1_live,
+  file_rastai_node_v1_node_hub_service,
+  file_rastai_node_v1_node_service,
+  file_rastai_worker_v1_worker_host_service,
+  file_rastai_worker_v1_worker_service,
 } from "./index.js";
 
 /** @typedef {import("@bufbuild/protobuf").DescMessage} DescMessage */
@@ -58,6 +65,21 @@ const GOLDEN_PACKAGES = [
     packageName: "rastai.events.v1",
     folder: "events",
     files: [file_rastai_events_v1_event_record, file_rastai_events_v1_event_service, file_rastai_events_v1_payloads],
+  },
+  {
+    packageName: "rastai.node.v1",
+    folder: "node",
+    files: [
+      file_rastai_node_v1_jobs,
+      file_rastai_node_v1_live,
+      file_rastai_node_v1_node_hub_service,
+      file_rastai_node_v1_node_service,
+    ],
+  },
+  {
+    packageName: "rastai.worker.v1",
+    folder: "worker",
+    files: [file_rastai_worker_v1_worker_host_service, file_rastai_worker_v1_worker_service],
   },
 ];
 const GOLDEN_ROOT = new URL("../../../fixtures/proto-golden/", import.meta.url);

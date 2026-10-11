@@ -1,6 +1,7 @@
 """Golden messages (layout: rust-node-gateway-proto.md section 3.5).
 
-Every message of rastai.common.v1, rastai.commands.v1 and rastai.events.v1 has a golden in
+Every message of rastai.common.v1, rastai.commands.v1, rastai.events.v1, rastai.node.v1 and rastai.worker.v1 has a
+golden in
 fixtures/proto-golden/<package>/, and its .binpb decodes and encodes back to exactly the same bytes. The Rust and
 JavaScript tests compare against the same files, so the three encoders agree byte for byte. Python keeps fields it
 doesn't know and writes them back, which would hide a module that lags behind the .proto, so the test drops unknown
@@ -16,6 +17,8 @@ import pytest
 import rastai_proto.commands.v1
 import rastai_proto.common.v1
 import rastai_proto.events.v1
+import rastai_proto.node.v1
+import rastai_proto.worker.v1
 from rastai_proto.commands.v1.command_service_pb2 import CommandDescriptor
 from rastai_proto.common.v1.states_pb2 import STABILITY_PREVIEW, STABILITY_UNSPECIFIED
 from rastai_proto.events.v1.event_service_pb2 import EventTypeDescriptor
@@ -32,6 +35,8 @@ GOLDEN_PACKAGES = {
     "common": rastai_proto.common.v1,
     "commands": rastai_proto.commands.v1,
     "events": rastai_proto.events.v1,
+    "node": rastai_proto.node.v1,
+    "worker": rastai_proto.worker.v1,
 }
 
 

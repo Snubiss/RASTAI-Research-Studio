@@ -1,0 +1,43 @@
+{
+  "node_id": "node_4HPN8Q3W6ZT2KX5M9RV7C1DBAEFGJS0Y3NW8QK5ZM2PT6RX4VC9BH",
+  "protocol_version": 1,
+  "app_version": "0.1.0",
+  "capabilities": ["generate.inspectable", "generate.fast", "lens.live", "self_update"],
+  "hardware": {
+    "cpu_model": "AMD Ryzen 9 7950X 16-Core Processor",
+    "cpu_count": 32,
+    "ram_total_bytes": "68719476736",
+    "disk_free_bytes": "1099511627776",
+    "gpus": [
+      {
+        "index": 1,
+        "name": "NVIDIA GeForce RTX 5080",
+        "architecture": "sm_120",
+        "vram_bytes": "17094934528",
+        "vendor": "nvidia",
+        "driver_version": "580.82.09"
+      },
+      {
+        "index": 2,
+        "name": "NVIDIA GeForce RTX 3090",
+        "architecture": "sm_86",
+        "vram_bytes": "25769803776",
+        "vendor": "nvidia",
+        "driver_version": "580.82.09"
+      }
+    ],
+    "driver_version": "580.82.09",
+    "backend": "cuda13"
+  },
+  "session_token": "5c1e0f7a9b3d24e6c8a1f0b2d4e6a8c0e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2",
+  "node_signature": "Zo21ViW7e4mf+R1NF2fA6NhkzAvzZvzaBYqGqljnW1YauEywYynlOv/UxIEcYG1k6ZokXZbEU66ulcfHgGLTfA==",
+  "diagnostic": {
+    "code": "RRS-N0002",
+    "severity": "SEVERITY_ERROR",
+    "message": "Daemon key not paired with this node.",
+    "path": "node/paired_daemons.json",
+    "fix_text": "Pair this daemon with the node again.",
+    "fix_command_id": "node.pair",
+    "fix_arguments_json": "{\"node_id\":\"node_4HPN8Q3W6ZT2KX5M9RV7C1DBAEFGJS0Y3NW8QK5ZM2PT6RX4VC9BH\"}"
+  }
+}

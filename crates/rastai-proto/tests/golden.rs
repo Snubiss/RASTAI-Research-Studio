@@ -22,14 +22,29 @@ use rastai_proto::events::v1::{
     ListEventTypesResponse, NodeStateChanged, PinChanged, PluginEventPayload, PluginStateChanged, RunMetrics,
     RunStateChanged, RunTagsChanged, SubscribeRequest,
 };
+use rastai_proto::node::v1::{
+    GetHardwareRequest, GetHardwareResponse, HandshakeRequest, HandshakeResponse, HeartbeatRequest, HeartbeatResponse,
+    JobInfo, JobSpec, ListJobsRequest, ListJobsResponse, LiveEvent, SignalJobRequest, SignalJobResponse,
+    WatchLiveRequest, WatchRunEventsRequest,
+};
+use rastai_proto::worker::v1::{
+    ControlRequest, ControlResponse, HelloRequest, RegisterRequest, RegisterResponse, WorkerInfo,
+};
 
 const GOLDEN_ROOT: &str = "../../fixtures/proto-golden";
 const BINARY_EXTENSION: &str = "binpb";
 const JSON_EXTENSION: &str = "json";
 // Descriptors written by a daemon that predates the stability field (layout 3.5, "Unset stability").
 const WITHOUT_STABILITY_FOLDER: &str = "without_stability";
-// A message with no fields encodes to no bytes at all, so its golden is the one golden allowed to be empty.
-const FIELDLESS_MESSAGES: &[&str] = &["ListEventTypesRequest"];
+// A message with no fields encodes to no bytes at all, so these goldens are the only ones allowed to be empty.
+const FIELDLESS_MESSAGES: &[&str] = &[
+    "ListEventTypesRequest",
+    "GetHardwareRequest",
+    "HeartbeatResponse",
+    "ListJobsRequest",
+    "WatchLiveRequest",
+    "HelloRequest",
+];
 
 /// Decodes golden bytes as one message type and encodes the message again.
 type RoundTrip = fn(&[u8]) -> Vec<u8>;
@@ -88,6 +103,33 @@ const EVENTS_MESSAGES: &[(&str, RoundTrip)] = &[
     ("SubscribeRequest", round_trip::<SubscribeRequest>),
 ];
 
+const NODE_MESSAGES: &[(&str, RoundTrip)] = &[
+    ("GetHardwareRequest", round_trip::<GetHardwareRequest>),
+    ("GetHardwareResponse", round_trip::<GetHardwareResponse>),
+    ("HandshakeRequest", round_trip::<HandshakeRequest>),
+    ("HandshakeResponse", round_trip::<HandshakeResponse>),
+    ("HeartbeatRequest", round_trip::<HeartbeatRequest>),
+    ("HeartbeatResponse", round_trip::<HeartbeatResponse>),
+    ("JobInfo", round_trip::<JobInfo>),
+    ("JobSpec", round_trip::<JobSpec>),
+    ("ListJobsRequest", round_trip::<ListJobsRequest>),
+    ("ListJobsResponse", round_trip::<ListJobsResponse>),
+    ("LiveEvent", round_trip::<LiveEvent>),
+    ("SignalJobRequest", round_trip::<SignalJobRequest>),
+    ("SignalJobResponse", round_trip::<SignalJobResponse>),
+    ("WatchLiveRequest", round_trip::<WatchLiveRequest>),
+    ("WatchRunEventsRequest", round_trip::<WatchRunEventsRequest>),
+];
+
+const WORKER_MESSAGES: &[(&str, RoundTrip)] = &[
+    ("ControlRequest", round_trip::<ControlRequest>),
+    ("ControlResponse", round_trip::<ControlResponse>),
+    ("HelloRequest", round_trip::<HelloRequest>),
+    ("RegisterRequest", round_trip::<RegisterRequest>),
+    ("RegisterResponse", round_trip::<RegisterResponse>),
+    ("WorkerInfo", round_trip::<WorkerInfo>),
+];
+
 const GOLDEN_PACKAGES: &[GoldenPackage] = &[
     GoldenPackage {
         folder: "common",
@@ -100,6 +142,14 @@ const GOLDEN_PACKAGES: &[GoldenPackage] = &[
     GoldenPackage {
         folder: "events",
         messages: EVENTS_MESSAGES,
+    },
+    GoldenPackage {
+        folder: "node",
+        messages: NODE_MESSAGES,
+    },
+    GoldenPackage {
+        folder: "worker",
+        messages: WORKER_MESSAGES,
     },
 ];
 
