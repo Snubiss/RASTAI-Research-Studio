@@ -1,0 +1,70 @@
+# Nightly runs on main (contracts 15.9, plan 8.7): every fuzz target of contracts 12.5 for 10 minutes each
+# (ADR-0037). None of these jobs is a required check. node-over-ssh joins this file with M9-E02.
+#
+# Like ci.yml, each job installs the pinned dev tools (tools/ci/install-dev-tools) and runs one `just` recipe.
+# Actions are pinned to a commit, with the release tag beside it.
+name: nightly
+
+on:
+  schedule:
+    # 03:17 UTC every night: not on the full hour, when GitHub's queue of scheduled runs is longest.
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  # Ten minutes per target (plan 8.7).
+  FUZZ_SECONDS: "600"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  fuzz:
+    # A schedule runs on the default branch already; the guard keeps it that way if a trigger is ever added.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # The build, ten minutes of fuzzing and some headroom.
+    timeout-minutes: 30
+    strategy:
+      # One target's crash must not stop the others from running their ten minutes.
+      fail-fast: false
+      matrix:
+        # Every cargo-fuzz target that exists so far, by crate and target name (contracts 12.5). A new target joins
+        # this list in the PR that adds it; tests/workspace/ci-workflows.test.js fails until it does.
+        include:
+          - { crate: rastai-formats, target: json_reader }
+          - { crate: rastai-formats, target: read_document }
+    name: fuzz ${{ matrix.crate }} ${{ matrix.target }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install just and cargo-fuzz
+        run: tools/ci/install-dev-tools just cargo-fuzz
+      - name: Install the nightly toolchain the justfile pins for fuzzing
+        # cargo-fuzz builds with sanitizer flags, which need nightly. The justfile's fuzz_toolchain is the one pin.
+        run: rustup toolchain install "$(just --evaluate fuzz_toolchain)" --profile minimal
+      - name: Restore the cargo cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Each fuzz crate is its own workspace with its own lock and target/ folder.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            crates/${{ matrix.crate }}/fuzz/target
+          key: fuzz-${{ matrix.crate }}-${{ matrix.target }}-${{ hashFiles(format('crates/{0}/fuzz/Cargo.lock', matrix.crate)) }}
+          restore-keys: fuzz-${{ matrix.crate }}-${{ matrix.target }}-
+      - name: just fuzz
+        run: just fuzz "${{ matrix.crate }}" "${{ matrix.target }}" "$FUZZ_SECONDS"
+      - name: Keep the crashing inputs
+        # cargo-fuzz writes each crashing input to fuzz/artifacts/<target>/; this keeps them for reproducing.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crashes-${{ matrix.crate }}-${{ matrix.target }}
+          path: crates/${{ matrix.crate }}/fuzz/artifacts/
