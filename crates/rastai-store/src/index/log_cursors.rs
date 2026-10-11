@@ -1,22 +1,21 @@
 //! `log_cursors` (contracts 8.2): how far the daemon's own event log is indexed, like `runs.acked_sequence` is for a
-//! run's log. The indexer (M1-25) sets it in the same transaction as the rows of the records it acknowledges, so a
-//! crash re-reads at most the records whose rows didn't commit.
+//! run's log. The indexer sets it in the same transaction as the rows of the records it acknowledges, so a crash
+//! re-reads at most the records whose rows didn't commit.
 
 use crate::error::StoreError;
 use crate::index::reads::IndexReader;
-use crate::sqlite::{SqliteTransaction, execute, query_rows, read_unsigned, text_value, unsigned_value};
+use crate::sqlite::{
+    SqliteTransaction, execute, query_rows, query_rows_in_transaction, read_unsigned, text_value, unsigned_value,
+};
 
 // The ack only moves forward: a late or repeated write for an older sequence leaves the cursor where it is.
-// The indexer (M1-25) is the first caller of set_log_cursor; until it lands only the test below uses the two.
-#[cfg_attr(not(test), allow(dead_code))]
 const SET_LOG_CURSOR: &str = "INSERT INTO log_cursors (log_name, acked_sequence) VALUES (?1, ?2)
     ON CONFLICT (log_name) DO UPDATE SET acked_sequence = MAX(log_cursors.acked_sequence, excluded.acked_sequence)";
 const SELECT_LOG_CURSOR: &str = "SELECT acked_sequence FROM log_cursors WHERE log_name = ?1";
 
-/// Records that every record of `log_name` up to `acked_sequence` is indexed. The indexer (M1-25) calls it inside
-/// the transaction of `IndexWrite::ApplyDaemonEvents`. Crate-private, like every function that runs SQL: it takes
-/// the writer's transaction, which no other crate can hold.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Records that every record of `log_name` up to `acked_sequence` is indexed. The indexer calls it inside the
+/// transaction of `IndexWrite::ApplyDaemonEvents`. Crate-private, like every function that runs SQL: it takes the
+/// writer's transaction, which no other crate can hold.
 pub(crate) fn set_log_cursor(
     transaction: &SqliteTransaction<'_>,
     log_name: &str,
@@ -28,6 +27,18 @@ pub(crate) fn set_log_cursor(
         &[text_value(log_name), unsigned_value(acked_sequence)?],
     )?;
     Ok(())
+}
+
+/// The cursor read inside the writer's transaction, so the indexer sees what this transaction has written.
+pub(crate) fn read_log_cursor_for_writing(
+    transaction: &SqliteTransaction<'_>,
+    log_name: &str,
+) -> Result<Option<u64>, StoreError> {
+    let rows = query_rows_in_transaction(transaction, SELECT_LOG_CURSOR, &[text_value(log_name)])?;
+    match rows.first() {
+        Some(row) => Ok(Some(read_unsigned(row, 0)?)),
+        None => Ok(None),
+    }
 }
 
 /// The last indexed sequence of `log_name`, or `None` for a log never indexed.

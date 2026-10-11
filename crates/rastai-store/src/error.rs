@@ -14,8 +14,11 @@ const CODE_INDEX_DAMAGED: &str = "RRS-S0003";
 const CODE_DATA_DIRECTORY_NOT_WRITABLE: &str = "RRS-S0004";
 const CODE_READ_FAILED: &str = "RRS-S0006";
 const CODE_RUNTIME_NOT_PRIVATE: &str = "RRS-S0007";
+const CODE_BLOB_HASH_MISMATCH: &str = "RRS-S1001";
+const CODE_BLOB_MISSING: &str = "RRS-S1002";
 const CODE_EVENT_LOG_CORRUPT: &str = "RRS-S2002";
 const CODE_EVENT_SEQUENCE_GAP: &str = "RRS-S2003";
+const CODE_NOT_ENOUGH_FREE_SPACE: &str = "RRS-S3001";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
 
@@ -67,6 +70,29 @@ pub enum StoreError {
     /// Creating, writing, truncating or syncing an event log failed for a reason other than a full disk; `reason`
     /// keeps the operating system's words.
     EventLogWriteFailed { path: PathBuf, reason: String },
+    /// A blob's bytes don't hash to its name, so it was moved out of the store to `quarantine_path`
+    /// (`<data>/blobs/.quarantine/`). Bit rot or a foreign write; the store never serves it again.
+    BlobHashMismatch { hash: String, quarantine_path: PathBuf },
+    /// No blob with this hash is in the store. Also a hash that isn't `blake3:<64 lowercase hex>`, since no blob
+    /// can have that name.
+    BlobMissing { hash: String },
+    /// Reading a blob, or the file `put_file` stores, failed for a reason other than its absence. `reason` keeps the
+    /// operating system's words. The read code, `RRS-S0006`, like a failed database or event-log read.
+    BlobReadFailed { path: PathBuf, reason: String },
+    /// Writing, linking, renaming or syncing a blob file failed for a reason other than a full disk.
+    BlobWriteFailed { path: PathBuf, reason: String },
+    /// The volume that holds `path` has `free_bytes` free, less than `needed_bytes` plus `margin_bytes`
+    /// (`storage.free_space_margin_bytes`, handed in by the caller).
+    NotEnoughFreeSpace {
+        path: PathBuf,
+        needed_bytes: u64,
+        margin_bytes: u64,
+        free_bytes: u64,
+    },
+    /// The free space of the volume that holds `path` couldn't be read: `statvfs` failed (a missing path, a
+    /// permission), or this platform has no free-space call yet. Unknown counts as not enough (ADR-0033 decision 4),
+    /// so this is `RRS-S3001` too and a check never passes without a number.
+    FreeSpaceUnknown { path: PathBuf, reason: String },
 }
 
 impl StoreError {
@@ -86,6 +112,12 @@ impl StoreError {
             StoreError::EventSequenceGap { .. } => CODE_EVENT_SEQUENCE_GAP,
             StoreError::EventLogReadFailed { .. } => CODE_READ_FAILED,
             StoreError::EventLogWriteFailed { .. } => CODE_WRITE_FAILED,
+            StoreError::BlobHashMismatch { .. } => CODE_BLOB_HASH_MISMATCH,
+            StoreError::BlobMissing { .. } => CODE_BLOB_MISSING,
+            StoreError::BlobReadFailed { .. } => CODE_READ_FAILED,
+            StoreError::BlobWriteFailed { .. } => CODE_WRITE_FAILED,
+            StoreError::NotEnoughFreeSpace { .. } => CODE_NOT_ENOUGH_FREE_SPACE,
+            StoreError::FreeSpaceUnknown { .. } => CODE_NOT_ENOUGH_FREE_SPACE,
         }
     }
 }
@@ -107,6 +139,29 @@ pub(crate) fn event_log_write_error(path: &std::path::Path, error: &std::io::Err
         };
     }
     StoreError::EventLogWriteFailed {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    }
+}
+
+/// An I/O error while reading a blob or a file being stored. A missing blob is `BlobMissing`, which the caller
+/// decides, since only it knows the hash.
+pub(crate) fn blob_read_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
+    StoreError::BlobReadFailed {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    }
+}
+
+/// Sorts an I/O error while writing a blob file: a full disk gets its own code, everything else keeps the operating
+/// system's reason.
+pub(crate) fn blob_write_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
+    if error.kind() == std::io::ErrorKind::StorageFull {
+        return StoreError::DiskFull {
+            reason: format!("{}: {error}", path.display()),
+        };
+    }
+    StoreError::BlobWriteFailed {
         path: path.to_path_buf(),
         reason: error.to_string(),
     }
@@ -185,5 +240,34 @@ mod tests {
         assert_eq!(event_log_write_error(path, &full).code(), "RRS-S3002");
         assert_eq!(event_log_write_error(path, &denied).code(), "RRS-S3005");
         assert_eq!(event_log_read_error(path, &denied).code(), "RRS-S0006");
+    }
+
+    #[test]
+    fn every_blob_and_free_space_error_has_its_catalog_code() {
+        let path = PathBuf::from("blobs");
+        let hash = "blake3:00".to_string();
+        let mismatch = StoreError::BlobHashMismatch {
+            hash: hash.clone(),
+            quarantine_path: path.clone(),
+        };
+        let not_enough = StoreError::NotEnoughFreeSpace {
+            path: path.clone(),
+            needed_bytes: 2,
+            margin_bytes: 1,
+            free_bytes: 1,
+        };
+        let unknown = StoreError::FreeSpaceUnknown {
+            path: path.clone(),
+            reason: "r".to_string(),
+        };
+        assert_eq!(mismatch.code(), "RRS-S1001");
+        assert_eq!(StoreError::BlobMissing { hash }.code(), "RRS-S1002");
+        assert_eq!(not_enough.code(), "RRS-S3001");
+        assert_eq!(unknown.code(), "RRS-S3001");
+        let full = std::io::Error::from(std::io::ErrorKind::StorageFull);
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(blob_write_error(&path, &full).code(), "RRS-S3002");
+        assert_eq!(blob_write_error(&path, &denied).code(), "RRS-S3005");
+        assert_eq!(blob_read_error(&path, &denied).code(), "RRS-S0006");
     }
 }

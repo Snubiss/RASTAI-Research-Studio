@@ -1,0 +1,474 @@
+//! The indexer (layout rust-control-plane.md 6.4 and 13.1, flows/platform.md 6.1): `apply_event_record` turns one
+//! `EventRecord` into its `rastai.db` rows. It is the one indexing path: live run logs, the daemon's own log, the
+//! offline rebuild and restored frames all go through it, so their rows can't differ.
+//!
+//! Exactly once, in two layers:
+//! - **Every write is an upsert or an update keyed by ids** (`run_metrics` by run, sequence and name), so a record
+//!   applied twice leaves the same rows.
+//! - **The ack commits with the rows.** `apply_run_events` and `apply_daemon_events` run inside one writer
+//!   transaction: they skip records at or below the log's ack, index the rest and move the ack to the last one
+//!   (`runs.acked_sequence` or `log_cursors.acked_sequence`). A crash before the commit loses both; a re-sent batch
+//!   after it changes nothing, and an older one can't move the ack back.
+//!
+//! The row a record makes is chosen by its payload, the typed `oneof` the event type names (contracts 7.3). A record
+//! without a payload, or one whose payload makes no rows (live state, plugin events), is acknowledged and skipped.
+//! Event types that have no payload message yet (`transfer.finished`, `download.finished`, `lineage.linked`,
+//! `run.deleted`, the `archive.*` records) get their rows with the contract PR that adds the payload.
+
+use rastai_core::states::{
+    eval_run_state_name, is_terminal_eval_run_state, job_state_name, node_state_name, plugin_state_name, run_state_name,
+};
+use rastai_proto::common::v1::{EvalRunState, JobState, NodeState, PluginState, RunState};
+use rastai_proto::events::v1::event_payload::Payload;
+use rastai_proto::events::v1::run_state_changed::State;
+use rastai_proto::events::v1::{
+    ArtifactCreated, CheckpointSaved, CommandFinished, DocumentChanged, EventRecord, JobStateChanged, NodeStateChanged,
+    PinChanged, PluginStateChanged, RunMetrics, RunStateChanged,
+};
+
+use crate::error::StoreError;
+use crate::index::artifacts::{CreatedArtifact, insert_lineage, set_artifact_pinned, upsert_artifact};
+use crate::index::documents::set_document_hash;
+use crate::index::journal::{FinishedCommand, record_command_finished};
+use crate::index::kept_tables::{set_node_state, set_plugin_state};
+use crate::index::log_cursors::{read_log_cursor_for_writing, set_log_cursor};
+use crate::index::runs::{
+    JobStateUpdate, MetricValue, SavedCheckpoint, read_run_acked_sequence, replace_run_tags, set_checkpoint_pinned,
+    set_run_acked_sequence, set_run_pinned, set_run_state, upsert_checkpoint, upsert_job_state, upsert_run_metric,
+};
+use crate::sqlite::SqliteTransaction;
+
+// The lineage relation of a checkpoint to its run (contracts 8.2: "checkpoint_of: from checkpoint.saved").
+const CHECKPOINT_OF_RELATION: &str = "checkpoint_of";
+// pin.changed names what it pins by one of these (contracts 7.3).
+const PIN_SUBJECT_RUN: &str = "run";
+const PIN_SUBJECT_CHECKPOINT: &str = "checkpoint";
+const PIN_SUBJECT_ARTIFACT: &str = "artifact";
+// The states that end a training run. Only `completed` is terminal (train.resume reopens the other two, contracts
+// 9.5), but all three stop the run, so all three get a finish time; a resume clears it.
+const RUN_STATES_THAT_END_A_RUN: &[RunState] = &[RunState::Completed, RunState::Failed, RunState::Cancelled];
+
+/// Writes the rows of one record inside the writer's transaction (layout 6.4). Applying the same record again
+/// leaves the same rows. The caller moves the ack; this function doesn't know which log the record came from.
+pub fn apply_event_record(transaction: &SqliteTransaction<'_>, record: &EventRecord) -> Result<(), StoreError> {
+    let Some(payload) = record.payload.as_ref().and_then(|payload| payload.payload.as_ref()) else {
+        return Ok(());
+    };
+    match payload {
+        Payload::JobStateChanged(change) => index_job_state(transaction, record, change),
+        Payload::RunStateChanged(change) => index_run_state(transaction, record, change),
+        Payload::RunMetrics(metrics) => index_run_metrics(transaction, record, metrics),
+        Payload::RunTagsChanged(change) => replace_run_tags(transaction, &change.run_id, &change.tags),
+        Payload::CheckpointSaved(checkpoint) => index_checkpoint(transaction, record, checkpoint),
+        Payload::ArtifactCreated(artifact) => index_artifact(transaction, record, artifact),
+        Payload::PinChanged(pin) => index_pin(transaction, pin),
+        Payload::NodeStateChanged(change) => index_node_state(transaction, change),
+        Payload::PluginStateChanged(change) => index_plugin_state(transaction, change),
+        Payload::DocumentChanged(change) => index_document(transaction, record, change),
+        Payload::CommandFinished(finished) => index_command_finished(transaction, record, finished),
+        // Live state comes from heartbeats, a diagnostic is shown, not stored, and plugin events are the plugin's.
+        Payload::JobProgress(_)
+        | Payload::JobLogLine(_)
+        | Payload::NodeHeartbeat(_)
+        | Payload::DiagnosticReported(_)
+        | Payload::PluginEvent(_) => Ok(()),
+    }
+}
+
+/// `IndexWrite::ApplyRunEvents`: the records of one run's log after its ack, and the ack moved to the last one, in
+/// the caller's transaction. The run's row must exist (the daemon writes it when it starts the run), so the ack has
+/// somewhere to go; without it nothing is written.
+pub(crate) fn apply_run_events(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    records: &[EventRecord],
+) -> Result<(), StoreError> {
+    let Some(acked_sequence) = read_run_acked_sequence(transaction, run_id)? else {
+        return Err(StoreError::DatabaseWriteFailed {
+            reason: format!("no runs row for {run_id}, so its event records have no ack to move"),
+        });
+    };
+    let newest_sequence = apply_records_after(transaction, records, acked_sequence)?;
+    set_run_acked_sequence(transaction, run_id, newest_sequence)
+}
+
+/// `IndexWrite::ApplyDaemonEvents`: the records of one daemon log segment after its cursor, and the cursor moved to
+/// the last one, in the caller's transaction.
+pub(crate) fn apply_daemon_events(
+    transaction: &SqliteTransaction<'_>,
+    log_name: &str,
+    records: &[EventRecord],
+) -> Result<(), StoreError> {
+    let acked_sequence = read_log_cursor_for_writing(transaction, log_name)?.unwrap_or(0);
+    let newest_sequence = apply_records_after(transaction, records, acked_sequence)?;
+    set_log_cursor(transaction, log_name, newest_sequence)
+}
+
+/// Applies each record whose sequence is past the ack and returns the new ack. A record at or below it was indexed
+/// by an earlier commit (or earlier in this batch) and is skipped, so it is applied exactly once.
+fn apply_records_after(
+    transaction: &SqliteTransaction<'_>,
+    records: &[EventRecord],
+    acked_sequence: u64,
+) -> Result<u64, StoreError> {
+    let mut newest_sequence = acked_sequence;
+    for record in records {
+        if record.sequence <= newest_sequence {
+            continue;
+        }
+        apply_event_record(transaction, record)?;
+        newest_sequence = record.sequence;
+    }
+    Ok(newest_sequence)
+}
+
+/// `jobs`: state, exit code and error code. A record that names no known state changes nothing.
+fn index_job_state(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    change: &JobStateChanged,
+) -> Result<(), StoreError> {
+    let Some(state) = known_job_state(change.to_state) else {
+        return Ok(());
+    };
+    let error_code = match &change.diagnostic {
+        Some(diagnostic) => diagnostic.code.clone(),
+        None => String::new(),
+    };
+    let update = JobStateUpdate {
+        job_id: change.job_id.clone(),
+        run_id: record.run_id.clone(),
+        state: job_state_name(state).to_string(),
+        exit_code: change.exit_code.map(i64::from),
+        error_code,
+    };
+    upsert_job_state(transaction, &update)
+}
+
+/// `runs.state`, and `finished_unix_ms` (the record's time) when the state ends the run.
+fn index_run_state(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    change: &RunStateChanged,
+) -> Result<(), StoreError> {
+    let Some((state_name, ends_the_run)) = run_state_of(change) else {
+        return Ok(());
+    };
+    let finished_unix_ms = if ends_the_run {
+        Some(record.emitted_unix_ms)
+    } else {
+        None
+    };
+    set_run_state(transaction, &record.run_id, state_name, finished_unix_ms)
+}
+
+/// One `run_metrics` row per value, keyed by the record's sequence.
+fn index_run_metrics(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    metrics: &RunMetrics,
+) -> Result<(), StoreError> {
+    for (name, value) in &metrics.values {
+        let metric = MetricValue {
+            run_id: &record.run_id,
+            sequence: record.sequence,
+            step: metrics.step,
+            name,
+            value: *value,
+            emitted_unix_ms: record.emitted_unix_ms,
+        };
+        upsert_run_metric(transaction, &metric)?;
+    }
+    Ok(())
+}
+
+/// `checkpoints`, and the `checkpoint_of` lineage link from the run.
+fn index_checkpoint(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    checkpoint: &CheckpointSaved,
+) -> Result<(), StoreError> {
+    let saved = SavedCheckpoint {
+        checkpoint_id: &checkpoint.checkpoint_id,
+        run_id: &record.run_id,
+        step: checkpoint.step,
+        folder: &checkpoint.folder,
+        is_best: checkpoint.is_best,
+    };
+    upsert_checkpoint(transaction, &saved)?;
+    insert_lineage(
+        transaction,
+        &record.run_id,
+        &checkpoint.checkpoint_id,
+        CHECKPOINT_OF_RELATION,
+    )
+}
+
+/// `artifacts`, the home node's `artifact_copies` row, and one `lineage` row per parent.
+fn index_artifact(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    artifact: &ArtifactCreated,
+) -> Result<(), StoreError> {
+    let created = CreatedArtifact {
+        artifact_id: &artifact.artifact_id,
+        kind: &artifact.kind,
+        content_hash: &artifact.content_hash,
+        size_bytes: artifact.size_bytes,
+        home_node_id: &artifact.home_node_id,
+        created_unix_ms: record.emitted_unix_ms,
+    };
+    upsert_artifact(transaction, &created)?;
+    for parent in &artifact.parents {
+        insert_lineage(transaction, &parent.id, &artifact.artifact_id, &parent.relation)?;
+    }
+    Ok(())
+}
+
+/// `pinned` on the run, checkpoint or artifact the record names; another subject kind changes nothing.
+fn index_pin(transaction: &SqliteTransaction<'_>, pin: &PinChanged) -> Result<(), StoreError> {
+    match pin.subject_kind.as_str() {
+        PIN_SUBJECT_RUN => set_run_pinned(transaction, &pin.subject_id, pin.pinned),
+        PIN_SUBJECT_CHECKPOINT => set_checkpoint_pinned(transaction, &pin.subject_id, pin.pinned),
+        PIN_SUBJECT_ARTIFACT => set_artifact_pinned(transaction, &pin.subject_id, pin.pinned),
+        _ => Ok(()),
+    }
+}
+
+fn index_node_state(transaction: &SqliteTransaction<'_>, change: &NodeStateChanged) -> Result<(), StoreError> {
+    match NodeState::try_from(change.to_state) {
+        Ok(state) if state != NodeState::Unspecified => {
+            set_node_state(transaction, &change.node_id, node_state_name(state))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn index_plugin_state(transaction: &SqliteTransaction<'_>, change: &PluginStateChanged) -> Result<(), StoreError> {
+    match PluginState::try_from(change.to_state) {
+        Ok(state) if state != PluginState::Unspecified => {
+            set_plugin_state(transaction, &change.plugin_id, plugin_state_name(state))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// `documents`: the new content hash, at the record's time.
+fn index_document(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    change: &DocumentChanged,
+) -> Result<(), StoreError> {
+    set_document_hash(
+        transaction,
+        &change.document_id,
+        &change.content_hash,
+        record.emitted_unix_ms,
+    )
+}
+
+/// `command_journal`'s finished columns, at the record's time.
+fn index_command_finished(
+    transaction: &SqliteTransaction<'_>,
+    record: &EventRecord,
+    finished: &CommandFinished,
+) -> Result<(), StoreError> {
+    let command = FinishedCommand {
+        journal_id: &finished.journal_id,
+        command_id: &finished.command_id,
+        principal: &finished.principal,
+        ok: finished.ok,
+        code: &finished.code,
+        finished_unix_ms: record.emitted_unix_ms,
+    };
+    record_command_finished(transaction, &command)
+}
+
+/// The job state a record moves to, or `None` for a number this build doesn't know or `UNSPECIFIED`.
+fn known_job_state(number: i32) -> Option<JobState> {
+    match JobState::try_from(number) {
+        Ok(JobState::Unspecified) | Err(_) => None,
+        Ok(state) => Some(state),
+    }
+}
+
+/// The new state's name and whether it ends the run, for a training run's or an eval run's state; `None` when the
+/// record carries no state this build knows.
+fn run_state_of(change: &RunStateChanged) -> Option<(&'static str, bool)> {
+    match change.state? {
+        State::RunState(number) => match RunState::try_from(number) {
+            Ok(RunState::Unspecified) | Err(_) => None,
+            Ok(state) => Some((run_state_name(state), RUN_STATES_THAT_END_A_RUN.contains(&state))),
+        },
+        State::EvalRunState(number) => match EvalRunState::try_from(number) {
+            Ok(EvalRunState::Unspecified) | Err(_) => None,
+            Ok(state) => Some((eval_run_state_name(state), is_terminal_eval_run_state(state))),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::collections::BTreeMap;
+
+    use rastai_proto::events::v1::{ArtifactParent, EventPayload};
+
+    use super::*;
+    use crate::index::reads::{list_table_columns, list_table_rows, open_index_reader};
+    use crate::index::runs::{RunRow, upsert_run};
+    use crate::reader_pool::{ReaderPool, open_reader_pool};
+    use crate::sqlite::{SqliteConnection, begin_transaction, commit_transaction, open_database_for_writing};
+    use crate::store::{INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS};
+
+    const RUN_ID: &str = "run_a";
+
+    fn test_folder(test_name: &str) -> std::path::PathBuf {
+        let folder = std::env::temp_dir().join(format!("rastai-store-indexer-{}-{test_name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    fn record(sequence: u64, payload: Payload) -> EventRecord {
+        EventRecord {
+            format_version: 1,
+            sequence,
+            run_id: RUN_ID.to_string(),
+            emitted_unix_ms: 100 + sequence as i64,
+            payload: Some(EventPayload { payload: Some(payload) }),
+            ..Default::default()
+        }
+    }
+
+    fn checkpoint(sequence: u64, checkpoint_id: &str, is_best: bool) -> EventRecord {
+        let saved = CheckpointSaved {
+            checkpoint_id: checkpoint_id.to_string(),
+            step: sequence,
+            folder: format!("checkpoints/{checkpoint_id}"),
+            is_best,
+            ..Default::default()
+        };
+        record(sequence, Payload::CheckpointSaved(saved))
+    }
+
+    fn records() -> Vec<EventRecord> {
+        let mut values = BTreeMap::new();
+        values.insert("train.loss".to_string(), 0.5);
+        let artifact = ArtifactCreated {
+            artifact_id: "art_a".to_string(),
+            kind: "dataset_snapshot".to_string(),
+            content_hash: "blake3:01".to_string(),
+            size_bytes: 3,
+            home_node_id: "node_local".to_string(),
+            parents: vec![ArtifactParent {
+                id: "conv_a".to_string(),
+                relation: "dataset_of".to_string(),
+            }],
+        };
+        vec![
+            record(1, Payload::RunMetrics(RunMetrics { step: 1, values })),
+            checkpoint(2, "ckpt_a", true),
+            record(3, Payload::ArtifactCreated(artifact)),
+        ]
+    }
+
+    fn open_index(folder: &std::path::Path) -> (SqliteConnection, ReaderPool) {
+        let path = folder.join("rastai.db");
+        let connection = open_database_for_writing(&path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap();
+        let transaction = begin_transaction(&connection).unwrap();
+        let run = RunRow {
+            run_id: RUN_ID.to_string(),
+            kind: "train".to_string(),
+            state: "running".to_string(),
+            project_id: String::new(),
+            node_id: "node_local".to_string(),
+            parent_run_id: String::new(),
+            record_hash: String::new(),
+            acked_sequence: 0,
+            created_unix_ms: 1,
+            finished_unix_ms: None,
+            pinned: false,
+            archive_state: String::new(),
+        };
+        upsert_run(&transaction, &run).unwrap();
+        commit_transaction(transaction).unwrap();
+        let pool = open_reader_pool(&path, 1).unwrap();
+        (connection, pool)
+    }
+
+    fn apply_all(connection: &SqliteConnection, records: &[EventRecord]) {
+        let transaction = begin_transaction(connection).unwrap();
+        for record in records {
+            apply_event_record(&transaction, record).unwrap();
+        }
+        commit_transaction(transaction).unwrap();
+    }
+
+    fn every_row(pool: &ReaderPool) -> Vec<Vec<Vec<String>>> {
+        let reader = open_index_reader(pool).unwrap();
+        let mut tables = Vec::new();
+        for table in list_table_columns(&reader).unwrap() {
+            tables.push(list_table_rows(&reader, &table.table_name).unwrap());
+        }
+        tables
+    }
+
+    // Without the ack's help: the rebuild calls apply_event_record on its own, so the upserts alone must absorb a
+    // record applied twice.
+    #[test]
+    fn a_record_applied_twice_leaves_the_same_rows() {
+        let folder = test_folder("twice");
+        let (connection, pool) = open_index(&folder);
+        apply_all(&connection, &records());
+        let rows_after_first = every_row(&pool);
+
+        apply_all(&connection, &records());
+
+        assert_eq!(every_row(&pool), rows_after_first);
+        drop(pool);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_new_best_checkpoint_takes_the_place_of_the_old_one() {
+        let folder = test_folder("best");
+        let (connection, pool) = open_index(&folder);
+
+        apply_all(
+            &connection,
+            &[checkpoint(1, "ckpt_a", true), checkpoint(2, "ckpt_b", true)],
+        );
+
+        let reader = open_index_reader(&pool).unwrap();
+        let rows = list_table_rows(&reader, "checkpoints").unwrap();
+        // Column 5 is is_best (contracts 8.2), and rows sort by checkpoint_id.
+        assert_eq!(rows[0][5], "0");
+        assert_eq!(rows[1][5], "1");
+        drop(reader);
+        drop(pool);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_record_without_a_payload_makes_no_rows() {
+        let folder = test_folder("no-payload");
+        let (connection, pool) = open_index(&folder);
+        let rows_before = every_row(&pool);
+        let empty = EventRecord {
+            sequence: 1,
+            run_id: RUN_ID.to_string(),
+            ..Default::default()
+        };
+
+        apply_all(&connection, &[empty]);
+
+        assert_eq!(every_row(&pool), rows_before);
+        drop(pool);
+        drop(connection);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+}

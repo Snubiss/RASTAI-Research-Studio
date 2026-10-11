@@ -34,6 +34,10 @@ const SELECT_NODE_BY_ID: &str = "SELECT node_id, name, transport, address, state
         last_heartbeat_unix_ms
     FROM nodes WHERE node_id = ?1";
 
+// node.state_changed and plugin.state_changed move only the state: the rows themselves are kept tables (13.2).
+const SET_NODE_STATE: &str = "UPDATE nodes SET state = ?2 WHERE node_id = ?1";
+const SET_PLUGIN_STATE: &str = "UPDATE plugins SET state = ?2 WHERE plugin_id = ?1";
+
 const UPSERT_PLUGIN: &str = "INSERT INTO plugins (plugin_id, version, state, content_hash, granted_permissions, source)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
     ON CONFLICT (plugin_id) DO UPDATE SET version = excluded.version, state = excluded.state,
@@ -147,6 +151,28 @@ pub(crate) fn upsert_plugin(transaction: &SqliteTransaction<'_>, row: &PluginRow
         text_value(&row.source),
     ];
     execute(transaction, UPSERT_PLUGIN, &parameters)?;
+    Ok(())
+}
+
+pub(crate) fn set_node_state(
+    transaction: &SqliteTransaction<'_>,
+    node_id: &str,
+    state: &str,
+) -> Result<(), StoreError> {
+    execute(transaction, SET_NODE_STATE, &[text_value(node_id), text_value(state)])?;
+    Ok(())
+}
+
+pub(crate) fn set_plugin_state(
+    transaction: &SqliteTransaction<'_>,
+    plugin_id: &str,
+    state: &str,
+) -> Result<(), StoreError> {
+    execute(
+        transaction,
+        SET_PLUGIN_STATE,
+        &[text_value(plugin_id), text_value(state)],
+    )?;
     Ok(())
 }
 

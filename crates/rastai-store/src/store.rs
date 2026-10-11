@@ -1,14 +1,17 @@
 //! `Store`, the handles the daemon keeps for its whole life, and `open_store` / `close_store` (layout section 6.2).
 //!
 //! M1-23 opens `rastai.db`: the writer connection first (it creates and migrates the file), then the read-only pool,
-//! then the writer thread. The vault, its readers, the blob store and the daemon log join the struct with their
-//! tasks (M1-24, M1-25, M3). The caller takes the daemon lock (`take_daemon_lock`) before opening the store.
+//! then the writer thread. M1-25 adds the blob store and its startup cleanup of `.incoming/`. The vault, its readers
+//! and the daemon log join the struct with their tasks. The caller takes the daemon lock (`take_daemon_lock`) before
+//! opening the store.
 
 use std::path::Path;
 
-use rastai_core::paths::{DataPaths, rastai_db_path};
+use rastai_core::paths::{DataPaths, blobs_dir, rastai_db_path};
 use tokio::sync::oneshot;
 
+use crate::blobs::blob_store::BlobStore;
+use crate::blobs::incoming::remove_stale_incoming_files;
 use crate::error::StoreError;
 use crate::reader_pool::{ReaderPool, open_reader_pool};
 use crate::sqlite::{DatabaseSettings, Migration, open_database_for_writing};
@@ -34,21 +37,25 @@ const INDEX_READER_COUNT: usize = 4;
 pub struct Store {
     pub index: IndexWriter,
     pub index_readers: ReaderPool,
+    pub blobs: BlobStore,
     // Fires when the index writer thread has committed its last batch and closed the file.
     index_writer_finished: oneshot::Receiver<()>,
 }
 
-/// Opens `rastai.db` (WAL, quick_check, migrations) and starts its writer thread. Synchronous: called once at
-/// startup, before anything is served.
+/// Opens `rastai.db` (WAL, quick_check, migrations), starts its writer thread and deletes the temporary files a
+/// crash left in the blob store's `.incoming/`. Synchronous: called once at startup, before anything is served.
 pub fn open_store(paths: &DataPaths) -> Result<Store, StoreError> {
     create_data_folder(&paths.data)?;
     let index_path = rastai_db_path(paths);
     let writer_connection = open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS)?;
     let index_readers = open_reader_pool(&index_path, INDEX_READER_COUNT)?;
     let (index, index_writer_finished) = start_index_writer(writer_connection)?;
+    let blobs = BlobStore { root: blobs_dir(paths) };
+    remove_stale_incoming_files(&blobs.root);
     Ok(Store {
         index,
         index_readers,
+        blobs,
         index_writer_finished,
     })
 }
@@ -59,6 +66,7 @@ pub async fn close_store(store: Store) {
     let Store {
         index,
         index_readers,
+        blobs: _,
         index_writer_finished,
     } = store;
     // Readers close first, so the writer's connection is the last one and checkpoints the WAL into the file.

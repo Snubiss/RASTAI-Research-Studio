@@ -14,6 +14,9 @@ const UPSERT_DOCUMENT: &str = "INSERT INTO documents (document_id, type, path, p
     ON CONFLICT (document_id) DO UPDATE SET type = excluded.type, path = excluded.path,
         project_id = excluded.project_id, content_hash = excluded.content_hash,
         updated_unix_ms = excluded.updated_unix_ms";
+// document.changed moves only the hash and the time; the rest of the row is the server's (UpsertDocument) or the
+// rebuild's project scan.
+const SET_DOCUMENT_HASH: &str = "UPDATE documents SET content_hash = ?2, updated_unix_ms = ?3 WHERE document_id = ?1";
 const SELECT_DOCUMENT_BY_ID: &str = "SELECT document_id, type, path, project_id, content_hash, updated_unix_ms
     FROM documents WHERE document_id = ?1";
 
@@ -60,6 +63,21 @@ pub(crate) fn upsert_document(transaction: &SqliteTransaction<'_>, row: &Documen
         integer_value(row.updated_unix_ms),
     ];
     execute(transaction, UPSERT_DOCUMENT, &parameters)?;
+    Ok(())
+}
+
+pub(crate) fn set_document_hash(
+    transaction: &SqliteTransaction<'_>,
+    document_id: &str,
+    content_hash: &str,
+    updated_unix_ms: i64,
+) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(document_id),
+        text_value(content_hash),
+        integer_value(updated_unix_ms),
+    ];
+    execute(transaction, SET_DOCUMENT_HASH, &parameters)?;
     Ok(())
 }
 

@@ -1672,10 +1672,10 @@ pub struct IndexWriter { /* std::sync::mpsc::Sender<IndexRequest> */ }
 pub enum IndexWrite {
     JournalStarted(JournalStartedRow),
     MarkUnfinishedJournalRows,                          // at startup: RRS-C0005
-    // rows + handler calls + runs.acked_sequence, one transaction
-    ApplyRunEvents { run_id: String, records: Vec<EventRecord>, handler_calls: Vec<HandlerCall> },
-    // rows + handler calls + log_cursors, one transaction
-    ApplyDaemonEvents { records: Vec<EventRecord>, handler_calls: Vec<HandlerCall> },
+    // rows + handler calls + runs.acked_sequence, one transaction; records at or below the ack are skipped
+    ApplyRunEvents { run_id: String, records: Vec<EventRecord>, handler_calls: Vec<HandlerCall> },   // handler_calls (M5)
+    // rows + handler calls + log_cursors of log_name ("daemon:<segment>": each segment has its own cursor)
+    ApplyDaemonEvents { log_name: String, records: Vec<EventRecord>, handler_calls: Vec<HandlerCall> },
     MarkHandlerDelivered { call: HandlerCall, journal_id: String, code: String },   // code "" when the command succeeded
     DropHandlerCalls { plugin_id: String },             // the user disabled or uninstalled the plugin
     UpsertRun(RunRow),
@@ -1747,6 +1747,8 @@ pub fn get_job(reader: &IndexReader, job_id: &str) -> Result<Option<JobRow>, Sto
 pub fn get_log_cursor(reader: &IndexReader, log_name: &str) -> Result<Option<u64>, StoreError>
 pub fn read_index_schema_version(reader: &IndexReader) -> Result<i64, StoreError>
 pub fn list_table_columns(reader: &IndexReader) -> Result<Vec<TableColumns>, StoreError>  // PRAGMA table_info, every table
+pub fn list_table_rows(reader: &IndexReader, table_name: &str) -> Result<Vec<Vec<String>>, StoreError>  // one table as
+                                                                    // sorted text rows: idempotence and rebuild checks
 pub fn get_conversation_tree(reader: &VaultReader, conversation_id: &str) -> Result<Option<ConversationTree>, StoreError>
 pub fn list_conversations(reader: &VaultReader, filter: &ConversationFilter) -> Result<Vec<ConversationRow>, StoreError>
 pub fn list_gateway_log(reader: &VaultReader, filter: &GatewayLogFilter) -> Result<Vec<GatewayLogEntry>, StoreError>
@@ -1778,8 +1780,9 @@ pub fn vault_writes_for_records(records: &[EventRecord]) -> Vec<VaultWrite>   //
 pub fn encode_token_ids(token_ids: &[u32]) -> Vec<u8>
 pub fn decode_token_ids(bytes: &[u8]) -> Result<Vec<u32>, StoreError>
 
-// blobs/
-pub struct BlobStore { pub root: PathBuf, pub max_blob_bytes: u64 }
+// blobs/ (M1-25 builds put, open, has and verify; the size cap, with a catalog code of its own, and the uploads
+// arrive with the first upload path, PUT /api/blobs. The caller checks free space first: the margin is a setting.)
+pub struct BlobStore { pub root: PathBuf }
 pub enum PutMode { Copy, HardLink }                     // hard link when pinning a checkpoint on the same filesystem
 pub fn put_bytes(store: &BlobStore, bytes: &[u8], media_type: &str) -> Result<BlobRef, StoreError>
 pub fn put_file(store: &BlobStore, source: &Path, mode: PutMode, media_type: &str) -> Result<BlobRef, StoreError>
