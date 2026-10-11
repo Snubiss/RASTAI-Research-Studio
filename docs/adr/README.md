@@ -51,7 +51,7 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 | [0035](0035-mysql-long-term-archive.md) | An optional long-term archive in the owner's MySQL or MariaDB; SQLite stays the live store | Accepted, 2026-10-10. Supersedes 0003 decision 6 in part; amends 0002 decision 7 |
 | [0036](0036-frontend-plain-javascript.md) | The frontend is plain JavaScript + React, with short JSDoc types checked by `checkJs` | Accepted, 2026-10-10. Supersedes 0023's TypeScript section and 0019 decision 5 in part |
 | [0037](0037-borrowed-decoders-and-parser-fuzzing.md) | Borrowed decoders for DEFLATE and images; one implementation and a fuzz target for every in-house parser | Accepted, 2026-10-10. Supersedes 0029 decision 1 in part |
-| [0038](0038-naming-and-schema-enforcement.md) | Names and command schemas are enforced by CI (`check-names`, `check-schema-diff` in M1); work is closed only after independent verification | Accepted, 2026-10-11. Amends 0017 decision 5 (closing needs independent verification); moves the schema-diff check of 0005's note into M1 |
+| [0038](0038-naming-and-schema-enforcement.md) | Names and command schemas are enforced by CI (`check-names`, `check-schema-diff` in M1); work is closed only after independent verification | Accepted, 2026-10-11. Amends 0017 decision 5 (closing needs independent verification); moves the schema-diff check of 0005's note into M1. Decision 4 amended 2026-10-11 (PROC-01) |
 
 ## By topic
 
@@ -82,7 +82,7 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
 | [0013](0013-unified-model-runtime.md) | M2 closes on NVIDIA, AMD parity at M10; the self-hosted GPU runner; one golden fixture per op; placement planned only in Rust | owner decisions 11 and 12 |
 | [0014](0014-platform-tiers.md) | The `nightly-gpu.yml` runner and its rules; the AMD card before M10 | owner decisions 11 and 12 |
 | [0015](0015-plugins-and-licensing.md) | "TypeScript" reads "JavaScript"; `.jsx` plugin templates; the AppArmor profile and the namespace fallback (`RRS-P2005`, `RRS-P2001`); capabilities for every contribution key; locked security-UI tokens | language; contracts v1.1 |
-| [0017](0017-definition-of-done-l0-l3.md) | "(L2)" tags on the durability extras; AMD checked at M10; the growing three-surfaces test. Closing a task needs independent verification with evidence (CI green, a non-author reviewer agent, the closing comment), ADR-0038 | contracts v1.1; amended by 0038 |
+| [0017](0017-definition-of-done-l0-l3.md) | "(L2)" tags on the durability extras; AMD checked at M10; the growing three-surfaces test. Closing a task needs independent verification with evidence (`just check` locally and on a fresh clone of the PR head, a non-author reviewer agent, the closing comment), ADR-0038 | contracts v1.1; amended by 0038 |
 | [0019](0019-in-house-webgl2-canvas.md) | Decision 5: a renderer is a plain JavaScript class. Theme tokens: `canvasColors`, `setColors`, the glyph atlas font, `check-colors` | superseded in part by 0036; note |
 | [0020](0020-evaluation-first-party-plugin.md) | Registry names are namespaced (`eval.drift`, `eval.pass_at_k`). The judge trust bar (0.8 on 10 labels); votes in `evals/votes.rrsdata`; exit 2 covers cancelled and refused | illustration; owner decisions 9 and 15 |
 | [0021](0021-technique-coverage.md) | `placement{graph_node_id: gpu_index}`, planned only by `plan_layer_placement` in Rust | contracts v1.1 |
@@ -95,6 +95,7 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
 | [0031](0031-sandbox-manager.md) | `hyper` on §27, wrapper `engine_http.rs`; the `rastai.job_id` label; the egress proxy | contracts v1.1 |
 | [0032](0032-document-files-and-validation.md) | The daemon-free validator is `rastai validate <file>`; `rastai file validate` is the daemon-backed verb. DEFLATE through `miniz_oxide`; fuzz targets for every in-house parser | path; 0037 |
 | [0036](0036-frontend-plain-javascript.md) | Decision 4: the generated folder of `@rastai/proto` is `packages/proto/src/generated/`, not the whole package | path |
+| [0038](0038-naming-and-schema-enforcement.md) | Decision 4: closing needs `just check` passing locally (the pre-push hook) and on the verifier's fresh clone of the PR head, not green CI; GitHub CI is manual-only while the repository is private | amended (owner decision, PROC-01) |
 
 ## Writing a new ADR
 

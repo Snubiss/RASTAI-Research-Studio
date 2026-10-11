@@ -4,7 +4,7 @@
 
 v1.4 applies the owner decisions of 2026-10-11 (ADR-0038, contracts v1.2):
 - **Names and schemas are enforced in M1** (about 2 size-days): M1-57 (`check-names`, the generated `schemas/names.json` against contracts) and M1-58 (`check-schema-diff`, moved from Phase 2). They land early, so the exit gate moves by one lane-day (3.4).
-- **Agent build protocol** (3.5) and **verification before closing** (3.6): an issue closes only with green CI, a reviewer agent that isn't the author confirming every acceptance criterion, and that evidence as the closing comment. The definition of done (3.3) and the PR template lines (8.5) carry both.
+- **Agent build protocol** (3.5) and **verification before closing** (3.6): an issue closes only with `just check` passing locally and on a fresh clone of the PR head, a reviewer agent that isn't the author confirming every acceptance criterion, and that evidence as the closing comment (PROC-01 made GitHub CI manual-only while the repository is private). The definition of done (3.3) and the PR template lines (8.5) carry both.
 - **Owner approvals:** the §27 additions in M1-02 (`@vitest/browser`, axe-core, the Tauri CLI, the Tauri updater plugin, MinIO as a test-only CI service, the named pillow license entry); `node-over-ssh` stays nightly (8.7); the contracts v1.1 names are accepted; the theme token group is `typography`; five small contract gaps are left to the tasks that build them, each named in its backlog issue (3.2).
 
 Earlier versions: v1.1 applied the cross-doc review (section 10 rows 23–37, ADR-0034, M3-E11, M4-E12, M5-E04 storage and lineage, `node-over-ssh`). v1.2 applied the second review (rows 2, 5, 29, 30, 32, 35 and 37, the threat model, M5-E15, tier-2 test runners, more feature rows). v1.3 applied the owner decisions of 2026-10-10 (contracts v1.1 "Changes", spec v5.4, ADR-0033 to ADR-0037):
@@ -203,20 +203,20 @@ git worktree add ../rastai-lane-b -b lane-b/M1-02-spec-27-register origin/main
 
 A PR is done when all of these hold. Reviewers check the PR template's boxes (8.5). A merged PR doesn't close its issue; 3.6 does.
 
-1. `just check` passes locally and every required CI job is green (§29). From M1-05 that includes `check-js` (`tsc --noEmit` over `jsconfig.json`, checkJs), prettier, ruff, `check-colors` and `check-no-typescript`; from M1-57 and M1-58, `check-names` and `check-schema-diff`.
+1. `just check` passes locally (§29); the pre-push hook (`tools/hooks/pre-push`, turned on with `just install-hooks`) runs it before every push. GitHub CI is manual-only while the repository is private (3.6). From M1-05 that includes `check-js` (`tsc --noEmit` over `jsconfig.json`, checkJs), prettier, ruff, `check-colors` and `check-no-typescript`; from M1-57 and M1-58, `check-names` and `check-schema-diff`.
 2. It adds a test that fails without the change. The one exception is a docs-only PR (spec, contracts prose, ADRs, this plan), which has no code to test.
 3. Wire and document contract changes (proto, document schemas, command rows and their argument types, catalog codes) were merged first, in their own PR. Any other new name (a table or column, a settings key, a module, a CLI verb) goes into contracts.md in the same PR that first uses it (ADR-0038).
 4. Every new user-facing error has a catalog code (`catalog_checks` enforces it from M1-12, and the source scan from M1-13).
 5. New external dependencies are in §27 and the allowlists (`check-deps`), each imported in its one wrapper file (contracts §2.5).
 6. No pickle, no runtime installs (`check-no-pickle`), no `unsafe` outside ADR-0033's one file (`check-unsafe`).
 7. House style: simple functions and plain data, constants at the top, readable names, small functions, a thin main (ADR-0023; clippy's `too_many_lines` at 60). Frontend code is plain JavaScript and JSX with short JSDoc types, never TypeScript syntax (ADR-0036).
-8. Every commit is signed off (the `dco` job).
+8. Every commit is signed off (`just check-dco`; the `dco` job when CI runs).
 9. It links its backlog issue with `Refs #n`, never `Closes #n`, so the merge doesn't close the issue (3.6). If it claims a level, it names the feature and the tests that prove it (section 7).
 10. One topic, within two days of work. Bigger work is split before review; a task sized over two days ships as two PRs.
 11. A new in-house parser of untrusted input lands with its fuzz target in the same PR (ADR-0037).
 12. Every name it uses is registered in contracts.md (§15 and the §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables), or added there in this PR. It reuses a registered name rather than inventing a near-duplicate. A schema change carries its contracts update (`check-schema-diff`).
 13. A reviewer agent that is not the author reviewed it with the naming and schema, style and tests lenses (3.5), and every finding is fixed or answered in the PR.
-14. The issue closes only after independent verification (3.6): CI green, including `just check` with `check-names` and `check-schema-diff`; a reviewer agent that is not the author confirms each acceptance criterion against the code and command output; that evidence is the closing comment.
+14. The issue closes only after independent verification (3.6): `just check` passes locally (the pre-push hook enforces it), and a reviewer agent that is not the author runs `just check` (with `check-names` and `check-schema-diff`) on a fresh clone of the exact PR head and confirms each acceptance criterion against the code and command output; that evidence is the closing comment.
 
 ### 3.4 Sizes and the honest estimate
 
@@ -248,11 +248,16 @@ Agents write most of the code. They invent plausible names when the registry isn
 
 ### 3.6 Closing an issue: independent verification
 
-Owner rule of 2026-10-11: "Ensure work is checked before marking off tasks as completed" (ADR-0038 decision 4). An issue, task or epic, is closed only when all three hold:
+Owner rule of 2026-10-11: "Ensure work is checked before marking off tasks as completed" (ADR-0038 decision 4). A task is done only after independent verification with evidence: `just check` passes locally (the pre-push hook enforces it), and a reviewer agent that is not the author runs `just check` on a fresh clone of the exact PR head and confirms each acceptance criterion against the code and command output, posted as the closing comment. GitHub CI is manual-only while the repo is private (owner decision 2026-10-11); macOS and Windows are re-checked when CI returns.
 
-1. **CI is green** on the PR that finished it: every required job, including `just check` with `check-names` and `check-schema-diff` (once M1-57 and M1-58 have landed).
+An issue, task or epic, is closed only when all three hold:
+
+1. **`just check` passes** on the PR that finished it, including `check-names` and `check-schema-diff` (once M1-57 and M1-58 have landed): locally before every push (the pre-push hook, `tools/hooks/pre-push`; `just install-hooks` turns it on), and again when the verifier runs it on a fresh clone of the exact PR head (`git clone`, `git checkout <head sha>`, `just check`).
 2. **A reviewer agent that is not the author** confirms each acceptance criterion in the issue body, one by one, against the code and the command output (the test names, the run, the lines it printed). The PR description is the author's claim, not evidence.
 3. **The evidence is posted on the issue as the closing comment.** Then the verifier closes it.
+
+- **Why local, not CI** (owner decision of 2026-10-11, PROC-01): the private repository's free GitHub Actions minutes ran out. `ci.yml` and `nightly.yml` run only when started by hand (`workflow_dispatch`) until the repository is public or a self-hosted runner takes the jobs (8.4, 8.7). The local gate runs on Linux; macOS and Windows (`test-rust-macos`, `test-rust-windows`, `test-python-macos`, `test-python-windows`, `test-js-macos`) are re-checked when CI returns.
+- **Skipping the hook** (`git push --no-verify`) is for emergencies only. It never skips the verifier's fresh-clone run.
 
 - **Merges never close issues.** PRs say `Refs #n` (3.3 rule 9), and M1-07's sync tool never closes anything.
 - **A criterion that can't be confirmed keeps the issue open.** That includes a failing, missing or claimed-only result. The verifier names it, and a follow-up PR fixes it.
@@ -264,7 +269,7 @@ The closing comment:
 
 ```
 Verified by <reviewer agent>, not the author (<author>).
-CI: <link to the green run>; just check includes check-names and check-schema-diff.
+Checks: `just check` on a fresh clone of <head sha> -> passed (Linux); just check includes check-names and check-schema-diff.
 Acceptance:
 - [x] <criterion 1>: <test or command> -> <result line>, <file:line>
 - [x] <criterion 2>: <test or command> -> <result line>, <file:line>
@@ -1864,8 +1869,10 @@ One GitHub milestone per row of 2.1, titled exactly as in `backlog.json`: `M1 Fo
 
 ### 8.4 Branch protection on `main`
 
+**While the repository is private, no status check is required** (owner decision of 2026-10-11, PROC-01). A task is done only after independent verification with evidence: `just check` passes locally (the pre-push hook enforces it), and a reviewer agent that is not the author runs `just check` on a fresh clone of the exact PR head and confirms each acceptance criterion against the code and command output, posted as the closing comment. GitHub CI is manual-only while the repo is private (owner decision 2026-10-11); macOS and Windows are re-checked when CI returns. The rule and the `contexts` list below are what applies once CI returns; `ci.yml` keeps every job they name.
+
 - Pull request required; one approving review (the owner); stale approvals dismissed on new commits; all conversations resolved.
-- Required status checks, strict (branch up to date): the PR jobs of 8.7 marked "required", added as each job lands. A task that adds a required job adds it to the protection rule in the same milestone.
+- Required status checks, strict (branch up to date), once CI returns: the PR jobs of 8.7 marked "required", added as each job lands. A task that adds a required job adds it to the protection rule in the same milestone.
 - Linear history; no force pushes; no deletions; rules apply to admins too.
 
 ```
@@ -1905,12 +1912,12 @@ After the merge, the issue stays open until the verification comment of 3.6 clos
 ### 8.6 DCO
 
 - Every commit carries `Signed-off-by` (`git commit -s`), as CONTRIBUTING.md says. Agents commit with `-s` under the owner's git identity, because the owner is the person certifying the change; the machine account only pushes branches and opens PRs (8.1).
-- The `dco` job runs `tools/checks/check-dco` on the PR's commit range: each commit's sign-off must match its author. It is in-house (a small script), so no GitHub App is needed.
+- The `dco` job runs `tools/checks/check-dco` on the PR's commit range: each commit's sign-off must match its author. It is in-house (a small script), so no GitHub App is needed. While CI is manual-only (3.6), the author runs `just check-dco` (the commits not yet on `origin/main`) before opening the PR.
 - Squash merges keep the sign-off lines because the squash message includes commit details (8.1).
 
 ### 8.7 CI jobs by milestone
 
-Each job is one `just` recipe; the workflow files stay thin (contracts §1).
+Each job is one `just` recipe; the workflow files stay thin (contracts §1). While the repository is private, `ci.yml` and `nightly.yml` run only when started by hand (`workflow_dispatch`; owner decision of 2026-10-11, PROC-01), and no job is required (8.4). The Trigger and Required columns are what each job returns to when CI does; a job added before then still lands in its workflow file with its jobs, and `just check` covers the Linux side locally (3.6).
 
 | Job | Workflow | Runs on | Trigger | Added by | Required on `main` |
 |---|---|---|---|---|---|
@@ -2059,4 +2066,4 @@ Each has the default this plan uses until the owner decides. Row numbers are sta
 | 12 | Section 10 row 23: a daemon kill mid-stream keeps the user's message but drops the half-streamed reply. Flush partial replies to `vault.db` every N tokens instead? | No for the prototype: one transaction per reply keeps the vault simple, and Regenerate is one click. Revisit if the owner loses long answers in practice. |
 | 14 | When does M11 run? It doesn't gate M10, and its three entry epics finish inside the 90 days. | After the 90 days, on whichever lane frees first once M9 is complete, so it never delays M10's epics. M11-E07 right after M11-E01. |
 | 15 | The owner left the `GetSecretRequest` and `GetSecretResponse` fields to M5-E07 (3.2, contracts §14 row 19), but M2-12 registers `NodeHubService.GetSecret` and M2-18 serves it for `hf_download` in M2. Who writes the fields? | M2-12 writes the fields M2 uses (the proto layout's default: `purpose` and `job_id`; `value`, `expires_unix_ms` and a `Diagnostic`) in its contract PR. M5-E07 adds the `mysql:<connection_name>` purpose and the environment variable that hands a job its secret, and closes the gap item. |
-| 16 | Branch protection (8.4) needs GitHub Pro or a public repository; the private repository on the current plan returns 403 (found by M1-06). Upgrade, go public, or keep working without it? | Deferred until the owner decides: PRs, reviews and green CI are kept by the agent build protocol (contracts §12.6), not by GitHub. Whoever settles this applies 8.4's `protection.json` unchanged and checks it with `gh api repos/{owner}/{repo}/branches/main/protection`. |
+| 16 | Branch protection (8.4) needs GitHub Pro or a public repository; the private repository on the current plan returns 403 (found by M1-06). Upgrade, go public, or keep working without it? | Deferred until the owner decides: PRs, reviews and the local `just check` gate (the pre-push hook and the verifier's fresh-clone run, 3.6) are kept by the agent build protocol (contracts §12.6), not by GitHub. Whoever settles this applies 8.4's `protection.json` unchanged and checks it with `gh api repos/{owner}/{repo}/branches/main/protection`. |

@@ -64,7 +64,7 @@ v4 (`rastai_spec_v4.md`) is kept for history.
     - `check-names` compares a generated names registry (`schemas/names.json`) with contracts.md in both directions. A name in code but not in contracts fails; a name in contracts but not in code passes only with its milestone mark, such as "(M4)" (§29).
     - Build agents get contracts.md, the generated schemas and the owning layout section in every task prompt, use only registered names, and every PR gets a separate reviewer agent with a naming and schema lens (§29).
     - The names contracts v1.1 invented are accepted, so contracts.md §15 is no longer provisional. Small contract gaps stay with the tasks that build them (§37).
-    - A task or issue is closed only after independent verification: CI green, plus a reviewer agent that is not the author confirming each acceptance criterion, with the evidence posted as the closing comment (§5).
+    - A task or issue is closed only after independent verification: `just check` passes locally (a pre-push hook enforces it), plus a reviewer agent that is not the author running `just check` on a fresh clone of the exact PR head and confirming each acceptance criterion, with the evidence posted as the closing comment (§5). GitHub CI is manual-only while the repository is private (owner decision of 2026-10-11, PROC-01); macOS and Windows are re-checked when CI returns.
 
 **Open**
 - Nothing blocking.
@@ -164,7 +164,7 @@ Every feature is rated on four levels:
 - It runs on Linux NVIDIA, Linux AMD and a paired SSH box.
 
 **A task or issue is closed only after independent verification (§0.23):**
-- CI is green, with `just check` including `check-names` and `check-schema-diff`.
+- `just check`, including `check-names` and `check-schema-diff`, passes locally (the pre-push hook enforces it) and on a fresh clone of the exact PR head, run by the verifier. GitHub CI is manual-only while the repository is private; macOS and Windows are re-checked when CI returns.
 - A reviewer agent that is not the author confirms each acceptance criterion against the code and the command output.
 - That evidence is posted as the closing comment. The author's own claim does not close anything.
 
@@ -1341,6 +1341,9 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4.2 (owner decision of 2026-10-11, PROC-01; the status line stays v5.4)**
+- §0.23 / §5 / §29: the verification rule's first condition is now `just check` passing locally (the pre-push hook `tools/hooks/pre-push`) and on the verifier's fresh clone of the exact PR head, not green CI. The private repository's free GitHub Actions minutes ran out, so CI runs only when started by hand until the repository is public or a self-hosted runner takes the jobs; macOS and Windows are re-checked then. This replaces the "CI is green" wording of v5.4.1 below.
+
 **v5.4.1 (owner approvals of 2026-10-11; the status line stays v5.4)**
 - §0.23 and ADR-0038: names and command schemas are enforced by CI, and work is closed only after independent verification.
 - §20 / §29 / §31 / §32: `check-schema-diff` moves from Phase 2 into M1; the new `check-names` compares a generated `schemas/names.json` with contracts.md both ways (a name in contracts but not yet in code needs its milestone mark); both run in `just check`.

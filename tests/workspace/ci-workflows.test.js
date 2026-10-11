@@ -1,6 +1,7 @@
 // The CI workflows against the plan and the repo's pins (M1-06). ci.yml must hold exactly the jobs branch protection
-// requires (plan 8.4), each running one `just` recipe; nightly.yml must fuzz every cargo-fuzz target in crates/; and
-// tools/ci/install-dev-tools must install the versions the rest of the repo pins. The files are read as plain text,
+// requires (plan 8.4), each running one `just` recipe; nightly.yml must fuzz every cargo-fuzz target in crates/; both
+// run only when started by hand while the repository is private (PROC-01); and tools/ci/install-dev-tools must
+// install the versions the rest of the repo pins. The files are read as plain text,
 // line by line: these few facts need no YAML parser (none is in spec §27). Lines split on "\r\n" too, so a Windows
 // checkout with CRLF endings passes the same way.
 
@@ -54,11 +55,17 @@ const BIN_NAME_LINE = /^name = "([a-z0-9_]+)"$/;
 // nightly.yml caches the cargo-fuzz binary and builds it only when that cache misses, so no job rebuilds it nightly.
 const CARGO_FUZZ_CACHE_PATH_LINE = "path: ~/.cargo/bin/cargo-fuzz";
 const CARGO_FUZZ_INSTALL_CONDITION_LINE = "if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'";
-// Each push to main has a concurrency group of its own (its commit), so no merge loses its CI result to a later one.
+// A run that isn't a pull request's has a concurrency group of its own (its commit), so no run loses its result to a
+// later one.
 const CONCURRENCY_GROUP_LINE = /^ {2}group: (.*)$/;
 const COMMIT_IN_GROUP = "github.sha";
 // nightly.yml carries each target's fuzz corpus from one night to the next in the cache.
 const FUZZ_CORPUS_CACHE_PATH_LINE = "path: crates/${{ matrix.crate }}/fuzz/corpus/${{ matrix.target }}";
+// Both workflows run only when started by hand while the repository is private (owner decision of 2026-10-11,
+// PROC-01; plan 3.6): the local pre-push hook and the verifier's fresh-clone run are the gate instead.
+const WORKFLOWS = [CI_WORKFLOW, NIGHTLY_WORKFLOW];
+const TRIGGERS_LINE = "on:";
+const MANUAL_ONLY_TRIGGERS = ["workflow_dispatch:"];
 // The cpu environment's interpreter has one spelling in the justfile, cpu_python, which is right on every OS.
 const CPU_PYTHON_BY_HAND = "{{cpu_environment}}/bin/python";
 
@@ -226,6 +233,32 @@ function fuzzTargetsInNightly() {
 }
 
 /**
+ * The triggers under a workflow's top-level `on:` key, one trimmed line each, comments left out. The block ends at
+ * the next line that starts in the first column.
+ * @param {string} path
+ * @returns {string[]}
+ */
+function workflowTriggers(path) {
+  const lines = readLines(path);
+  const triggersStart = lines.indexOf(TRIGGERS_LINE);
+  if (triggersStart < 0) {
+    throw new Error(`no "${TRIGGERS_LINE}" line in ${path}`);
+  }
+  const triggers = [];
+  for (const line of lines.slice(triggersStart + 1)) {
+    const startsInFirstColumn = line !== "" && !line.startsWith(" ");
+    if (startsInFirstColumn) {
+      break;
+    }
+    const trimmed = line.trim();
+    if (trimmed !== "" && !trimmed.startsWith("#")) {
+      triggers.push(trimmed);
+    }
+  }
+  return triggers;
+}
+
+/**
  * The value of the first line that matches `pattern`; its first group is the value.
  * @param {string} path
  * @param {RegExp} pattern
@@ -312,7 +345,13 @@ test("nightly.yml builds cargo-fuzz only when its cached binary is missing", () 
   expect(lines).toContain(CARGO_FUZZ_INSTALL_CONDITION_LINE);
 });
 
-test("ci.yml gives each push to main a concurrency group of its own", () => {
+test("ci.yml and nightly.yml run only when started by hand (workflow_dispatch)", () => {
+  for (const workflow of WORKFLOWS) {
+    expect(workflowTriggers(workflow), workflow).toEqual(MANUAL_ONLY_TRIGGERS);
+  }
+});
+
+test("ci.yml gives each run outside a pull request a concurrency group of its own commit", () => {
   const group = findValue(CI_WORKFLOW, CONCURRENCY_GROUP_LINE);
   expect(group).toContain(COMMIT_IN_GROUP);
 });

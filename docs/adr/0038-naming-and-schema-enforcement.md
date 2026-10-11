@@ -1,6 +1,6 @@
 # ADR-0038: Names and command schemas are enforced by CI, not by convention; work is closed only after independent verification
 
-**Status:** Accepted, 2026-10-11.
+**Status:** Accepted, 2026-10-11. Decision 4 amended 2026-10-11 (owner decision, PROC-01).
 
 ## Context
 
@@ -28,11 +28,13 @@
    - Every PR gets a separate reviewer agent with a naming and schema lens, in addition to the style and tests lenses.
    - `just check` runs `check-names` and `check-schema-diff`.
 4. **Verification before closing.** An issue or task is closed only after independent verification:
-   - CI is green, including `just check` with `check-names` and `check-schema-diff`;
-   - a reviewer agent that is not the author confirms each acceptance criterion against the code and the command output;
+   - `just check`, with `check-names` and `check-schema-diff`, passes locally (the pre-push hook enforces it);
+   - a reviewer agent that is not the author runs `just check` on a fresh clone of the exact PR head and confirms each acceptance criterion against the code and the command output;
    - that evidence is posted as the closing comment.
 
    This goes into the plan's definition of done (§3.3) and into CONTRIBUTING.
+
+   **Amended (2026-10-11, owner decision, PROC-01):** the first item read "CI is green". The private repository's free GitHub Actions minutes ran out, so `ci.yml` and `nightly.yml` run only when started by hand until the repository is public or a self-hosted runner takes the jobs. The check moves to the local machine: the pre-push hook (`tools/hooks/pre-push`) runs `just check` before every push, and the verifier runs it again on a fresh clone of the PR head. macOS and Windows are re-checked when CI returns (plan 3.6).
 5. **Contracts v1.1 names are accepted.** §15 is marked accepted, not provisional. After this ADR a change to an accepted name is a contracts change with a reason in the PR.
 
 **Checked by:**

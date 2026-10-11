@@ -121,6 +121,8 @@ RASTAI/
       check-names            (M1) schemas/names.json against contracts §15 and the tables of §2.1-2.3, §5.2, §6, §7, §8, §10 and §11, both ways (2.8)
       check-schema-diff      (M1) schemas/commands/ and schemas/events/ against the base branch: contracts update required,
                              breaking change to a stable item refused (2.8, 11.1)
+    hooks/
+      pre-push               POSIX sh git hook: runs `just check` and refuses the push if it fails (2.5, plan 3.6)
   fixtures/                  shared test inputs (contracts §12.5)
   tests/
     crash/                   Rust crate `rastai-crash-tests` (publish = false): the kill -9 matrix (flows/platform.md 6.5),
@@ -255,7 +257,8 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 
 | Recipe | Runs | Used by |
 |---|---|---|
-| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29) |
+| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29); the pre-push hook before every push, and the verifier on a fresh clone of the PR head (plan 3.6) |
+| `just install-hooks` | `git config core.hooksPath tools/hooks` (this clone's config, never `--global`), so git runs `tools/hooks/pre-push` | dev: once per clone |
 | `just build` | `cargo build --workspace --locked` | dev |
 | `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`; MySQL tests skip themselves without a server) | CI on Linux, macOS, Windows runners (CPU) |
 | `just test-crash` | `cargo test -p rastai-crash-tests -- --test-threads=1` | CI on Linux |
