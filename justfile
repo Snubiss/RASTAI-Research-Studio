@@ -51,7 +51,7 @@ protoc_gen_prost_version := "0.5.0"
 protoc_gen_tonic_version := "0.5.0"
 # The branch this one merges into. `proto-check` runs `buf breaking` against its proto files at the merge base, and
 # `codegen-check` refuses a catalog code that was there and is now gone.
-proto_base := "origin/main"
+base_branch := "origin/main"
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
 # The cpu environment's interpreter. A virtual environment keeps it in Scripts\ on Windows and bin/ elsewhere; the
@@ -209,7 +209,7 @@ check-no-typescript: env-cpu
 # buf.gen.yaml runs the Rust plugins from your PATH, grpcio-tools from the cpu environment and protoc-gen-es from
 # node_modules, so it needs both environments. The rastai-codegen bins run after buf, in the order of layout
 # rust-control-plane.md 4.9: the catalog first, because every other crate's build needs rastai-diag's tables.
-# Regenerate every generated folder: the protobuf code of proto/, then the error and term catalog of catalog/.
+# Regenerate every generated output: the protobuf code of proto/, then the error and term catalog of catalog/.
 codegen: env-cpu env-js proto-tools
     buf generate
     cargo run --quiet --locked -p rastai-codegen --bin rastai-catalog-codegen
@@ -220,7 +220,7 @@ codegen: env-cpu env-js proto-tools
 # catalog's merge-base check (a code present on `base` is never deleted; it needs git history, like proto-check)
 # and the outputs check (generated JavaScript passes tsc and generated Python imports; it needs both environments).
 # Checked-in generated code equals a fresh codegen run, and the generators' outputs work in their languages.
-codegen-check base=proto_base: env-cpu env-js proto-tools
+codegen-check base=base_branch: env-cpu env-js proto-tools
     "{{check_python}}" tools/checks/check-generated
     RASTAI_BASE_REF="{{base}}" cargo test --quiet --locked -p rastai-codegen -- --ignored
 
@@ -245,7 +245,7 @@ require-version tool version:
 # buf breaking can't see inside arguments_json and the other _json strings; check-schema-diff covers those (M1-58).
 # It needs only buf, not the plugins, so it checks buf's version alone.
 # buf lint, and buf breaking against the proto files where this branch left `base` (contracts 4).
-proto-check base=proto_base: (require-version "buf" buf_version)
+proto-check base=base_branch: (require-version "buf" buf_version)
     #!/usr/bin/env bash
     set -euo pipefail
     buf lint

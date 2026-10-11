@@ -4,6 +4,10 @@
 //! The codegen owns the whole folder, `mod.rs` included, so check-generated can compare it as one unit. `mod.rs`
 //! marks both tables `#[rustfmt::skip]`: they are compared byte for byte with a fresh run, so they stay exactly as
 //! written here, whatever a later rustfmt would prefer.
+//!
+//! The codegen itself builds on rastai-diag, so tables that no longer compile (after a hand edit or a bad merge)
+//! also stop `just codegen` from running. To recover, set both tables in catalog_table.rs and terms_table.rs to
+//! `&[]`, then run `just codegen` to write them again.
 
 use std::path::Path;
 

@@ -74,9 +74,9 @@ GENERATORS: list[Generator] = [
 
 
 def main() -> int:
-    root = parse_root_argument("Regenerates every generated folder into a temporary tree and fails on any change.")
+    root = parse_root_argument("Regenerates every generated output into a temporary tree and fails on any change.")
     problems = find_stale_files(root, GENERATORS)
-    return report("check-generated", problems, "every generated folder matches a fresh codegen run")
+    return report("check-generated", problems, "every generated output matches a fresh codegen run")
 
 
 def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
