@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# install-dev-tools: downloads the pinned dev tools a CI job needs, checks each download against its SHA-256 and
+# puts the programs in ~/.local/bin, for the user only (no sudo). The CI workflows run it before their `just` recipe.
+# It also works on a developer's machine, as a shortcut for the install steps in the justfile header.
+#
+# Usage: tools/ci/install-dev-tools <tool>...
+#   tools: just, uv, node (with pnpm through corepack), cargo-deny, cargo-fuzz
+#
+# The versions are the ones the repo pins elsewhere (the justfile, package.json, python/pyproject.toml);
+# tests/workspace/ci-workflows.test.js fails if they drift apart. Each tool has one prebuilt download per CI runner:
+# Linux x86_64, macOS arm64 and Windows x86_64 (Git Bash). Any other platform stops with a message, never a guess.
+
+set -euo pipefail
+
+INSTALL_DIR="$HOME/.local/bin"
+# Node.js is a whole folder (bin/, lib/ and its bundled corepack): unpacked here, its programs linked into INSTALL_DIR.
+NODE_PARENT_DIR="$HOME/.local/opt"
+
+JUST_VERSION="1.58.0"
+UV_VERSION="0.13.0"
+NODE_VERSION="24.21.0"
+CARGO_DENY_VERSION="0.20.2"
+CARGO_FUZZ_VERSION="0.13.2"
+
+# The SHA-256 of each download, copied from the release's own checksum file when the pin was made. A download that
+# differs (a replaced release asset, a tampered mirror) stops the install. cargo-fuzz publishes no checksum file, so
+# its value is the hash of the release asset taken when it was pinned (2026-10-11).
+JUST_SHA256_LINUX="4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
+JUST_SHA256_MACOS="50ae3e996c974a0bf32ea7d10f495070df33f1b43e0616b2769e3d4821ed8f48"
+JUST_SHA256_WINDOWS="759f16fb7aa17c5c8b9594b6d4a8c1a6630dfd042cf2b3ff84841454d3d188dc"
+UV_SHA256_LINUX="1468ebd5a5541121837c5a2817b9972ba6090fa6caa3d142620850a47fb75154"
+UV_SHA256_MACOS="a9c1b29002cf3c83f07fa9cd8a887a3be0107d90e23189721221e7257db8e3d6"
+UV_SHA256_WINDOWS="088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba656c"
+NODE_SHA256_LINUX="fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+NODE_SHA256_MACOS="6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"
+CARGO_DENY_SHA256_LINUX="9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+CARGO_FUZZ_SHA256_LINUX="b5b704018b63e0f151c17a057ac53b5111e1db545d1b9f72fee79f08a545931c"
+
+main() {
+    if [ "$#" -eq 0 ]; then
+        fail "name at least one tool: just, uv, node, cargo-deny, cargo-fuzz"
+    fi
+    PLATFORM="$(detect_platform)"
+    WORK_DIR="$(mktemp -d)"
+    trap 'rm -rf "$WORK_DIR"' EXIT
+    mkdir -p "$INSTALL_DIR"
+    for tool in "$@"; do
+        install_tool "$tool"
+    done
+    add_install_dir_to_github_path
+}
+
+install_tool() {
+    case "$1" in
+        just) install_just ;;
+        uv) install_uv ;;
+        node) install_node ;;
+        cargo-deny) install_cargo_deny ;;
+        cargo-fuzz) install_cargo_fuzz ;;
+        *) fail "unknown tool: $1 (tools: just, uv, node, cargo-deny, cargo-fuzz)" ;;
+    esac
+}
+
+# Prints linux, macos or windows: the three CI runners, each with one pinned download per tool.
+detect_platform() {
+    local system machine
+    system="$(uname -s)"
+    machine="$(uname -m)"
+    case "$system-$machine" in
+        Linux-x86_64) echo "linux" ;;
+        Darwin-arm64) echo "macos" ;;
+        MINGW64_NT*-x86_64 | MSYS_NT*-x86_64) echo "windows" ;;
+        *) fail "no pinned downloads for $system $machine" ;;
+    esac
+}
+
+install_just() {
+    local asset sha256
+    case "$PLATFORM" in
+        linux)
+            asset="just-$JUST_VERSION-x86_64-unknown-linux-musl.tar.gz"
+            sha256="$JUST_SHA256_LINUX"
+            ;;
+        macos)
+            asset="just-$JUST_VERSION-aarch64-apple-darwin.tar.gz"
+            sha256="$JUST_SHA256_MACOS"
+            ;;
+        windows)
+            asset="just-$JUST_VERSION-x86_64-pc-windows-msvc.zip"
+            sha256="$JUST_SHA256_WINDOWS"
+            ;;
+    esac
+    local folder
+    folder="$(download_and_unpack "https://github.com/casey/just/releases/download/$JUST_VERSION/$asset" "$sha256")"
+    copy_program "$folder" just
+    "$INSTALL_DIR/just" --version
+}
+
+install_uv() {
+    # The Linux and macOS archives hold a folder named after the platform (`inner`); the Windows zip holds the
+    # programs themselves.
+    local asset sha256 inner
+    case "$PLATFORM" in
+        linux)
+            asset="uv-x86_64-unknown-linux-gnu.tar.gz"
+            sha256="$UV_SHA256_LINUX"
+            inner="uv-x86_64-unknown-linux-gnu"
+            ;;
+        macos)
+            asset="uv-aarch64-apple-darwin.tar.gz"
+            sha256="$UV_SHA256_MACOS"
+            inner="uv-aarch64-apple-darwin"
+            ;;
+        windows)
+            asset="uv-x86_64-pc-windows-msvc.zip"
+            sha256="$UV_SHA256_WINDOWS"
+            inner="."
+            ;;
+    esac
+    local folder
+    folder="$(download_and_unpack "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$asset" "$sha256")"
+    copy_program "$folder/$inner" uv
+    copy_program "$folder/$inner" uvx
+    "$INSTALL_DIR/uv" --version
+}
+
+# Only the Linux and macOS JavaScript jobs need Node.js (plan 8.7), so Windows has no pinned download.
+install_node() {
+    local node_name sha256
+    case "$PLATFORM" in
+        linux)
+            node_name="node-v$NODE_VERSION-linux-x64"
+            sha256="$NODE_SHA256_LINUX"
+            ;;
+        macos)
+            node_name="node-v$NODE_VERSION-darwin-arm64"
+            sha256="$NODE_SHA256_MACOS"
+            ;;
+        windows)
+            fail "no pinned Node.js download for Windows: only the Linux and macOS jobs run JavaScript"
+            ;;
+    esac
+    local folder
+    folder="$(download_and_unpack "https://nodejs.org/dist/v$NODE_VERSION/$node_name.tar.xz" "$sha256")"
+    mkdir -p "$NODE_PARENT_DIR"
+    rm -rf "${NODE_PARENT_DIR:?}/$node_name"
+    mv "$folder/$node_name" "$NODE_PARENT_DIR/"
+    for program in node npm corepack; do
+        ln -sf "$NODE_PARENT_DIR/$node_name/bin/$program" "$INSTALL_DIR/$program"
+    done
+    "$INSTALL_DIR/node" --version
+    # pnpm comes through corepack, which downloads the version package.json `packageManager` pins and refuses a
+    # download whose sha512 differs.
+    "$INSTALL_DIR/corepack" enable --install-directory "$INSTALL_DIR" pnpm
+}
+
+# cargo-deny runs only in the Linux `checks` job.
+install_cargo_deny() {
+    require_linux cargo-deny
+    local name="cargo-deny-$CARGO_DENY_VERSION-x86_64-unknown-linux-musl"
+    local release_url="https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION"
+    local folder
+    folder="$(download_and_unpack "$release_url/$name.tar.gz" "$CARGO_DENY_SHA256_LINUX")"
+    copy_program "$folder/$name" cargo-deny
+    "$INSTALL_DIR/cargo-deny" --version
+}
+
+# cargo-fuzz runs only in the Linux nightly fuzz job.
+install_cargo_fuzz() {
+    require_linux cargo-fuzz
+    local asset="cargo-fuzz-$CARGO_FUZZ_VERSION-x86_64-unknown-linux-musl.tar.gz"
+    local folder
+    folder="$(download_and_unpack \
+        "https://github.com/rust-fuzz/cargo-fuzz/releases/download/$CARGO_FUZZ_VERSION/$asset" \
+        "$CARGO_FUZZ_SHA256_LINUX")"
+    copy_program "$folder" cargo-fuzz
+    "$INSTALL_DIR/cargo-fuzz" --version
+}
+
+require_linux() {
+    if [ "$PLATFORM" != "linux" ]; then
+        fail "$1 has a pinned download for Linux only"
+    fi
+}
+
+# Downloads a release archive, stops unless its SHA-256 is the pinned one, unpacks it into a fresh folder and
+# prints that folder.
+download_and_unpack() {
+    local url="$1" expected_sha256="$2"
+    local file="$WORK_DIR/${url##*/}"
+    local folder="$file.unpacked"
+    echo "Downloading $url" >&2
+    curl --fail --silent --show-error --location --retry 3 --output "$file" "$url"
+    check_sha256 "$file" "$expected_sha256"
+    mkdir -p "$folder"
+    case "$file" in
+        *.tar.gz) tar -xzf "$file" -C "$folder" ;;
+        *.tar.xz) tar -xJf "$file" -C "$folder" ;;
+        *.zip) unzip -q "$file" -d "$folder" ;;
+        *) fail "don't know how to unpack $file" ;;
+    esac
+    echo "$folder"
+}
+
+check_sha256() {
+    local file="$1" expected_sha256="$2"
+    local actual_sha256
+    actual_sha256="$(file_sha256 "$file")"
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        fail "checksum mismatch for ${file##*/}: expected $expected_sha256, got $actual_sha256"
+    fi
+}
+
+# Linux and Git Bash have sha256sum; macOS has shasum. Both print "<hash>  <file>".
+file_sha256() {
+    local output
+    if command -v sha256sum > /dev/null; then
+        output="$(sha256sum "$1")"
+    else
+        output="$(shasum -a 256 "$1")"
+    fi
+    echo "${output%% *}"
+}
+
+# Copies one program into INSTALL_DIR: <name> on Linux and macOS, <name>.exe on Windows.
+copy_program() {
+    local folder="$1" name="$2"
+    if [ "$PLATFORM" = "windows" ]; then
+        name="$name.exe"
+    fi
+    cp "$folder/$name" "$INSTALL_DIR/$name"
+    chmod 755 "$INSTALL_DIR/$name"
+}
+
+# On a GitHub runner, later steps find the tools through $GITHUB_PATH, which takes a native path (C:\... on Windows).
+add_install_dir_to_github_path() {
+    if [ -z "${GITHUB_PATH:-}" ]; then
+        return
+    fi
+    if [ "$PLATFORM" = "windows" ]; then
+        cygpath --windows "$INSTALL_DIR" >> "$GITHUB_PATH"
+    else
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+    fi
+}
+
+fail() {
+    echo "install-dev-tools: $1" >&2
+    exit 1
+}
+
+main "$@"

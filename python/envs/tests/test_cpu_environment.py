@@ -2,10 +2,12 @@
 
 It runs inside `just check` (through `just test-python`) against .dev/envs/cpu, the environment `just env-cpu`
 syncs from python/envs/cpu/uv.lock. It fails when the environment drifts from the lock's pins, when torch isn't
-the CPU build, or when python/conftest.py stops providing its shared fixtures.
+the CPU build, or when python/conftest.py stops providing its shared fixtures. The macOS and Windows CI jobs run it
+too, through `just test-python-portable`, until the pure-compute packages bring their own tests (M1-06).
 """
 
 import importlib.metadata
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -60,3 +62,11 @@ def test_torch_is_the_cpu_build() -> None:
 def test_shared_fixtures_point_into_the_repo(repo_root: Path, fixtures_folder: Path) -> None:
     assert (repo_root / "python" / "conftest.py").is_file()
     assert fixtures_folder == repo_root / "fixtures"
+
+
+@pytest.mark.posix_only
+def test_posix_only_tests_never_run_on_windows() -> None:
+    """The posix_only marker's own smoke test (M1-06). Linux runs it in `just test-python`; on macOS and Windows
+    `just test-python-portable` deselects it, and python/conftest.py skips it on Windows in any other run. If a
+    posix_only test ever ran on Windows, this one would fail there."""
+    assert os.name == "posix"
