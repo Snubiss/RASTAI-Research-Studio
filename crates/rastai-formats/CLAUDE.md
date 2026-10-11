@@ -20,11 +20,16 @@ and §15.1.
 - **One wrapper file per external crate:** `blake3` only in `src/hashing.rs`; `miniz_oxide` only in
   `src/zip/inflate.rs` (M2).
 - **One error enum**, `FormatsError` in `src/error.rs`, each variant with a catalog code from contracts §10.3.
+- **A document type is written in four places, all in its own contract PR:** the struct (with
+  `#[serde(flatten)] pub header: SharedHeader`) and its `describe_<type>()` (fields starting with `header_fields()`)
+  in `src/documents/<type>.rs`; its row in `DOCUMENT_TYPES` and its `Document` variant (`src/documents/mod.rs`); its
+  description in `describe_all_types()` (`src/describe/registry.rs`); and its fixtures in
+  `fixtures/documents/<type>/` with a `tests/describe_matches_struct.rs` case.
 - **`src/lib.rs` and `src/json/mod.rs` are lists of `pub mod` lines** (contracts §12.2). Unit tests sit at the
   bottom of the file they test.
 
 ## Fuzzing
 
 `fuzz/` is a cargo-fuzz crate with its own workspace, built on the pinned nightly:
-`just fuzz rastai-formats json_reader 60` runs the reader target for a minute. Nightly CI runs each target for
-10 minutes (contracts §12.5).
+`just fuzz rastai-formats json_reader 60` runs the reader target for a minute, and `read_document` the same way.
+Nightly CI runs each target for 10 minutes (contracts §12.5).

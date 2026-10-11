@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E5004",
+      "path": "too_deep.json:1:129"
+    }
+  ]
+}

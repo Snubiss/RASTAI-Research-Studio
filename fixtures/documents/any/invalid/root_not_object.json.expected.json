@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1002",
+      "path": "root_not_object.json:1:1"
+    }
+  ]
+}

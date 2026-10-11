@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E0004",
+      "path": "nan.json:2:21"
+    }
+  ]
+}

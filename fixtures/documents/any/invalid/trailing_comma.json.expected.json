@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E0001",
+      "path": "trailing_comma.json:4:1"
+    }
+  ]
+}

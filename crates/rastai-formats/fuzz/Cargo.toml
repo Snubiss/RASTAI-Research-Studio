@@ -17,6 +17,10 @@ libfuzzer-sys = "=0.4.13"
 [dependencies.rastai-formats]
 path = ".."
 
+# For `has_errors` in the read_document target: the outcome's diagnostics are rastai-diag's type.
+[dependencies.rastai-diag]
+path = "../../rastai-diag"
+
 # An independent workspace for the fuzz targets.
 [workspace]
 members = ["."]
@@ -24,6 +28,13 @@ members = ["."]
 [[bin]]
 name = "json_reader"
 path = "fuzz_targets/json_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "read_document"
+path = "fuzz_targets/read_document.rs"
 test = false
 doc = false
 bench = false
