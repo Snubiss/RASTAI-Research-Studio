@@ -24,9 +24,9 @@ Open-source studio to design, train, serve and study neural networks. Rust backe
 - A new in-house parser of untrusted input lands with its fuzz target (ADR-0037).
 - Every user-facing error gets a catalog code.
 - Contract changes (proto, schemas, commands) land in their own PR before code that uses them.
-- Names come only from `docs/architecture/contracts.md` §15 (and its §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables). A new name that isn't a wire, document or command shape is added to contracts in the same PR; shapes still land in their own contract PR first (ADR-0038). `just check` runs `check-names` and `check-schema-diff`, and a breaking change to a `stable` command or event fails CI (ADR-0038).
+- Names come only from `docs/architecture/contracts.md` §15 (and its §2.1–2.3, §5.2, §6, §7, §8, §10 and §11 tables). A new name that isn't a wire, document or command shape is added to contracts in the same PR; shapes still land in their own contract PR first (ADR-0038). `just check` runs `check-names` and `check-schema-diff`, and a breaking change to a `stable` command or event fails it (ADR-0038).
 - Every build task starts from contracts.md, the generated schemas (`schemas/`) and the owning layout section. Every PR gets a separate reviewer agent with a naming and schema lens.
-- Done means `just check` passes and a test was added. A task is done only after independent verification with evidence: CI green, and a reviewer agent that is not the author confirms each acceptance criterion against the code and command output, posted as the closing comment.
+- Done means `just check` passes and a test was added. A task is done only after independent verification with evidence: `just check` passes locally (the pre-push hook enforces it), and a reviewer agent that is not the author runs `just check` on a fresh clone of the exact PR head and confirms each acceptance criterion against the code and command output, posted as the closing comment. GitHub CI is manual-only while the repo is private (owner decision 2026-10-11); macOS and Windows are re-checked when CI returns. Run `just install-hooks` once per clone to turn the pre-push hook on.
 
 ## Code style (the owner's)
 

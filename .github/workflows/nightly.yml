@@ -1,14 +1,15 @@
-# Nightly runs on main (contracts 15.9, plan 8.7): every fuzz target of contracts 12.5 for 10 minutes each
-# (ADR-0037). None of these jobs is a required check. node-over-ssh joins this file with M9-E02.
+# Nightly runs on main, started by hand for now (contracts 15.9, plan 8.7): every fuzz target of contracts 12.5 for
+# 10 minutes each (ADR-0037). None of these jobs is a required check. node-over-ssh joins this file with M9-E02.
 #
 # Like ci.yml, each job installs the pinned dev tools (tools/ci/install-dev-tools) and runs one `just` recipe.
 # Actions are pinned to a commit, with the release tag beside it.
 name: nightly
 
+# Manual runs only while the repository is private (owner decision of 2026-10-11, PROC-01; see ci.yml). When CI
+# returns, the trigger goes back to `schedule` with cron "17 3 * * *": 03:17 UTC every night, not on the full hour,
+# when GitHub's queue of scheduled runs is longest. Start a run with `gh workflow run nightly.yml --ref main`.
 on:
-  schedule:
-    # 03:17 UTC every night: not on the full hour, when GitHub's queue of scheduled runs is longest.
-    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +26,8 @@ defaults:
 
 jobs:
   fuzz:
-    # A schedule runs on the default branch already; the guard keeps it that way if a trigger is ever added.
+    # A schedule runs on the default branch already; the guard keeps a manual run on main too, so the corpus
+    # cache and any crash belong to main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     # The build, ten minutes of fuzzing and some headroom.

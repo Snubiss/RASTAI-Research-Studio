@@ -1,0 +1,63 @@
+#!/bin/sh
+# Git runs this before every push, once `just install-hooks` has pointed core.hooksPath at tools/hooks (contracts
+# 15.9). It runs `just check`, the gate every PR passes, and refuses the push if it fails, so a broken branch never
+# leaves this machine. GitHub CI is manual-only while the repository is private (plan 3.6, owner decision of
+# 2026-10-11), so this hook and the verifier's fresh-clone run are the gate.
+#
+# In an emergency (say, to save work in progress before the machine goes away), skip it with:
+#   git push --no-verify
+# Nothing merges on that alone: the verifier still runs `just check` on a fresh clone of the PR head (plan 3.6).
+#
+# Plain POSIX sh, so it runs the same under any /bin/sh.
+
+# The one recipe the hook runs: the gate every PR passes (justfile, contracts 12.6).
+CHECK_RECIPE="check"
+REFUSED_PREFIX="pre-push: push refused:"
+
+# Why the push was refused and what to do about it, on one line, so it stands out under the check's output.
+refuse_push() {
+    reason="$1"
+    next_step="$2"
+    echo "$REFUSED_PREFIX $reason $next_step" >&2
+    exit 1
+}
+
+# `just check` tests the files on disk, not the commits being pushed. An uncommitted change to a tracked file could
+# make it pass for a tree that isn't the one pushed (or fail for one that is), so the hook asks for a clean tree.
+require_committed_tree() {
+    if ! git diff --quiet HEAD --; then
+        refuse_push "tracked files have uncommitted changes, so \`just $CHECK_RECIPE\` would not test what you push." \
+            "Commit or stash them, then push again."
+    fi
+}
+
+require_just() {
+    if ! command -v just >/dev/null 2>&1; then
+        refuse_push "\`just\` is not on PATH." "The justfile header says how to install it."
+    fi
+}
+
+# Git hands the hook the refs to push on stdin; `just check` has no use for them, so it reads from /dev/null.
+run_check() {
+    if ! just "$CHECK_RECIPE" </dev/null; then
+        refuse_push "\`just $CHECK_RECIPE\` failed (its output is above)." \
+            "Fix it, run \`just $CHECK_RECIPE\` until it passes, then push again."
+    fi
+}
+
+# In a linked worktree git runs the hook with GIT_DIR pointing at this repository, and a `git -c` on the push
+# arrives as GIT_CONFIG_PARAMETERS. `just check` runs tests that make and commit to scratch repositories; with these
+# set, their git commands would act on this repository instead. Git finds the repository from the working folder
+# without them (it runs the hook from the top of the working tree).
+forget_git_environment() {
+    unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_CONFIG_PARAMETERS
+}
+
+main() {
+    forget_git_environment
+    require_committed_tree
+    require_just
+    run_check
+}
+
+main

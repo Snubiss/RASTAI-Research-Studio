@@ -35,7 +35,7 @@
 - *M1-49's three-surfaces test (`tests/e2e/three_surfaces/`) grows each milestone, and M10-E02 adds an API-only run of the core loop (contracts §2.4 rule 9).*
 - *The decisions are unchanged.*
 
-*Note (2026-10-11), ADR-0038: decision 5 sets when a PR is done. Closing the issue or task needs more: CI green, a reviewer agent that is not the author confirming each acceptance criterion, and that evidence as the closing comment. A merged PR no longer closes its issue (plan 3.3, 3.6).*
+*Note (2026-10-11), ADR-0038: decision 5 sets when a PR is done. Closing the issue or task needs more: `just check` passing locally and on a fresh clone of the PR head (PROC-01 replaced green CI while the repository is private), a reviewer agent that is not the author confirming each acceptance criterion, and that evidence as the closing comment. A merged PR no longer closes its issue (plan 3.3, 3.6).*
 
 **Checked by:** a CI test that runs every registered command with `dry_run` and fails on an un-coded error (this is the L0 floor for the whole app); the plan's level table, reviewed at each milestone exit.
 

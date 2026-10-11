@@ -4,7 +4,7 @@
 
 ## Checklist
 
-- [ ] `just check` passes
+- [ ] `just check` passes (the pre-push hook runs it before every push; turn it on with `just install-hooks`)
 - [ ] A test was added that fails without this change
 - [ ] Contract changes (proto, schemas, commands) are in their own PR, merged first
 - [ ] New user-facing errors have catalog codes

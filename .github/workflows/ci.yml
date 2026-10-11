@@ -1,4 +1,4 @@
-# CI for pull requests and pushes to main (contracts 15.9, plan 8.7). The workflow stays thin: each job checks out
+# CI, started by hand (contracts 15.9, plan 8.7). The workflow stays thin: each job checks out
 # the repository, installs the pinned dev tools (tools/ci/install-dev-tools), restores its caches and runs one `just`
 # recipe, so a red job reproduces locally with the same command. The job ids are the required status checks of
 # branch protection (plan 8.4); tests/workspace/ci-workflows.test.js keeps the two lists equal.
@@ -7,18 +7,21 @@
 # Actions are pinned to a commit, with the release tag beside it, so a moved tag can't change what runs.
 name: ci
 
+# Manual runs only (owner decision of 2026-10-11, PROC-01): the private repository's free Actions minutes ran out, so
+# the gate is local while the repository is private: the pre-push hook runs `just check`, and the verifier runs it on
+# a fresh clone of the PR head (plan 3.6). Start a run from the Actions tab or with `gh workflow run ci.yml --ref
+# <branch>`. When CI returns (a public repository or a self-hosted runner), the triggers go back to `pull_request`
+# and `push` to main; the jobs below already handle both.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # No job writes to the repository.
 permissions:
   contents: read
 
-# A pull request's runs share one group, so a new push cancels the run it replaces. Each push to main gets a group of
-# its own (its commit), because GitHub keeps only one waiting run per group and drops the older one: with one shared
-# group, a merge that landed while another was waiting would never get a result.
+# A pull request's runs share one group, so a new push cancels the run it replaces. Any other run (a push to main, or
+# a manual run) gets a group of its own commit, because GitHub keeps only one waiting run per group and drops the
+# older one: with one shared group, a merge that landed while another was waiting would never get a result.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -97,7 +100,8 @@ jobs:
         run: just check
 
   # Every commit of the pull request carries a Signed-off-by matching its author (plan 8.6). In-house, so no
-  # GitHub App is needed.
+  # GitHub App is needed. A manual run has no pull request, so this job is skipped; locally, `just check-dco` checks
+  # the commits not yet on main.
   dco:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04

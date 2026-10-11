@@ -1,5 +1,7 @@
 # Every build, test and check task goes through `just` (layout: rust-control-plane.md section 2.5).
 # "Done" means `just check` passes (§29). Running `just` with no recipe runs `check`.
+# Run `just install-hooks` once per clone: git then runs `just check` before every push and refuses a push that
+# fails it (tools/hooks/pre-push; plan 3.6).
 #
 # Dev tools, pinned. Install them for your user (no sudo) with:
 #   cargo install --locked just@1.58.0
@@ -67,11 +69,17 @@ portable_test_folders := "envs/tests rastai_formats/tests rastai_data/tests"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-# The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: CI's `dco` job runs it
-# on a pull request's commits.
+# The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: it reads a pull request's
+# commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
 check: fmt-check lint check-js test-rust test-python test-js wasm deny proto-check \
     check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check
+
+# core.hooksPath goes in this clone's own git config (never --global), so other repositories keep their hooks.
+# A relative path is read from the top of each working tree, so every worktree of this clone runs its own copy.
+# Point git at tools/hooks, so the pre-push hook runs `just check` before every push.
+install-hooks:
+    git config core.hooksPath tools/hooks
 
 # Build every crate in the workspace. --locked: Cargo.lock is checked in and never silently changes.
 build:
