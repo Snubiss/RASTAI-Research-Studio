@@ -59,10 +59,10 @@ cpu_python := if os() == "windows" { cpu_environment / "Scripts/python.exe" } el
 # The repo checks in tools/checks are standard-library Python scripts. They run on the cpu environment's Python,
 # so every machine runs them with the same interpreter.
 check_python := cpu_python
-# The test folders under python/ that test-python-portable runs on macOS and Windows: the pure-compute packages
-# rastai_formats, rastai_models, rastai_data and rastai_train join as they land (plan 8.7). Until M1-19 adds the first
-# one, the cpu environment's smoke test keeps those jobs honest.
-portable_test_folders := "envs/tests"
+# The test folders under python/ that test-python-portable runs on macOS and Windows: the cpu environment's smoke
+# test and the pure-compute packages' tests (plan 8.7). rastai_data is here; rastai_formats, rastai_models and
+# rastai_train join as they land (tests/workspace/ci-workflows.test.js fails until they do).
+portable_test_folders := "envs/tests rastai_data/tests"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -130,7 +130,7 @@ test-python: env-cpu
 
 # The macOS and Windows CI jobs run this (tier 2 keeps compiling and passing, spec §28 risk 13). Tests that need Unix
 # sockets, flock or setsid carry the posix_only marker and are deselected here; Linux runs them in test-python.
-# pytest over portable_test_folders (the smoke test until M1-19), without the posix_only tests.
+# pytest over portable_test_folders (the smoke test and the pure-compute packages), without the posix_only tests.
 test-python-portable: env-cpu
     cd python && "{{cpu_python}}" -m pytest -m "not posix_only" {{portable_test_folders}}
 

@@ -41,11 +41,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - &checkout
-        name: Check out the repository
+      - name: Check out the repository with its history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install just, uv, Node.js, pnpm and cargo-deny
-        run: tools/ci/install-dev-tools just uv node cargo-deny
+        with:
+          # proto-check runs `buf breaking` against the merge base of HEAD and origin/main, so it needs main's
+          # history, not only the merge commit.
+          fetch-depth: 0
+      - name: Restore the protoc plugins
+        # protoc-gen-prost and protoc-gen-tonic are built with cargo install, which takes minutes. ~/.cargo/bin is
+        # not in the cargo cache below. The install script holds their pins, so a new pin is a new key; the script
+        # also checks a restored plugin's version and rebuilds it if it differs.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/protoc-gen-prost
+            ~/.cargo/bin/protoc-gen-tonic
+          key: protoc-plugins-${{ runner.os }}-${{ hashFiles('tools/ci/install-dev-tools') }}
+      - name: Install just, uv, Node.js, pnpm, cargo-deny, buf and the protoc plugins
+        run: tools/ci/install-dev-tools just uv node cargo-deny buf protoc-gen-prost protoc-gen-tonic
       - &cargo-cache
         name: Restore the cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -109,7 +122,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - *checkout
+      - &checkout
+        name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - &install-just
         name: Install just
         run: tools/ci/install-dev-tools just
