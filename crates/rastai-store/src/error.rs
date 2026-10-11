@@ -11,6 +11,7 @@ const CODE_SCHEMA_TOO_NEW: &str = "RRS-S0002";
 const CODE_INDEX_DAMAGED: &str = "RRS-S0003";
 const CODE_DATA_DIRECTORY_NOT_WRITABLE: &str = "RRS-S0004";
 const CODE_READ_FAILED: &str = "RRS-S0006";
+const CODE_RUNTIME_NOT_PRIVATE: &str = "RRS-S0007";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
 
@@ -31,6 +32,10 @@ pub enum StoreError {
     IndexDamaged { reason: String },
     /// The data folder, or the database file in it, can't be created or opened for writing.
     DataDirectoryNotWritable { path: PathBuf, reason: String },
+    /// The runtime folder, or the `daemon.lock` in it, could be reached by another user: the folder is a symbolic
+    /// link, not a folder, another user's or open to group or others, or `daemon.lock` is a link or not a regular
+    /// file. Nothing was written to it. `reason` says which.
+    RuntimeNotPrivate { path: PathBuf, reason: String },
     /// SQLite reported a full disk during a write.
     DiskFull { reason: String },
     /// A write failed for any other reason (a constraint, an I/O error, a lock held past the busy timeout).
@@ -51,6 +56,7 @@ impl StoreError {
             StoreError::SchemaTooNew { .. } => CODE_SCHEMA_TOO_NEW,
             StoreError::IndexDamaged { .. } => CODE_INDEX_DAMAGED,
             StoreError::DataDirectoryNotWritable { .. } => CODE_DATA_DIRECTORY_NOT_WRITABLE,
+            StoreError::RuntimeNotPrivate { .. } => CODE_RUNTIME_NOT_PRIVATE,
             StoreError::DiskFull { .. } => CODE_DISK_FULL,
             StoreError::DatabaseWriteFailed { .. } => CODE_WRITE_FAILED,
             StoreError::DatabaseReadFailed { .. } => CODE_READ_FAILED,
@@ -78,6 +84,10 @@ mod tests {
         };
         let damaged = StoreError::IndexDamaged { reason: reason.clone() };
         let not_writable = StoreError::DataDirectoryNotWritable {
+            path: path.clone(),
+            reason: reason.clone(),
+        };
+        let not_private = StoreError::RuntimeNotPrivate {
             path,
             reason: reason.clone(),
         };
@@ -85,6 +95,7 @@ mod tests {
         assert_eq!(schema.code(), "RRS-S0002");
         assert_eq!(damaged.code(), "RRS-S0003");
         assert_eq!(not_writable.code(), "RRS-S0004");
+        assert_eq!(not_private.code(), "RRS-S0007");
         assert_eq!(StoreError::DiskFull { reason: reason.clone() }.code(), "RRS-S3002");
         let write_failed = StoreError::DatabaseWriteFailed { reason: reason.clone() };
         let read_failed = StoreError::DatabaseReadFailed { reason };

@@ -288,11 +288,7 @@ pub(crate) fn read_optional_boolean(row: &[SqlValue], index: usize) -> Result<Op
 // ---- Opening ----
 
 fn open_connection(path: &Path, flags: OpenFlags, read_only: bool) -> Result<SqliteConnection, StoreError> {
-    let connection =
-        Connection::open_with_flags(path, flags).map_err(|error| StoreError::DataDirectoryNotWritable {
-            path: path.to_path_buf(),
-            reason: error.to_string(),
-        })?;
+    let connection = Connection::open_with_flags(path, flags).map_err(|error| open_failed(path, read_only, error))?;
     let connection = SqliteConnection {
         connection,
         path: path.to_path_buf(),
@@ -303,6 +299,19 @@ fn open_connection(path: &Path, flags: OpenFlags, read_only: bool) -> Result<Sql
         .busy_timeout(BUSY_TIMEOUT)
         .map_err(|error| error_from_sqlite(&connection, error))?;
     Ok(connection)
+}
+
+/// A reader that can't open its file failed a read (`RRS-S0006`): it never writes, so "not writable" would point
+/// the user at the wrong fix. Only the writer's failure to open is `RRS-S0004`.
+fn open_failed(path: &Path, read_only: bool, error: rusqlite::Error) -> StoreError {
+    let reason = error.to_string();
+    if read_only {
+        return StoreError::DatabaseReadFailed { reason };
+    }
+    StoreError::DataDirectoryNotWritable {
+        path: path.to_path_buf(),
+        reason,
+    }
 }
 
 /// Refuses a file whose `schema_migrations` holds a version newer than any migration this build has. It only reads,
@@ -481,18 +490,19 @@ fn unexpected_column(index: usize, expected: &str, found: Option<&SqlValue>) -> 
 /// Sorts SQLite's error codes into the catalog's: a full disk, a damaged file and an unwritable file each have
 /// their own code (contracts 10.3). Everything else keeps SQLite's words: under `RRS-S0006` on a reader's
 /// connection, which only reads, and under `RRS-S3005` on the writer's, whose every call is part of a write.
+/// A reader that can't open or read its file failed a read too: "data folder not writable" is the writer's alone.
 fn error_from_sqlite(connection: &SqliteConnection, error: rusqlite::Error) -> StoreError {
     let reason = error.to_string();
     match error.sqlite_error_code() {
         Some(ErrorCode::DiskFull) => StoreError::DiskFull { reason },
         Some(ErrorCode::DatabaseCorrupt) | Some(ErrorCode::NotADatabase) => StoreError::IndexDamaged { reason },
+        _ if connection.read_only => StoreError::DatabaseReadFailed { reason },
         Some(ErrorCode::CannotOpen) | Some(ErrorCode::ReadOnly) | Some(ErrorCode::PermissionDenied) => {
             StoreError::DataDirectoryNotWritable {
                 path: connection.path.clone(),
                 reason,
             }
         }
-        _ if connection.read_only => StoreError::DatabaseReadFailed { reason },
         _ => StoreError::DatabaseWriteFailed { reason },
     }
 }
@@ -641,6 +651,29 @@ mod tests {
 
         assert_eq!(read_error.code(), "RRS-S0006");
         assert_eq!(write_error.code(), "RRS-S3005");
+        drop(reader);
+        drop(writer);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_reader_that_cannot_open_or_write_its_file_failed_a_read() {
+        let folder = test_folder("reader-open-or-read-only");
+        let path = folder.join("test.db");
+        let migrations = [Migration {
+            version: 1,
+            sql: FIRST_MIGRATION,
+        }];
+        let writer = open_database_for_writing(&path, &TEST_SETTINGS, &migrations).unwrap();
+        let reader = open_database_for_reading(&path).unwrap();
+        // SQLITE_READONLY on a reader's connection: the reader failed, the data folder is fine.
+        let read_only_error = query_rows(&reader, "DELETE FROM notes", &[]).unwrap_err();
+        // SQLITE_CANTOPEN while opening a reader: a failed read too, not "data folder not writable".
+        let cannot_open_error = open_database_for_reading(&folder.join("missing.db")).err().unwrap();
+
+        assert_eq!(read_only_error.code(), "RRS-S0006");
+        assert!(matches!(read_only_error, StoreError::DatabaseReadFailed { .. }));
+        assert_eq!(cannot_open_error.code(), "RRS-S0006");
         drop(reader);
         drop(writer);
         std::fs::remove_dir_all(&folder).unwrap();
