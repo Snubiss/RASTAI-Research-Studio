@@ -14,7 +14,7 @@ use crate::describe::types::TypeDescription;
 use crate::documents::{DocumentType, document_type_for_file, find_document_type};
 use crate::header::{TYPE_KEY, describe_shared_header};
 use crate::json::positions::PositionMap;
-use crate::validate::diagnostic_path;
+use crate::json::positions::diagnostic_path;
 
 const CODE_MISSING_FIELD: &str = "RRS-E1001";
 const CODE_WRONG_KIND: &str = "RRS-E1002";

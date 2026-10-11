@@ -13,7 +13,6 @@ pub mod structure;
 pub mod syntax;
 
 use rastai_diag::diagnostic::{Diagnostic, has_errors};
-use rastai_diag::path::{DiagnosticPath, format_path};
 use serde_json::Value;
 
 use crate::byte_source::ByteSource;
@@ -21,7 +20,6 @@ use crate::describe::registry::describe_all_types;
 use crate::describe::structure_check::StructureCheck;
 use crate::describe::types::TypeDescription;
 use crate::documents::{DOCUMENT_TYPES, Document, DocumentType};
-use crate::json::positions::{PositionMap, find_position};
 use crate::limits::ImportLimits;
 use crate::migrate::chain_table::MIGRATION_STEPS;
 use crate::migrate::{MigrationInput, MigrationResult, migrate_to_current};
@@ -138,18 +136,6 @@ fn stopped(type_name: String, diagnostics: Vec<Diagnostic>) -> CheckedDocument {
     }
 }
 
-/// `file:line:column#pointer` for a value in the document. The position is the pointer's own or, for a missing
-/// field, its nearest recorded parent's (the object that should hold it).
-pub(crate) fn diagnostic_path(file_name: &str, positions: &PositionMap, pointer: &str) -> String {
-    let position = find_position(positions, pointer);
-    format_path(&DiagnosticPath {
-        file: file_name.to_string(),
-        line: position.map_or(0, |place| place.line),
-        column: position.map_or(0, |place| place.column),
-        json_pointer: pointer.to_string(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,13 +177,5 @@ mod tests {
         let outcome = read("[1, 2]");
         assert_eq!(codes(&outcome), vec!["RRS-E1002"]);
         assert_eq!(outcome.diagnostics[0].path, "doc.json:1:1");
-    }
-
-    #[test]
-    fn a_missing_field_points_at_the_object_that_should_hold_it() {
-        let parsed = crate::json::reader::read_json(b"{\n  \"a\": {}\n}", &ImportLimits::default());
-        let positions = parsed.map(|parsed| parsed.positions).unwrap_or_default();
-        assert_eq!(diagnostic_path("f.json", &positions, "/a/b"), "f.json:2:3#/a/b");
-        assert_eq!(diagnostic_path("f.json", &positions, ""), "f.json:1:1");
     }
 }

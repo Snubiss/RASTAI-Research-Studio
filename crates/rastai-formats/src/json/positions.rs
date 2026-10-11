@@ -14,6 +14,8 @@
 //! tree takes (1.42 GiB for `[{"a":0},{"a":0},...]` at 8 MB); the list holds just its members (limits.rs has the
 //! measured costs).
 
+use rastai_diag::path::{DiagnosticPath, format_path};
+
 use crate::json::pointer::{ROOT_POINTER, parse_array_index, unescape_pointer_token};
 
 const POINTER_SEPARATOR: char = '/';
@@ -95,6 +97,18 @@ pub fn position_of(map: &PositionMap, pointer: &str) -> Option<TextPosition> {
 /// has no position of its own, so its diagnostic points at the object that should hold it.
 pub fn find_position(map: &PositionMap, pointer: &str) -> Option<TextPosition> {
     walk_pointer(map, pointer).deepest
+}
+
+/// `file:line:column#pointer` for a value in the document. The position is the pointer's own or, for a missing
+/// field, its nearest recorded parent's (the object that should hold it).
+pub(crate) fn diagnostic_path(file_name: &str, positions: &PositionMap, pointer: &str) -> String {
+    let position = find_position(positions, pointer);
+    format_path(&DiagnosticPath {
+        file: file_name.to_string(),
+        line: position.map_or(0, |place| place.line),
+        column: position.map_or(0, |place| place.column),
+        json_pointer: pointer.to_string(),
+    })
 }
 
 /// The number of recorded positions; one per value the reader saw. Tests use it to check nothing is recorded twice.
@@ -259,5 +273,13 @@ mod tests {
         assert_eq!(find_position(&map, "/a~2b/c"), Some(at(1, 1)));
         assert_eq!(position_of(&map, "inputs"), None);
         assert_eq!(find_position(&map, "inputs"), Some(at(1, 1)));
+    }
+
+    #[test]
+    fn a_missing_field_points_at_the_object_that_should_hold_it() {
+        let parsed = crate::json::reader::read_json(b"{\n  \"a\": {}\n}", &crate::limits::ImportLimits::default());
+        let positions = parsed.map(|parsed| parsed.positions).unwrap_or_default();
+        assert_eq!(diagnostic_path("f.json", &positions, "/a/b"), "f.json:2:3#/a/b");
+        assert_eq!(diagnostic_path("f.json", &positions, ""), "f.json:1:1");
     }
 }

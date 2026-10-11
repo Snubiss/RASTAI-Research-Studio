@@ -125,6 +125,26 @@ fn seeded_random_headers_survive_write_and_read() {
     }
 }
 
+/// Compact JSON text with every object's members in reverse key order. serde_json keeps object members sorted by
+/// key, so a different order exists only in text; this writes one by hand.
+fn reversed_compact_text(value: &Value) -> String {
+    match value {
+        Value::Object(members) => {
+            let mut parts = Vec::new();
+            for (key, member) in members.iter().rev() {
+                let key_text = serde_json::to_string(key).unwrap();
+                parts.push(format!("{key_text}:{}", reversed_compact_text(member)));
+            }
+            format!("{{{}}}", parts.join(","))
+        }
+        Value::Array(elements) => {
+            let parts: Vec<String> = elements.iter().map(reversed_compact_text).collect();
+            format!("[{}]", parts.join(","))
+        }
+        other => serde_json::to_string(other).unwrap(),
+    }
+}
+
 #[test]
 fn the_content_hash_ignores_its_own_field_spacing_and_key_order() {
     let mut seed = SEED;
@@ -135,9 +155,15 @@ fn the_content_hash_ignores_its_own_field_spacing_and_key_order() {
     let written = pretty_json(&header).unwrap();
     let reread = read_back(&written).value.unwrap();
     assert_eq!(content_hash_of_value(&reread), hash);
-    // The same members, compact and in another order, hash the same.
-    let compact: Value = serde_json::from_slice(&serde_json::to_vec(&reread).unwrap()).unwrap();
-    assert_eq!(content_hash_of_value(&compact), hash);
+    // The same members, compact and in reverse key order, read back and hash the same.
+    let reordered = reversed_compact_text(&reread);
+    assert_ne!(reordered.as_bytes(), written.as_slice());
+    assert!(
+        reordered.starts_with("{\"type\""),
+        "the text must really be in another order: {reordered}"
+    );
+    let reordered_value = read_back(reordered.as_bytes()).value.unwrap();
+    assert_eq!(content_hash_of_value(&reordered_value), hash);
 }
 
 #[test]

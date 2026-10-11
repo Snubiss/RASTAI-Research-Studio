@@ -12,10 +12,17 @@ use rastai_diag::path::{DiagnosticPath, format_path};
 
 use crate::documents::{Document, document_header};
 use crate::json::pointer::join_pointer;
-use crate::semver::{parse_version, version_matches};
+use crate::semver::{Version, parse_version, version_matches};
 
 const CODE_PLUGIN_MISSING: &str = "RRS-E3001";
 const REQUIRES_POINTER: &str = "/requires";
+// Any release does to find out whether a range reads; the answer to the match itself is thrown away.
+const RANGE_PROBE_VERSION: Version = Version {
+    major: 0,
+    minor: 0,
+    patch: 0,
+    pre_release: String::new(),
+};
 
 /// Plain facts the caller looked up.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,7 +41,11 @@ pub fn check_environment(document: &Document, facts: &EnvironmentFacts) -> Vec<D
 }
 
 /// Each required plugin must be enabled at a version inside its range; otherwise `RRS-E3001` at
-/// `#/requires/<plugin_id>`. A range semver.rs can't read is reported with its own code (`RRS-E1004`).
+/// `#/requires/<plugin_id>`. A range semver.rs can't read is reported with its own code (`RRS-E1004`) whether the
+/// plugin is enabled or not, so the same file gets the same diagnostic on every machine.
+///
+/// The paths carry the JSON pointer only, with no file name or position: the layout's `check_environment` takes a
+/// `Document`, which no longer knows its file. Callers that show these to people put their file name in front.
 pub fn check_requirements(requires: &BTreeMap<String, String>, facts: &EnvironmentFacts) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for (plugin_id, range) in requires {
@@ -42,29 +53,38 @@ pub fn check_requirements(requires: &BTreeMap<String, String>, facts: &Environme
             json_pointer: join_pointer(REQUIRES_POINTER, plugin_id),
             ..DiagnosticPath::default()
         });
-        let enabled_version = facts
-            .enabled_plugins
-            .iter()
-            .find(|(enabled_id, _)| enabled_id == plugin_id)
-            .map(|(_, version)| version.as_str());
         let values = [("plugin_id", plugin_id.as_str()), ("range", range.as_str())];
-        match enabled_version.map(|version| plugin_version_matches(range, version)) {
-            Some(Ok(true)) => {}
-            Some(Err(code)) => diagnostics.push(diagnostic_at(code, &values, &path)),
-            Some(Ok(false)) | None => diagnostics.push(diagnostic_at(CODE_PLUGIN_MISSING, &values, &path)),
+        if let Some(code) = range_problem(range) {
+            diagnostics.push(diagnostic_at(code, &values, &path));
+        } else if !plugin_is_satisfied(plugin_id, range, facts) {
+            diagnostics.push(diagnostic_at(CODE_PLUGIN_MISSING, &values, &path));
         }
     }
     diagnostics
 }
 
-/// Whether an enabled plugin's version is inside the range. The range comes from the document, so a bad one is
-/// the document's problem (`Err` with its code). The version comes from an installed manifest, already checked
-/// when it was installed; one that still doesn't read counts as not matching.
-fn plugin_version_matches(range: &str, version_text: &str) -> Result<bool, &'static str> {
-    let Ok(version) = parse_version(version_text) else {
-        return Ok(false);
+/// The code for a range that doesn't read, or `None` for a good one. The range comes from the document, so a bad
+/// one is the document's problem. Matching any version tells: semver.rs reads the whole range before comparing.
+fn range_problem(range: &str) -> Option<&'static str> {
+    version_matches(range, &RANGE_PROBE_VERSION)
+        .err()
+        .map(|error| error.code())
+}
+
+/// Whether the plugin is enabled at a version inside a range already known to read. The version comes from an
+/// installed manifest, already checked when it was installed; one that still doesn't read counts as not matching.
+fn plugin_is_satisfied(plugin_id: &str, range: &str, facts: &EnvironmentFacts) -> bool {
+    let Some((_, version_text)) = facts
+        .enabled_plugins
+        .iter()
+        .find(|(enabled_id, _)| enabled_id == plugin_id)
+    else {
+        return false;
     };
-    version_matches(range, &version).map_err(|error| error.code())
+    let Ok(version) = parse_version(version_text) else {
+        return false;
+    };
+    version_matches(range, &version).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -119,6 +139,8 @@ mod tests {
     fn a_range_that_does_not_read_is_e1004_and_ids_are_escaped() {
         let expected = vec![pair("RRS-E1004", "#/requires/a~1b")];
         assert_eq!(reported(&[("a/b", "about one")], &[("a/b", "1.0.0")]), expected);
+        // The same bad range gives the same code when the plugin isn't installed at all.
+        assert_eq!(reported(&[("a/b", "about one")], &[]), expected);
         // A broken installed version counts as not matching.
         assert_eq!(
             reported(&[("x", "^1")], &[("x", "one")]),
