@@ -1,0 +1,9 @@
+{
+  "cpu_model": "AMD Ryzen 9 7900X 12-Core Processor",
+  "cpu_count": 2,
+  "ram_total_bytes": 66226421760,
+  "driver_version": "",
+  "backend": "cpu",
+  "gpus": [],
+  "notes": ["RRS-H0001"]
+}

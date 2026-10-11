@@ -134,7 +134,7 @@ pub struct EnvironmentChoice {
     pub notes: Vec<Diagnostic>,          // RRS-H0001, RRS-H4001, ...: the reason shown to the user
 }
 
-pub async fn detect_hardware() -> Result<HardwareProfile, NodeError> { ... }       // hardware.rs
+pub async fn detect_hardware(sources: &HardwareSources) -> DetectedHardware { ... }  // hardware.rs: never fails; notes carry H0001, H0002
 pub fn pick_environment_id(hardware: &HardwareProfile) -> EnvironmentChoice { ... } // environments.rs
 ```
 

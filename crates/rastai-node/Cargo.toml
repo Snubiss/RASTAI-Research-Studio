@@ -1,0 +1,40 @@
+[package]
+name = "rastai-node"
+description = "Rastai's node agent: identity, the handshake, hardware and telemetry, and later jobs, leases and models"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# M1-42 lands the entry, the identity, the local handshake, GetHardware, and the hardware and telemetry readers
+# (layout: rust-node-gateway-proto.md section 7, build-order step 1). Jobs (M1-43), run events and live streams
+# (M1-44), reattach and heartbeats (M1-45) add their files, and with them rastai-store (the event-log reader,
+# free_bytes) and the later internal crates of contracts 2.1.
+[dependencies]
+rastai-diag = { path = "../rastai-diag" }
+# Paths, ids, random bytes, versions, settings and the Diagnostic conversion for the wire.
+rastai-core = { path = "../rastai-core" }
+# BLAKE3 of the session token in the node's signed answer (the one blake3 wrapper, contracts 2.4 rule 8).
+rastai-formats = { path = "../rastai-formats" }
+# NodeService and its messages. The tonic service code is behind the grpc feature.
+rastai-proto = { path = "../rastai-proto", features = ["grpc"] }
+# node.sock: bind with the same-user checks, and serve gRPC on it.
+rastai-transport = { path = "../rastai-transport" }
+# Child processes for nvidia-smi and rocm-smi with a timeout, the telemetry loops, and the async service.
+tokio = { workspace = true, features = ["process", "rt", "time", "sync", "io-util", "macros"] }
+# The NodeService server. "codegen" re-exports async_trait, which the generated service trait needs.
+tonic = { workspace = true, features = ["server", "router", "codegen"] }
+# paired_daemons.json, and the rocm-smi JSON output.
+serde_json = { workspace = true }
+# Only identity.rs imports it (contracts 2.5; deny.toml names this crate its one owner).
+ed25519-dalek = { workspace = true }
+
+[dev-dependencies]
+# #[tokio::test], and a multi-thread runtime for the tests that run the node beside a client.
+tokio = { workspace = true, features = ["process", "rt", "rt-multi-thread", "time", "sync", "io-util", "macros"] }
+# The NodeService client the handshake tests call over node.sock.
+tonic = { workspace = true, features = ["channel", "codegen"] }
+
+[lints]
+workspace = true
