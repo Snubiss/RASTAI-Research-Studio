@@ -1,7 +1,7 @@
 # CI, started by hand (contracts 15.9, plan 8.7). The workflow stays thin: each job checks out
 # the repository, installs the pinned dev tools (tools/ci/install-dev-tools), restores its caches and runs one `just`
-# recipe, so a red job reproduces locally with the same command. The job ids are the required status checks of
-# branch protection (plan 8.4); tests/workspace/ci-workflows.test.js keeps the two lists equal.
+# recipe, so a red job reproduces locally with the same command. The job ids become the required status checks of
+# branch protection once CI returns (plan 8.4); tests/workspace/ci-workflows.test.js keeps the two lists equal.
 #
 # Steps that repeat are written once, where they first appear (`&name`), and reused by reference (`*name`).
 # Actions are pinned to a commit, with the release tag beside it, so a moved tag can't change what runs.
