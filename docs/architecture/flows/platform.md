@@ -391,9 +391,9 @@ sequenceDiagram
     SRV-->>CLI: exit, RRS-S0001 if its health stays down for 10 s
   end
   SRV->>SRV: crash check on state/daemon.session.json, then write a new one, see 11
+  SRV->>SRV: owner.token must be 0600, else refuse to start with RRS-C1008, or RRS-C1010 when it can't be read or created
   SRV->>STO: open rastai.db and vault.db, WAL, quick_check, migrations
   STO-->>SRV: one writer thread per database
-  SRV->>SRV: owner.token must be 0600, else refuse to start with RRS-C1008
   SRV->>SRV: load identity keys
   SRV->>STO: mark unfinished journal rows RRS-C0005
   SRV->>ND: start on its own tokio runtime
@@ -432,6 +432,7 @@ sequenceDiagram
   - data directory not writable → `RRS-S0004`;
   - no free port in 47820–47829 → `RRS-C1001`;
   - `owner.token` readable by group or others → the daemon refuses to start with `RRS-C1008` (error), fix text: `chmod 600 <path>` (ADR-0007, "Checked by"). It never rotates or rewrites the file on its own, because a loose mode may mean someone else already read the token.
+  - `owner.token` can't be read or created (a permission, a folder in its place, an empty file) → `RRS-C1010`, before any database opens or listener binds; the fix is to correct the permissions, or delete the file so the next start writes a new one.
 - **A settings file that doesn't parse** (`<config>/settings.json`, `<config>/keybindings.json`, or a project's `settings.json` at `project.open`, 10.1) never stops the daemon and is never overwritten:
   - The daemon starts with that layer empty, so defaults and the other layers apply. It reports the `RRS-E0xxx` (syntax) or `RRS-E1xxx` (structure) diagnostic with the file and line through `diagnostic.reported`, and the UI shows it as a banner.
   - Every command that would write that file (`settings.set` at that level, the keybinding editor's save) is refused with `RRS-C0009` ("fix the settings file first"). Writing a fresh file from the empty layer would drop the user's other keys.

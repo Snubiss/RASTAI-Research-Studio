@@ -2306,7 +2306,9 @@ crates/rastai-server/
       request_gate.rs         header parsing in check_request_gate never panics; every malformed head is refused
       connect_json.rs         the hand-written Connect JSON decoder on arbitrary bytes
   tests/
-    gate.rs                   one request head per branch of flows/platform.md 4.2
+    gate.rs                   one request head per branch of flows/platform.md 4.2, then the same rules through a running daemon
+    startup.rs                owner.token created 0600 or refused (RRS-C1008, RRS-C1010) before anything starts; port fallback
+                              and daemon.port; healthy within 1 s; a clean stop removes the runtime files and frees the lock
     connect_protocol.rs       envelopes and JSON against fixtures/proto-golden/
     execute_paths.rs          one row per branch of flows/platform.md 3.2
     dispatch_complete.rs      every core command id reaches its own arm, never the plugin fall-through
@@ -2346,20 +2348,32 @@ pub struct Server {
     pub scheduler: Scheduler,
     pub identity: NodeIdentity,                   // daemon.key, through rastai_node::identity (the one Ed25519 wrapper)
     pub archiver: ArchiverHandle,                 // (M11) wake-up signal, status and lag; idle when archive.enabled is false
+    pub shutdown: watch::Sender<bool>,            // request_shutdown sets it: the signal handler, system.shutdown
 }
 
 // daemon.rs
 pub struct DaemonOptions { pub headless: bool, pub port: Option<u16>, pub set_flags: Vec<String>, pub open_browser: bool }
 
 pub async fn run_daemon(options: DaemonOptions) -> Result<(), ServerError> {
-    let paths = resolve_paths(&read_path_environment());
-    let settings = load_settings_layers(&paths, &options)?;
-    let _daemon_lock = take_daemon_lock(&paths)?;                 // RRS-S0001
-    ensure_owner_token(&paths)?;                                  // RRS-C1008 when group or others can read it; never rewritten
+    let paths = resolve_paths(&read_path_environment()?);
+    let running = start_daemon(paths, &options).await?;
+    stop_on_signals(&running.server);                             // SIGTERM, SIGINT; tests call request_shutdown instead
+    wait_for_shutdown(running).await                              // shutdown.rs: stop serving, remove daemon.port and
+}                                                                 // daemon.sock, close the store, release the lock
+
+// Everything up to serving, so tests start a daemon on temporary folders. RunningDaemon holds the server, the port,
+// the serve tasks and the daemon lock.
+pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<RunningDaemon, ServerError> {
+    let settings = load_settings_layers(&paths, options)?;        // M1-26: defaults, environment, --set; the files with M1-27
+    let daemon_lock = take_daemon_lock(&paths)?;                  // RRS-S0001
+    start_logger(&paths, &settings);                              // after the lock: one daemon rotates the log file
+    let owner_token_hash = ensure_owner_token(&paths)?;           // RRS-C1008 when group or others can read it, RRS-C1010
+                                                                  // when it can't be read or created; never rewritten
     let store = open_store(&paths)?;                              // migrations, writer threads
     let identity = load_or_create_identity(&daemon_key_path(&paths))?;   // rastai_node::identity
     let node = start_embedded_node(&paths, &settings, &identity).await?;
-    let server = build_server(paths, settings, store, identity);
+    let auth = new_auth_state(owner_token_hash, &daemon_id_prefix);   // login codes, sessions (http/sessions.rs)
+    let server = Arc::new(build_server(paths, settings, store, auth, identity));
     discover_plugins(&server)?;                                   // manifests and saved states only, so replayed records match handlers (12.5)
     replay_daemon_log(&server).await?;                            // index records after the cursor
     connect_to_node(&server, &node).await?;                       // handshake, reconcile (Register before Hello), resume run tails
@@ -2368,12 +2382,14 @@ pub async fn run_daemon(options: DaemonOptions) -> Result<(), ServerError> {
     start_background_tasks(&server);                              // scheduler, heartbeat watch, retention, GC timer,
                                                                   // pending plugin handler calls (12.5), (M11) the archiver
                                                                   // with its catch-up pass, (L2) the snapshot timer
-    listen_http(&server).await?;                                  // writes daemon.port; health ok from here
-    wait_for_shutdown(&server).await
+    let http = listen_http(&server, preferred_port, listen_address).await?;   // writes daemon.port; health ok from here
+    Ok(RunningDaemon { server, http_port: http.tcp_port, serve_tasks: http.serve_tasks, daemon_lock })
 }
 ```
 
-This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cli` calls it for `rastai serve`. The `owner.token` check runs before the databases open, so a refused start leaves nothing half started.
+M1-26 part 1 builds the lock, the owner token, the store, `build_server` (with `auth`) and `listen_http`; `start_embedded_node` is a stub until M1-47, the identity key arrives with `rastai_node::identity` (M1-42), and every other step with the task that builds it. Until the daemon key exists, the cookie's daemon id prefix (`rastai_session_<prefix>`) is the first 8 hex digits of a hash of the owner token's hash: stable for the installation, different on another machine, and it says nothing about the token.
+
+This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cli` calls it for `rastai serve`. The `owner.token` check runs before the databases open, so a refused start leaves nothing half started. Ports: `--port`, else `daemon.port`, is tried first, then 47820–47829 in order (`candidate_ports`); none free is `RRS-C1001`. `daemon.listen` that isn't an IP address falls back to loopback, and a non-loopback one logs a warning at every start.
 
 ### 8.3 Module APIs
 
@@ -2598,7 +2614,9 @@ fn allowed_without_origin(request: &RequestHead) -> bool {
 - **Bearer requests** may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed iframe) is refused.
 - **Cross-origin browser clients are refused in v1.** Two routes are designed for Phase 2 and not built: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand).
 - **`owner.token`** that group or others can read stops the start with `RRS-C1008` and the fix `chmod 600 <path>` (`auth_files.rs`); the daemon never rotates or rewrites it.
-- **Header parsing** is fuzzed (`fuzz/fuzz_targets/request_gate.rs`): a malformed header is a refusal, never a panic.
+- **Header parsing** is fuzzed (`fuzz/fuzz_targets/request_gate.rs`): a malformed header is a refusal, never a panic. `read_request_head(method, path, headers, cookie_name)` builds the `RequestHead`; a Host, Origin, `Sec-Fetch-Site`, `Rastai-Session-Key` or `Authorization` header that is sent twice or isn't visible ASCII is refused with the code of the rule it feeds (`RRS-C1003`, `RRS-C1004`, `RRS-C1002`), and two different values for this daemon's session cookie (a page on another loopback port can set a cookie of that name) are `RRS-C1002`: the gate never guesses which one is meant.
+- **Public paths are plain.** Health, `/plugins/...` and the web app are public; `/api/`, `/rastai.`, `/v1` and `/mcp` never are, and neither is any path with `..`, `//`, `%` or `\`, so a crafted path can't reach the API through the public rule. The router puts the gate in front of the fallback too, so an unknown path is refused like a known one.
+- **Refusals** are the diagnostic as JSON (`render_json`) with 401 for `RRS-C1002` and `RRS-C1007`, 403 for `RRS-C1003` and `RRS-C1004`, and 400 for a login body without a code (`RRS-C0002`); part 2 wraps them in the Connect error envelope on the Connect paths (11.3). Sign-in answers carry `Cache-Control: no-store`.
 
 - **Async handlers, sync helpers.** Handlers are `async fn` because they await the store, nodes or the gateway; everything they call that doesn't wait (stats, argument building, row building) is a plain sync function.
 - **`active_parameter_count`** differs from the total only for MoE designs (§11: total vs active parameters).
@@ -2663,6 +2681,7 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Test | Where | What |
 |---|---|---|
 | Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET with no Origin and `Sec-Fetch-Site: same-origin` passes, `same-site` → `RRS-C1004`; a cookie POST with no Origin → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards; a cookie POST with the right Origin and no `Rastai-Session-Key`, or a wrong one → `RRS-C1002`; a cookie GET of a blob with no key passes |
+| Startup | `tests/startup.rs` | first start writes `owner.token` 0600 (folder 0700) and `daemon.port`, healthy within 1 s; a 0644 token → `RRS-C1008` with no socket, port file or database, the file unchanged, and after it is deleted the next start writes a new 0600 token; a folder or an empty file in its place → `RRS-C1010`; a busy port falls back into 47820–47829 and `daemon.port` names it; no free port → `RRS-C1001`; a second daemon → `RRS-S0001`; a clean stop removes `daemon.port` and `daemon.sock` and frees the lock |
 | Blob headers | `tests/blob_headers.rs` | an uploaded HTML blob is served as an attachment with type `application/octet-stream` and the sandbox CSP; the same for SVG and an unknown type; `image/png` is inline but still carries `nosniff` and `Cross-Origin-Resource-Policy: same-origin` |
 | Fuzz | `fuzz/fuzz_targets/request_gate.rs`, `connect_json.rs` | nightly, 10 minutes each (contracts §12.5) |
 | Connect | `tests/connect_protocol.rs` | unary binary and JSON; stream envelopes and the end-of-stream trailer; JSON equals `fixtures/proto-golden/commands/*.json` |
