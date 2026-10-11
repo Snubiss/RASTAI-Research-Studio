@@ -15,8 +15,18 @@ publish.workspace = true
 # rastai-transport opens every channel itself over a Unix socket. tonic-prost is the codec the generated code calls.
 [dependencies]
 prost = { workspace = true }
-tonic = { workspace = true, features = ["codegen"] }
-tonic-prost = { workspace = true }
+tonic = { workspace = true, features = ["codegen"], optional = true }
+tonic-prost = { workspace = true, optional = true }
+
+# The tonic service code is behind `grpc`, off by default, so a crate that needs only the messages (rastai-core,
+# which never depends on tonic: layout rust-control-plane.md 5.4) gets prost alone. Only the crates that serve or
+# call a gRPC service turn it on.
+[features]
+grpc = ["dep:tonic", "dep:tonic-prost"]
+
+[dev-dependencies]
+# tests/services.rs builds the tonic server stubs, so the tests turn `grpc` on for this crate itself.
+rastai-proto = { path = ".", features = ["grpc"] }
 
 [lints]
 workspace = true

@@ -5,6 +5,9 @@
 //! `rastai_proto::<package>::v1`, and its body is the generated file `src/generated/rastai.<package>.v1.rs`, which
 //! `just codegen` writes and nobody edits. prost refers to another package's types by relative paths
 //! (`super::super::common::v1::Diagnostic`), so this tree must mirror the package names exactly.
+//!
+//! The tonic clients and servers are behind the `grpc` feature, off by default, so a crate that needs only the
+//! messages (rastai-core) never builds tonic (layout: rust-control-plane.md section 5.4).
 
 pub mod common {
     pub mod v1 {
@@ -24,13 +27,16 @@ pub mod events {
     }
 }
 
-// node.v1 and worker.v1 also have services, so their generated file ends by including the tonic client and server
-// code (`rastai.<package>.v1.tonic.rs`) that protoc-gen-tonic writes beside it. Its request routers are one long
-// match per service; the small-functions rule (clippy's too_many_lines) is for hand-written code, not generated code.
+// node.v1 and worker.v1 also have services: with the `grpc` feature their module also includes the tonic client and
+// server code (`rastai.<package>.v1.tonic.rs`) that protoc-gen-tonic writes beside the messages. Its request routers
+// are one long match per service; the small-functions rule (clippy's too_many_lines) is for hand-written code, not
+// generated code.
 pub mod node {
     #[allow(clippy::too_many_lines)]
     pub mod v1 {
         include!("generated/rastai.node.v1.rs");
+        #[cfg(feature = "grpc")]
+        include!("generated/rastai.node.v1.tonic.rs");
     }
 }
 
@@ -38,5 +44,7 @@ pub mod worker {
     #[allow(clippy::too_many_lines)]
     pub mod v1 {
         include!("generated/rastai.worker.v1.rs");
+        #[cfg(feature = "grpc")]
+        include!("generated/rastai.worker.v1.tonic.rs");
     }
 }
