@@ -263,7 +263,8 @@ crates/rastai-transport/
     sse.rs                  server-sent-event line reader (ported from the spike's take_complete_lines)
     transfer.rs             resumable whole-file transfers: chunk reader, PartialFile, BLAKE3 verify (via rastai_formats::hashing)
   tests/
-    local_socket.rs         bind, connect, peer credentials, 0700 directory, stale socket file replaced
+    local_socket.rs         bind, connect, peer credentials, 0700 directory (one another user owns, or a looser mode,
+                            is refused: /tmp/rastai-<uid>, contracts 8.1), stale socket file replaced
     grpc_local.rs           a tiny tonic service over a Unix socket, unary and streaming
     transfer_resume.rs      interrupt a transfer mid-file, resume from offset, hash matches
     ssh_loopback.rs         real OpenSSH against a test sshd (ignored unless RASTAI_TEST_SSH is set)

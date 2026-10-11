@@ -17,8 +17,9 @@ members = [
 ]
 # cargo-fuzz needs its own nightly workspace per crate (contracts §12.5); the spike is history and never built here.
 exclude = [
-  "crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz", "crates/rastai-mcp/fuzz",
-  "crates/rastai-transport/fuzz", "crates/rastai-node/fuzz", "crates/rastai-archive/fuzz", "spike",
+  "crates/rastai-formats/fuzz", "crates/rastai-core/fuzz", "crates/rastai-store/fuzz", "crates/rastai-server/fuzz",
+  "crates/rastai-mcp/fuzz", "crates/rastai-transport/fuzz", "crates/rastai-node/fuzz", "crates/rastai-archive/fuzz",
+  "spike",
 ]
 
 [workspace.package]

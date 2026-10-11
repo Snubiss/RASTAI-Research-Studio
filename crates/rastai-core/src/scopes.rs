@@ -59,27 +59,26 @@ pub const FIXED_SCOPES: &[Scope] = &[
 
 /// The scope's text: `conversations.read`, or `plugin:<plugin_id>`.
 pub fn scope_name(scope: &Scope) -> String {
-    let fixed_name = match scope {
-        Scope::Read => "read",
-        Scope::Chat => "chat",
-        Scope::ConversationsRead => "conversations.read",
-        Scope::GatewaySpend => "gateway.spend",
-        Scope::InferenceManage => "inference.manage",
-        Scope::Psychology => "psychology",
-        Scope::Training => "training",
-        Scope::Eval => "eval",
-        Scope::Designer => "designer",
-        Scope::Gym => "gym",
-        Scope::SandboxSpawn => "sandbox.spawn",
-        Scope::Data => "data",
-        Scope::Project => "project",
-        Scope::PluginsManage => "plugins.manage",
-        Scope::Remote => "remote",
-        Scope::Secrets => "secrets",
-        Scope::SystemAdmin => "system.admin",
-        Scope::Plugin(plugin_id) => return format!("{PLUGIN_SCOPE_PREFIX}{plugin_id}"),
-    };
-    fixed_name.to_string()
+    match scope {
+        Scope::Read => "read".to_string(),
+        Scope::Chat => "chat".to_string(),
+        Scope::ConversationsRead => "conversations.read".to_string(),
+        Scope::GatewaySpend => "gateway.spend".to_string(),
+        Scope::InferenceManage => "inference.manage".to_string(),
+        Scope::Psychology => "psychology".to_string(),
+        Scope::Training => "training".to_string(),
+        Scope::Eval => "eval".to_string(),
+        Scope::Designer => "designer".to_string(),
+        Scope::Gym => "gym".to_string(),
+        Scope::SandboxSpawn => "sandbox.spawn".to_string(),
+        Scope::Data => "data".to_string(),
+        Scope::Project => "project".to_string(),
+        Scope::PluginsManage => "plugins.manage".to_string(),
+        Scope::Remote => "remote".to_string(),
+        Scope::Secrets => "secrets".to_string(),
+        Scope::SystemAdmin => "system.admin".to_string(),
+        Scope::Plugin(plugin_id) => format!("{PLUGIN_SCOPE_PREFIX}{plugin_id}"),
+    }
 }
 
 /// The scope a text names. Anything else is `RRS-E1004` (not one of the allowed values).

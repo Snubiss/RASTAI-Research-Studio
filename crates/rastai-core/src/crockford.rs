@@ -91,6 +91,15 @@ mod tests {
         *state
     }
 
+    /// `count` bytes of test input.
+    fn random_test_bytes(state: &mut u64, count: usize) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(count);
+        for _ in 0..count {
+            bytes.push(next_random(state) as u8);
+        }
+        bytes
+    }
+
     #[test]
     fn known_values() {
         assert_eq!(encode_base32(&[]), "");
@@ -112,7 +121,7 @@ mod tests {
     fn every_byte_count_round_trips() {
         let mut state = GARBAGE_SEED;
         for byte_count in 0..40 {
-            let bytes: Vec<u8> = (0..byte_count).map(|_| next_random(&mut state) as u8).collect();
+            let bytes = random_test_bytes(&mut state, byte_count);
             let text = encode_base32(&bytes);
             assert_eq!(text.len(), base32_length(byte_count));
             assert_eq!(decode_base32(&text, byte_count).unwrap(), bytes, "{text}");
@@ -123,8 +132,8 @@ mod tests {
     fn text_order_is_byte_order() {
         let mut state = GARBAGE_SEED;
         for _ in 0..GARBAGE_CASES {
-            let first: Vec<u8> = (0..16).map(|_| next_random(&mut state) as u8).collect();
-            let second: Vec<u8> = (0..16).map(|_| next_random(&mut state) as u8).collect();
+            let first = random_test_bytes(&mut state, 16);
+            let second = random_test_bytes(&mut state, 16);
             assert_eq!(encode_base32(&first).cmp(&encode_base32(&second)), first.cmp(&second));
         }
     }
@@ -148,7 +157,7 @@ mod tests {
         let mut state = GARBAGE_SEED;
         for _ in 0..GARBAGE_CASES {
             let length = (next_random(&mut state) % 60) as usize;
-            let bytes: Vec<u8> = (0..length).map(|_| next_random(&mut state) as u8).collect();
+            let bytes = random_test_bytes(&mut state, length);
             let text = String::from_utf8_lossy(&bytes);
             for byte_count in [1, 16, 32] {
                 if let Some(decoded) = decode_base32(&text, byte_count) {

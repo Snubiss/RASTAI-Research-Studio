@@ -8,7 +8,9 @@ and §15.1.
 
 - **Synchronous, and no I/O.** No tokio, axum, tonic, rusqlite or network crate. No files, no sockets, no SQLite.
   The only reads from the operating system are environment variables (`read_path_environment`, and settings from
-  M1-21) and `/dev/urandom` (`random.rs`).
+  M1-21), the owner of `/proc/self` (the user id, in `read_path_environment`) and `/dev/urandom` (`random.rs`).
+- **Fuzz targets** for the parsers of untrusted text live in `fuzz/` (its own nightly workspace, contracts §12.5):
+  `base32_decode` and `rfc3339_parse`. A new parser here adds its target in the same PR (ADR-0037).
 - **The only place data paths are built** (contracts §8.1, ADR-0014). No other crate reads `RASTAI_HOME`,
   `HOME`, `XDG_*`, `HF_HUB_CACHE` or `HF_HOME`; inside this crate only `src/paths.rs` does.
 - **No twins of generated types.** State enums, `Diagnostic` and `CommandDescriptor` on the wire are

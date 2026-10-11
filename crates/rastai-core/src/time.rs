@@ -4,6 +4,7 @@
 //! Dates are converted with the proleptic Gregorian calendar (Howard Hinnant's `days_from_civil` and
 //! `civil_from_days`), counting days from 1970-01-01. Leap seconds don't exist in Unix time, so `:60` is refused.
 
+use std::ops::Range;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::CoreError;
@@ -21,9 +22,30 @@ const EPOCH_DAY_FROM_MARCH_ZERO: i64 = 719_468;
 // RFC 3339 has four-digit years.
 const FIRST_YEAR: i64 = 0;
 const LAST_YEAR: i64 = 9999;
-// "YYYY-MM-DDTHH:MM:SS": the part before the fraction and the zone.
+// "YYYY-MM-DDTHH:MM:SS": the part before the fraction and the zone, and where each field and separator sits.
 const DATE_TIME_LENGTH: usize = 19;
+const YEAR_DIGITS: Range<usize> = 0..4;
+const MONTH_DIGITS: Range<usize> = 5..7;
+const DAY_DIGITS: Range<usize> = 8..10;
+const HOUR_DIGITS: Range<usize> = 11..13;
+const MINUTE_DIGITS: Range<usize> = 14..16;
+const SECOND_DIGITS: Range<usize> = 17..19;
+const FIRST_DATE_DASH: usize = 4;
+const SECOND_DATE_DASH: usize = 7;
+const DATE_TIME_SEPARATOR: usize = 10;
+const FIRST_CLOCK_COLON: usize = 13;
+const SECOND_CLOCK_COLON: usize = 16;
 const MILLISECOND_DIGITS: usize = 3;
+// A numeric zone, "+HH:MM" or "-HH:MM".
+const OFFSET_LENGTH: usize = 6;
+const OFFSET_SIGN: usize = 0;
+const OFFSET_HOUR_DIGITS: Range<usize> = 1..3;
+const OFFSET_COLON: usize = 3;
+const OFFSET_MINUTE_DIGITS: Range<usize> = 4..6;
+// The largest clock values. A second of 60 would be a leap second, which Unix time doesn't have.
+const LAST_HOUR: i64 = 23;
+const LAST_MINUTE: i64 = 59;
+const LAST_SECOND: i64 = 59;
 
 // Why a timestamp was refused; carried in `CoreError::InvalidTimestamp.reason`.
 const BAD_LAYOUT: &str = "expected YYYY-MM-DDTHH:MM:SS, an optional fraction, then Z or an offset like +02:00";
@@ -82,18 +104,18 @@ pub fn parse_rfc3339(text: &str) -> Result<i64, CoreError> {
     let (millisecond, zone_start) = read_fraction(bytes).ok_or_else(|| refuse(BAD_FRACTION))?;
     let offset_seconds = read_offset(&bytes[zone_start..]).ok_or_else(|| refuse(BAD_OFFSET))?;
     let date_time = DateTime {
-        year: digits_value(&bytes[0..4]),
-        month: digits_value(&bytes[5..7]),
-        day: digits_value(&bytes[8..10]),
-        hour: digits_value(&bytes[11..13]),
-        minute: digits_value(&bytes[14..16]),
-        second: digits_value(&bytes[17..19]),
+        year: digits_value(&bytes[YEAR_DIGITS]),
+        month: digits_value(&bytes[MONTH_DIGITS]),
+        day: digits_value(&bytes[DAY_DIGITS]),
+        hour: digits_value(&bytes[HOUR_DIGITS]),
+        minute: digits_value(&bytes[MINUTE_DIGITS]),
+        second: digits_value(&bytes[SECOND_DIGITS]),
         millisecond,
     };
     if !is_valid_date(date_time.year, date_time.month, date_time.day) {
         return Err(refuse(BAD_DATE));
     }
-    if date_time.hour > 23 || date_time.minute > 59 || date_time.second > 59 {
+    if date_time.hour > LAST_HOUR || date_time.minute > LAST_MINUTE || date_time.second > LAST_SECOND {
         return Err(refuse(BAD_CLOCK));
     }
     Ok(unix_ms_from_date_time(&date_time) - offset_seconds * MILLISECONDS_PER_SECOND)
@@ -102,9 +124,9 @@ pub fn parse_rfc3339(text: &str) -> Result<i64, CoreError> {
 /// `YYYY-MM-DDTHH:MM:SS`: digits where digits go, and the separators in their places.
 fn has_date_time_layout(bytes: &[u8]) -> bool {
     bytes.iter().enumerate().all(|(index, byte)| match index {
-        4 | 7 => *byte == b'-',
-        10 => *byte == b'T' || *byte == b't',
-        13 | 16 => *byte == b':',
+        FIRST_DATE_DASH | SECOND_DATE_DASH => *byte == b'-',
+        DATE_TIME_SEPARATOR => *byte == b'T' || *byte == b't',
+        FIRST_CLOCK_COLON | SECOND_CLOCK_COLON => *byte == b':',
         _ => byte.is_ascii_digit(),
     })
 }
@@ -141,21 +163,25 @@ fn read_offset(zone: &[u8]) -> Option<i64> {
     if zone == b"Z" || zone == b"z" {
         return Some(0);
     }
-    let is_offset_layout = zone.len() == 6
-        && (zone[0] == b'+' || zone[0] == b'-')
-        && zone[1..3].iter().all(u8::is_ascii_digit)
-        && zone[3] == b':'
-        && zone[4..6].iter().all(u8::is_ascii_digit);
+    let is_offset_layout = zone.len() == OFFSET_LENGTH
+        && (zone[OFFSET_SIGN] == b'+' || zone[OFFSET_SIGN] == b'-')
+        && zone[OFFSET_HOUR_DIGITS].iter().all(u8::is_ascii_digit)
+        && zone[OFFSET_COLON] == b':'
+        && zone[OFFSET_MINUTE_DIGITS].iter().all(u8::is_ascii_digit);
     if !is_offset_layout {
         return None;
     }
-    let hours = digits_value(&zone[1..3]);
-    let minutes = digits_value(&zone[4..6]);
-    if hours > 23 || minutes > 59 {
+    let hours = digits_value(&zone[OFFSET_HOUR_DIGITS]);
+    let minutes = digits_value(&zone[OFFSET_MINUTE_DIGITS]);
+    if hours > LAST_HOUR || minutes > LAST_MINUTE {
         return None;
     }
     let seconds = hours * SECONDS_PER_HOUR + minutes * SECONDS_PER_MINUTE;
-    Some(if zone[0] == b'-' { -seconds } else { seconds })
+    if zone[OFFSET_SIGN] == b'-' {
+        Some(-seconds)
+    } else {
+        Some(seconds)
+    }
 }
 
 /// The value of ASCII digits the caller already checked.
@@ -253,6 +279,28 @@ mod tests {
     const MARCH_FIRST_2000_MS: i64 = 951_868_800_000;
     const GARBAGE_SEED: u64 = 0xD1B5_4A32_D192_ED03;
     const GARBAGE_CASES: usize = 3000;
+    const GARBAGE_MAX_LENGTH: u64 = 32;
+    // Characters a timestamp is made of, so the garbage gets past the first checks often.
+    const TIMESTAMP_CHARACTERS: &[u8] = b"0123456789-:T.Z+z ";
+
+    /// xorshift64: enough to make varied test input without a dependency.
+    fn next_random(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    /// Up to `GARBAGE_MAX_LENGTH` characters drawn from `TIMESTAMP_CHARACTERS`.
+    fn random_timestamp_text(state: &mut u64) -> String {
+        let length = next_random(state) % GARBAGE_MAX_LENGTH;
+        let mut text = String::new();
+        for _ in 0..length {
+            let index = (next_random(state) % TIMESTAMP_CHARACTERS.len() as u64) as usize;
+            text.push(char::from(TIMESTAMP_CHARACTERS[index]));
+        }
+        text
+    }
 
     fn parse(text: &str) -> i64 {
         parse_rfc3339(text).unwrap()
@@ -358,15 +406,8 @@ mod tests {
     #[test]
     fn garbage_never_panics() {
         let mut state = GARBAGE_SEED;
-        let alphabet = b"0123456789-:T.Z+z ";
         for _ in 0..GARBAGE_CASES {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            let length = (state % 32) as usize;
-            let text: String = (0..length)
-                .map(|index| char::from(alphabet[((state >> (index % 60)) as usize + index) % alphabet.len()]))
-                .collect();
+            let text = random_timestamp_text(&mut state);
             let _ = parse_rfc3339(&text);
             let _ = parse_rfc3339(&format!("2026-10-10T12:00:00{text}"));
         }
