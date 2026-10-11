@@ -1520,8 +1520,8 @@ sequenceDiagram
   BR->>HD: POST /api/login through the tunnel
   HD->>HD: Host is a loopback name, Origin equals http plus Host, code unused
   HD->>HD: bind the session to that Origin
-  HD-->>BR: session cookie named for this daemon
-  BR->>HD: Connect Execute and EventService.Subscribe
+  HD-->>BR: session cookie named for this daemon, and the session key in the body
+  BR->>HD: Connect Execute and EventService.Subscribe with the cookie and Rastai-Session-Key
   Note over SSH: tunnel drops
   BR->>BR: RRS-U0001 reconnecting
   CLI->>SSH: restart the tunnel on the same local port

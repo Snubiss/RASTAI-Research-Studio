@@ -745,7 +745,8 @@ export async function checkHealth(baseUrl) {}
 export function readLoginCode(location) {}
 
 /**
- * Redeems the code for the session cookie (set by the browser) and the session key (ADR-0034 decision 10).
+ * Redeems the code for the session cookie (set by the browser) and the session key (ADR-0034 decision 10),
+ * the response body's session_key field: 64 lowercase hex characters, sent back unchanged (contracts §3.3).
  * @param {string} baseUrl
  * @param {string} code
  * @returns {Promise<{ sessionKey: string | null, diagnostic: Diagnostic | null }>}   RRS-U0002 when the code is
@@ -1928,8 +1929,10 @@ apps/web/
     main.jsx                    thin main (8.3)
     constants.js                hidden-tab pause delay, toast durations, egress badge hold, version baked in at build
     app/
-      boot.js                   signIn (login from the fragment, 2.6), loadSettings, loadCommands, loadPlugins: the steps main calls
-      daemon.js                 the window's one DaemonClient (cookie credential); version check (RRS-U0004)
+      boot.js                   signIn (login from the fragment, 2.6; returns the session key, kept in memory only),
+                                loadSettings, loadCommands, loadPlugins: the steps main calls
+      daemon.js                 the window's one DaemonClient (cookie credential carrying the session key);
+                                version check (RRS-U0004)
       App.jsx                   frame: sidebar, workspace, status bar, palette, banners; renders SignedOutScreen
                                 from @rastai/ui/security when signed out
       ConnectionBanner.jsx      shows the connection status (2.2)
@@ -2124,8 +2127,8 @@ Section ids: `home`, `inference`, `training`, `designer`, `gym`, `data`, `plugin
 // apps/web/src/main.jsx
 // Thin main: each step is one function in app/boot.js or state/theme.js.
 async function main() {
-  await signIn();                         // login code from the URL fragment, if any; removed before routing
-  const client = await connectDaemon();   // health and version check; cookie credential
+  const sessionKey = await signIn();                // login code from the URL fragment; removed before routing
+  const client = await connectDaemon(sessionKey);   // health and version check; cookie credential with the key
   const settings = await loadSettings(client);
   applyTheme(settings);                   // before the first render, so the page never flashes the wrong theme
   const commands = await loadCommands(client);
@@ -2178,8 +2181,8 @@ sequenceDiagram
   - Hidden if `privacy.show_egress_badge` is off. The events still arrive. Only the badge is hidden.
 - **Lineage panel** (spec §26): a core panel `core.lineage` from `artifact.lineage`, available in every section's panel menu.
 - **Second window** (spec §10: "a second window for live training and the dashboard"): the view action `view.window.open` opens a route, such as `#/training/run/<run_id>`, in a new window. `Dashboard.jsx` has "Open in new window"; the palette offers it for the current route.
-  - Browser: `window.open(location.origin + "/" + route)`. The new window shares the session cookie, so it boots with no login code, and it opens its own event stream (decision 2).
-  - Tauri: `window.rs` turns a `window.open` to the daemon origin into a second `WebviewWindow`. It gets the same navigation guard, the same cookie store and no IPC. A `window.open` to any other origin goes to the system browser (9.3).
+  - Browser: `window.open(location.origin + "/" + route)`. The new window shares the session cookie but not the opener's memory, so it has no session key, and the cookie alone can't run `Execute` or `Subscribe` (2.1). How it gets the key is open question 24 (contracts §14); until that is settled, its default applies: when the new window loads, `signIn` asks its opener with `postMessage`, and the opener answers with the key, targeting its own origin only and checking `event.origin` and `event.source` on both sides. The key never goes into a URL. The window then opens its own event stream (decision 2). A reloaded second window asks its opener again. A window with no opener, such as the same URL pasted into a new tab, shows `SignedOutScreen`, as a reloaded main window does.
+  - Tauri: `window.rs` turns a `window.open` to the daemon origin into a second `WebviewWindow`. It gets the same navigation guard, the same cookie store and no IPC. A `window.open` to any other origin goes to the system browser (9.3). Whether the second `WebviewWindow` keeps `window.opener`, which the default above needs, is checked when step 5 is built (9.8); if it doesn't, the second window signs in again with a new code from `rastai open --print-url`, as a reload does (9.3), and open question 24 records the answer.
   - Each window is a full app frame with its own stores and query cache. Settings and documents stay in step through bus events, as between two tabs.
   - Nothing is persisted per window. Closing a second window loses nothing: the run keeps going, and a reopened dashboard loads its series the same way as on first open.
 - **Assistant and tutorials** (spec §7, §13; Phase 2, plan §10 row 45): the panel `core.assistant` docks on the right in every section. It opens from the palette (`view.panel.open`) and from Home's "Take the tour".
@@ -2193,7 +2196,7 @@ sequenceDiagram
   - The language-model assistant that answers free text and runs "do it" by itself is Phase 2 (section 19, question 11). The tutorials and assistant skills above are Phase 2 too: tutorials are L3 work (ADR-0017 decision 3), and plan §10 row 45 schedules both there. This design is ready for then.
 - **Sending files:** `FileDrop` uploads files up to 256 MiB with `PUT /api/blobs` and calls `file.open` with the blob. Bigger files get "Open from disk", which uses `file.browse` and opens by path.
 - **Embedding:** `rastai-server` embeds `apps/web/dist/` in the binary. `index.html` is served `no-store`; hashed assets `immutable`. The CSP the daemon sends must allow `'wasm-unsafe-eval'` (the `@rastai/formats` validator) and `frame-src` for `/plugins/*`, and nothing from other origins.
-- **Dev loop:** `just dev-web` runs Vite with a proxy to `127.0.0.1:47820` that rewrites the `Host` and `Origin` headers on every request, `/api/login` included, so the session is bound to the daemon's origin and every later request matches it. The daemon needs no dev flag.
+- **Dev loop:** `just dev-web` runs Vite with a proxy to `127.0.0.1:47820` that rewrites the `Host` and `Origin` headers on every request, `/api/login` included, so the session is bound to the daemon's origin and every later request matches it. The daemon needs no dev flag. Vite's hot module replacement keeps the page and its in-memory session key; a full page reload loses the key, so it needs a new login code from `rastai open --print-url` (2.1).
 
 One step of the First Run tutorial (`templates/tutorials/first-run.tutorial.json`), for the assistant bullet above. The `path` must follow `model.list`'s result type in `rastai-formats` once that type exists:
 
@@ -2244,8 +2247,8 @@ The First Run tutorial covers minutes 3–10 of spec §6: load a model, chat, op
 |---|---|
 | `first-run.spec.js` | the Home checklist with a CPU environment and a tiny model |
 | `chat.spec.js` | send, stream, stop, branch, star, pin, incognito never stored |
-| `reconnect.spec.js` | kill -9 the daemon mid-stream; restart; resync; the user message is stored and Regenerate works (plan §10 row 23); a typed but unsent message in the composer survives a page reload and is gone after it's sent |
-| `second-window.spec.js` | "Open in new window" on a run dashboard: the new window is signed in by the cookie alone, opens its own event stream, and shows the same live metrics; hiding it for 60 s pauses only its stream |
+| `reconnect.spec.js` | kill -9 the daemon mid-stream; restart; resync; the user message is stored and Regenerate works (plan §10 row 23); a typed but unsent message in the composer survives a page reload (which signs the tab out; it is there after signing in again with a new login code) and is gone after it's sent |
+| `second-window.spec.js` | "Open in new window" on a run dashboard: the new window gets the session key from its opener (open question 24's default, contracts §14), never from its URL, opens its own event stream, and shows the same live metrics; hiding it for 60 s pauses only its stream; the same URL pasted into a new tab, with the cookie but no opener, shows `SignedOutScreen` |
 | `tutorial.spec.js` (Phase 2, plan §10 row 45) | the First Run tutorial on the fixture model: each step's check fails before the action and passes after it; every command id in `templates/tutorials/` is a `view.*` action or exists in `ListCommands` |
 | `egress.spec.js` | an HF download from `fixtures/hf-server/` and an API chat against the mock API server turn the badge on with the right host; `privacy.show_egress_badge` off hides it |
 | `palette.spec.js` | Ctrl/Cmd-K, Basic filtering, forms, copy as, keybindings |
