@@ -1,9 +1,13 @@
 //! Local sockets end to end (layout: rust-node-gateway-proto.md section 4.7): bind and connect, the peer's
 //! credentials, the 0700 socket folder (a looser one is refused, contracts 8.1), a stale socket file replaced.
 //! "A folder another user owns is refused" needs a second user, so the folder decision is unit-tested with a made-up
-//! owner in src/local_socket.rs.
+//! owner in src/local_socket.rs. So is "a peer of another user is refused": those unit tests run the real accept and
+//! connect checks on a real connection, passing them a user id that isn't ours.
 //!
 //! Unix sockets only; on Windows every function returns RRS-N2009 until named pipes arrive (tier 2).
+
+#[cfg(unix)]
+mod common;
 
 #[cfg(unix)]
 #[allow(clippy::unwrap_used)]
@@ -11,7 +15,6 @@ mod on_unix {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU32, Ordering};
 
     use rastai_transport::local_socket::{
         LocalListener, LocalStream, SOCKET_DIRECTORY_MODE, accept_local, bind_local_socket, connect_local_socket,
@@ -19,23 +22,14 @@ mod on_unix {
     use rastai_transport::peer::{PeerIdentity, check_same_user};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    use crate::common::{SOCKET_FOLDER, new_test_folder};
+
     const SOCKET_FILE: &str = "test.sock";
-    const SOCKET_FOLDER: &str = "run";
+    const TEST_FOLDER_PREFIX: &str = "rtl";
     const GREETING: &[u8] = b"hello over a local socket";
 
-    static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
-
-    /// A fresh folder for one test, short enough that the socket path stays under the 107-byte Unix limit.
-    fn new_test_folder() -> PathBuf {
-        let number = NEXT_FOLDER_NUMBER.fetch_add(1, Ordering::SeqCst);
-        let folder = std::env::temp_dir().join(format!("rtl-{}-{number}", std::process::id()));
-        let _ = fs::remove_dir_all(&folder);
-        fs::create_dir_all(&folder).unwrap();
-        folder
-    }
-
     fn socket_path_in(test_folder: &Path) -> PathBuf {
-        test_folder.join(SOCKET_FOLDER).join(SOCKET_FILE)
+        crate::common::socket_path_in(test_folder, SOCKET_FILE)
     }
 
     fn unix_stream(stream: LocalStream) -> tokio::net::UnixStream {
@@ -56,7 +50,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn bind_and_connect_carry_bytes_and_name_this_process_as_the_peer() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         let listener = bind_local_socket(&socket_path).unwrap();
 
@@ -74,7 +68,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn the_peer_check_refuses_another_user_id() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         let listener = bind_local_socket(&socket_path).unwrap();
         let (_server_end, _client_end, peer) = connect_and_accept(&listener, &socket_path).await;
@@ -90,7 +84,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn the_socket_folder_is_created_with_mode_0700() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         let _listener = bind_local_socket(&socket_path).unwrap();
 
@@ -106,7 +100,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn a_socket_folder_others_can_enter_is_refused_on_both_ends() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         let socket_folder = test_folder.join(SOCKET_FOLDER);
         fs::create_dir(&socket_folder).unwrap();
@@ -125,7 +119,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn a_stale_socket_file_is_replaced() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         // A process that died without removing its socket: the file stays, nobody listens.
         drop(bind_local_socket(&socket_path).unwrap());
@@ -139,7 +133,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn a_live_socket_is_not_taken_over() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         let listener = bind_local_socket(&socket_path).unwrap();
 
@@ -153,7 +147,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn a_file_that_isnt_a_socket_is_never_deleted() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         fs::create_dir(test_folder.join(SOCKET_FOLDER)).unwrap();
         fs::set_permissions(test_folder.join(SOCKET_FOLDER), fs::Permissions::from_mode(0o700)).unwrap();
@@ -167,7 +161,7 @@ mod on_unix {
 
     #[tokio::test]
     async fn connecting_with_nothing_listening_is_not_reachable() {
-        let test_folder = new_test_folder();
+        let test_folder = new_test_folder(TEST_FOLDER_PREFIX);
         let socket_path = socket_path_in(&test_folder);
         let missing_folder = connect_local_socket(&socket_path).await.map(|_| ());
         // The folder exists and is private, but nobody bound the socket.

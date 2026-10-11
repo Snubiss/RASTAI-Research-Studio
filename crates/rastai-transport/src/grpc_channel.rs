@@ -93,14 +93,16 @@ async fn accept_same_user_connections(listener: LocalListener, sender: AcceptedS
                     return;
                 }
             }
-            Err(error) => log_refused_connection(&error).await,
+            Err(error) => log_refusal_and_back_off(&error).await,
         }
     }
 }
 
-/// A refused peer or a failed accept never stops the server; it goes to the log.
+/// A refused peer or a failed accept never stops the server; it goes to the log. A failed accept also waits
+/// ACCEPT_RETRY_DELAY_MS before the next one, so a lasting failure (out of file descriptors) can't spin; a refused
+/// peer doesn't wait, since the next client may be ours.
 #[cfg(unix)]
-async fn log_refused_connection(error: &TransportError) {
+async fn log_refusal_and_back_off(error: &TransportError) {
     let reason = format!("{error:?}");
     rastai_diag::logger::log_warn(
         "local socket connection refused",

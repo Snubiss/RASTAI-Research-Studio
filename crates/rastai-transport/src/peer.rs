@@ -4,6 +4,11 @@
 //! The kernel reports the peer's user and process ids (SO_PEERCRED on Linux, getpeereid on macOS), read through
 //! tokio. Our own user id is read the same way, from a socket pair this process holds both ends of: std has no
 //! getuid, and this crate may not use `unsafe` or libc (ADR-0033).
+//!
+//! The backend reads its own user id in two places, on purpose. `rastai-core`'s paths.rs reads the owner of
+//! /proc/self, only to name the /tmp/rastai-<uid> fallback folder; without /proc (macOS) that read is None and the
+//! folder goes elsewhere, which is fine for a name. The security checks here can't settle for "unknown", so they use
+//! the socket pair, which works wherever Unix sockets do. Both report the effective user id.
 
 use crate::error::TransportError;
 
