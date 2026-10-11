@@ -27,27 +27,35 @@ struct ReadSummary {
 }
 
 fuzz_target!(|bytes: &[u8]| {
-    // The reader reads files, so the input becomes one, a file per fuzzing process.
+    // The reader reads files, so the input becomes one, a file per fuzzing process, removed after each input so a
+    // run leaves nothing in the temp folder.
     let path = std::env::temp_dir().join(format!("rastai-store-fuzz-event-frame-{}.log", std::process::id()));
-    if std::fs::write(&path, bytes).is_err() {
-        return;
+    if std::fs::write(&path, bytes).is_ok() {
+        check_reader_then_writer(&path, bytes);
     }
-    let Some(before) = read_and_check_every_frame(&path, bytes) else {
+    let _ = std::fs::remove_file(&path);
+});
+
+/// Reads `path` (whose bytes are `bytes`) checking every frame, then opens it for append and, if the writer accepts
+/// it, checks the cut file reads as whole frames to the end with the same records.
+fn check_reader_then_writer(path: &Path, bytes: &[u8]) {
+    let Some(before) = read_and_check_every_frame(path, bytes) else {
         return;
     };
-    if open_event_log_for_append(&path).is_ok() {
-        let Ok(cut_bytes) = std::fs::read(&path) else {
-            return;
-        };
-        let after = read_and_check_every_frame(&path, &cut_bytes).expect("a log the writer accepted reads again");
-        assert_eq!(
-            after.outcome, "end of file",
-            "the writer left a bad tail; before: {}",
-            before.outcome
-        );
-        assert_eq!(after.record_count, before.record_count);
+    if open_event_log_for_append(path).is_err() {
+        return;
     }
-});
+    let Ok(cut_bytes) = std::fs::read(path) else {
+        return;
+    };
+    let after = read_and_check_every_frame(path, &cut_bytes).expect("a log the writer accepted reads again");
+    assert_eq!(
+        after.outcome, "end of file",
+        "the writer left a bad tail; before: {}",
+        before.outcome
+    );
+    assert_eq!(after.record_count, before.record_count);
+}
 
 /// Reads `path` (whose bytes are `bytes`) to the first non-record, checking each step. `None` when the read stops
 /// with an error (a sequence gap, or the file system).

@@ -1611,10 +1611,10 @@ crates/rastai-store/
       quarantine.rs           move a mismatched blob to .quarantine/ (RRS-S1001)
       gc.rs                   blob sweep: not in the live set and untouched for BLOB_GC_GRACE_HOURS
     event_log/
+      mod.rs                  the three pub mod lines
       frame.rs                EVENT_LOG_HEADER, encode_frame(), decode_frame_header(); checksums through
                               rastai_formats::crc32 (the one CRC-32 table, contracts §7.1)
       writer.rs               EventLogWriter: create, open for append (truncates a torn tail), append, raw append, sync
-      mod.rs                  the three pub mod lines
       reader.rs               EventLogReader, open_event_log(), read_next_frame() -> FrameRead (flows/platform.md 6.1)
     indexer.rs                apply_event_record(): one EventRecord to its rastai.db rows, inside the writer's transaction;
                               the one indexing path for live, rebuilt and restored records;
@@ -1958,7 +1958,7 @@ There is no `blake3` here: hashing goes through `rastai_formats::hashing`, so BL
 | Outbox | `tests/vault_changes.rs` | with recording off no rows are added; with it on, every changed row adds exactly one `vault_changes` row in the same transaction; a `DeleteConversation` adds `delete` rows for every message; `TrimVaultChanges` keeps later rows |
 | Writer thread | `tests/writer_thread.rs`; bottom of `writer_thread.rs` and `sqlite.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07, and far fewer transactions than writes by `writer_batch_count`); one bad write in a batch fails alone; a `Batch` lands whole or not at all; a full disk (`PRAGMA max_page_count`) fails every write of its batch with `RRS-S3002` and commits none; a reader's failure is `RRS-S0006` |
 | Migrations | `tests/index_migrations.rs`; bottom of `store.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged (in `store.rs`, because modelling the newer app takes the crate-private migration functions) |
-| Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first; a bad checksum on the last frame and a zero-filled tail are torn tails; a corrupt or gapped log refuses an append and is left unchanged; the committed fixtures equal their recipes |
+| Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first; a bad checksum on the last frame, a damaged length on the last frame and a zero-filled tail are torn tails; a damaged length with whole frames after it and a checksum-valid record of another format version (last or in the middle) are corrupt; a corrupt or gapped log refuses an append and is left unchanged; the committed fixtures equal their recipes |
 | Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
 | Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |
 | Handler calls | `tests/handler_calls.rs` | pending calls list per plugin in log order; `MarkHandlerDelivered` removes one from the pending list; `DropHandlerCalls` clears a plugin's |

@@ -20,14 +20,12 @@ use std::time::{Duration, Instant};
 use rastai_proto::events::v1::EventRecord;
 
 use crate::error::{StoreError, event_log_io_error};
-use crate::event_log::frame::{EVENT_LOG_HEADER, EVENT_RECORD_FORMAT_VERSION, encode_frame};
+use crate::event_log::frame::{EVENT_LOG_HEADER, EVENT_RECORD_FORMAT_VERSION, FIRST_SEQUENCE, encode_frame};
 use crate::event_log::reader::{FrameRead, open_event_log, read_next_frame, reader_offset};
 
 /// Batched appends (metrics) are fsynced at least this often (contracts 7.1: "at least once a second"). The same
 /// name and value as the Python worker's writer (contracts 15.10).
 const METRICS_FSYNC_INTERVAL_SECONDS: u64 = 1;
-/// The first record of a new log.
-const FIRST_SEQUENCE: u64 = 1;
 const FRAME_TOO_LARGE_REASON: &str = "the record is larger than a frame's 4 GiB length field allows";
 
 /// When an append is made durable against a power cut. Every append survives the writer being killed either way:
@@ -203,9 +201,10 @@ fn cut_file_to(file: &File, path: &Path, length: u64) -> Result<(), StoreError> 
 
 fn write_header_at_start(file: &mut File, path: &Path) -> Result<(), StoreError> {
     file.seek(SeekFrom::Start(0))
-        .and_then(|_| file.write_all(EVENT_LOG_HEADER))
-        .and_then(|_| file.sync_all())
-        .map_err(|error| event_log_io_error(path, &error))
+        .map_err(|error| event_log_io_error(path, &error))?;
+    file.write_all(EVENT_LOG_HEADER)
+        .map_err(|error| event_log_io_error(path, &error))?;
+    file.sync_all().map_err(|error| event_log_io_error(path, &error))
 }
 
 /// For `SyncPolicy::Batched`: whether the last fsync is old enough that this append should fsync.
@@ -226,9 +225,8 @@ fn sync_parent_folder(path: &Path) -> Result<(), StoreError> {
     } else {
         folder
     };
-    File::open(folder)
-        .and_then(|handle| handle.sync_all())
-        .map_err(|error| event_log_io_error(folder, &error))
+    let handle = File::open(folder).map_err(|error| event_log_io_error(folder, &error))?;
+    handle.sync_all().map_err(|error| event_log_io_error(folder, &error))
 }
 
 #[cfg(not(unix))]

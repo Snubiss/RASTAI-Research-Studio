@@ -148,17 +148,35 @@ fn fixture_path(name: &str) -> PathBuf {
     Path::new(FIXTURES_FOLDER).join(name)
 }
 
-/// A fresh folder for one test, under the system temp folder.
-fn scratch_folder(test_name: &str) -> PathBuf {
-    let folder = std::env::temp_dir().join(format!("rastai-store-{}-{test_name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).unwrap();
-    folder
+/// A fresh folder for one test, under the system temp folder. Dropping it removes the folder and what is in it,
+/// also when the test fails, so test runs leave nothing behind.
+struct ScratchFolder {
+    path: PathBuf,
+}
+
+impl ScratchFolder {
+    fn new(test_name: &str) -> ScratchFolder {
+        let path = std::env::temp_dir().join(format!("rastai-store-{}-{test_name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        ScratchFolder { path }
+    }
+
+    /// The path of `file_name` inside the folder.
+    fn file(&self, file_name: &str) -> PathBuf {
+        self.path.join(file_name)
+    }
+}
+
+impl Drop for ScratchFolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 /// A copy of a fixture in a scratch folder, for the tests that write.
-fn copy_fixture(name: &str, test_name: &str) -> PathBuf {
-    let path = scratch_folder(test_name).join(name);
+fn copy_fixture(name: &str, scratch: &ScratchFolder) -> PathBuf {
+    let path = scratch.file(name);
     std::fs::copy(fixture_path(name), &path).unwrap();
     path
 }
@@ -232,17 +250,14 @@ fn a_corrupt_middle_reads_as_corrupt_rrs_s2002() {
     let (records, outcome, _) = read_until_not_a_record(&fixture_path(CORRUPT_MIDDLE_LOG));
     let corrupt_frame_start = frame_ends(&good_records())[0];
     assert_eq!(records, good_records()[..1].to_vec());
+    // The reader reports where; RRS-S2002 itself is the writer's error, checked by
+    // appending_to_a_corrupt_or_gapped_log_is_refused_and_changes_nothing.
     assert_eq!(
         outcome,
         Ok(FrameRead::Corrupt {
             offset: corrupt_frame_start
         })
     );
-    let error = StoreError::EventLogCorrupt {
-        path: fixture_path(CORRUPT_MIDDLE_LOG),
-        offset: corrupt_frame_start,
-    };
-    assert_eq!(error.code(), "RRS-S2002");
 }
 
 #[test]
@@ -268,7 +283,8 @@ fn a_sequence_gap_is_rrs_s2003() {
 
 #[test]
 fn appending_after_a_torn_tail_truncates_it_first() {
-    let path = copy_fixture(TORN_TAIL_LOG, "append_after_torn_tail");
+    let scratch = ScratchFolder::new("append_after_torn_tail");
+    let path = copy_fixture(TORN_TAIL_LOG, &scratch);
     let torn_length = std::fs::metadata(&path).unwrap().len();
     let whole_frames_end = frame_ends(&good_records())[2];
 
@@ -290,12 +306,13 @@ fn appending_after_a_torn_tail_truncates_it_first() {
 
 #[test]
 fn appending_to_a_corrupt_or_gapped_log_is_refused_and_changes_nothing() {
-    let corrupt = copy_fixture(CORRUPT_MIDDLE_LOG, "append_refused_corrupt");
+    let scratch = ScratchFolder::new("append_refused");
+    let corrupt = copy_fixture(CORRUPT_MIDDLE_LOG, &scratch);
     let error = open_event_log_for_append(&corrupt).unwrap_err();
     assert_eq!(error.code(), "RRS-S2002");
     assert_eq!(std::fs::read(&corrupt).unwrap(), corrupt_middle_log());
 
-    let gapped = copy_fixture(SEQUENCE_GAP_LOG, "append_refused_gap");
+    let gapped = copy_fixture(SEQUENCE_GAP_LOG, &scratch);
     let error = open_event_log_for_append(&gapped).unwrap_err();
     assert_eq!(error.code(), "RRS-S2003");
     assert_eq!(std::fs::read(&gapped).unwrap(), sequence_gap_log());
@@ -303,7 +320,8 @@ fn appending_to_a_corrupt_or_gapped_log_is_refused_and_changes_nothing() {
 
 #[test]
 fn appending_to_a_good_log_continues_its_sequence() {
-    let path = copy_fixture(GOOD_LOG, "append_to_good");
+    let scratch = ScratchFolder::new("append_to_good");
+    let path = copy_fixture(GOOD_LOG, &scratch);
     let mut writer = open_event_log_for_append(&path).unwrap();
     assert_eq!(truncated_tail_bytes(&writer), 0);
     let mut fifth = good_records()[1].clone();
@@ -317,7 +335,8 @@ fn appending_to_a_good_log_continues_its_sequence() {
 
 #[test]
 fn a_new_log_writes_the_same_bytes_as_the_good_fixture() {
-    let path = scratch_folder("new_log").join("events.log");
+    let scratch = ScratchFolder::new("new_log");
+    let path = scratch.file("events.log");
     let mut writer = create_event_log(&path).unwrap();
     for (index, mut record) in good_records().into_iter().enumerate() {
         // The writer, not the caller, numbers the records and stamps the format version.
@@ -336,7 +355,8 @@ fn a_new_log_writes_the_same_bytes_as_the_good_fixture() {
 
 #[test]
 fn creating_a_log_never_overwrites_one() {
-    let path = copy_fixture(GOOD_LOG, "create_refuses_existing");
+    let scratch = ScratchFolder::new("create_refuses_existing");
+    let path = copy_fixture(GOOD_LOG, &scratch);
     let error = create_event_log(&path).unwrap_err();
     assert_eq!(error.code(), "RRS-S3005");
     assert_eq!(std::fs::read(&path).unwrap(), good_log());
@@ -344,7 +364,8 @@ fn creating_a_log_never_overwrites_one() {
 
 #[test]
 fn a_header_the_writer_never_finished_is_restarted() {
-    let path = scratch_folder("torn_header").join("events.log");
+    let scratch = ScratchFolder::new("torn_header");
+    let path = scratch.file("events.log");
     std::fs::write(&path, &EVENT_LOG_HEADER[..3]).unwrap();
     let (records, outcome, _) = read_until_not_a_record(&path);
     assert!(records.is_empty());
@@ -361,7 +382,8 @@ fn a_header_the_writer_never_finished_is_restarted() {
 
 #[test]
 fn a_file_that_isnt_an_event_log_is_corrupt_at_offset_0() {
-    let path = scratch_folder("wrong_header").join("events.log");
+    let scratch = ScratchFolder::new("wrong_header");
+    let path = scratch.file("events.log");
     std::fs::write(&path, b"NOTALOG!and some more bytes").unwrap();
     let (_, outcome, _) = read_until_not_a_record(&path);
     assert_eq!(outcome, Ok(FrameRead::Corrupt { offset: 0 }));
@@ -374,7 +396,8 @@ fn a_bad_checksum_on_the_last_frame_is_a_torn_tail() {
     let mut frames = frames_of(&good_records());
     let last = frames.len() - 1;
     frames[last][FRAME_HEADER_BYTES + 1] ^= 0x40;
-    let path = scratch_folder("bad_last_checksum").join("events.log");
+    let scratch = ScratchFolder::new("bad_last_checksum");
+    let path = scratch.file("events.log");
     std::fs::write(&path, log_of(&frames)).unwrap();
     let (records, outcome, _) = read_until_not_a_record(&path);
     assert_eq!(records.len(), 3);
@@ -386,6 +409,73 @@ fn a_bad_checksum_on_the_last_frame_is_a_torn_tail() {
     );
 }
 
+/// Reads `bytes` as a log and checks that the read stops at a corrupt frame at `corrupt_offset` after `whole_records`
+/// records, and that the writer refuses to append (`RRS-S2002`) and leaves every byte as it was.
+fn assert_corrupt_and_left_alone(test_name: &str, bytes: &[u8], whole_records: usize, corrupt_offset: u64) {
+    let scratch = ScratchFolder::new(test_name);
+    let path = scratch.file("events.log");
+    std::fs::write(&path, bytes).unwrap();
+    let (records, outcome, _) = read_until_not_a_record(&path);
+    assert_eq!(records, good_records()[..whole_records].to_vec());
+    assert_eq!(outcome, Ok(FrameRead::Corrupt { offset: corrupt_offset }));
+    assert_eq!(open_event_log_for_append(&path).unwrap_err().code(), "RRS-S2002");
+    assert!(
+        std::fs::read(&path).unwrap() == bytes,
+        "the refused open changed the file"
+    );
+}
+
+/// The four good records with the one at `index` stamped `format_version` 2 (its frame's checksum still matches).
+fn log_with_a_version_2_record(index: usize) -> Vec<u8> {
+    let mut records = good_records();
+    records[index].format_version = 2;
+    log_of(&frames_of(&records))
+}
+
+#[test]
+fn a_damaged_length_with_whole_frames_after_it_is_corrupt() {
+    // Bit rot in the second frame's body_length (its top byte) makes the frame seem to run past the end of the file,
+    // like a torn tail. The whole, checksum-valid frames 3 and 4 after it show it isn't: a crash tears only the last
+    // frame. Cutting it off as a tail would drop three good records.
+    let second_frame_start = frame_ends(&good_records())[0];
+    let mut bytes = good_log();
+    bytes[second_frame_start as usize + 3] ^= 0x80;
+    assert_corrupt_and_left_alone("damaged_length", &bytes, 1, second_frame_start);
+}
+
+#[test]
+fn a_damaged_length_on_the_last_frame_is_a_torn_tail() {
+    // With no whole frame after it, an overrunning frame can't be told from one a crash tore: it is cut off, which
+    // costs that one record (contracts 7.1).
+    let ends = frame_ends(&good_records());
+    let mut bytes = good_log();
+    bytes[ends[2] as usize + 3] ^= 0x80;
+    let scratch = ScratchFolder::new("damaged_last_length");
+    let path = scratch.file("events.log");
+    std::fs::write(&path, &bytes).unwrap();
+    let (records, outcome, _) = read_until_not_a_record(&path);
+    assert_eq!(records, good_records()[..3].to_vec());
+    assert_eq!(outcome, Ok(FrameRead::Incomplete { valid_bytes: ends[2] }));
+
+    let writer = open_event_log_for_append(&path).unwrap();
+    assert_eq!(truncated_tail_bytes(&writer), ends[3] - ends[2]);
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), ends[2]);
+}
+
+#[test]
+fn a_valid_checksum_on_another_format_version_is_corrupt_even_last() {
+    // A checksum that matches means the bytes are what the writer wrote, so a crash didn't make them: a record this
+    // code can't read is never a torn tail, not even as the last frame.
+    let ends = frame_ends(&good_records());
+    assert_corrupt_and_left_alone("version_2_last", &log_with_a_version_2_record(3), 3, ends[2]);
+}
+
+#[test]
+fn a_valid_checksum_on_another_format_version_is_corrupt_in_the_middle() {
+    let ends = frame_ends(&good_records());
+    assert_corrupt_and_left_alone("version_2_middle", &log_with_a_version_2_record(1), 1, ends[0]);
+}
+
 #[test]
 fn a_zero_filled_tail_is_a_torn_tail() {
     // A power cut can leave the end of a file as zeros. An all-zero frame header even has a matching checksum
@@ -393,7 +483,8 @@ fn a_zero_filled_tail_is_a_torn_tail() {
     let mut bytes = good_log();
     let good_length = bytes.len() as u64;
     bytes.extend_from_slice(&[0u8; 100]);
-    let path = scratch_folder("zero_tail").join("events.log");
+    let scratch = ScratchFolder::new("zero_tail");
+    let path = scratch.file("events.log");
     std::fs::write(&path, &bytes).unwrap();
     let (records, outcome, _) = read_until_not_a_record(&path);
     assert_eq!(records, good_records());
@@ -412,7 +503,8 @@ fn a_zero_filled_tail_is_a_torn_tail() {
 #[test]
 fn a_tailer_reads_a_frame_once_the_writer_has_finished_it() {
     // A live tailer sees the torn state first, then the record, without reopening the file.
-    let path = scratch_folder("tailer").join("events.log");
+    let scratch = ScratchFolder::new("tailer");
+    let path = scratch.file("events.log");
     let full = good_log();
     let one_frame_end = frame_ends(&good_records())[0] as usize;
     std::fs::write(&path, &full[..one_frame_end + 5]).unwrap();
