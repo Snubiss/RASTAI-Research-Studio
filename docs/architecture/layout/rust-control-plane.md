@@ -560,7 +560,8 @@ crates/rastai-formats/
   src/
     lib.rs
     error.rs                  FormatsError, typed errors for internal callers, each with code()
-    limits.rs                 ImportLimits and its defaults: file size, JSON depth, graph node count, parameter count, zip caps
+    limits.rs                 ImportLimits and its defaults: file size, JSON depth, JSON value count, graph node count,
+                              parameter count, zip caps
     byte_source.rs            ByteSource trait (length, read_at) with SliceSource and FileSource;
                               ByteSink trait (write_bytes) with VecSink and FileSink
     hashing.rs                the only blake3 import: hash_bytes, StreamHasher, content_hash_of_value, model_hash

@@ -77,6 +77,14 @@ struct Bound {
     inclusive: bool,
 }
 
+/// The versions one comparator allows.
+enum Allowed {
+    /// Every version between the bounds; a missing bound is unbounded on that side.
+    Between { lower: Option<Bound>, upper: Option<Bound> },
+    /// No version at all: `>18446744073709551615` asks for a version above the largest one there can be.
+    Nothing,
+}
+
 /// Reads a full version: `1.2.3`, `1.2.3-rc.1`, `1.2.3+build.5`.
 pub fn parse_version(text: &str) -> Result<Version, FormatsError> {
     let partial = parse_partial_version(text.trim()).map_err(|reason| invalid(text, reason))?;
@@ -274,9 +282,18 @@ fn names_pre_release_of(comparators: &[Comparator], version: &Version) -> bool {
 }
 
 fn comparator_matches(comparator: &Comparator, version: &Version) -> bool {
-    let (lower, upper) = comparator_bounds(comparator);
-    let above_lower = lower.is_none_or(|bound| is_above(version, &bound));
-    let below_upper = upper.is_none_or(|bound| is_below(version, &bound));
+    let (lower, upper) = match comparator_bounds(comparator) {
+        Allowed::Between { lower, upper } => (lower, upper),
+        Allowed::Nothing => return false,
+    };
+    let above_lower = match &lower {
+        Some(bound) => is_above(version, bound),
+        None => true,
+    };
+    let below_upper = match &upper {
+        Some(bound) => is_below(version, bound),
+        None => true,
+    };
     above_lower && below_upper
 }
 
@@ -296,35 +313,50 @@ fn is_below(version: &Version, bound: &Bound) -> bool {
     }
 }
 
-/// The lowest and highest version a comparator allows; None is unbounded.
-fn comparator_bounds(comparator: &Comparator) -> (Option<Bound>, Option<Bound>) {
+/// The versions a comparator allows. An end that would overflow u64 (`^18446744073709551615`) means there is no
+/// version past it, so the upper side is unbounded; for `>` the same overflow means nothing can match.
+fn comparator_bounds(comparator: &Comparator) -> Allowed {
     let partial = &comparator.version;
     let low = filled_version(partial);
     let is_full = partial.patch.is_some();
-    let inclusive = |version| {
-        Some(Bound {
-            version,
-            inclusive: true,
-        })
-    };
-    let exclusive = |version| {
-        Some(Bound {
-            version,
-            inclusive: false,
-        })
-    };
-    match comparator.operator {
+    let (lower, upper) = match comparator.operator {
         Operator::Any => (None, None),
         Operator::GreaterOrEqual => (inclusive(low), None),
         Operator::Less => (None, exclusive(low)),
         Operator::Exact if is_full => (inclusive(low.clone()), inclusive(low)),
         Operator::Greater if is_full => (exclusive(low), None),
         Operator::LessOrEqual if is_full => (None, inclusive(low)),
-        Operator::Exact => (inclusive(low), wildcard_end(partial).and_then(exclusive)),
-        Operator::Greater => (wildcard_end(partial).and_then(inclusive), None),
-        Operator::LessOrEqual => (None, wildcard_end(partial).and_then(exclusive)),
-        Operator::Caret => (inclusive(low), caret_end(partial).and_then(exclusive)),
-        Operator::Tilde => (inclusive(low), tilde_end(partial).and_then(exclusive)),
+        Operator::Exact => (inclusive(low), below(wildcard_end(partial))),
+        Operator::Greater => match wildcard_end(partial) {
+            Some(end) => (inclusive(end), None),
+            None => return Allowed::Nothing,
+        },
+        Operator::LessOrEqual => (None, below(wildcard_end(partial))),
+        Operator::Caret => (inclusive(low), below(caret_end(partial))),
+        Operator::Tilde => (inclusive(low), below(tilde_end(partial))),
+    };
+    Allowed::Between { lower, upper }
+}
+
+fn inclusive(version: Version) -> Option<Bound> {
+    Some(Bound {
+        version,
+        inclusive: true,
+    })
+}
+
+fn exclusive(version: Version) -> Option<Bound> {
+    Some(Bound {
+        version,
+        inclusive: false,
+    })
+}
+
+/// The upper bound just below a range's end. No end (the numbers were already at u64::MAX) is no upper bound.
+fn below(end: Option<Version>) -> Option<Bound> {
+    match end {
+        Some(version) => exclusive(version),
+        None => None,
     }
 }
 
@@ -550,9 +582,18 @@ mod tests {
 
     #[test]
     fn largest_numbers_do_not_overflow() {
-        let top = format!("{}.{}.{}", u64::MAX, u64::MAX, u64::MAX);
+        let max = u64::MAX;
+        let top = format!("{max}.{max}.{max}");
         assert!(matches(&format!("^{top}"), &top));
-        assert!(matches(&format!("~{}", u64::MAX), &top));
-        assert!(matches(&format!("{}", u64::MAX), &top));
+        assert!(matches(&format!("~{max}"), &top));
+        assert!(matches(&format!("{max}"), &top));
+        assert!(matches(&format!("<={max}"), &top));
+        assert!(matches(&format!("<={max}.{max}"), &top));
+        // Nothing is above every MAX.x.x or every MAX.MAX.x, so these match no version at all.
+        for range in [format!(">{max}"), format!(">{max}.{max}"), format!(">{top}")] {
+            for text in ["0.0.0", "1.0.0", top.as_str()] {
+                assert!(!matches(&range, text), "{range} with {text}");
+            }
+        }
     }
 }

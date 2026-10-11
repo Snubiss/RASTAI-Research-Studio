@@ -6,6 +6,9 @@
 
 use serde_json::Value;
 
+/// The pointer of the whole document (RFC 6901: the empty string).
+pub(crate) const ROOT_POINTER: &str = "";
+
 const SEPARATOR: char = '/';
 const ESCAPE: char = '~';
 const ESCAPED_TILDE: &str = "~0";
@@ -66,7 +69,8 @@ fn child_value<'a>(parent: &'a Value, token: &str) -> Option<&'a Value> {
     }
 }
 
-fn unescape_pointer_token(token: &str) -> Option<String> {
+/// `a~1b` → `a/b`, `m~0n` → `m~n`. None for a `~` followed by anything but `0` or `1`.
+pub(crate) fn unescape_pointer_token(token: &str) -> Option<String> {
     let mut unescaped = String::with_capacity(token.len());
     let mut characters = token.chars();
     while let Some(character) = characters.next() {

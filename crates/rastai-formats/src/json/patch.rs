@@ -130,9 +130,12 @@ fn replace_value(document: &mut Value, path: &str, value: Value) -> Result<(), &
 /// Remove at `from`, then add at `path`. Moving a value into its own descendant would orphan it, so it's refused.
 fn move_value(document: &mut Value, from: &str, path: &str) -> Result<(), &'static str> {
     if from == path {
-        return find_value_mut(document, &split_pointer(from).ok_or(NOT_A_POINTER)?)
-            .map(|_| ())
-            .ok_or(MISSING_TARGET);
+        // Moving a value onto itself changes nothing, but the value must still be there (RFC 6902 section 4.4).
+        let tokens = split_pointer(from).ok_or(NOT_A_POINTER)?;
+        if find_value_mut(document, &tokens).is_none() {
+            return Err(MISSING_TARGET);
+        }
+        return Ok(());
     }
     if path.starts_with(from) && path[from.len()..].starts_with('/') {
         return Err(MOVE_INTO_ITSELF);
@@ -226,6 +229,7 @@ fn operation(op: PatchOp, path: String, value: Value) -> JsonPatchOperation {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::test_random::next_random;
     use serde_json::json;
 
     fn op(op: PatchOp, path: &str, value: Value) -> JsonPatchOperation {
@@ -316,6 +320,7 @@ mod tests {
             (op(PatchOp::Replace, "no-slash", json!(1)), NOT_A_POINTER),
             (moved("/list", "/list/0"), MOVE_INTO_ITSELF),
             (moved("/missing", "/x"), MISSING_TARGET),
+            (moved("/missing", "/missing"), MISSING_TARGET),
         ];
         for (failing_operation, reason) in failing {
             let patch = [op(PatchOp::Add, "/first", json!(1)), failing_operation.clone()];
@@ -458,10 +463,5 @@ mod tests {
             }
             _ => *value = random_value(seed, 2),
         }
-    }
-
-    fn next_random(seed: &mut u64) -> u64 {
-        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        *seed >> 33
     }
 }
