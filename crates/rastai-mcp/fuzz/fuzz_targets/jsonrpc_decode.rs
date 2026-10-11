@@ -6,6 +6,8 @@
 //! - a refusal is always `RRS-C3001`, and its error reply is itself a message the parser accepts.
 //!
 //! Bytes that aren't UTF-8 are read lossily, so they still reach the parser (the bridge refuses them before it).
+//! The first byte picks the session the message meets: a fresh one, so `initialize` runs, or one already
+//! initialized, so `tools/list` and `tools/call` get past the lifecycle check. The rest is the message.
 
 #![no_main]
 
@@ -18,11 +20,17 @@ use rastai_mcp::server::tools::{McpTool, tool_from_command};
 use rastai_proto::commands::v1::CommandDescriptor;
 
 const MALFORMED_MESSAGE_CODE: &str = "RRS-C3001";
+/// The revision of an already-initialized session.
+const SESSION_PROTOCOL_VERSION: &str = "2025-06-18";
 
 fuzz_target!(|bytes: &[u8]| {
-    let text = String::from_utf8_lossy(bytes);
+    let Some((first_byte, message_bytes)) = bytes.split_first() else {
+        return;
+    };
+    let already_initialized = first_byte % 2 == 1;
+    let text = String::from_utf8_lossy(message_bytes);
     match parse_message(&text) {
-        Ok(message) => check_accepted(message),
+        Ok(message) => check_accepted(message, already_initialized),
         Err(error) => {
             assert_eq!(error.code(), MALFORMED_MESSAGE_CODE);
             check_round_trip(&error_reply(None, &error));
@@ -30,22 +38,32 @@ fuzz_target!(|bytes: &[u8]| {
     }
 });
 
-fn check_accepted(message: JsonRpcMessage) {
+fn check_accepted(message: JsonRpcMessage, already_initialized: bool) {
     check_round_trip(&message);
-    // A session that already chose its revision, so tools/list and tools/call get past the lifecycle check.
-    let mut session = McpSession {
-        session_id: "FUZZ".to_string(),
-        protocol_version: "2025-06-18".to_string(),
-        principal: owner_principal(),
-        client_name: String::new(),
-        initialized: true,
-        last_used_unix_ms: 0,
-    };
+    let mut session = fuzz_session(already_initialized);
     let tools = [one_tool()];
     match handle_message(&mut session, message, &tools) {
         McpStep::Reply(reply) => check_round_trip(&reply),
         McpStep::ExecuteTool { arguments_json, .. } => check_arguments(&arguments_json),
         McpStep::NoReply => {}
+    }
+}
+
+/// A fresh session (no revision yet) or one that already chose its revision. Built by hand rather than with
+/// `new_session`, so a fuzz run doesn't read the random source on every input.
+fn fuzz_session(already_initialized: bool) -> McpSession {
+    let protocol_version = if already_initialized {
+        SESSION_PROTOCOL_VERSION.to_string()
+    } else {
+        String::new()
+    };
+    McpSession {
+        session_id: "FUZZ".to_string(),
+        protocol_version,
+        principal: owner_principal(),
+        client_name: String::new(),
+        initialized: already_initialized,
+        last_used_unix_ms: 0,
     }
 }
 

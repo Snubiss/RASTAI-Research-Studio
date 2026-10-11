@@ -19,16 +19,18 @@ use rastai_diag::diagnostic::{Diagnostic, Severity, diagnostic};
 use rastai_diag::logger::log_warn;
 use rastai_transport::error::TransportError;
 use rastai_transport::http_client::{HttpRequest, HttpResponse, HttpTarget, send_request};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
-use crate::error::McpError;
+use crate::error::{McpError, malformed_message};
 use crate::jsonrpc::{
     INVALID_REQUEST, JsonRpcId, JsonRpcMessage, MAX_MESSAGE_BYTES, RASTAI_ERROR, diagnostic_reply, error_reply,
     message_json, parse_message,
 };
 
 const MCP_PATH: &str = "/mcp";
+/// Every message goes to `/mcp` as a POST (MCP Streamable HTTP).
+const POST_METHOD: &str = "POST";
 /// A sync command runs inside the call; a job command returns its job_id at once. Five minutes covers the slowest
 /// sync command with room to spare, and still ends a request the daemon lost.
 const REQUEST_TIMEOUT_MS: u64 = 300_000;
@@ -92,7 +94,10 @@ pub async fn run_bridge(
     loop {
         let reply = match read_capped_line(&mut input).await {
             Ok(LineRead::Line(line)) => answer_line(daemon, token, &mut session, &line).await,
-            Ok(LineRead::TooLong) => Some(error_reply(None, &malformed_line(&too_long_reason()))),
+            Ok(LineRead::TooLong) => Some(error_reply(
+                None,
+                &malformed_message(&too_long_reason(), INVALID_REQUEST, None),
+            )),
             Ok(LineRead::End) => return,
             Err(error) => {
                 // Nothing can be answered on input that can't be read: the client is gone or broken.
@@ -117,7 +122,10 @@ async fn answer_line(
     line: &[u8],
 ) -> Option<JsonRpcMessage> {
     let Ok(text) = std::str::from_utf8(line) else {
-        return Some(error_reply(None, &malformed_line("the line isn't UTF-8")));
+        return Some(error_reply(
+            None,
+            &malformed_message("the line isn't UTF-8", INVALID_REQUEST, None),
+        ));
     };
     let text = text.trim();
     if text.is_empty() {
@@ -142,9 +150,7 @@ async fn forward_message(
 ) -> Option<JsonRpcMessage> {
     let is_initialize = is_call_to(&message, INITIALIZE_METHOD);
     if is_initialize {
-        // A client that initializes again starts a new session, as it would against the daemon directly.
-        session.session_id.clear();
-        session.initialize_message = Some(message.clone());
+        start_new_session(session, &message);
     }
     if is_call_to(&message, INITIALIZED_NOTIFICATION) {
         session.client_sent_initialized = true;
@@ -159,6 +165,15 @@ async fn forward_message(
     }
     let id = request_id(&message)?;
     Some(reply_from_answer(daemon, id, answer))
+}
+
+/// A client that initializes again starts a new session, as it would against the daemon directly: nothing of the
+/// old one is kept, so a later restore replays only what the client sent for the new one.
+fn start_new_session(session: &mut BridgeSession, initialize: &JsonRpcMessage) {
+    *session = BridgeSession {
+        initialize_message: Some(initialize.clone()),
+        ..BridgeSession::default()
+    };
 }
 
 /// Replays the client's `initialize` on a new session after the daemon lost the old one. True when the daemon
@@ -208,7 +223,7 @@ async fn post_message(
     message: &JsonRpcMessage,
 ) -> Result<HttpResponse, TransportError> {
     let request = HttpRequest {
-        method: "POST".to_string(),
+        method: POST_METHOD.to_string(),
         target: HttpTarget::LocalSocket {
             socket_path: daemon.socket_path.clone(),
         },
@@ -266,7 +281,11 @@ fn reply_from_answer(
 fn parse_body(body: &[u8]) -> Result<JsonRpcMessage, McpError> {
     match std::str::from_utf8(body) {
         Ok(text) => parse_message(text),
-        Err(_) => Err(malformed_line("the daemon's reply isn't UTF-8")),
+        Err(_) => Err(malformed_message(
+            "the daemon's reply isn't UTF-8",
+            INVALID_REQUEST,
+            None,
+        )),
     }
 }
 
@@ -276,23 +295,27 @@ fn daemon_diagnostic(body: &[u8]) -> Option<Diagnostic> {
     let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(body) else {
         return None;
     };
-    let text = |key: &str| match object.get(key) {
-        Some(Value::String(value)) => value.clone(),
-        _ => String::new(),
-    };
-    let code = text("code");
+    let code = text_member(&object, "code");
     if code.is_empty() {
         return None;
     }
     Some(Diagnostic {
         code,
         severity: Severity::Error,
-        message: text("message"),
-        path: text("path"),
-        fix_text: text("fix_text"),
-        fix_command_id: text("fix_command_id"),
-        fix_arguments_json: text("fix_arguments_json"),
+        message: text_member(&object, "message"),
+        path: text_member(&object, "path"),
+        fix_text: text_member(&object, "fix_text"),
+        fix_command_id: text_member(&object, "fix_command_id"),
+        fix_arguments_json: text_member(&object, "fix_arguments_json"),
     })
+}
+
+/// A string member of a JSON object; empty when it is missing or not a string.
+fn text_member(object: &Map<String, Value>, key: &str) -> String {
+    match object.get(key) {
+        Some(Value::String(value)) => value.clone(),
+        _ => String::new(),
+    }
 }
 
 /// The transport's error as its catalog diagnostic, with the daemon's socket as the path.
@@ -363,14 +386,6 @@ fn finished_line(line: Vec<u8>, too_long: bool, at_end: bool) -> LineRead {
 
 fn too_long_reason() -> String {
     format!("the message is over the {MAX_MESSAGE_BYTES}-byte limit")
-}
-
-fn malformed_line(reason: &str) -> McpError {
-    McpError::MalformedMessage {
-        reason: reason.to_string(),
-        json_rpc_code: INVALID_REQUEST,
-        id: None,
-    }
 }
 
 async fn write_line(output: &mut (impl AsyncWrite + Unpin), line: &str) -> std::io::Result<()> {
@@ -461,6 +476,23 @@ mod tests {
         assert_eq!(headers[0].1, "Bearer tok_secret");
         assert!(headers.contains(&("Mcp-Session-Id".to_string(), "S1".to_string())));
         assert!(headers.contains(&("MCP-Protocol-Version".to_string(), "2025-06-18".to_string())));
+    }
+
+    #[test]
+    fn a_second_initialize_forgets_the_old_session() {
+        let first = parse_message(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#).unwrap();
+        let second = parse_message(r#"{"jsonrpc":"2.0","id":9,"method":"initialize","params":{}}"#).unwrap();
+        let mut session = BridgeSession {
+            session_id: "S1".to_string(),
+            protocol_version: "2025-06-18".to_string(),
+            initialize_message: Some(first),
+            client_sent_initialized: true,
+        };
+        start_new_session(&mut session, &second);
+        assert!(session.session_id.is_empty());
+        assert!(session.protocol_version.is_empty());
+        assert!(!session.client_sent_initialized);
+        assert_eq!(session.initialize_message, Some(second));
     }
 
     #[test]

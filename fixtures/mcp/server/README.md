@@ -34,6 +34,10 @@ Every other line is one exchange:
 and kinds are real rows of contracts 6.4; the titles and schemas are stand-ins until the core table and its argument
 types land (M1-22). `system.env.list` is marked experimental here only to show that such a command is hidden.
 
+The outcomes are what the daemon hands back; running the command, and the refusals of flows/platform.md 3.2, are
+`rastai-server`'s (M1-30), so a transcript checks which command this crate asks to run and how the outcome is
+replied, never the decision itself.
+
 ## The transcripts
 
 | File | What it shows |
@@ -43,5 +47,5 @@ types land (M1-22). `system.env.list` is marked experimental here only to show t
 | `tools_list_mcp_default.jsonl` | an `mcp-default` token sees only the `read` commands, with their schemas and `readOnlyHint` |
 | `tool_call.jsonl` | a call is handed to the daemon as `ExecuteTool`; a result comes back as `structuredContent`, a failure as `isError` with its code |
 | `tool_call_job.jsonl` | a job command returns its `job_id` at once, with a note to poll `job.get` |
-| `tool_call_outside_scopes.jsonl` | tools the token's scopes don't list are refused (`-32602`, `RRS-C0001`) and never executed |
+| `tool_call_outside_scopes.jsonl` | a tool the token's scopes don't list is still handed to the daemon: `execute_command` refuses a missing scope with `RRS-C1005` and an unknown or hidden experimental command with `RRS-C0001` (flows/platform.md 3.2), and the refusal comes back as `isError` |
 | `malformed.jsonl` | lines that aren't valid messages, and requests the session can't take, get `RRS-C3001` |

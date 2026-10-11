@@ -17,7 +17,7 @@ use rastai_formats::json::reader::read_json;
 use rastai_formats::limits::ImportLimits;
 use serde_json::{Map, Value};
 
-use crate::error::{McpError, error_diagnostic};
+use crate::error::{McpError, error_diagnostic, malformed_message};
 
 /// Checked before parsing: MCP input is untrusted, and no tool's arguments come near this.
 pub const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
@@ -81,17 +81,17 @@ pub fn parse_message(text: &str) -> Result<JsonRpcMessage, McpError> {
             "the message is {} bytes, over the {MAX_MESSAGE_BYTES}-byte limit",
             text.len()
         );
-        return Err(malformed(reason, INVALID_REQUEST, None));
+        return Err(malformed_message(&reason, INVALID_REQUEST, None));
     }
     match read_strict_json(text)? {
         Value::Object(object) => message_from_object(&object),
-        Value::Array(_) => Err(malformed(
-            "batch arrays aren't supported".to_string(),
+        Value::Array(_) => Err(malformed_message(
+            "batch arrays aren't supported",
             INVALID_REQUEST,
             None,
         )),
-        _ => Err(malformed(
-            "a message must be a JSON object".to_string(),
+        _ => Err(malformed_message(
+            "a message must be a JSON object",
             INVALID_REQUEST,
             None,
         )),
@@ -136,7 +136,7 @@ fn read_strict_json(text: &str) -> Result<Value, McpError> {
     };
     match read_json(text.as_bytes(), &limits) {
         Ok(parsed) => Ok(parsed.value),
-        Err(error) => Err(malformed(json_problem(&error), PARSE_ERROR, None)),
+        Err(error) => Err(malformed_message(&json_problem(&error), PARSE_ERROR, None)),
     }
 }
 
@@ -166,7 +166,11 @@ fn message_from_object(object: &Map<String, Value>) -> Result<JsonRpcMessage, Mc
     };
     check_members(object, &known_id)?;
     if object.get("jsonrpc") != Some(&Value::String(JSONRPC_VERSION.to_string())) {
-        return Err(invalid("\"jsonrpc\" must be \"2.0\"", known_id));
+        return Err(malformed_message(
+            "\"jsonrpc\" must be \"2.0\"",
+            INVALID_REQUEST,
+            known_id,
+        ));
     }
     if object.contains_key("method") {
         return call_from_object(object, id_member);
@@ -177,7 +181,11 @@ fn message_from_object(object: &Map<String, Value>) -> Result<JsonRpcMessage, Mc
     if object.contains_key("error") {
         return error_from_object(object, id_member);
     }
-    Err(invalid("a message needs \"method\", \"result\" or \"error\"", known_id))
+    Err(malformed_message(
+        "a message needs \"method\", \"result\" or \"error\"",
+        INVALID_REQUEST,
+        known_id,
+    ))
 }
 
 fn read_id(object: &Map<String, Value>) -> Result<IdMember, McpError> {
@@ -189,12 +197,17 @@ fn read_id(object: &Map<String, Value>) -> Result<IdMember, McpError> {
         Value::String(text) => Ok(IdMember::Present(JsonRpcId::Text(text.clone()))),
         Value::Number(number) => match number.as_i64() {
             Some(whole) => Ok(IdMember::Present(JsonRpcId::Number(whole))),
-            None => Err(invalid(
+            None => Err(malformed_message(
                 "\"id\" must be a whole number that fits 64 bits, or a string",
+                INVALID_REQUEST,
                 None,
             )),
         },
-        _ => Err(invalid("\"id\" must be a whole number or a string", None)),
+        _ => Err(malformed_message(
+            "\"id\" must be a whole number or a string",
+            INVALID_REQUEST,
+            None,
+        )),
     }
 }
 
@@ -202,7 +215,11 @@ fn read_id(object: &Map<String, Value>) -> Result<IdMember, McpError> {
 fn check_members(object: &Map<String, Value>, known_id: &Option<JsonRpcId>) -> Result<(), McpError> {
     for key in object.keys() {
         if !MESSAGE_MEMBERS.contains(&key.as_str()) {
-            return Err(invalid(&format!("unknown member {key:?}"), known_id.clone()));
+            return Err(malformed_message(
+                &format!("unknown member {key:?}"),
+                INVALID_REQUEST,
+                known_id.clone(),
+            ));
         }
     }
     let kinds = ["method", "result", "error"]
@@ -210,14 +227,16 @@ fn check_members(object: &Map<String, Value>, known_id: &Option<JsonRpcId>) -> R
         .filter(|kind| object.contains_key(**kind))
         .count();
     if kinds > 1 {
-        return Err(invalid(
+        return Err(malformed_message(
             "a message has only one of \"method\", \"result\" and \"error\"",
+            INVALID_REQUEST,
             known_id.clone(),
         ));
     }
     if object.contains_key("params") && !object.contains_key("method") {
-        return Err(invalid(
+        return Err(malformed_message(
             "only a request or notification has \"params\"",
+            INVALID_REQUEST,
             known_id.clone(),
         ));
     }
@@ -231,24 +250,38 @@ fn call_from_object(object: &Map<String, Value>, id_member: IdMember) -> Result<
         IdMember::Missing | IdMember::Null => None,
     };
     let Some(Value::String(method)) = object.get("method") else {
-        return Err(invalid("\"method\" must be a string", known_id));
+        return Err(malformed_message(
+            "\"method\" must be a string",
+            INVALID_REQUEST,
+            known_id,
+        ));
     };
     let params = match object.get("params") {
         None => Value::Null,
         Some(Value::Object(members)) => Value::Object(members.clone()),
-        Some(_) => return Err(invalid("\"params\" must be an object", known_id)),
+        Some(_) => {
+            return Err(malformed_message(
+                "\"params\" must be an object",
+                INVALID_REQUEST,
+                known_id,
+            ));
+        }
     };
     let method = method.clone();
     match id_member {
         IdMember::Present(id) => Ok(JsonRpcMessage::Request { id, method, params }),
         IdMember::Missing => Ok(JsonRpcMessage::Notification { method, params }),
-        IdMember::Null => Err(invalid("a request's \"id\" can't be null", None)),
+        IdMember::Null => Err(malformed_message(
+            "a request's \"id\" can't be null",
+            INVALID_REQUEST,
+            None,
+        )),
     }
 }
 
 fn response_from_object(object: &Map<String, Value>, id_member: IdMember) -> Result<JsonRpcMessage, McpError> {
     let IdMember::Present(id) = id_member else {
-        return Err(invalid("a response needs an \"id\"", None));
+        return Err(malformed_message("a response needs an \"id\"", INVALID_REQUEST, None));
     };
     let result = object.get("result").cloned().unwrap_or(Value::Null);
     Ok(JsonRpcMessage::Response { id, result })
@@ -258,19 +291,37 @@ fn error_from_object(object: &Map<String, Value>, id_member: IdMember) -> Result
     let id = match id_member {
         IdMember::Present(id) => Some(id),
         IdMember::Null => None,
-        IdMember::Missing => return Err(invalid("an error needs an \"id\", which may be null", None)),
+        IdMember::Missing => {
+            return Err(malformed_message(
+                "an error needs an \"id\", which may be null",
+                INVALID_REQUEST,
+                None,
+            ));
+        }
     };
     let Some(Value::Object(error)) = object.get("error") else {
-        return Err(invalid("\"error\" must be an object", id));
+        return Err(malformed_message("\"error\" must be an object", INVALID_REQUEST, id));
     };
     if let Some(key) = error.keys().find(|key| !ERROR_MEMBERS.contains(&key.as_str())) {
-        return Err(invalid(&format!("unknown member {key:?} in \"error\""), id));
+        return Err(malformed_message(
+            &format!("unknown member {key:?} in \"error\""),
+            INVALID_REQUEST,
+            id,
+        ));
     }
     let Some(code) = error.get("code").and_then(Value::as_i64) else {
-        return Err(invalid("\"error.code\" must be a whole number", id));
+        return Err(malformed_message(
+            "\"error.code\" must be a whole number",
+            INVALID_REQUEST,
+            id,
+        ));
     };
     let Some(Value::String(message)) = error.get("message") else {
-        return Err(invalid("\"error.message\" must be a string", id));
+        return Err(malformed_message(
+            "\"error.message\" must be a string",
+            INVALID_REQUEST,
+            id,
+        ));
     };
     let data = error.get("data").cloned().unwrap_or(Value::Null);
     let message = message.clone();
@@ -330,18 +381,6 @@ fn id_value(id: &JsonRpcId) -> Value {
     match id {
         JsonRpcId::Number(number) => Value::from(*number),
         JsonRpcId::Text(text) => Value::String(text.clone()),
-    }
-}
-
-fn invalid(reason: &str, id: Option<JsonRpcId>) -> McpError {
-    malformed(reason.to_string(), INVALID_REQUEST, id)
-}
-
-fn malformed(reason: String, json_rpc_code: i64, id: Option<JsonRpcId>) -> McpError {
-    McpError::MalformedMessage {
-        reason,
-        json_rpc_code,
-        id,
     }
 }
 
