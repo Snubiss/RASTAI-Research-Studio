@@ -80,7 +80,8 @@ deny = [
   { crate = "rusqlite", wrappers = ["rastai-store"], reason = "one owner: rastai-store (sqlite.rs)" },
   # cpufeatures (under blake3, M1-14) reads CPU features through libc on ARM Linux and Android. tokio and the crates
   # under its sockets (mio, socket2, tokio-util), and hyper-util under tonic and rastai-transport's HTTP client, make
-  # their system calls through it (M1-41).
+  # their system calls through it (M1-41). tokio's `signal` feature, which the daemon's SIGTERM and SIGINT handling
+  # needs, installs its handlers through signal-hook-registry and reads errno through errno (M1-26).
   { crate = "libc", wrappers = [
     "rastai-store",
     "cpufeatures",
@@ -89,6 +90,8 @@ deny = [
     "socket2",
     "tokio-util",
     "hyper-util",
+    "signal-hook-registry",
+    "errno",
   ], reason = "rastai-store (disk_space.rs, ADR-0033); the system calls of blake3, tokio and hyper-util underneath" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },
