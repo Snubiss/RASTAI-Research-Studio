@@ -39,6 +39,8 @@ jobs:
         include:
           - { crate: rastai-formats, target: json_reader }
           - { crate: rastai-formats, target: read_document }
+          - { crate: rastai-core, target: base32_decode }
+          - { crate: rastai-core, target: rfc3339_parse }
     name: fuzz ${{ matrix.crate }} ${{ matrix.target }}
     steps:
       - name: Check out the repository

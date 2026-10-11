@@ -45,6 +45,7 @@ const RUNTIME_FOLDER: &str = "runtime";
 // the longest socket path stays within the 107 bytes a Unix socket address holds. The user id is read as the owner
 // of /proc/self, because std has no getuid and libc is rastai-store's alone (ADR-0033).
 const SHARED_TEMP_FOLDER: &str = "/tmp";
+#[cfg(unix)]
 const PROCESS_FOLDER: &str = "/proc/self";
 
 // The Hugging Face hub cache: HF_HUB_CACHE, else HF_HOME/hub, else ~/.cache/huggingface/hub (spike hf_cache.py).
@@ -621,6 +622,9 @@ mod tests {
         assert_eq!(resolve_paths(&relative).data, Path::new(".dev/data"));
     }
 
+    // Unix only: XDG folders are a Unix convention, and "/xdg/config" has no drive, so Windows reads it as relative
+    // and ignores it, as it should. Windows gets its own rows of contracts 8.1 with its build.
+    #[cfg(unix)]
     #[test]
     fn xdg_folders_are_used_when_set() {
         let paths = resolve_paths(&full_xdg_environment());

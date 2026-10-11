@@ -43,6 +43,7 @@ fn random_unavailable(error: std::io::Error) -> CoreError {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn gives_the_count_asked_for() {
         assert_eq!(random_bytes(0).unwrap().len(), 0);
@@ -51,8 +52,18 @@ mod tests {
     }
 
     // Two 32-byte draws are equal with probability 2^-256; equal draws mean the source is broken.
+    #[cfg(unix)]
     #[test]
     fn two_draws_differ() {
         assert_ne!(random_bytes(32).unwrap(), random_bytes(32).unwrap());
+    }
+
+    // Until the Windows build brings its system call, asking for random bytes fails with RRS-C0502, never with
+    // bytes that aren't random.
+    #[cfg(not(unix))]
+    #[test]
+    fn other_platforms_have_no_random_source_yet() {
+        let error = random_bytes(16).unwrap_err();
+        assert!(matches!(error, CoreError::RandomUnavailable { .. }), "{error:?}");
     }
 }
