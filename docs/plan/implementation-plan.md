@@ -1887,6 +1887,8 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.j
 
 The first contexts become available with M1-06; until then, protection without required checks still forces PRs and review.
 
+Not applied yet (found by M1-06, 2026-10-11): on the current GitHub plan, a private repository has no branch protection or rulesets. `gh api repos/Snubiss/RASTAI-Research-Studio/branches/main/protection` and `.../rulesets` return `403 Upgrade to GitHub Pro or make this repository public`. So `main` has no rule yet, and none of the ten contexts above is required. The `contexts` list already matches `ci.yml` (`tests/workspace/ci-workflows.test.js` keeps them equal), so the command above applies unchanged once the owner settles section 12 row 16.
+
 ### 8.5 The PR template
 
 The existing checklist covers rules 1–8 of 3.3. M1-07 adds four lines and changes the template's issue hint from `Closes #123` to `Refs #123`:
@@ -2057,3 +2059,4 @@ Each has the default this plan uses until the owner decides. Row numbers are sta
 | 12 | Section 10 row 23: a daemon kill mid-stream keeps the user's message but drops the half-streamed reply. Flush partial replies to `vault.db` every N tokens instead? | No for the prototype: one transaction per reply keeps the vault simple, and Regenerate is one click. Revisit if the owner loses long answers in practice. |
 | 14 | When does M11 run? It doesn't gate M10, and its three entry epics finish inside the 90 days. | After the 90 days, on whichever lane frees first once M9 is complete, so it never delays M10's epics. M11-E07 right after M11-E01. |
 | 15 | The owner left the `GetSecretRequest` and `GetSecretResponse` fields to M5-E07 (3.2, contracts §14 row 19), but M2-12 registers `NodeHubService.GetSecret` and M2-18 serves it for `hf_download` in M2. Who writes the fields? | M2-12 writes the fields M2 uses (the proto layout's default: `purpose` and `job_id`; `value`, `expires_unix_ms` and a `Diagnostic`) in its contract PR. M5-E07 adds the `mysql:<connection_name>` purpose and the environment variable that hands a job its secret, and closes the gap item. |
+| 16 | Branch protection (8.4) needs GitHub Pro or a public repository; the private repository on the current plan returns 403 (found by M1-06). Upgrade, go public, or keep working without it? | Deferred until the owner decides: PRs, reviews and green CI are kept by the agent build protocol (contracts §12.6), not by GitHub. Whoever settles this applies 8.4's `protection.json` unchanged and checks it with `gh api repos/{owner}/{repo}/branches/main/protection`. |

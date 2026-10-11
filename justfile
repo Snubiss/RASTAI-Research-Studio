@@ -122,15 +122,15 @@ env-js:
 # pytest over python/, tools/checks/tests, tools/codegen/tests, tools/fixtures/tests and tools/github/tests in the cpu
 # environment.
 test-python: env-cpu
-    cd python && "{{cpu_environment}}/bin/python" -m pytest
-    cd tools/checks && "{{cpu_environment}}/bin/python" -m pytest
-    cd tools/codegen && "{{cpu_environment}}/bin/python" -m pytest
-    cd tools/fixtures && "{{cpu_environment}}/bin/python" -m pytest
-    cd tools/github && "{{cpu_environment}}/bin/python" -m pytest
+    cd python && "{{cpu_python}}" -m pytest
+    cd tools/checks && "{{cpu_python}}" -m pytest
+    cd tools/codegen && "{{cpu_python}}" -m pytest
+    cd tools/fixtures && "{{cpu_python}}" -m pytest
+    cd tools/github && "{{cpu_python}}" -m pytest
 
 # The macOS and Windows CI jobs run this (tier 2 keeps compiling and passing, spec §28 risk 13). Tests that need Unix
 # sockets, flock or setsid carry the posix_only marker and are deselected here; Linux runs them in test-python.
-# pytest over the pure-compute packages, without the posix_only tests.
+# pytest over portable_test_folders (the smoke test until M1-19), without the posix_only tests.
 test-python-portable: env-cpu
     cd python && "{{cpu_python}}" -m pytest -m "not posix_only" {{portable_test_folders}}
 
