@@ -6,8 +6,12 @@
 //! or doubled underscore, which is what makes each rule here lossless: `-` in a CLI word and `__` in an MCP tool
 //! name can only come from one place in the id. A plugin id is the first segment of its commands, so it follows the
 //! same segment rule (`is_plugin_id`), and scopes.rs checks `plugin:<plugin_id>` with that same function.
+//!
+//! The id rules themselves (`is_command_id`, `is_plugin_id`, `is_core_area`, `CORE_AREAS`) live in rastai-formats,
+//! which sits below this crate, so a plugin manifest's layer-3 check and this registry share one implementation.
 
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
+use rastai_formats::validate::meaning::plugin_manifest::{CORE_AREAS, is_command_id, is_core_area, is_plugin_id};
 
 use crate::commands::registry::{CommandRegistry, find_command};
 
@@ -17,6 +21,7 @@ const SEGMENT_WORD_SEPARATOR: char = '_';
 const CLI_WORD_SEPARATOR: char = '-';
 const MCP_SEPARATOR: &str = "__";
 const FLAG_PREFIX: &str = "--";
+// A command id has two or three segments, so CLI words name one in two or three words.
 const MIN_SEGMENTS: usize = 2;
 const MAX_SEGMENTS: usize = 3;
 
@@ -25,49 +30,6 @@ const CODE_PLUGIN_COMMAND_OUTSIDE_NAMESPACE: &str = "RRS-P0004";
 const EXPECTED_ID_FORM: &str = "<area>.<verb> or <area>.<noun>.<verb>, in lowercase snake_case";
 const EXPECTED_PLUGIN_ID_FORM: &str =
     "a plugin id: lowercase letters and digits in words joined by single underscores, starting with a letter";
-
-/// The reserved core areas (contracts 6.1). No plugin may use one as its id, and every core command sits in one.
-/// `view` holds UI-only actions and `core` is the pseudo plugin id of core sections and panels.
-const CORE_AREAS: &[&str] = &[
-    "system",
-    "settings",
-    "token",
-    "secret",
-    "storage",
-    "archive",
-    "artifact",
-    "project",
-    "file",
-    "document",
-    "workspace",
-    "command",
-    "job",
-    "hf",
-    "model",
-    "chat",
-    "conversation",
-    "adapter",
-    "gateway",
-    "train",
-    "teach",
-    "rlhf",
-    "sweep",
-    "recipe",
-    "run",
-    "checkpoint",
-    "design",
-    "harness",
-    "gym",
-    "sandbox",
-    "plugin",
-    "node",
-    "transfer",
-    "dataset",
-    "converter",
-    "tutorial",
-    "view",
-    "core",
-];
 
 /// Short CLI words for commands people type often: the word, then the command id it runs (contracts 15.1).
 pub const ALIASES: &[(&str, &str)] = &[("doctor", "system.doctor"), ("rerun", "run.rerun")];
@@ -155,15 +117,13 @@ pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnos
     if !plugin_id.is_empty() {
         check_plugin_id(plugin_id)?;
     }
-    let segments: Vec<&str> = command_id.split(ID_SEPARATOR).collect();
-    let segment_count_ok = (MIN_SEGMENTS..=MAX_SEGMENTS).contains(&segments.len());
-    if !segment_count_ok || !segments.iter().all(|segment| is_snake_case_segment(segment)) {
+    if !is_command_id(command_id) {
         return Err(diagnostic(
             CODE_VALUE_NOT_ALLOWED,
             &[("found", command_id), ("expected", EXPECTED_ID_FORM)],
         ));
     }
-    let area = segments[0];
+    let area = command_id.split(ID_SEPARATOR).next().unwrap_or_default();
     if plugin_id.is_empty() {
         return check_core_area(command_id, area);
     }
@@ -174,12 +134,6 @@ pub fn check_command_id(command_id: &str, plugin_id: &str) -> Result<(), Diagnos
         ));
     }
     Ok(())
-}
-
-/// True for a plugin id as contracts 6.1 defines it: one command-id segment (`acme`, `acme_tools2`), so no
-/// trailing or doubled underscore (`acme_`, `acme__tools`). The empty id of core commands is not a plugin id.
-pub(crate) fn is_plugin_id(text: &str) -> bool {
-    is_snake_case_segment(text)
 }
 
 /// Refuses a text that isn't a plugin id (`RRS-E1004`), including the empty id that marks core commands.
@@ -194,11 +148,6 @@ pub(crate) fn check_plugin_id(plugin_id: &str) -> Result<(), Diagnostic> {
     ))
 }
 
-/// True for one of the reserved core areas of contracts 6.1.
-fn is_core_area(area: &str) -> bool {
-    CORE_AREAS.contains(&area)
-}
-
 #[allow(clippy::result_large_err)]
 fn check_core_area(command_id: &str, area: &str) -> Result<(), Diagnostic> {
     if is_core_area(area) {
@@ -209,19 +158,6 @@ fn check_core_area(command_id: &str, area: &str) -> Result<(), Diagnostic> {
         CODE_VALUE_NOT_ALLOWED,
         &[("found", command_id), ("expected", &expected)],
     ))
-}
-
-/// Starts with a letter; `[a-z0-9]+` words joined by single underscores: `add_conversation`, `top_k2`, `a1_2b`;
-/// not `_x`, `x_`, `a__b`, `1a`.
-fn is_snake_case_segment(segment: &str) -> bool {
-    let starts_with_letter = segment.bytes().next().is_some_and(|first| first.is_ascii_lowercase());
-    starts_with_letter
-        && segment.split(SEGMENT_WORD_SEPARATOR).all(|word| {
-            !word.is_empty()
-                && word
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        })
 }
 
 /// One segment or field name as a CLI word: `_` written as `-`.

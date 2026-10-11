@@ -3,4 +3,11 @@
 
 // Every generated type module. A type is named as `import("@rastai/formats").<Name>`.
 
+export * from "./lock.js";
+export * from "./plugin.js";
+export * from "./project.js";
+export * from "./resume.js";
+export * from "./run-record.js";
+export * from "./settings.js";
 export * from "./shared.js";
+export * from "./theme.js";

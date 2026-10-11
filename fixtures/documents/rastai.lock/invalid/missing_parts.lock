@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.lock/1.json",
+  "type": "rastai.lock",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2R",
+  "plugins": {
+    "eval": {
+      "version": "1.0.0"
+    }
+  },
+  "models": {
+    "hf:google/gemma-3-1b-it": "main"
+  }
+}

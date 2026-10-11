@@ -150,6 +150,16 @@
     "retired": false
   },
   {
+    "code": "RRS-E2006",
+    "severity": "error",
+    "title": "Value isn't in its required form",
+    "message": "{found} isn't {expected}.",
+    "basic_text": "A value in this file is written in a form Rastai can't use, such as a color that isn't six hex digits.",
+    "fix_text": "Rewrite the value in the form shown.",
+    "docs_anchor": "rrs-e2006",
+    "retired": false
+  },
+  {
     "code": "RRS-E3001",
     "severity": "warning",
     "title": "File requires a plugin that isn't installed or enabled",

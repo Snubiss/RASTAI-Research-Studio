@@ -1,4 +1,40 @@
 {
   "format_version": 1,
-  "schemas": []
+  "schemas": [
+    {
+      "content_hash": "blake3:71a85ff35052720c58a5943e10fd198efb6ae2f1fa427be069d2941a06a1a1a7",
+      "file": "rastai.lock/1.json",
+      "schema_id": "rastai.lock/1"
+    },
+    {
+      "content_hash": "blake3:84017b1a37a975a8901e69b2fd661ad83a1c6ffd9c81666d48d0cdd26f96ece9",
+      "file": "rastai.plugin/1.json",
+      "schema_id": "rastai.plugin/1"
+    },
+    {
+      "content_hash": "blake3:dc4f3602fd680631e212640e4c6599f61f409b27514c312d7bb915154284a47c",
+      "file": "rastai.project/1.json",
+      "schema_id": "rastai.project/1"
+    },
+    {
+      "content_hash": "blake3:894d7a0066c82b4612436de76e6606060a6248ea054b4c7b08b4beed77a4a8a1",
+      "file": "rastai.resume/1.json",
+      "schema_id": "rastai.resume/1"
+    },
+    {
+      "content_hash": "blake3:541b1cb8f46daa24b31ab79b7d7dc327bf39458f27a6c604794bd3b715d7fabf",
+      "file": "rastai.run_record/1.json",
+      "schema_id": "rastai.run_record/1"
+    },
+    {
+      "content_hash": "blake3:2aba05cc1037bf36653bddb4cfd54eb19d91257903bb94151c49fcc39f82ef00",
+      "file": "rastai.settings/1.json",
+      "schema_id": "rastai.settings/1"
+    },
+    {
+      "content_hash": "blake3:3eb5a4be4b42885d2eae6589970ea7b072aaa8ab658279b1521dced150de9a6c",
+      "file": "rastai.theme/1.json",
+      "schema_id": "rastai.theme/1"
+    }
+  ]
 }

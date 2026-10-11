@@ -1,11 +1,35 @@
 //! The document types (contracts 5.2): the `Document` enum with one variant per type, the table of types the
-//! validation layers read, and type detection from a file's extension.
+//! validation layers read, type detection from a file's extension, and building the typed struct from a checked
+//! value.
 //!
-//! Every type is added by its own contract PR (M1-17 adds the step-1 documents). Until then the enum and the table
-//! are empty: `read_document` reads the syntax and checks the shared header of any file, and reports its type as
-//! unknown. The table is data, not a match, so the layer-2 code is the same for every type and a test can run it
-//! with a type of its own.
+//! The table is data, not a match, so the layer-2 code is the same for every type and a test can run it with a type
+//! of its own. A new type adds its module here, its row in `DOCUMENT_TYPES`, its `Document` variant and an arm in
+//! `document_from_value` and `document_header` (crates/rastai-formats/CLAUDE.md).
 
+pub mod lock;
+pub mod plugin_manifest;
+pub mod project;
+pub mod resume;
+pub mod run_record;
+pub mod settings;
+pub mod theme;
+
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+
+use crate::documents::lock::{LOCK_FILE_NAME, LOCK_SCHEMA_VERSION, LOCK_TYPE_NAME, LockFile};
+use crate::documents::plugin_manifest::{
+    PLUGIN_MANIFEST_NAME, PLUGIN_MANIFEST_SCHEMA_VERSION, PLUGIN_MANIFEST_TYPE_NAME, PluginManifest,
+};
+use crate::documents::project::{PROJECT_NAME, PROJECT_SCHEMA_VERSION, PROJECT_TYPE_NAME, Project};
+use crate::documents::resume::{RESUME_SCHEMA_VERSION, RESUME_STATE_NAME, RESUME_TYPE_NAME, ResumeState};
+use crate::documents::run_record::{RUN_RECORD_NAME, RUN_RECORD_SCHEMA_VERSION, RUN_RECORD_TYPE_NAME, RunRecord};
+use crate::documents::settings::{
+    SETTINGS_DOCUMENT_NAME, SETTINGS_SCHEMA_VERSION, SETTINGS_TYPE_NAME, SettingsDocument,
+};
+use crate::documents::theme::{
+    THEME_DOCUMENT_NAME, THEME_FILE_EXTENSION, THEME_SCHEMA_VERSION, THEME_TYPE_NAME, ThemeDocument,
+};
 use crate::header::SharedHeader;
 
 /// One document type, as the validation layers need it.
@@ -22,17 +46,101 @@ pub struct DocumentType {
     pub description_name: &'static str,
 }
 
-/// Every document type `read_document` knows. Each type's contract PR adds its row.
-pub const DOCUMENT_TYPES: &[DocumentType] = &[];
+/// Every document type `read_document` knows. Each type's contract PR adds its row. Documents found by their place
+/// in a folder (`run.json`, `settings.json`, `rastai.lock`) have no extension and are known by their `type` field.
+pub const DOCUMENT_TYPES: &[DocumentType] = &[
+    DocumentType {
+        type_name: RUN_RECORD_TYPE_NAME,
+        schema_version: RUN_RECORD_SCHEMA_VERSION,
+        file_extensions: &[],
+        description_name: RUN_RECORD_NAME,
+    },
+    DocumentType {
+        type_name: RESUME_TYPE_NAME,
+        schema_version: RESUME_SCHEMA_VERSION,
+        file_extensions: &[],
+        description_name: RESUME_STATE_NAME,
+    },
+    DocumentType {
+        type_name: SETTINGS_TYPE_NAME,
+        schema_version: SETTINGS_SCHEMA_VERSION,
+        file_extensions: &[],
+        description_name: SETTINGS_DOCUMENT_NAME,
+    },
+    DocumentType {
+        type_name: PROJECT_TYPE_NAME,
+        schema_version: PROJECT_SCHEMA_VERSION,
+        file_extensions: &[],
+        description_name: PROJECT_NAME,
+    },
+    DocumentType {
+        type_name: LOCK_TYPE_NAME,
+        schema_version: LOCK_SCHEMA_VERSION,
+        file_extensions: &[],
+        description_name: LOCK_FILE_NAME,
+    },
+    DocumentType {
+        type_name: PLUGIN_MANIFEST_TYPE_NAME,
+        schema_version: PLUGIN_MANIFEST_SCHEMA_VERSION,
+        file_extensions: &[],
+        description_name: PLUGIN_MANIFEST_NAME,
+    },
+    DocumentType {
+        type_name: THEME_TYPE_NAME,
+        schema_version: THEME_SCHEMA_VERSION,
+        file_extensions: &[THEME_FILE_EXTENSION],
+        description_name: THEME_DOCUMENT_NAME,
+    },
+];
 
 /// A document that passed layers 1 and 2, as its typed struct. Each type's contract PR adds its variant; the
 /// `match` in `document_header` then fails to compile until the new variant is handled.
+// The variants differ in size (a theme holds 40 color roles), but a document is read once and handed on, never
+// kept in large numbers, so boxing each variant would only add a dereference at every use.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
-pub enum Document {}
+pub enum Document {
+    RunRecord(RunRecord),
+    Resume(ResumeState),
+    Settings(SettingsDocument),
+    Project(Project),
+    Lock(LockFile),
+    PluginManifest(PluginManifest),
+    Theme(ThemeDocument),
+}
 
 /// The shared header of any document.
 pub fn document_header(document: &Document) -> &SharedHeader {
-    match *document {}
+    match document {
+        Document::RunRecord(run_record) => &run_record.header,
+        Document::Resume(resume) => &resume.header,
+        Document::Settings(settings) => &settings.header,
+        Document::Project(project) => &project.header,
+        Document::Lock(lock) => &lock.header,
+        Document::PluginManifest(manifest) => &manifest.header,
+        Document::Theme(theme) => &theme.header,
+    }
+}
+
+/// The typed document for a value that passed layers 1 and 2. The error is serde's reason, which can only happen
+/// when a description and its struct disagree (tests/describe_matches_struct.rs keeps them equal); None when no
+/// type has that name.
+pub fn document_from_value(type_name: &str, value: Value) -> Option<Result<Document, String>> {
+    let document = match type_name {
+        RUN_RECORD_TYPE_NAME => typed(value).map(Document::RunRecord),
+        RESUME_TYPE_NAME => typed(value).map(Document::Resume),
+        SETTINGS_TYPE_NAME => typed(value).map(Document::Settings),
+        PROJECT_TYPE_NAME => typed(value).map(Document::Project),
+        LOCK_TYPE_NAME => typed(value).map(Document::Lock),
+        PLUGIN_MANIFEST_TYPE_NAME => typed(value).map(Document::PluginManifest),
+        THEME_TYPE_NAME => typed(value).map(Document::Theme),
+        _ => return None,
+    };
+    Some(document)
+}
+
+fn typed<T: DeserializeOwned>(value: Value) -> Result<T, String> {
+    serde_json::from_value(value).map_err(|error| error.to_string())
 }
 
 /// The row for a `type` value, or None when no type has that name.
@@ -82,6 +190,27 @@ mod tests {
         let found = find_document_type(SAMPLE_TYPES, "test.theme").map(|row| row.schema_version);
         assert_eq!(found, Some(2));
         assert!(find_document_type(SAMPLE_TYPES, "test.missing").is_none());
+    }
+
+    #[test]
+    fn every_built_in_type_has_a_unique_name_and_a_description() {
+        let all_types = crate::describe::registry::describe_all_types();
+        for row in DOCUMENT_TYPES {
+            let same_name = DOCUMENT_TYPES
+                .iter()
+                .filter(|other| other.type_name == row.type_name)
+                .count();
+            assert_eq!(same_name, 1, "{}", row.type_name);
+            let described = crate::describe::registry::find_description(&all_types, row.description_name);
+            assert!(described.is_some(), "{} has no description", row.type_name);
+        }
+    }
+
+    #[test]
+    fn a_value_of_an_unknown_type_builds_nothing() {
+        assert!(document_from_value("rastai.no_such_type", Value::Null).is_none());
+        let refused = document_from_value(PROJECT_TYPE_NAME, Value::Null);
+        assert!(matches!(refused, Some(Err(_))));
     }
 
     #[test]

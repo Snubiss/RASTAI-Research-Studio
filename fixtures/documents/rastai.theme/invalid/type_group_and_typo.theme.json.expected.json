@@ -1,0 +1,16 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1002",
+      "path": "type_group_and_typo.theme.json:3:3#/type"
+    },
+    {
+      "code": "RRS-E1003",
+      "path": "type_group_and_typo.theme.json:29:5#/colors/backgrund"
+    },
+    {
+      "code": "RRS-E1001",
+      "path": "type_group_and_typo.theme.json:1:1#/typography"
+    }
+  ]
+}

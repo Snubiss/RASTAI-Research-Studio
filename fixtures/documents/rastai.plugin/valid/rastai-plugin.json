@@ -1,0 +1,75 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "plugin_id": "acme_tools",
+  "display_name": "Acme tools",
+  "version": "1.2.0",
+  "engines": {
+    "rastai": "^1.0"
+  },
+  "requires_capabilities": [
+    "commands@1",
+    "ui.panel@1",
+    "events.handler@1",
+    "psychology.lens@1"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command_id": "acme_tools.report.export",
+        "title": "Export report",
+        "kind": "job",
+        "arguments_type": "ReportExportArgs",
+        "result_type": "ReportExportResult",
+        "basic": true
+      },
+      {
+        "command_id": "acme_tools.refresh",
+        "title": "Refresh",
+        "summary": "Reload the report.",
+        "scope": "plugin:acme_tools",
+        "kind": "sync",
+        "arguments_type": "RefreshArgs",
+        "result_type": "RefreshResult",
+        "default_shortcut": "Ctrl+Shift+R",
+        "undoable": false
+      }
+    ],
+    "panels": [
+      {
+        "panel_id": "acme_tools.report",
+        "title": "Report",
+        "placement": "right"
+      }
+    ],
+    "event_handlers": [
+      {
+        "event_type": "checkpoint.saved",
+        "command_id": "acme_tools.refresh"
+      }
+    ],
+    "lenses": [
+      {
+        "lens_id": "acme_tools.norms",
+        "title": "Norms",
+        "source": "offline"
+      }
+    ]
+  },
+  "permissions": [
+    "commands:[plugin:acme_tools]"
+  ],
+  "ui": {
+    "entry": "index.html",
+    "kind": "iframe"
+  },
+  "python": {
+    "module": "acme_tools",
+    "lockfile": "uv.lock"
+  },
+  "dependencies": {
+    "psychology": "^1.0"
+  }
+}

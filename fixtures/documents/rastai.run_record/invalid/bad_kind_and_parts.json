@@ -1,0 +1,18 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.run_record/1.json",
+  "type": "rastai.run_record",
+  "schema_version": 1,
+  "id": "run_01JA2B3C4D5E6F7G8H9J0K1M2T",
+  "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2T",
+  "kind": "training",
+  "job_spec": [],
+  "seed": -1.5,
+  "chain": {
+    "steps": [
+      {
+        "step_name": "train",
+        "command_id": "train.start"
+      }
+    ]
+  }
+}

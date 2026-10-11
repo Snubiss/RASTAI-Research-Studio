@@ -639,8 +639,11 @@ crates/rastai-formats/
         harness.rs            tool names unique, reward refers to a known kind, task ids unique
         data.rs               split ratios sum to 1, converter ref present, source hashes well formed
         eval.rs               test ids unique, thresholds in range, judge ids referenced exist
-        plugin_manifest.rs    plugin id format, command ids inside the plugin's namespace, no reserved areas
-        project.rs            folders exist in the listing given, data_policy known
+        plugin_manifest.rs    plugin id format, command ids inside the plugin's namespace, no reserved areas; the id
+                              rules of contracts §6.1 (is_plugin_id, is_command_id, CORE_AREAS), which rastai-core's
+                              naming.rs and scopes.rs call, so the manifest and the registry share one implementation
+        project.rs            the name isn't blank; default_node is local or a node id (the data policy lives in the
+                              project's settings.json, contracts §11.1, and read_document sees no folder listing)
         theme.rs              color values are #rrggbb; (M8) the accessibility check: WCAG 2.2 AA contrast 4.5:1 for
                               text, 3:1 for UI parts and the focus ring, 24 px targets
         mysql_connection.rs   tls.mode disabled only with a loopback host or a Unix socket
@@ -1308,7 +1311,8 @@ crates/rastai-core/
       registry.rs             CommandRegistry, load_core_commands(), add_plugin_commands(), remove_plugin_commands(),
                               find_command(), list_commands(), check_scope()
       naming.rs               cli_words(), command_id_from_cli_words(), flag_name(), mcp_tool_name(),
-                              command_id_from_mcp_tool_name(), javascript_wrapper_name(), check_command_id(); the CLI's fixed words:
+                              command_id_from_mcp_tool_name(), javascript_wrapper_name(), check_command_id() (over
+                              rastai-formats' id rules); the CLI's fixed words:
                               ALIASES and CLI_MODE_WORDS (read by rastai-cli's modes.rs and by rastai-names-codegen)
       output.rs               CommandOutput (result_json, job_id, warnings)
     wire.rs                   rastai-diag Diagnostic to and from the proto Diagnostic; CommandRow to the proto CommandDescriptor
@@ -1525,7 +1529,7 @@ pub const API_PACKAGES: &[&str] = &["rastai.commands.v1", "rastai.events.v1"];  
 | Kind | Name | Used for | Wrapper file |
 |---|---|---|---|
 | Internal | `rastai-diag` | diagnostics | |
-| Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver | |
+| Internal | `rastai-formats` | `TypeDescription` for argument schemas, semver, the id rules of contracts §6.1 (`is_plugin_id`, `is_command_id`, `CORE_AREAS`) that `naming.rs` and `scopes.rs` share with the manifest check | |
 | Internal | `rastai-proto` | state enums, `Diagnostic`, `CommandDescriptor`, `CommandKind` and `Stability`; `JobSpec`, `HardwareFingerprint`, `SamplingSettings` for proto JSON | `wire.rs`, `states.rs`, `commands/descriptor.rs`, `commands/registry.rs` (it holds descriptors), `proto_json.rs` |
 | External | serde, serde_json | settings values, the default layer, proto JSON values | `settings.rs`, `settings_defaults.rs`, `proto_json.rs` |
 

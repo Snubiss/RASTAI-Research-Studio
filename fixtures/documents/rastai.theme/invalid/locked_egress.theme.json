@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.theme/1.json",
+  "type": "rastai.theme",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "name": "Sneaky",
+  "base": "dark",
+  "colors": {
+    "accent": "#1f6feb",
+    "--rr-locked-egress": "#1f6feb"
+  },
+  "typography": {
+    "font_family_ui": "Inter, system-ui, sans-serif",
+    "font_family_mono": "JetBrains Mono, ui-monospace, monospace",
+    "font_weights": {
+      "regular": 400,
+      "medium": 500,
+      "bold": 700
+    },
+    "font_sizes_px": {
+      "xs": 11,
+      "sm": 12,
+      "md": 14,
+      "lg": 16,
+      "xl": 20
+    },
+    "line_heights": {
+      "body": 1.5,
+      "heading": 1.25,
+      "code": 1.4
+    }
+  },
+  "density": {
+    "comfortable": {
+      "spacing_px": [
+        0,
+        4,
+        8,
+        12,
+        16,
+        24,
+        32
+      ]
+    },
+    "compact": {
+      "spacing_px": [
+        0,
+        2,
+        4,
+        8,
+        12,
+        16,
+        24
+      ]
+    }
+  },
+  "radius_px": {
+    "small": 2,
+    "medium": 4,
+    "large": 8
+  },
+  "motion": {
+    "fast_ms": 120,
+    "slow_ms": 240,
+    "easing": "cubic-bezier(0.2, 0, 0, 1)"
+  },
+  "focus_ring": {
+    "width_px": 2,
+    "offset_px": 2
+  },
+  "elevation": {
+    "level_1": "0 1px 2px rgba(0, 0, 0, 0.3)",
+    "level_2": "0 2px 8px rgba(0, 0, 0, 0.35)",
+    "level_3": "0 8px 24px rgba(0, 0, 0, 0.4)"
+  }
+}

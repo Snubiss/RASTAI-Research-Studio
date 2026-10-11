@@ -1,0 +1,114 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.theme/1.json",
+  "type": "rastai.theme",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "name": "Every role",
+  "base": "light",
+  "colors": {
+    "background": "#101820",
+    "surface": "#131b23",
+    "surface_raised": "#161e26",
+    "surface_sunken": "#192129",
+    "overlay": "#1c242c",
+    "text": "#1f272f",
+    "text_muted": "#222a32",
+    "text_disabled": "#252d35",
+    "text_on_accent": "#283038",
+    "border": "#2b333b",
+    "border_strong": "#2e363e",
+    "divider": "#313941",
+    "accent": "#343c44",
+    "accent_hover": "#373f47",
+    "accent_active": "#3a424a",
+    "selection": "#3d454d",
+    "focus_ring": "#404850",
+    "success": "#434b53",
+    "series_1": "#464e56",
+    "series_2": "#495159",
+    "series_3": "#4c545c",
+    "series_4": "#4f575f",
+    "series_5": "#525a62",
+    "series_6": "#555d65",
+    "series_7": "#586068",
+    "series_8": "#5b636b",
+    "sequential_low": "#5e666e",
+    "sequential_high": "#616971",
+    "diverging_negative": "#646c74",
+    "diverging_zero": "#676f77",
+    "diverging_positive": "#6a727a",
+    "canvas_background": "#6d757d",
+    "canvas_grid": "#707880",
+    "canvas_node": "#737b83",
+    "canvas_node_border": "#767e86",
+    "canvas_node_selected": "#798189",
+    "canvas_edge": "#7c848c",
+    "canvas_edge_active": "#7f878f",
+    "canvas_label": "#828a92",
+    "canvas_port": "#858d95"
+  },
+  "typography": {
+    "font_family_ui": "Inter, system-ui, sans-serif",
+    "font_family_mono": "JetBrains Mono, ui-monospace, monospace",
+    "font_weights": {
+      "regular": 400,
+      "medium": 500,
+      "bold": 700
+    },
+    "font_sizes_px": {
+      "xs": 11,
+      "sm": 12,
+      "md": 14,
+      "lg": 16,
+      "xl": 20
+    },
+    "line_heights": {
+      "body": 1.5,
+      "heading": 1.25,
+      "code": 1.4
+    }
+  },
+  "density": {
+    "comfortable": {
+      "spacing_px": [
+        0,
+        4,
+        8,
+        12,
+        16,
+        24,
+        32
+      ]
+    },
+    "compact": {
+      "spacing_px": [
+        0,
+        2,
+        4,
+        8,
+        12,
+        16,
+        24
+      ]
+    }
+  },
+  "radius_px": {
+    "small": 2,
+    "medium": 4,
+    "large": 8
+  },
+  "motion": {
+    "fast_ms": 120,
+    "slow_ms": 240,
+    "easing": "cubic-bezier(0.2, 0, 0, 1)"
+  },
+  "focus_ring": {
+    "width_px": 2,
+    "offset_px": 2
+  },
+  "elevation": {
+    "level_1": "0 1px 2px rgba(0, 0, 0, 0.3)",
+    "level_2": "0 2px 8px rgba(0, 0, 0, 0.35)",
+    "level_3": "0 8px 24px rgba(0, 0, 0, 0.4)"
+  }
+}

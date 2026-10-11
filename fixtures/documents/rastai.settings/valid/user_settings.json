@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.settings/1.json",
+  "type": "rastai.settings",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "ui": {
+    "theme": "dark",
+    "density": "compact",
+    "mode": "basic",
+    "reduced_motion": true
+  },
+  "daemon": {
+    "port": 8899
+  },
+  "inference": {
+    "default_runtime": "fast",
+    "sampling": {
+      "temperature": 0.2,
+      "top_k": 32,
+      "seed": 7
+    }
+  },
+  "training": {
+    "lora": {
+      "rank": 8
+    },
+    "checkpoint": {
+      "interval_minutes": 30
+    }
+  },
+  "compute": {
+    "gpu_assignment": {
+      "chat": [
+        0
+      ],
+      "training": [
+        1,
+        2
+      ]
+    }
+  },
+  "privacy": {
+    "data_policy": "trusted-remote"
+  },
+  "sandbox": {
+    "default_caps": {
+      "cpu": 4
+    }
+  },
+  "logging": {
+    "level": "debug"
+  }
+}

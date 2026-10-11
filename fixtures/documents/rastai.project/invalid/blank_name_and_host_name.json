@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.project/1.json",
+  "type": "rastai.project",
+  "schema_version": 1,
+  "id": "prj_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "name": "  ",
+  "default_node": "gpu-box"
+}

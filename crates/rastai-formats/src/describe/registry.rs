@@ -2,14 +2,29 @@
 //! (layout 4.9), the names registry reads the document schema ids from it (contracts 12.6), and layer 2 looks up
 //! `FieldKind::Type` references in it.
 //!
-//! Each document type's PR adds its `describe_<type>()` calls here (M1-17 adds the step-1 documents).
+//! Each document type's PR adds its file's descriptions here: the document itself and every part of it.
 
 use crate::describe::types::TypeDescription;
+use crate::documents::lock::describe_lock_types;
+use crate::documents::plugin_manifest::describe_plugin_manifest_types;
+use crate::documents::project::describe_project_types;
+use crate::documents::resume::describe_resume_types;
+use crate::documents::run_record::describe_run_record_types;
+use crate::documents::settings::describe_settings_types;
+use crate::documents::theme::describe_theme_types;
 use crate::header::describe_shared_header;
 
-/// Every described type, the shared header first.
+/// Every described type, the shared header first, then each document type's descriptions in `DOCUMENT_TYPES` order.
 pub fn describe_all_types() -> Vec<TypeDescription> {
-    vec![describe_shared_header()]
+    let mut all_types = vec![describe_shared_header()];
+    all_types.extend(describe_run_record_types());
+    all_types.extend(describe_resume_types());
+    all_types.extend(describe_settings_types());
+    all_types.extend(describe_project_types());
+    all_types.extend(describe_lock_types());
+    all_types.extend(describe_plugin_manifest_types());
+    all_types.extend(describe_theme_types());
+    all_types
 }
 
 /// The description with this name, or None. A linear scan: there are a few dozen types, and a lookup happens once

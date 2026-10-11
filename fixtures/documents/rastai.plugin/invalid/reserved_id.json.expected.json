@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-P0002",
+      "path": "reserved_id.json:6:3#/plugin_id"
+    }
+  ]
+}

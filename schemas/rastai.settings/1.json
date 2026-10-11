@@ -1,0 +1,675 @@
+{
+  "$defs": {
+    "SettingsCheckpoint": {
+      "additionalProperties": false,
+      "description": "Checkpoint schedule.",
+      "properties": {
+        "interval_minutes": {
+          "description": "Minutes between checkpoints.",
+          "type": "integer"
+        },
+        "keep_last": {
+          "description": "Checkpoints kept per run.",
+          "type": "integer"
+        },
+        "preemption_budget_seconds": {
+          "description": "Time allowed to checkpoint on SIGTERM.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsCheckpoint",
+      "type": "object"
+    },
+    "SettingsCompute": {
+      "additionalProperties": false,
+      "description": "Nodes and GPUs used by default.",
+      "properties": {
+        "default_node": {
+          "description": "local or a node id.",
+          "type": "string"
+        },
+        "gpu_assignment": {
+          "$ref": "#/$defs/SettingsGpuAssignment",
+          "description": "GPUs per use."
+        },
+        "sandbox_cap": {
+          "description": "Most sandboxes at once.",
+          "type": "integer"
+        },
+        "vram_reserve_bytes": {
+          "description": "GPU memory left free on every GPU.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsCompute",
+      "type": "object"
+    },
+    "SettingsDaemon": {
+      "additionalProperties": false,
+      "description": "The daemon's listener.",
+      "properties": {
+        "bus_buffer_events": {
+          "description": "Events kept for clients that reconnect.",
+          "type": "integer"
+        },
+        "listen": {
+          "description": "Address to listen on.",
+          "type": "string"
+        },
+        "open_browser": {
+          "description": "Open the browser on start.",
+          "type": "boolean"
+        },
+        "port": {
+          "description": "Loopback HTTP port.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsDaemon",
+      "type": "object"
+    },
+    "SettingsEval": {
+      "additionalProperties": false,
+      "description": "The Evaluation plugin.",
+      "properties": {
+        "drift_prompt_set": {
+          "description": "Prompt set for drift checks; empty for the built-in one.",
+          "type": "string"
+        },
+        "judge_default": {
+          "description": "Judge model used when none is named.",
+          "type": "string"
+        },
+        "run_on_new_checkpoint": {
+          "description": "Run the suites on each new checkpoint.",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "title": "SettingsEval",
+      "type": "object"
+    },
+    "SettingsGateway": {
+      "additionalProperties": false,
+      "description": "The inference gateway and its log.",
+      "properties": {
+        "default_adapter": {
+          "description": "API adapter used when none is named.",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Serve the /v1 endpoints.",
+          "type": "boolean"
+        },
+        "incognito_default": {
+          "description": "New chats start incognito.",
+          "type": "boolean"
+        },
+        "redact_pii_on_export": {
+          "description": "Redact personal data in exports.",
+          "type": "boolean"
+        },
+        "retention_days": {
+          "description": "Days the gateway log is kept.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsGateway",
+      "type": "object"
+    },
+    "SettingsGpuAssignment": {
+      "additionalProperties": false,
+      "description": "GPU indices per use; an empty list means any GPU.",
+      "properties": {
+        "chat": {
+          "description": "GPUs for chat.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "training": {
+          "description": "GPUs for training.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [],
+      "title": "SettingsGpuAssignment",
+      "type": "object"
+    },
+    "SettingsHf": {
+      "additionalProperties": false,
+      "description": "Hugging Face cache and offline mode.",
+      "properties": {
+        "cache_dir": {
+          "description": "Cache folder; left out for the Hugging Face default.",
+          "type": "string"
+        },
+        "offline": {
+          "description": "Never contact the Hub.",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "title": "SettingsHf",
+      "type": "object"
+    },
+    "SettingsInference": {
+      "additionalProperties": false,
+      "description": "Default runtime, model and sampling.",
+      "properties": {
+        "default_model": {
+          "description": "Model ref used when none is named.",
+          "type": "string"
+        },
+        "default_runtime": {
+          "description": "inspectable or fast.",
+          "enum": [
+            "inspectable",
+            "fast"
+          ],
+          "type": "string"
+        },
+        "pin_attention_kernel_for_replay": {
+          "description": "Use one attention kernel so replays match.",
+          "type": "boolean"
+        },
+        "sampling": {
+          "$ref": "#/$defs/SettingsSampling",
+          "description": "Default sampling settings."
+        }
+      },
+      "required": [],
+      "title": "SettingsInference",
+      "type": "object"
+    },
+    "SettingsLogging": {
+      "additionalProperties": false,
+      "description": "Log level and rotation.",
+      "properties": {
+        "keep_files": {
+          "description": "Rotated files kept.",
+          "type": "integer"
+        },
+        "level": {
+          "description": "Lowest level written.",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "type": "string"
+        },
+        "max_file_bytes": {
+          "description": "Size at which a log file rotates.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsLogging",
+      "type": "object"
+    },
+    "SettingsLora": {
+      "additionalProperties": false,
+      "description": "Default LoRA size.",
+      "properties": {
+        "alpha": {
+          "description": "LoRA alpha.",
+          "type": "integer"
+        },
+        "rank": {
+          "description": "LoRA rank.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsLora",
+      "type": "object"
+    },
+    "SettingsNodes": {
+      "additionalProperties": false,
+      "description": "Remote node connections.",
+      "properties": {
+        "heartbeat_seconds": {
+          "description": "Seconds between heartbeats.",
+          "type": "integer"
+        },
+        "missed_heartbeats_unreachable": {
+          "description": "Missed heartbeats before a node is unreachable.",
+          "type": "integer"
+        },
+        "ssh_binary": {
+          "description": "The OpenSSH client to run.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SettingsNodes",
+      "type": "object"
+    },
+    "SettingsPlugins": {
+      "additionalProperties": false,
+      "description": "Plugin development and experimental APIs.",
+      "properties": {
+        "dev_paths": {
+          "description": "Unpacked plugin folders to load.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "experimental_apis": {
+          "description": "Allow experimental extension points.",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "title": "SettingsPlugins",
+      "type": "object"
+    },
+    "SettingsPrivacy": {
+      "additionalProperties": false,
+      "description": "Data policy and crash reports.",
+      "properties": {
+        "crash_reports": {
+          "description": "Offer to review a crash report.",
+          "type": "boolean"
+        },
+        "data_policy": {
+          "description": "Where data may go (contracts 11.1).",
+          "enum": [
+            "local-only",
+            "trusted-remote",
+            "any"
+          ],
+          "type": "string"
+        },
+        "show_egress_badge": {
+          "description": "Show the badge while data leaves the machine.",
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "title": "SettingsPrivacy",
+      "type": "object"
+    },
+    "SettingsPsychology": {
+      "additionalProperties": false,
+      "description": "The Psychology plugin.",
+      "properties": {
+        "live_panel": {
+          "description": "Show the live panel while chatting.",
+          "type": "boolean"
+        },
+        "overhead_budget_percent": {
+          "description": "Most extra decode time the live panel may cost.",
+          "type": "number"
+        },
+        "sae_fit_max_fvu_increase": {
+          "description": "Largest allowed FVU increase in the fit check.",
+          "type": "number"
+        },
+        "sae_layers_default": {
+          "description": "Layers with SAEs by default.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "summary_layer_top_k": {
+          "description": "Features kept per token in the summary layer.",
+          "type": "integer"
+        },
+        "top_k": {
+          "description": "Features shown per token.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsPsychology",
+      "type": "object"
+    },
+    "SettingsSampling": {
+      "additionalProperties": false,
+      "description": "Default sampling settings.",
+      "properties": {
+        "max_tokens": {
+          "description": "Most tokens to generate.",
+          "type": "integer"
+        },
+        "repetition_penalty": {
+          "description": "Penalty for repeated tokens.",
+          "type": "number"
+        },
+        "seed": {
+          "description": "Fixed seed; left out for a new one each time.",
+          "type": "integer"
+        },
+        "temperature": {
+          "description": "Sampling temperature.",
+          "type": "number"
+        },
+        "top_k": {
+          "description": "Keep the k most likely tokens.",
+          "type": "integer"
+        },
+        "top_p": {
+          "description": "Keep tokens up to this probability mass.",
+          "type": "number"
+        }
+      },
+      "required": [],
+      "title": "SettingsSampling",
+      "type": "object"
+    },
+    "SettingsSandbox": {
+      "additionalProperties": false,
+      "description": "Agent Gym sandboxes.",
+      "properties": {
+        "default_caps": {
+          "$ref": "#/$defs/SettingsSandboxCaps",
+          "description": "Default sandbox limits."
+        },
+        "engine_socket": {
+          "description": "Container engine socket; empty finds Podman, then Docker.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SettingsSandbox",
+      "type": "object"
+    },
+    "SettingsSandboxCaps": {
+      "additionalProperties": false,
+      "description": "Default sandbox limits.",
+      "properties": {
+        "cpu": {
+          "description": "CPU cores.",
+          "type": "integer"
+        },
+        "disk_bytes": {
+          "description": "Disk space.",
+          "type": "integer"
+        },
+        "pids_limit": {
+          "description": "Most processes.",
+          "type": "integer"
+        },
+        "ram_bytes": {
+          "description": "Memory.",
+          "type": "integer"
+        },
+        "time_seconds": {
+          "description": "Wall-clock time.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsSandboxCaps",
+      "type": "object"
+    },
+    "SettingsStorage": {
+      "additionalProperties": false,
+      "description": "Data folders, quota and cleanup.",
+      "properties": {
+        "data_dir": {
+          "description": "Data folder; left out for the default.",
+          "type": "string"
+        },
+        "free_space_margin_bytes": {
+          "description": "Space always left free on the disk.",
+          "type": "integer"
+        },
+        "gc_interval_hours": {
+          "description": "Hours between cleanups.",
+          "type": "integer"
+        },
+        "quota_bytes": {
+          "description": "Most bytes the data folder may hold; left out for none.",
+          "type": "integer"
+        }
+      },
+      "required": [],
+      "title": "SettingsStorage",
+      "type": "object"
+    },
+    "SettingsTraining": {
+      "additionalProperties": false,
+      "description": "Training defaults.",
+      "properties": {
+        "anchors_default": {
+          "description": "Add anchor examples to SFT and DPO.",
+          "type": "boolean"
+        },
+        "answer_only_loss": {
+          "description": "Compute the loss on answers only.",
+          "type": "boolean"
+        },
+        "auto_resume": {
+          "description": "Resume preempted runs automatically.",
+          "type": "boolean"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/SettingsCheckpoint",
+          "description": "Checkpoint schedule."
+        },
+        "gradient_checkpointing": {
+          "description": "Trade compute for memory.",
+          "type": "boolean"
+        },
+        "lora": {
+          "$ref": "#/$defs/SettingsLora",
+          "description": "Default LoRA size."
+        },
+        "memory_cap_bytes": {
+          "description": "Most GPU memory training may use.",
+          "type": "integer"
+        },
+        "rlhf_reward_model_min_accuracy": {
+          "description": "Reward model accuracy RLHF needs to continue.",
+          "type": "number"
+        }
+      },
+      "required": [],
+      "title": "SettingsTraining",
+      "type": "object"
+    },
+    "SettingsUi": {
+      "additionalProperties": false,
+      "description": "Appearance and interface mode.",
+      "properties": {
+        "colorblind_palette": {
+          "description": "Use the colorblind-safe chart colors.",
+          "type": "boolean"
+        },
+        "density": {
+          "description": "Spacing scale.",
+          "enum": [
+            "comfortable",
+            "compact"
+          ],
+          "type": "string"
+        },
+        "locale": {
+          "description": "Interface language.",
+          "type": "string"
+        },
+        "mode": {
+          "description": "Basic or Advanced interface.",
+          "enum": [
+            "basic",
+            "advanced"
+          ],
+          "type": "string"
+        },
+        "reduced_motion": {
+          "description": "Turn animations off.",
+          "type": "boolean"
+        },
+        "theme": {
+          "description": "system, light, dark, or a plugin theme id (M8).",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SettingsUi",
+      "type": "object"
+    },
+    "SettingsUpdates": {
+      "additionalProperties": false,
+      "description": "Update channel.",
+      "properties": {
+        "auto_check": {
+          "description": "Check for updates on start.",
+          "type": "boolean"
+        },
+        "channel": {
+          "description": "Release channel, such as stable.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SettingsUpdates",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.settings/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A settings layer (settings.json): only the keys it sets.",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "compute": {
+      "$ref": "#/$defs/SettingsCompute",
+      "description": "Nodes and GPUs used by default."
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "daemon": {
+      "$ref": "#/$defs/SettingsDaemon",
+      "description": "The daemon's listener."
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "eval": {
+      "$ref": "#/$defs/SettingsEval",
+      "description": "The Evaluation plugin."
+    },
+    "gateway": {
+      "$ref": "#/$defs/SettingsGateway",
+      "description": "The inference gateway and its log."
+    },
+    "hf": {
+      "$ref": "#/$defs/SettingsHf",
+      "description": "Hugging Face cache and offline mode."
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "inference": {
+      "$ref": "#/$defs/SettingsInference",
+      "description": "Default runtime, model and sampling."
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "logging": {
+      "$ref": "#/$defs/SettingsLogging",
+      "description": "Log level and rotation."
+    },
+    "nodes": {
+      "$ref": "#/$defs/SettingsNodes",
+      "description": "Remote node connections."
+    },
+    "plugins": {
+      "$ref": "#/$defs/SettingsPlugins",
+      "description": "Plugin development and experimental APIs."
+    },
+    "privacy": {
+      "$ref": "#/$defs/SettingsPrivacy",
+      "description": "Data policy and crash reports."
+    },
+    "psychology": {
+      "$ref": "#/$defs/SettingsPsychology",
+      "description": "The Psychology plugin."
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "sandbox": {
+      "$ref": "#/$defs/SettingsSandbox",
+      "description": "Agent Gym sandboxes."
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "storage": {
+      "$ref": "#/$defs/SettingsStorage",
+      "description": "Data folders, quota and cleanup."
+    },
+    "training": {
+      "$ref": "#/$defs/SettingsTraining",
+      "description": "Training defaults."
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    },
+    "ui": {
+      "$ref": "#/$defs/SettingsUi",
+      "description": "Appearance and interface mode."
+    },
+    "updates": {
+      "$ref": "#/$defs/SettingsUpdates",
+      "description": "Update channel."
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id"
+  ],
+  "title": "SettingsDocument",
+  "type": "object"
+}

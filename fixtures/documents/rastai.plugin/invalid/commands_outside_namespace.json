@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2R",
+  "plugin_id": "acme_tools",
+  "display_name": "Acme tools",
+  "version": "1.2.0",
+  "engines": {
+    "rastai": "^1.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "title": "T",
+        "kind": "sync",
+        "arguments_type": "A",
+        "result_type": "R",
+        "command_id": "other_plugin.run"
+      },
+      {
+        "title": "T",
+        "kind": "sync",
+        "arguments_type": "A",
+        "result_type": "R",
+        "command_id": "acme_tools.Run"
+      },
+      {
+        "title": "T",
+        "kind": "sync",
+        "arguments_type": "A",
+        "result_type": "R",
+        "command_id": "acme_tools.report.export"
+      },
+      {
+        "title": "T",
+        "kind": "sync",
+        "arguments_type": "A",
+        "result_type": "R",
+        "command_id": "acme_tools.report.export"
+      },
+      {
+        "title": "T",
+        "kind": "sync",
+        "arguments_type": "A",
+        "result_type": "R",
+        "command_id": "model.load"
+      }
+    ],
+    "event_handlers": [
+      {
+        "event_type": "checkpoint.saved",
+        "command_id": "acme_tools.report.export"
+      },
+      {
+        "event_type": "checkpoint.saved",
+        "command_id": "eval.test"
+      }
+    ]
+  }
+}

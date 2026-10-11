@@ -1,0 +1,24 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1004",
+      "path": "bad_kind_and_parts.json:7:3#/kind"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "bad_kind_and_parts.json:8:3#/job_spec"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "bad_kind_and_parts.json:9:3#/seed"
+    },
+    {
+      "code": "RRS-E1001",
+      "path": "bad_kind_and_parts.json:12:7#/chain/steps/0/child_run_id"
+    },
+    {
+      "code": "RRS-E1001",
+      "path": "bad_kind_and_parts.json:1:1#/created_at"
+    }
+  ]
+}

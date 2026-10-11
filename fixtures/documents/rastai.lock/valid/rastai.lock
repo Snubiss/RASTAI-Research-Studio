@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.lock/1.json",
+  "type": "rastai.lock",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "environment": {
+    "environment_id": "cuda13",
+    "lock_hash": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "plugins": {
+    "eval": {
+      "version": "1.0.0",
+      "content_hash": "blake3:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  "models": {
+    "hf:google/gemma-3-1b-it": {
+      "revision": "main",
+      "model_hash": "blake3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  "datasets": {
+    "doc_01JA2B3C4D5E6F7G8H9J0K1M2P": "blake3:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

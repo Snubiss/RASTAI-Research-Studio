@@ -1,0 +1,16 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E1001",
+      "path": "missing_parts.lock:1:1#/environment"
+    },
+    {
+      "code": "RRS-E1001",
+      "path": "missing_parts.lock:7:5#/plugins/eval/content_hash"
+    },
+    {
+      "code": "RRS-E1002",
+      "path": "missing_parts.lock:12:5#/models/hf:google~1gemma-3-1b-it"
+    }
+  ]
+}

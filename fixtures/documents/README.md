@@ -6,7 +6,7 @@ Golden files for `rastai-formats`' `read_document` (contracts §12.5, ADR-0032).
 
 | Folder | Holds |
 |---|---|
-| `<type>/valid/` | Files of one document type (the folder is the full type name, e.g. `rastai.model`) that must read with no error. Warnings and info are allowed. |
+| `<type>/valid/` | Files of one document type (the folder is the full type name, e.g. `rastai.theme`) that must read with no error. Warnings and info are allowed. The step-1 types are here from M1-17: `rastai.run_record`, `rastai.resume`, `rastai.settings`, `rastai.project`, `rastai.lock`, `rastai.plugin` and `rastai.theme`. |
 | `<type>/invalid/` | Files of that type that must fail, each with its expected diagnostics. |
 | `<type>/v<n>/` | Files at an old schema version, for the migration test (`tests/migrations.rs`, once a type has a v2). |
 | `any/invalid/` | Cases every document shares whatever its type: syntax errors, import limits, the shared header, an unknown `type`. Their `type` names no real type, so they keep their verdict as types are added. |
@@ -25,6 +25,7 @@ Golden files for `rastai-formats`' `read_document` (contracts §12.5, ADR-0032).
   }
   ```
 
-  It lists every diagnostic of the file, in the order one read reports them: the `type` check, then the migration, then the structure walk (each object's fields in description order, then its unknown keys in key order). `path` is the full diagnostic path, `file:line:column#/json/pointer` (contracts §4.1). A missing field's pointer names the field, and its line and column are those of the object that should hold it.
+  It lists every diagnostic of the file, in the order one read reports them: the `type` check, then the migration, then the structure walk (each object's fields in description order, then its unknown keys in key order), then the meaning checks of layer 3 (`RRS-E2xxx`, and `RRS-P0xxx` for a plugin manifest), which run only when layers 1 and 2 found no error. `path` is the full diagnostic path, `file:line:column#/json/pointer` (contracts §4.1). A missing field's pointer names the field, and its line and column are those of the object that should hold it.
+- **A valid file must also come back as its typed document**, so a description that disagrees with its struct shows up here too.
 - **An expected file without its fixture fails the test**, so renaming a case can't leave its expectations behind.
 - **A file that isn't UTF-8** (`any/invalid/not_utf8.json`) is kept byte for byte; don't let an editor re-save it.

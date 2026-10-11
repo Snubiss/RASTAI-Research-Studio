@@ -1,16 +1,17 @@
 //! Fuzz target for `read_document` (contracts 12.5): arbitrary bytes, read once per known extension and once as a
 //! plain `.json` file, never panic, and every outcome keeps the promises callers rely on.
 //!
-//! No document type is registered before M1-17, so `read_document` alone stops after the header. The same bytes
-//! also go through `check_document` with a fuzz-only type that has every nested kind (Type, List, Map, Enum and a
-//! type that holds itself), so the layer-2 body walk is fuzzed too, as tests/documents_corpus.rs tests it.
+//! `read_document` runs every layer for the step-1 document types, layer 3 included, once the bytes name one of
+//! them. The same bytes also go through `check_document` with a fuzz-only type that has every nested kind (Type,
+//! List, Map, Enum and a type that holds itself), so the layer-2 walk is fuzzed on deeper shapes than the real
+//! descriptions have, as tests/documents_corpus.rs tests it.
 
 #![no_main]
 
 use std::sync::OnceLock;
 
 use libfuzzer_sys::fuzz_target;
-use rastai_diag::diagnostic::{Diagnostic, has_errors};
+use rastai_diag::diagnostic::{Diagnostic, Severity, has_errors};
 use rastai_formats::byte_source::SliceSource;
 use rastai_formats::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of};
 use rastai_formats::documents::{DOCUMENT_TYPES, DocumentType};
@@ -21,7 +22,11 @@ use rastai_formats::validate::{check_document, read_document};
 const FILE_STEM: &str = "fuzz";
 // Documents found by their place (run.json, settings.json) have no extension of their own.
 const PLAIN_EXTENSION: &str = ".json";
+// read_document reports formats codes, and plugin codes from a manifest's layer-3 check.
 const FORMATS_CODE_PREFIX: &str = "RRS-E";
+const PLUGIN_CODE_PREFIX: &str = "RRS-P";
+// Layer 3's own formats codes; its findings never clear the typed document.
+const MEANING_CODE_PREFIX: &str = "RRS-E2";
 
 const FUZZ_TYPE_NAME: &str = "fuzz.sample";
 const FUZZ_FILE_NAME: &str = "fuzz.sample";
@@ -98,12 +103,21 @@ fn fuzz_descriptions_once() -> &'static [TypeDescription] {
     DESCRIPTIONS.get_or_init(fuzz_descriptions)
 }
 
-/// Every diagnostic is a formats code and says which file it is about.
+/// Every diagnostic is a formats or plugin code and says which file it is about.
 fn check_diagnostics(file_name: &str, diagnostics: &[Diagnostic]) {
     for diagnostic in diagnostics {
-        assert!(diagnostic.code.starts_with(FORMATS_CODE_PREFIX), "{diagnostic:?}");
+        let code = diagnostic.code.as_str();
+        assert!(
+            code.starts_with(FORMATS_CODE_PREFIX) || code.starts_with(PLUGIN_CODE_PREFIX),
+            "{diagnostic:?}"
+        );
         assert!(diagnostic.path.starts_with(file_name), "{diagnostic:?}");
     }
+}
+
+/// A layer-3 finding: the only kind of error a typed document may come back with.
+fn is_meaning_code(code: &str) -> bool {
+    code.starts_with(MEANING_CODE_PREFIX) || code.starts_with(PLUGIN_CODE_PREFIX)
 }
 
 fuzz_target!(|bytes: &[u8]| {
@@ -111,8 +125,13 @@ fuzz_target!(|bytes: &[u8]| {
     let source = SliceSource { bytes };
     for file_name in file_names() {
         let outcome = read_document(&file_name, &source, &limits);
-        // A typed document only ever comes without errors.
-        assert!(outcome.document.is_none() || !has_errors(&outcome.diagnostics));
+        // A typed document only ever comes when layers 1 and 2 found no error: its errors are layer 3's.
+        if outcome.document.is_some() {
+            let errors = outcome.diagnostics.iter().filter(|item| item.severity == Severity::Error);
+            for error in errors {
+                assert!(is_meaning_code(&error.code), "{error:?}");
+            }
+        }
         check_diagnostics(&file_name, &outcome.diagnostics);
     }
     let checked = check_document(FUZZ_FILE_NAME, &source, &limits, FUZZ_TYPES, fuzz_descriptions_once());

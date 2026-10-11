@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.run_record/1.json",
+  "type": "rastai.run_record",
+  "schema_version": 1,
+  "id": "run_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2Q",
+  "kind": "teach",
+  "chain": {
+    "steps": [
+      {
+        "step_name": "train",
+        "child_run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2R",
+        "command_id": "train.start",
+        "arguments_json": "{\"recipe\": \"sft\"}"
+      },
+      {
+        "step_name": "diff",
+        "child_run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2S",
+        "command_id": "psychology.diff.run",
+        "optional": true
+      }
+    ]
+  },
+  "created_at": "2026-10-11T12:05:00Z"
+}

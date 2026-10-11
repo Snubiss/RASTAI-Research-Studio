@@ -1,0 +1,16 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "colors_not_rrggbb.theme.json:9:5#/colors/surface"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "colors_not_rrggbb.theme.json:10:5#/colors/text"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "colors_not_rrggbb.theme.json:11:5#/colors/accent"
+    }
+  ]
+}

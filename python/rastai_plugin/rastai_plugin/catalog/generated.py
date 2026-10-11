@@ -94,6 +94,7 @@ RRS_E2002 = "RRS-E2002"
 RRS_E2003 = "RRS-E2003"
 RRS_E2004 = "RRS-E2004"
 RRS_E2005 = "RRS-E2005"
+RRS_E2006 = "RRS-E2006"
 RRS_E3001 = "RRS-E3001"
 RRS_E3002 = "RRS-E3002"
 RRS_E3003 = "RRS-E3003"
@@ -1066,6 +1067,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Rename one of them.",
         fix_command_id="",
         docs_anchor="rrs-e2005",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_E2006,
+        severity="error",
+        title="Value isn't in its required form",
+        message="{found} isn't {expected}.",
+        basic_text="A value in this file is written in a form Rastai can't use, such as a color that isn't six hex digits.",
+        fix_text="Rewrite the value in the form shown.",
+        fix_command_id="",
+        docs_anchor="rrs-e2006",
         retired=False,
     ),
     CatalogEntry(

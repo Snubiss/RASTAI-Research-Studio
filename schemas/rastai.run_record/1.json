@@ -1,0 +1,270 @@
+{
+  "$defs": {
+    "RunBaseModel": {
+      "additionalProperties": false,
+      "description": "The model a run started from.",
+      "properties": {
+        "model_hash": {
+          "description": "Hash of its weight files.",
+          "type": "string"
+        },
+        "model_ref": {
+          "description": "Model ref (contracts 8.6).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_ref"
+      ],
+      "title": "RunBaseModel",
+      "type": "object"
+    },
+    "RunChain": {
+      "additionalProperties": false,
+      "description": "The steps of a chain run.",
+      "properties": {
+        "steps": {
+          "description": "Steps in order.",
+          "items": {
+            "$ref": "#/$defs/RunChainStep"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "title": "RunChain",
+      "type": "object"
+    },
+    "RunChainStep": {
+      "additionalProperties": false,
+      "description": "One step of a chain run.",
+      "properties": {
+        "arguments_json": {
+          "description": "Its arguments as JSON text.",
+          "type": "string"
+        },
+        "child_run_id": {
+          "description": "Run id assigned to the step.",
+          "type": "string"
+        },
+        "command_id": {
+          "description": "Command the step runs.",
+          "type": "string"
+        },
+        "optional": {
+          "description": "Skipped when its plugin is off.",
+          "type": "boolean"
+        },
+        "step_name": {
+          "description": "Such as train or verify.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_name",
+        "child_run_id",
+        "command_id"
+      ],
+      "title": "RunChainStep",
+      "type": "object"
+    },
+    "RunRecipe": {
+      "additionalProperties": false,
+      "description": "The recipe a run used.",
+      "properties": {
+        "name": {
+          "description": "Recipe name.",
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {},
+          "description": "Its settings as accepted at launch.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "RunRecipe",
+      "type": "object"
+    },
+    "RunSource": {
+      "additionalProperties": false,
+      "description": "Where an imported run came from.",
+      "properties": {
+        "kind": {
+          "description": "Its source, such as tensorboard.",
+          "type": "string"
+        },
+        "location": {
+          "description": "Folder or URL it was read from.",
+          "type": "string"
+        },
+        "original_run_id": {
+          "description": "Its id in the other tool.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RunSource",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.run_record/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "What a run was started with (runs/<run_id>/run.json).",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "app_version": {
+      "description": "Rastai version that started it.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "base_model": {
+      "$ref": "#/$defs/RunBaseModel",
+      "description": "Model it started from."
+    },
+    "chain": {
+      "$ref": "#/$defs/RunChain",
+      "description": "Chain runs: the steps."
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "created_at": {
+      "description": "RFC 3339 UTC creation time.",
+      "type": "string"
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "dataset_hashes": {
+      "description": "Each dataset snapshot's hash.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "environment_lock_hash": {
+      "description": "The environment's lock hash.",
+      "type": "string"
+    },
+    "git_commit": {
+      "description": "Commit of the user's code, if any.",
+      "type": "string"
+    },
+    "hardware_fingerprint": {
+      "description": "The hardware it ran on. Protobuf JSON of rastai.common.v1.HardwareFingerprint.",
+      "type": "object"
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "job_spec": {
+      "description": "The job that ran it. Protobuf JSON of rastai.node.v1.JobSpec.",
+      "type": "object"
+    },
+    "kind": {
+      "description": "Run kind (contracts 9.5).",
+      "enum": [
+        "train",
+        "teach",
+        "rlhf",
+        "sweep",
+        "eval",
+        "lens",
+        "data_import",
+        "data_check",
+        "export",
+        "imported",
+        "external"
+      ],
+      "type": "string"
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "parent_run_id": {
+      "description": "Chain run or rerun source.",
+      "type": "string"
+    },
+    "plugin_versions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugin id to the version that ran.",
+      "type": "object"
+    },
+    "recipe": {
+      "$ref": "#/$defs/RunRecipe",
+      "description": "Recipe and settings."
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "run_id": {
+      "description": "The run's id.",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "seed": {
+      "description": "Random seed.",
+      "type": "integer"
+    },
+    "source": {
+      "$ref": "#/$defs/RunSource",
+      "description": "Imported runs: the source."
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id",
+    "run_id",
+    "kind",
+    "created_at"
+  ],
+  "title": "RunRecord",
+  "type": "object"
+}

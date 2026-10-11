@@ -5,8 +5,7 @@
 //! command-id segment, contracts 6.1), so the two kinds can never be read as each other.
 
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
-
-use crate::commands::naming::is_plugin_id;
+use rastai_formats::validate::meaning::plugin_manifest::is_plugin_id;
 
 const PLUGIN_SCOPE_PREFIX: &str = "plugin:";
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
