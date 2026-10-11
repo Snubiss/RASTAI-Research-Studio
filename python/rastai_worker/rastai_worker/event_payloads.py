@@ -77,8 +77,12 @@ MAP_VALUE_FIELD = "value"
 
 def payload_from_dict(event_type: str, values: dict) -> EventPayload:
     """The typed payload of one event: `values` holds the payload message's fields by their proto names, enums by
-    name ("RUN_STATE_RUNNING"). An event type a worker doesn't emit, a field the message doesn't have or a value of
-    the wrong type is a bug in the calling code, so it raises ValueError."""
+    name ("RUN_STATE_RUNNING"). An event type a worker doesn't emit, a field the message doesn't have or a value
+    that can't become the field's type is a bug in the calling code, so it raises ValueError.
+
+    The conversion is protobuf's JSON mapping, so it also takes what that mapping takes: a field's lowerCamelCase
+    JSON name ("checkpointId" for checkpoint_id), a number written as a string ("12" for an int64) and an enum by
+    its number. Engines write proto names and plain values; the record is the same either way."""
     field_name = WORKER_EVENT_PAYLOAD_FIELDS.get(event_type)
     if field_name is None:
         raise ValueError(f"a worker doesn't emit the event type {event_type!r} (contracts 7.3)")

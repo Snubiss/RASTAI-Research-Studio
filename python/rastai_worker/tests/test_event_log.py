@@ -394,6 +394,30 @@ def test_the_reserve_exists_while_open_and_is_gone_after_close(tmp_path: Path) -
     writer.close()
 
 
+def test_a_relaunch_that_takes_the_lock_as_close_releases_it_keeps_its_reserve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / LOG_FILE_NAME
+    reserve = event_log.reserve_path_for(path)
+    closing = EventLogWriter(path, RUN_ID, JOB_ID)
+    relaunched = []
+    real_close = os.close
+
+    def close_then_relaunch(file_descriptor: int) -> None:
+        # The relaunch opens in the moment the closing writer's lock is released, before close returns.
+        real_close(file_descriptor)
+        if file_descriptor == closing.file_descriptor and not relaunched:
+            relaunched.append(EventLogWriter(path, RUN_ID, JOB_ID))
+
+    monkeypatch.setattr(event_log.os, "close", close_then_relaunch)
+    closing.close()
+    monkeypatch.undo()
+    assert len(relaunched) == 1
+    assert reserve.read_bytes() == bytes(EVENT_LOG_RESERVE_BYTES), "the closing writer deleted the new one's reserve"
+    relaunched[0].close()
+    assert not reserve.exists()
+
+
 def test_a_closed_writer_refuses_to_append(tmp_path: Path) -> None:
     writer = EventLogWriter(tmp_path / LOG_FILE_NAME, RUN_ID, JOB_ID)
     writer.close()

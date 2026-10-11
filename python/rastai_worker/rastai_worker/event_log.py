@@ -24,14 +24,19 @@ both languages read and write.
   arrives with the job process, M1-40). `close` deletes it.
 
 How the open tells a torn tail from corruption is the Rust reader's rule (contracts 7.1, `reader.rs`), ported here
-line for line so both sides give every file the same verdict. A crash only damages the end of a file, so a bad
-frame is the torn tail when nothing but zeros follows its start or, for a checksum mismatch, when nothing but zeros
-follows its declared end. A frame whose declared end lies past the end of the file, or a checksum mismatch with only
-zeros after it, is the torn tail unless a whole, checksum-valid, version-1 frame with a later sequence lies in the
-1 MiB after its header: then its length was damaged and it is corruption. When the bytes after the header start as
-the record the frame should hold, a later frame may start only where one of that record's top-level fields ends (a
-frame inside a field is the record's own text quoting one); otherwise every offset is a candidate. The search runs
-at most 4 MiB of candidate bodies through CRC-32, so crafted bytes can't make an open slow.
+line for line so both sides give every file a writer can produce the same verdict. A crash only damages the end of a
+file, so a bad frame is the torn tail when nothing but zeros follows its start or, for a checksum mismatch, when
+nothing but zeros follows its declared end. A frame whose declared end lies past the end of the file, or a checksum
+mismatch with only zeros after it, is the torn tail unless a whole, checksum-valid, version-1 frame with a later
+sequence lies in the 1 MiB after its header: then its length was damaged and it is corruption. When the bytes after
+the header start as the record the frame should hold, a later frame may start only where one of that record's
+top-level fields ends (a frame inside a field is the record's own text quoting one); otherwise every offset is a
+candidate. The search runs at most 4 MiB of candidate bodies through CRC-32, so crafted bytes can't make an open
+slow.
+
+One difference is left: a checksum-valid body whose known field has the wrong wire type decodes here, where upb
+takes it as an unknown field, and is RRS-S2002 in Rust, where prost refuses it. Neither writer encodes one, so only
+crafted bytes hit it.
 """
 
 import errno
@@ -49,7 +54,16 @@ from rastai_proto.events.v1.event_record_pb2 import EventRecord
 from rastai_proto.events.v1.payloads_pb2 import EventPayload
 
 from rastai_worker.errors import WorkerError
-from rastai_worker.event_payloads import decode_event_record, encode_message
+from rastai_worker.event_payloads import (
+    UINT64_MASK,
+    WIRE_TYPE_BITS,
+    WIRE_TYPE_FIXED32,
+    WIRE_TYPE_FIXED64,
+    WIRE_TYPE_LENGTH_DELIMITED,
+    WIRE_TYPE_VARINT,
+    decode_event_record,
+    encode_message,
+)
 
 # Metrics are batched and fsynced at least this often (contracts 7.1 and 15.10; the Rust writer's batched policy).
 METRICS_FSYNC_INTERVAL_SECONDS = 1.0
@@ -93,18 +107,12 @@ CANDIDATE_LATER_FRAME = "later_frame"
 CANDIDATE_NOTHING = "nothing"
 CANDIDATE_BUDGET_SPENT = "budget_spent"
 
-# The protobuf wire types (the low 3 bits of a field key) the field walk steps over. Groups (3 and 4) are never
-# written by our encoders, so the walk stops at them.
-WIRE_TYPE_VARINT = 0
-WIRE_TYPE_FIXED64 = 1
-WIRE_TYPE_LENGTH_DELIMITED = 2
-WIRE_TYPE_FIXED32 = 5
-WIRE_TYPE_BITS = 3
+# The field walk steps over the wire types imported from event_payloads (the low 3 bits of a field key). Groups
+# (3 and 4) are never written by our encoders, so the walk stops at them.
 FIXED64_BYTES = 8
 FIXED32_BYTES = 4
-# A u64 varint takes at most 10 bytes, 7 bits each; the Rust walk keeps only the low 64 bits.
+# A u64 varint takes at most 10 bytes, 7 bits each; the Rust walk keeps only the low 64 bits (UINT64_MASK).
 MAX_VARINT_BYTES = 10
-UINT64_MASK = (1 << 64) - 1
 # EventRecord's first two field numbers. Every encoder writes fields in number order, and both are always written,
 # because a record's version (1) and sequence (1 or more) are never 0.
 FORMAT_VERSION_FIELD = 1
@@ -178,15 +186,14 @@ class EventLogWriter:
         self.last_sync_seconds = time.monotonic()
 
     def close(self) -> None:
-        """fsyncs, releases the lock and deletes the reserve. Closing twice does nothing."""
+        """fsyncs, deletes the reserve and releases the lock. Closing twice does nothing."""
         if self.is_closed:
             return
         self.is_closed = True
         try:
             self.sync()
         finally:
-            os.close(self.file_descriptor)
-            self.reserve_path.unlink(missing_ok=True)
+            delete_reserve_then_unlock(self.file_descriptor, self.reserve_path)
 
     def write_frame_at_end(self, frame: bytes) -> None:
         """One write at the end of the last whole frame. On failure the file is cut back to that point, so a failed
@@ -220,6 +227,16 @@ def batched_sync_is_due(last_sync_seconds: float, now_seconds: float) -> bool:
 
 def reserve_path_for(log_path: Path) -> Path:
     return log_path.with_name(log_path.name + RESERVE_FILE_SUFFIX)
+
+
+def delete_reserve_then_unlock(file_descriptor: int, reserve_path: Path) -> None:
+    """The reserve goes while the lock is still held. Closing the file releases the flock, and a relaunch that takes
+    it at once writes its own reserve at the same path: deleting ours after the close would delete the new writer's,
+    leaving it no room to pause on a full disk."""
+    try:
+        reserve_path.unlink(missing_ok=True)
+    finally:
+        os.close(file_descriptor)
 
 
 # ---- Opening, locking and recovering ----
