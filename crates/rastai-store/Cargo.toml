@@ -1,6 +1,6 @@
 [package]
 name = "rastai-store"
-description = "Everything the Rastai daemon persists: rastai.db behind one writer thread, read-only reader pools, the daemon lock"
+description = "Everything the Rastai daemon persists: rastai.db behind one writer thread, read-only reader pools, the daemon lock, the event logs"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -8,11 +8,17 @@ version.workspace = true
 publish.workspace = true
 
 # The only crate that touches SQLite, and sqlite.rs is its only file that imports rusqlite (layout: rust-control-plane.md
-# section 6.6). M1-23 lands rastai.db, its writer thread, the reader pool and the daemon lock; the event logs (M1-24),
-# the indexer, blobs and free space (M1-25) and vault.db (M3) bring rastai-proto, rastai-formats, prost and libc.
+# section 6.6). M1-23 lands rastai.db, its writer thread, the reader pool and the daemon lock; M1-24 the event-log frames,
+# reader and writer; the indexer, blobs and free space (M1-25) and vault.db (M3) bring libc.
 [dependencies]
 # DataPaths and the path functions (the only place paths are built), and now_unix_ms.
 rastai-core = { path = "../rastai-core" }
+# crc32.rs, the one CRC-32 table, for frame checksums (contracts 7.1).
+rastai-formats = { path = "../rastai-formats" }
+# EventRecord, the body of every frame.
+rastai-proto = { path = "../rastai-proto" }
+# Encodes and decodes EventRecord frame bodies; only src/event_log/frame.rs uses it (layout section 6.5).
+prost = { workspace = true }
 rusqlite = { workspace = true }
 # The list columns (tokens.scopes, nodes.capabilities, plugins.granted_permissions) are JSON arrays of text.
 serde_json = { workspace = true }

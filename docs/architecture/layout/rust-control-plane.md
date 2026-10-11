@@ -1614,6 +1614,7 @@ crates/rastai-store/
       frame.rs                EVENT_LOG_HEADER, encode_frame(), decode_frame_header(); checksums through
                               rastai_formats::crc32 (the one CRC-32 table, contracts §7.1)
       writer.rs               EventLogWriter: create, open for append (truncates a torn tail), append, raw append, sync
+      mod.rs                  the three pub mod lines
       reader.rs               EventLogReader, open_event_log(), read_next_frame() -> FrameRead (flows/platform.md 6.1)
     indexer.rs                apply_event_record(): one EventRecord to its rastai.db rows, inside the writer's transaction;
                               the one indexing path for live, rebuilt and restored records;
@@ -1782,19 +1783,31 @@ pub fn has_blob(store: &BlobStore, hash: &str) -> bool
 pub fn verify_blob(store: &BlobStore, hash: &str) -> Result<(), StoreError>             // re-hash; quarantine on mismatch
 pub fn collect_blob_garbage(store: &BlobStore, live_hashes: &HashSet<String>, dry_run: bool) -> Result<BlobGcReport, StoreError>
 
-// event_log/
+// event_log/frame.rs: the one file that encodes or decodes frame bytes (prost's wrapper)
 pub const EVENT_LOG_HEADER: &[u8; 8] = b"RRSEVLG1";
+pub const FRAME_HEADER_BYTES: usize = 8;                       // body_length u32 LE, checksum u32 LE
+pub const EVENT_RECORD_FORMAT_VERSION: u32 = 1;
+pub struct FrameHeader { pub body_length: u32, pub checksum: u32 }
+pub fn encode_frame(record: &EventRecord) -> Option<Vec<u8>>   // None only for a body over the u32 length field
+pub fn decode_frame_header(bytes: &[u8; 8]) -> FrameHeader
+pub fn body_matches_header(header: &FrameHeader, body: &[u8]) -> bool   // length and CRC-32 (rastai_formats::crc32)
+pub fn decode_frame_body(body: &[u8]) -> Option<EventRecord>   // None: not an EventRecord, or format_version != 1
+
+// event_log/reader.rs
 pub enum FrameRead { Record(EventRecord), EndOfFile, Incomplete { valid_bytes: u64 }, Corrupt { offset: u64 } }
 pub fn open_event_log(path: &Path) -> Result<EventLogReader, StoreError>
-pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreError>
+pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreError>  // a sequence gap is Err (RRS-S2003)
+pub fn reader_offset(reader: &EventLogReader) -> u64             // where the whole frames read so far end
 /// (M11) The archive copies frames verbatim (contracts §7.1): the decoded record plus its exact body bytes and CRC,
 /// so rastai-archive needs no protobuf encoder of its own.
 pub struct RawFrame { pub record: EventRecord, pub body: Vec<u8>, pub crc32: u32 }
 pub enum RawFrameRead { Frame(RawFrame), EndOfFile, Incomplete { valid_bytes: u64 }, Corrupt { offset: u64 } }
 pub fn read_next_raw_frame(reader: &mut EventLogReader) -> Result<RawFrameRead, StoreError>
-pub enum SyncPolicy { Now, Batched }
-pub fn create_event_log(path: &Path) -> Result<EventLogWriter, StoreError>
+// event_log/writer.rs
+pub enum SyncPolicy { Now, Batched }                            // Batched: fsync once METRICS_FSYNC_INTERVAL_SECONDS passed
+pub fn create_event_log(path: &Path) -> Result<EventLogWriter, StoreError>              // never overwrites; fsyncs the folder
 pub fn open_event_log_for_append(path: &Path) -> Result<EventLogWriter, StoreError>     // truncates a torn tail (RRS-S2001)
+pub fn truncated_tail_bytes(writer: &EventLogWriter) -> u64     // what that open cut off; the caller logs RRS-S2001
 pub fn append_event(writer: &mut EventLogWriter, record: &mut EventRecord, sync: SyncPolicy) -> Result<u64, StoreError>  // sets sequence
 pub fn append_raw_frame(writer: &mut EventLogWriter, frame_bytes: &[u8]) -> Result<(), StoreError>   // daemon mirror of a remote
                                                                                                     // run; archive restores
@@ -1945,7 +1958,7 @@ There is no `blake3` here: hashing goes through `rastai_formats::hashing`, so BL
 | Outbox | `tests/vault_changes.rs` | with recording off no rows are added; with it on, every changed row adds exactly one `vault_changes` row in the same transaction; a `DeleteConversation` adds `delete` rows for every message; `TrimVaultChanges` keeps later rows |
 | Writer thread | `tests/writer_thread.rs`; bottom of `writer_thread.rs` and `sqlite.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07, and far fewer transactions than writes by `writer_batch_count`); one bad write in a batch fails alone; a `Batch` lands whole or not at all; a full disk (`PRAGMA max_page_count`) fails every write of its batch with `RRS-S3002` and commits none; a reader's failure is `RRS-S0006` |
 | Migrations | `tests/index_migrations.rs`; bottom of `store.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged (in `store.rs`, because modelling the newer app takes the crate-private migration functions) |
-| Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first |
+| Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first; a bad checksum on the last frame and a zero-filled tail are torn tails; a corrupt or gapped log refuses an append and is left unchanged; the committed fixtures equal their recipes |
 | Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
 | Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |
 | Handler calls | `tests/handler_calls.rs` | pending calls list per plugin in log order; `MarkHandlerDelivered` removes one from the pending list; `DropHandlerCalls` clears a plugin's |

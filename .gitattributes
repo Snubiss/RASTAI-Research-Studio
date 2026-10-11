@@ -7,3 +7,6 @@
 # Golden protobuf messages are compared byte for byte, so git never treats them as text: no line-ending
 # conversion on any checkout (an autocrlf clone, the Windows CI job) and no text diffs.
 *.binpb binary
+
+# The event-log fixtures are frames of protobuf bytes (contracts 7.1), compared byte for byte: binary, no text diffs.
+fixtures/event-logs/*.log binary
