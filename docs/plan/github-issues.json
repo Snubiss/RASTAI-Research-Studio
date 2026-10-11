@@ -3,6 +3,10 @@
     "number": 1,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/1"
   },
+  "M1-01a": {
+    "number": 150,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/150"
+  },
   "M1-02": {
     "number": 2,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/2"
@@ -311,6 +315,10 @@
     "number": 78,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/78"
   },
+  "M2-23": {
+    "number": 151,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/151"
+  },
   "M3-E01": {
     "number": 79,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/79"
@@ -463,6 +471,10 @@
     "number": 116,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/116"
   },
+  "M5-E16": {
+    "number": 152,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/152"
+  },
   "M6-E01": {
     "number": 117,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/117"
@@ -555,6 +567,10 @@
     "number": 139,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/139"
   },
+  "M8-E06": {
+    "number": 153,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/153"
+  },
   "M9-E01": {
     "number": 140,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/140"
@@ -594,5 +610,37 @@
   "M10-E03": {
     "number": 149,
     "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/149"
+  },
+  "M10-E04": {
+    "number": 154,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/154"
+  },
+  "M11-E01": {
+    "number": 155,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/155"
+  },
+  "M11-E02": {
+    "number": 156,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/156"
+  },
+  "M11-E03": {
+    "number": 157,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/157"
+  },
+  "M11-E04": {
+    "number": 158,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/158"
+  },
+  "M11-E05": {
+    "number": 159,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/159"
+  },
+  "M11-E06": {
+    "number": 160,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/160"
+  },
+  "M11-E07": {
+    "number": 161,
+    "url": "https://github.com/Snubiss/RASTAI-Research-Studio/issues/161"
   }
 }
