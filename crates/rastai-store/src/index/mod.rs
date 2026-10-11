@@ -3,6 +3,7 @@
 //!
 //! This file is a list of `pub mod` lines (contracts 12.2).
 
+pub mod artifacts;
 pub mod documents;
 pub mod journal;
 pub mod kept_tables;

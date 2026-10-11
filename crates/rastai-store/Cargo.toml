@@ -9,14 +9,17 @@ publish.workspace = true
 
 # The only crate that touches SQLite, and sqlite.rs is its only file that imports rusqlite (layout: rust-control-plane.md
 # section 6.6). M1-23 lands rastai.db, its writer thread, the reader pool and the daemon lock; M1-24 the event-log frames,
-# reader and writer; the indexer, blobs and free space (M1-25) and vault.db (M3) bring libc.
+# reader and writer; M1-25 the indexer, the blob store and free space, which brings libc; vault.db joins in M3.
 [dependencies]
-# DataPaths and the path functions (the only place paths are built), and now_unix_ms.
+# DataPaths and the path functions (the only place paths are built), now_unix_ms, random bytes for temporary file
+# names, and the state names the indexer writes.
 rastai-core = { path = "../rastai-core" }
-# crc32.rs, the one CRC-32 table, for frame checksums (contracts 7.1).
+# crc32.rs, the one CRC-32 table, for frame checksums (contracts 7.1); hashing.rs, the one BLAKE3, for blob names.
 rastai-formats = { path = "../rastai-formats" }
-# EventRecord, the body of every frame.
+# EventRecord, the body of every frame and what the indexer reads; BlobRef, what a blob write returns.
 rastai-proto = { path = "../rastai-proto" }
+# One statvfs call in src/disk_space.rs, the only unsafe in the workspace (ADR-0033); no other file imports it.
+libc = { workspace = true }
 # Encodes and decodes EventRecord frame bodies; only src/event_log/frame.rs uses it (layout section 6.5).
 prost = { workspace = true }
 rusqlite = { workspace = true }

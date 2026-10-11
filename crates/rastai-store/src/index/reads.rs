@@ -14,7 +14,7 @@ use std::sync::MutexGuard;
 
 use crate::error::StoreError;
 use crate::reader_pool::{ReaderPool, lock_reader};
-use crate::sqlite::{SqliteConnection, query_rows, read_schema_version, read_text, text_value};
+use crate::sqlite::{SqlValue, SqliteConnection, query_rows, read_schema_version, read_text, text_value};
 
 // SQLite's own tables (sqlite_sequence, sqlite_stat1, ...) all start with this prefix and are never ours.
 const SQLITE_INTERNAL_TABLE_PATTERN: &str = "sqlite\\_%";
@@ -47,6 +47,33 @@ pub struct TableColumns {
     pub column_names: Vec<String>,
 }
 
+/// Every row of one table, each column written as text, sorted by all its columns, so two databases with the same
+/// rows give the same list. For comparing whole tables: the indexer's idempotence test and the rebuild's row by row
+/// check (contracts 8.2). NULL is `NULL`, text is quoted, a blob is `x'<hex>'`.
+///
+/// `table_name` must be a table of the database (`list_table_columns` lists them); any other name is refused before
+/// it reaches SQL, so the name can't carry SQL of its own.
+pub fn list_table_rows(reader: &IndexReader, table_name: &str) -> Result<Vec<Vec<String>>, StoreError> {
+    let column_names = list_column_names(reader, table_name)?;
+    // No table of ours has a quote in its name, and one would end the quoted name in the SQL below.
+    if column_names.is_empty() || table_name.contains('"') {
+        return Err(StoreError::DatabaseReadFailed {
+            reason: format!("{table_name} is not a table of the database"),
+        });
+    }
+    let mut column_numbers = Vec::with_capacity(column_names.len());
+    for number in 1..=column_names.len() {
+        column_numbers.push(number.to_string());
+    }
+    let sql = format!("SELECT * FROM \"{table_name}\" ORDER BY {}", column_numbers.join(", "));
+    let rows = query_rows(&reader.connection, &sql, &[])?;
+    let mut table_rows = Vec::with_capacity(rows.len());
+    for row in &rows {
+        table_rows.push(row.iter().map(value_as_text).collect());
+    }
+    Ok(table_rows)
+}
+
 /// Lends one reader from the pool, waiting only when every reader is in use.
 pub fn open_index_reader(pool: &ReaderPool) -> Result<IndexReaderGuard<'_>, StoreError> {
     Ok(IndexReaderGuard {
@@ -77,6 +104,22 @@ pub fn list_table_columns(reader: &IndexReader) -> Result<Vec<TableColumns>, Sto
         });
     }
     Ok(tables)
+}
+
+fn value_as_text(value: &SqlValue) -> String {
+    match value {
+        SqlValue::Null => "NULL".to_string(),
+        SqlValue::Integer(number) => number.to_string(),
+        SqlValue::Real(number) => format!("{number:?}"),
+        SqlValue::Text(text) => format!("{text:?}"),
+        SqlValue::Blob(bytes) => {
+            let mut hex = String::with_capacity(bytes.len() * 2);
+            for byte in bytes {
+                hex.push_str(&format!("{byte:02x}"));
+            }
+            format!("x'{hex}'")
+        }
+    }
 }
 
 fn list_column_names(reader: &IndexReader, table_name: &str) -> Result<Vec<String>, StoreError> {

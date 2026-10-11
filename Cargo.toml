@@ -61,8 +61,11 @@ tonic-prost = "=0.14.6"
 # pinned.
 hyper = { version = "=1.11.1", default-features = false }
 hyper-util = { version = "=0.1.21", default-features = false }
+# One statvfs call in rastai-store's disk_space.rs (ADR-0033). The version Cargo.lock already held under tokio, so
+# the lock gains no second copy.
+libc = "=0.2.190"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
-# rustls, tokio-rustls, webpki-roots, tower, libc,
+# rustls, tokio-rustls, webpki-roots, tower,
 # miniz_oxide, ed25519-dalek, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build,
 # tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 

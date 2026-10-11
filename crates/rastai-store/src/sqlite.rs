@@ -198,6 +198,16 @@ pub(crate) fn query_rows(
     Ok(result)
 }
 
+/// Runs a query on the writer's own connection, inside its transaction, so it sees the rows the transaction has
+/// written but not yet committed. The indexer reads the ack this way before it decides which records are new.
+pub(crate) fn query_rows_in_transaction(
+    transaction: &SqliteTransaction<'_>,
+    sql: &str,
+    parameters: &[SqlValue],
+) -> Result<Vec<Vec<SqlValue>>, StoreError> {
+    query_rows(transaction.connection, sql, parameters)
+}
+
 /// The highest migration version the file has; 0 for a new, empty file.
 pub(crate) fn read_schema_version(connection: &SqliteConnection) -> Result<i64, StoreError> {
     let tables = query_rows(connection, COUNT_SCHEMA_MIGRATIONS_TABLES, &[])?;
@@ -211,6 +221,14 @@ pub(crate) fn read_schema_version(connection: &SqliteConnection) -> Result<i64, 
 // ---- Parameters and columns: the small conversions every table file uses ----
 
 pub(crate) fn text_value(text: &str) -> SqlValue {
+    SqlValue::Text(text.to_string())
+}
+
+/// "" is stored as NULL: a text column whose value is "none", such as the code of a command that succeeded.
+pub(crate) fn optional_text_value(text: &str) -> SqlValue {
+    if text.is_empty() {
+        return SqlValue::Null;
+    }
     SqlValue::Text(text.to_string())
 }
 
@@ -235,6 +253,15 @@ pub(crate) fn unsigned_value(number: u64) -> Result<SqlValue, StoreError> {
             reason: format!("{number} is larger than SQLite's largest integer"),
         }),
     }
+}
+
+/// A REAL column. A NaN is stored as NULL: SQLite would turn it into NULL anyway, and saying so here keeps the
+/// diverging run's metric row (its value unknown) instead of failing the write.
+pub(crate) fn real_value(number: f64) -> SqlValue {
+    if number.is_nan() {
+        return SqlValue::Null;
+    }
+    SqlValue::Real(number)
 }
 
 /// SQLite has no boolean; 0 and 1 in an INTEGER column, as the STRICT tables declare.

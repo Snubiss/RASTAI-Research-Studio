@@ -2,9 +2,11 @@
 //! The writer thread applies each request inside its own savepoint (writer_thread.rs), so a write either lands whole
 //! or not at all. There is no settings write: settings live only in files (contracts 11.1).
 //!
-//! Variants arrive with the code that needs them (layout section 6.2): `ApplyRunEvents` and `ApplyDaemonEvents` with
-//! the indexer (M1-25), the handler-call writes (M5), `UpsertTransfer` (M9) and the archive writes (M11).
+//! Variants arrive with the code that needs them (layout section 6.2): the handler-call writes and the
+//! `handler_calls` of the two `Apply*Events` (M5), `UpsertTransfer` (M9) and the archive writes (M11).
 //! `SetUndoPosition` waits for undo (build step 4): `documents` has no column for a document's current position yet.
+
+use rastai_proto::events::v1::EventRecord;
 
 use crate::error::StoreError;
 use crate::index::documents::{DocumentRow, UndoStepRow, clear_undo_steps, record_undo_step, upsert_document};
@@ -13,14 +15,29 @@ use crate::index::kept_tables::{
     NodeRow, PluginRow, ProjectRow, TokenRow, insert_token, revoke_token, upsert_node, upsert_plugin, upsert_project,
 };
 use crate::index::runs::{JobRow, RunRow, upsert_job, upsert_run};
+use crate::indexer::{apply_daemon_events, apply_run_events};
 use crate::sqlite::SqliteTransaction;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// PartialEq but not Eq: an event record can carry metric values, and floats have no total equality.
+#[derive(Debug, Clone, PartialEq)]
 pub enum IndexWrite {
     /// A command started: its journal row, before it runs.
     JournalStarted(JournalStartedRow),
     /// At startup: close every journal row a restart interrupted, as failed with `RRS-C0005`.
     MarkUnfinishedJournalRows,
+    /// A batch of one run's event-log records, in log order: their rows and `runs.acked_sequence`, in one
+    /// transaction. Records at or below the ack are skipped, so a re-sent batch changes nothing (indexer.rs). The
+    /// run's row must already exist.
+    ApplyRunEvents {
+        run_id: String,
+        records: Vec<EventRecord>,
+    },
+    /// A batch of the daemon log's records, in log order: their rows and `log_cursors.acked_sequence` of `log_name`
+    /// (one name per segment, `daemon:<segment>`), in one transaction, skipping records at or below the cursor.
+    ApplyDaemonEvents {
+        log_name: String,
+        records: Vec<EventRecord>,
+    },
     UpsertRun(RunRow),
     UpsertJob(JobRow),
     UpsertDocument(DocumentRow),
@@ -48,6 +65,8 @@ pub(crate) fn apply_index_write(transaction: &SqliteTransaction<'_>, write: &Ind
         IndexWrite::MarkUnfinishedJournalRows => {
             mark_unfinished_journal_rows(transaction, rastai_core::time::now_unix_ms())
         }
+        IndexWrite::ApplyRunEvents { run_id, records } => apply_run_events(transaction, run_id, records),
+        IndexWrite::ApplyDaemonEvents { log_name, records } => apply_daemon_events(transaction, log_name, records),
         IndexWrite::UpsertRun(row) => upsert_run(transaction, row),
         IndexWrite::UpsertJob(row) => upsert_job(transaction, row),
         IndexWrite::UpsertDocument(row) => upsert_document(transaction, row),

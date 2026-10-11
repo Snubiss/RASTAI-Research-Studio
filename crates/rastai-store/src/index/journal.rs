@@ -1,12 +1,12 @@
-//! Rows of `command_journal` (contracts 8.2): one per executed command, written when it starts. The indexer (M1-25)
-//! fills the finished columns from the daemon log's `command.finished` record; a restart marks the rows it
-//! interrupted with `RRS-C0005`.
+//! Rows of `command_journal` (contracts 8.2): one per executed command, written when it starts. The indexer fills
+//! the finished columns from the daemon log's `command.finished` record; a restart marks the rows it interrupted
+//! with `RRS-C0005`.
 
 use crate::error::StoreError;
 use crate::index::reads::IndexReader;
 use crate::sqlite::{
-    SqlValue, SqliteTransaction, execute, integer_value, query_rows, read_integer, read_optional_boolean,
-    read_optional_integer, read_text, text_value,
+    SqlValue, SqliteTransaction, boolean_value, execute, integer_value, optional_text_value, query_rows, read_integer,
+    read_optional_boolean, read_optional_integer, read_text, text_value,
 };
 
 // The warning a command interrupted by a daemon restart finishes with (contracts 10.3).
@@ -17,6 +17,16 @@ const INSERT_JOURNAL_STARTED: &str = "INSERT INTO command_journal (journal_id, c
     VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 const MARK_UNFINISHED_ROWS: &str = "UPDATE command_journal SET ok = 0, code = ?1, finished_unix_ms = ?2
     WHERE finished_unix_ms IS NULL";
+// A rebuild has no started rows, so a command.finished record makes the row (contracts 8.2: commands that never
+// finished are not rebuilt). It starts and finishes at the record's time, with the arguments the record doesn't
+// carry written as none. A row the daemon wrote at the start keeps its arguments and start.
+const RECORD_COMMAND_FINISHED: &str = "INSERT INTO command_journal (journal_id, command_id, principal, arguments_json,
+        ok, code, started_unix_ms, finished_unix_ms)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+    ON CONFLICT (journal_id) DO UPDATE SET ok = excluded.ok, code = excluded.code,
+        finished_unix_ms = excluded.finished_unix_ms";
+const ARGUMENTS_NOT_RECORDED: &str = "{}";
+
 // Both selects list the columns in the order journal_from_columns reads them.
 // The newest row wins: whether it is still inside the key's 24 hours is the server's call (flows/platform.md 3.2).
 const SELECT_BY_IDEMPOTENCY_KEY: &str = "SELECT journal_id, command_id, principal, arguments_json, ok, code,
@@ -81,6 +91,34 @@ pub(crate) fn mark_unfinished_journal_rows(
 ) -> Result<(), StoreError> {
     let parameters = [text_value(CODE_INTERRUPTED_BY_RESTART), integer_value(finished_unix_ms)];
     execute(transaction, MARK_UNFINISHED_ROWS, &parameters)?;
+    Ok(())
+}
+
+/// A command finished, as its `command.finished` record says. `code` is "" when it succeeded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FinishedCommand<'a> {
+    pub(crate) journal_id: &'a str,
+    pub(crate) command_id: &'a str,
+    pub(crate) principal: &'a str,
+    pub(crate) ok: bool,
+    pub(crate) code: &'a str,
+    pub(crate) finished_unix_ms: i64,
+}
+
+pub(crate) fn record_command_finished(
+    transaction: &SqliteTransaction<'_>,
+    finished: &FinishedCommand<'_>,
+) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(finished.journal_id),
+        text_value(finished.command_id),
+        text_value(finished.principal),
+        text_value(ARGUMENTS_NOT_RECORDED),
+        boolean_value(finished.ok),
+        optional_text_value(finished.code),
+        integer_value(finished.finished_unix_ms),
+    ];
+    execute(transaction, RECORD_COMMAND_FINISHED, &parameters)?;
     Ok(())
 }
 

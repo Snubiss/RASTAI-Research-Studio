@@ -1,11 +1,16 @@
-//! Rows of `runs` and `jobs` (contracts 8.2). The daemon upserts them when it starts a run or a job; the indexer
-//! (M1-25) adds `run_metrics`, `run_tags` and `checkpoints` from the event logs, and moves `runs.acked_sequence`.
+//! Rows of `runs`, `jobs`, `run_metrics`, `run_tags` and `checkpoints` (contracts 8.2). The daemon upserts runs and
+//! jobs when it starts them; the indexer (indexer.rs) changes their states and adds the metrics, tags and
+//! checkpoints from the event logs, and moves `runs.acked_sequence`.
+//!
+//! Every indexer write here is an upsert or an update keyed by ids, so a record applied twice leaves the same rows
+//! (layout section 6.4).
 
 use crate::error::StoreError;
 use crate::index::reads::IndexReader;
 use crate::sqlite::{
     SqlValue, SqliteTransaction, boolean_value, execute, integer_value, optional_integer_value, query_rows,
-    read_boolean, read_integer, read_optional_integer, read_text, read_unsigned, text_value, unsigned_value,
+    query_rows_in_transaction, read_boolean, read_integer, read_optional_integer, read_text, read_unsigned, real_value,
+    text_value, unsigned_value,
 };
 
 // archive_state is left out of the insert, so a new run takes the column default, 'local', and an update never
@@ -29,6 +34,40 @@ const SELECT_RUNS_BY_FILTER: &str = "SELECT run_id, kind, state, project_id, nod
     WHERE (?1 = '' OR project_id = ?1) AND (?2 = '' OR state = ?2) AND (?3 = '' OR kind = ?3)
     ORDER BY created_unix_ms DESC, run_id DESC LIMIT ?4";
 const NO_LIMIT: i64 = -1;
+
+// ---- What the indexer writes (layout section 6.4) ----
+
+// The ack only moves forward, like log_cursors: a late write for an older batch leaves it where it is.
+const SET_RUN_ACKED_SEQUENCE: &str = "UPDATE runs SET acked_sequence = MAX(acked_sequence, ?2) WHERE run_id = ?1";
+const SELECT_RUN_ACKED_SEQUENCE: &str = "SELECT acked_sequence FROM runs WHERE run_id = ?1";
+const SET_RUN_STATE: &str = "UPDATE runs SET state = ?2, finished_unix_ms = ?3 WHERE run_id = ?1";
+const SET_RUN_PINNED: &str = "UPDATE runs SET pinned = ?2 WHERE run_id = ?1";
+// A job the daemon never recorded (a rebuild has no jobs rows to start from) gets the record's run and '' for the
+// node and kind, which the record doesn't carry. A job the daemon recorded keeps its own.
+const UPSERT_JOB_STATE: &str = "INSERT INTO jobs (job_id, run_id, node_id, kind, state, exit_code, error_code)
+    VALUES (?1, ?2, '', '', ?3, ?4, ?5)
+    ON CONFLICT (job_id) DO UPDATE SET state = excluded.state, exit_code = excluded.exit_code,
+        error_code = excluded.error_code";
+// Keyed by (run_id, sequence, name), so a re-sent record never counts twice (contracts 7.1).
+const UPSERT_RUN_METRIC: &str = "INSERT INTO run_metrics (run_id, sequence, step, name, value, emitted_unix_ms)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    ON CONFLICT (run_id, sequence, name) DO UPDATE SET step = excluded.step, value = excluded.value,
+        emitted_unix_ms = excluded.emitted_unix_ms";
+const DELETE_RUN_TAGS: &str = "DELETE FROM run_tags WHERE run_id = ?1";
+// Tags come from the daemon log, which can name a run whose folder a later run.deleted removed: a rebuild has no
+// runs row for it then, so its tags are skipped rather than refused by the foreign key.
+const INSERT_RUN_TAG: &str = "INSERT INTO run_tags (run_id, tag)
+    SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM runs WHERE run_id = ?1)
+    ON CONFLICT (run_id, tag) DO NOTHING";
+// The checkpoint is on the run's node. `pinned` is left out of the update: only pin.changed moves it.
+const UPSERT_CHECKPOINT: &str = "INSERT INTO checkpoints (checkpoint_id, run_id, step, folder, node_id, is_best)
+    VALUES (?1, ?2, ?3, ?4, COALESCE((SELECT node_id FROM runs WHERE run_id = ?2), ''), ?5)
+    ON CONFLICT (checkpoint_id) DO UPDATE SET run_id = excluded.run_id, step = excluded.step,
+        folder = excluded.folder, node_id = excluded.node_id, is_best = excluded.is_best";
+// A run has one best checkpoint: the newest one saved as best.
+const CLEAR_OTHER_BEST_CHECKPOINTS: &str =
+    "UPDATE checkpoints SET is_best = 0 WHERE run_id = ?1 AND checkpoint_id <> ?2";
+const SET_CHECKPOINT_PINNED: &str = "UPDATE checkpoints SET pinned = ?2 WHERE checkpoint_id = ?1";
 
 const UPSERT_JOB: &str = "INSERT INTO jobs (job_id, run_id, node_id, kind, state, pid, process_group_id, exit_code,
         error_code)
@@ -71,6 +110,38 @@ pub struct JobRow {
     pub error_code: String,
 }
 
+/// A job's state as a `job.state_changed` record reports it. `exit_code` is `None` until the process has exited;
+/// `error_code` is "" unless the job failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobStateUpdate {
+    pub(crate) job_id: String,
+    pub(crate) run_id: String,
+    pub(crate) state: String,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) error_code: String,
+}
+
+/// One value of a `run.metrics` record: the record's sequence, the step and one metric.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MetricValue<'a> {
+    pub(crate) run_id: &'a str,
+    pub(crate) sequence: u64,
+    pub(crate) step: u64,
+    pub(crate) name: &'a str,
+    pub(crate) value: f64,
+    pub(crate) emitted_unix_ms: i64,
+}
+
+/// A checkpoint as `checkpoint.saved` reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SavedCheckpoint<'a> {
+    pub(crate) checkpoint_id: &'a str,
+    pub(crate) run_id: &'a str,
+    pub(crate) step: u64,
+    pub(crate) folder: &'a str,
+    pub(crate) is_best: bool,
+}
+
 /// Which runs `list_runs` returns. An empty field matches every run; `limit` `None` returns them all.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RunFilter {
@@ -111,6 +182,132 @@ pub(crate) fn upsert_job(transaction: &SqliteTransaction<'_>, row: &JobRow) -> R
         text_value(&row.error_code),
     ];
     execute(transaction, UPSERT_JOB, &parameters)?;
+    Ok(())
+}
+
+/// The run's ack, read inside the writer's transaction; `None` when there is no runs row for it.
+pub(crate) fn read_run_acked_sequence(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+) -> Result<Option<u64>, StoreError> {
+    let rows = query_rows_in_transaction(transaction, SELECT_RUN_ACKED_SEQUENCE, &[text_value(run_id)])?;
+    match rows.first() {
+        Some(row) => Ok(Some(read_unsigned(row, 0)?)),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn set_run_acked_sequence(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    acked_sequence: u64,
+) -> Result<(), StoreError> {
+    let parameters = [text_value(run_id), unsigned_value(acked_sequence)?];
+    execute(transaction, SET_RUN_ACKED_SEQUENCE, &parameters)?;
+    Ok(())
+}
+
+/// `finished_unix_ms` is `None` while the run goes on, including after a resume.
+pub(crate) fn set_run_state(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    state: &str,
+    finished_unix_ms: Option<i64>,
+) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(run_id),
+        text_value(state),
+        optional_integer_value(finished_unix_ms),
+    ];
+    execute(transaction, SET_RUN_STATE, &parameters)?;
+    Ok(())
+}
+
+pub(crate) fn set_run_pinned(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    pinned: bool,
+) -> Result<(), StoreError> {
+    execute(
+        transaction,
+        SET_RUN_PINNED,
+        &[text_value(run_id), boolean_value(pinned)],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn upsert_job_state(transaction: &SqliteTransaction<'_>, update: &JobStateUpdate) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(&update.job_id),
+        text_value(&update.run_id),
+        text_value(&update.state),
+        optional_integer_value(update.exit_code),
+        text_value(&update.error_code),
+    ];
+    execute(transaction, UPSERT_JOB_STATE, &parameters)?;
+    Ok(())
+}
+
+pub(crate) fn upsert_run_metric(
+    transaction: &SqliteTransaction<'_>,
+    metric: &MetricValue<'_>,
+) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(metric.run_id),
+        unsigned_value(metric.sequence)?,
+        unsigned_value(metric.step)?,
+        text_value(metric.name),
+        real_value(metric.value),
+        integer_value(metric.emitted_unix_ms),
+    ];
+    execute(transaction, UPSERT_RUN_METRIC, &parameters)?;
+    Ok(())
+}
+
+/// Replaces the run's tags with `tags`: a `run.tags_changed` record carries the whole set, not the difference.
+pub(crate) fn replace_run_tags(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    tags: &[String],
+) -> Result<(), StoreError> {
+    execute(transaction, DELETE_RUN_TAGS, &[text_value(run_id)])?;
+    for tag in tags {
+        execute(transaction, INSERT_RUN_TAG, &[text_value(run_id), text_value(tag)])?;
+    }
+    Ok(())
+}
+
+/// Upserts the checkpoint; when it is the new best, the run's other checkpoints stop being best. The run's row must
+/// exist: a checkpoint of an unknown run is refused by the foreign key.
+pub(crate) fn upsert_checkpoint(
+    transaction: &SqliteTransaction<'_>,
+    checkpoint: &SavedCheckpoint<'_>,
+) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(checkpoint.checkpoint_id),
+        text_value(checkpoint.run_id),
+        unsigned_value(checkpoint.step)?,
+        text_value(checkpoint.folder),
+        boolean_value(checkpoint.is_best),
+    ];
+    execute(transaction, UPSERT_CHECKPOINT, &parameters)?;
+    if checkpoint.is_best {
+        let parameters = [text_value(checkpoint.run_id), text_value(checkpoint.checkpoint_id)];
+        execute(transaction, CLEAR_OTHER_BEST_CHECKPOINTS, &parameters)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn set_checkpoint_pinned(
+    transaction: &SqliteTransaction<'_>,
+    checkpoint_id: &str,
+    pinned: bool,
+) -> Result<(), StoreError> {
+    execute(
+        transaction,
+        SET_CHECKPOINT_PINNED,
+        &[text_value(checkpoint_id), boolean_value(pinned)],
+    )?;
     Ok(())
 }
 

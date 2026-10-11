@@ -27,6 +27,13 @@ are in `docs/architecture/contracts.md` §8.2 (tables and columns) and §15.1 (c
   decides by the connection, a reader's or the writer's. A reader that can't open its file failed a read too;
   `RRS-S0004` ("not writable") is the writer's alone. Event logs follow the same split: opening or reading a log is
   `RRS-S0006`, creating, writing or syncing one `RRS-S3005` (`error.rs`).
+- **One indexing path.** Live run logs, the daemon log, the rebuild and restored frames all index through
+  `apply_event_record` (`indexer.rs`), whose writes are upserts or updates keyed by ids. `ApplyRunEvents` and
+  `ApplyDaemonEvents` skip records at or below the ack and commit the rows with the ack in one transaction, so each
+  record is applied exactly once.
+- **Blobs are named by their BLAKE3** (`blobs/`): written to `.incoming/`, fsynced, renamed into `ab/<hash>`; a
+  mismatch is moved to `.quarantine/` (`RRS-S1001`). A hash is checked for `blake3:<64 lowercase hex>` before it
+  becomes a path.
 - **One parser of event-log bytes.** Every reader of a log goes through `event_log/reader.rs`, and only
   `event_log/frame.rs` encodes or decodes frame bytes; the `event_frame` fuzz target covers both (ADR-0037).
 - **The runtime folder may be shared `/tmp`.** `take_daemon_lock` refuses (`RRS-S0007`) a runtime folder that is a
