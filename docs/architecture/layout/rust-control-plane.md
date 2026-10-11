@@ -1687,6 +1687,7 @@ pub enum IndexWrite {
 // Pruning and restoring change rows through ApplyDaemonEvents, because archive.pruned and archive.restored are durable
 // daemon records (6.4); that is what lets a rebuild bring the stubs back.
 pub async fn write_index(writer: &IndexWriter, write: IndexWrite) -> Result<(), StoreError>
+pub fn writer_batch_count(writer: &IndexWriter) -> u64   // batches applied, one transaction each (the convoy test)
 
 pub struct VaultWriter { /* same shape, plus the outbox switch below */ }
 pub enum VaultWrite {
@@ -1728,6 +1729,11 @@ pub fn find_token_by_hash(reader: &IndexReader, token_hash: &str) -> Result<Opti
 pub fn get_document(reader: &IndexReader, document_id: &str) -> Result<Option<DocumentRow>, StoreError>
 pub fn list_undo_steps(reader: &IndexReader, document_id: &str) -> Result<Vec<UndoStepRow>, StoreError>
 pub fn artifact_lineage(reader: &IndexReader, artifact_id: &str, depth: u32) -> Result<Vec<LineageRow>, StoreError>
+pub fn get_job(reader: &IndexReader, job_id: &str) -> Result<Option<JobRow>, StoreError>     // and get_journal, get_project,
+                                                                                         // get_node, get_plugin (M1-23)
+pub fn get_log_cursor(reader: &IndexReader, log_name: &str) -> Result<Option<u64>, StoreError>
+pub fn read_index_schema_version(reader: &IndexReader) -> Result<i64, StoreError>
+pub fn list_table_columns(reader: &IndexReader) -> Result<Vec<TableColumns>, StoreError>  // PRAGMA table_info, every table
 pub fn get_conversation_tree(reader: &VaultReader, conversation_id: &str) -> Result<Option<ConversationTree>, StoreError>
 pub fn list_conversations(reader: &VaultReader, filter: &ConversationFilter) -> Result<Vec<ConversationRow>, StoreError>
 pub fn list_gateway_log(reader: &VaultReader, filter: &GatewayLogFilter) -> Result<Vec<GatewayLogEntry>, StoreError>
@@ -1931,8 +1937,8 @@ There is no `blake3` here: hashing goes through `rastai_formats::hashing`, so BL
 | Free space | `tests/disk_space.rs` | `free_bytes` on a temp directory equals `df -B1 --output=avail` on the CI runner within one block; a missing path gives the typed error and `check_free_space` then fails with `RRS-S3001` (ADR-0033) |
 | Config files | `tests/config_files.rs` | a write leaves the old file or the new one, never a truncated one (a test hook stops between fsync and rename); the folder is fsynced |
 | Outbox | `tests/vault_changes.rs` | with recording off no rows are added; with it on, every changed row adds exactly one `vault_changes` row in the same transaction; a `DeleteConversation` adds `delete` rows for every message; `TrimVaultChanges` keeps later rows |
-| Writer thread | `tests/writer_thread.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07); one bad write in a batch fails alone |
-| Migrations | `tests/index_migrations.rs` | a fresh database equals the migration chain applied to the oldest fixture; a newer `schema_migrations` → `RRS-S0002`, file unchanged |
+| Writer thread | `tests/writer_thread.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07, and far fewer transactions than writes by `writer_batch_count`); one bad write in a batch fails alone; a `Batch` lands whole or not at all |
+| Migrations | `tests/index_migrations.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged |
 | Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first |
 | Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
 | Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |
