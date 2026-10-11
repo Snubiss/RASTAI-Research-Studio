@@ -28,7 +28,13 @@ const USAGE: &str = "usage: rastai-catalog-codegen [--output <folder>]";
 const EXIT_USAGE: u8 = 2;
 
 fn main() -> ExitCode {
-    let repo_root = find_repo_root();
+    let repo_root = match find_repo_root() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("{PROGRAM_NAME}: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let Some(output_root) = read_output_root(&arguments, &repo_root) else {
         eprintln!("{USAGE}");

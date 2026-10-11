@@ -180,7 +180,9 @@ fn is_slug_word(word: &str) -> bool {
 // ---- The real catalog ----
 
 fn real_errors() -> Vec<ErrorRecord> {
-    read_catalog(&find_repo_root()).expect("the catalog reads").errors
+    read_catalog(&find_repo_root().unwrap())
+        .expect("the catalog reads")
+        .errors
 }
 
 #[test]
@@ -199,7 +201,9 @@ fn real_catalog_codes_are_inside_their_owner_range() {
 }
 
 fn real_terms() -> Vec<TermRecord> {
-    read_catalog(&find_repo_root()).expect("the catalog reads").terms
+    read_catalog(&find_repo_root().unwrap())
+        .expect("the catalog reads")
+        .terms
 }
 
 #[test]
@@ -221,7 +225,7 @@ fn real_catalog_term_ids_are_unique() {
 #[test]
 #[ignore = "needs the base branch's git history; `just codegen-check` runs it"]
 fn no_code_was_deleted_since_the_merge_base() {
-    let repo_root = find_repo_root();
+    let repo_root = find_repo_root().unwrap();
     let base_ref = std::env::var(BASE_REF_VARIABLE).unwrap_or_else(|_| DEFAULT_BASE_REF.to_string());
     let merge_base = run_git(&["merge-base", "HEAD", &base_ref]).trim().to_string();
     let mut base_codes = BTreeSet::new();
@@ -269,7 +273,7 @@ fn is_error_file(path: &str) -> bool {
 fn run_git(arguments: &[&str]) -> String {
     let output = Command::new("git")
         .args(arguments)
-        .current_dir(find_repo_root())
+        .current_dir(find_repo_root().unwrap())
         .output()
         .expect("git runs");
     assert!(

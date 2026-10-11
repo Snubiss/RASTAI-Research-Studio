@@ -1103,7 +1103,8 @@ tools/codegen/
                                   into another tree laid out like the repository (check-generated uses it)
       rastai_names_codegen.rs     main: collect every name, then write schemas/names.json (M1)
     error.rs                  CodegenError: the file at fault and a sentence (no catalog code: the catalog is the output)
-    repo_root.rs              find_repo_root: two folders above this crate's manifest
+    repo_root.rs              find_repo_root: two folders above this crate's folder, read from CARGO_MANIFEST_DIR at
+                              run time (compile-time path only as a fallback); refuses a folder without the manifests
     catalog_source.rs         read_catalog: catalog/errors/*.json, catalog/terms/terms.json and plugins/*/catalog/ into
                               ErrorRecord and TermRecord lists, sorted; exact fields, strict JSON
     catalog_ranges.rs         CATALOG_PREFIXES: contracts §10.1 as data (prefix, owner's file, ranges); split_code
