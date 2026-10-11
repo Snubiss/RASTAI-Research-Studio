@@ -1,0 +1,552 @@
+[
+  {
+    "code": "RRS-E0001",
+    "severity": "error",
+    "title": "JSON syntax error",
+    "message": "JSON syntax error: expected {expected}.",
+    "basic_text": "This file isn't valid JSON, so Rastai can't read it.",
+    "fix_text": "Fix the text at the line and column shown, or restore the file from a backup.",
+    "docs_anchor": "rrs-e0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E0002",
+    "severity": "error",
+    "title": "File is not valid UTF-8",
+    "message": "The file is not valid UTF-8 text.",
+    "basic_text": "This file contains bytes that aren't text, so Rastai can't read it.",
+    "fix_text": "Save the file as UTF-8, or check that it is the file you meant to open.",
+    "docs_anchor": "rrs-e0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E0003",
+    "severity": "error",
+    "title": "Duplicate key in a JSON object",
+    "message": "This object has the same key twice.",
+    "basic_text": "A setting appears twice in this file, so Rastai can't tell which one you meant.",
+    "fix_text": "Remove one of the two keys.",
+    "docs_anchor": "rrs-e0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E0004",
+    "severity": "error",
+    "title": "NaN or Infinity is not valid JSON",
+    "message": "NaN, Infinity and numbers too large for a 64-bit float are not valid JSON.",
+    "basic_text": "This file has a number that isn't a real number, such as NaN or Infinity.",
+    "fix_text": "Replace it with a finite number, or with null where the field allows it.",
+    "docs_anchor": "rrs-e0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-E1001",
+    "severity": "error",
+    "title": "Required field missing",
+    "message": "Required field {field} is missing; it should be {expected}.",
+    "basic_text": "Something this file needs is missing.",
+    "fix_text": "Add the field shown.",
+    "docs_anchor": "rrs-e1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E1002",
+    "severity": "error",
+    "title": "Field has the wrong kind",
+    "message": "{field} should be {expected}, but it is {found}.",
+    "basic_text": "A value in this file is the wrong kind, for example text where a number belongs.",
+    "fix_text": "Change the value to the kind shown.",
+    "docs_anchor": "rrs-e1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E1003",
+    "severity": "error",
+    "title": "Unknown field",
+    "message": "Unknown field {field}.",
+    "basic_text": "This file has a setting Rastai doesn't know. It may be a typo, or come from a newer version.",
+    "fix_text": "Check the spelling, or remove the field.",
+    "docs_anchor": "rrs-e1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E1004",
+    "severity": "error",
+    "title": "Value is not one of the allowed values",
+    "message": "{found} is not one of the allowed values; expected {expected}.",
+    "basic_text": "A value in this file isn't one of the choices Rastai accepts.",
+    "fix_text": "Change it to one of the allowed values.",
+    "docs_anchor": "rrs-e1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-E1005",
+    "severity": "error",
+    "title": "The type field doesn't match the file extension",
+    "message": "The type field says {type}, but the file extension is for {extension_type}.",
+    "basic_text": "The file's name says one kind of file, but its contents say another.",
+    "fix_text": "Rename the file with the right extension, or fix its type field.",
+    "docs_anchor": "rrs-e1005",
+    "retired": false
+  },
+  {
+    "code": "RRS-E1006",
+    "severity": "error",
+    "title": "A value can't be written as JSON",
+    "message": "A value can't be written as JSON: {reason}.",
+    "basic_text": "Rastai hit an internal problem while saving. This is a bug, not something you did.",
+    "fix_text": "Please report this bug; the log has the details.",
+    "docs_anchor": "rrs-e1006",
+    "retired": false
+  },
+  {
+    "code": "RRS-E2001",
+    "severity": "error",
+    "title": "Reference doesn't resolve",
+    "message": "The reference {reference} doesn't resolve.",
+    "basic_text": "Something in this file points to a part that doesn't exist.",
+    "fix_text": "Fix the reference, or add the part it names.",
+    "docs_anchor": "rrs-e2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E2002",
+    "severity": "error",
+    "title": "Shapes don't match along a graph edge",
+    "message": "{from_graph_node} gives shape {from_shape}, but {to_graph_node} expects {to_shape}.",
+    "basic_text": "Two connected blocks in this design don't fit together.",
+    "fix_text": "Change one block's size, or add a block between them that reshapes the data.",
+    "docs_anchor": "rrs-e2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E2003",
+    "severity": "error",
+    "title": "Graph has a cycle with no recurrent node",
+    "message": "The graph has a cycle through {graph_nodes} with no recurrent graph node.",
+    "basic_text": "This design loops back on itself, which only a recurrent block can do.",
+    "fix_text": "Remove one connection in the loop, or make one of its blocks recurrent.",
+    "docs_anchor": "rrs-e2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E2004",
+    "severity": "error",
+    "title": "Input ranges overlap",
+    "message": "Input {input_name} overlaps input {other_input_name} ({other_range}).",
+    "basic_text": "Two inputs claim the same part of the data.",
+    "fix_text": "Shrink one of the ranges, or merge the two inputs.",
+    "docs_anchor": "rrs-e2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-E2005",
+    "severity": "error",
+    "title": "Duplicate id",
+    "message": "The id {id} is used more than once.",
+    "basic_text": "Two items in this file have the same name, so Rastai can't tell them apart.",
+    "fix_text": "Rename one of them.",
+    "docs_anchor": "rrs-e2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-E3001",
+    "severity": "warning",
+    "title": "File requires a plugin that isn't installed or enabled",
+    "message": "This file needs the plugin {plugin_id} ({range}), which isn't installed or enabled.",
+    "basic_text": "This file uses a plugin you don't have turned on.",
+    "fix_text": "Install or enable the plugin, then open the file again.",
+    "docs_anchor": "rrs-e3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E3002",
+    "severity": "warning",
+    "title": "No handler for this file type",
+    "message": "No installed handler opens {extension} files.",
+    "basic_text": "Rastai doesn't know how to open this kind of file.",
+    "fix_text": "Install a plugin that handles this file type.",
+    "docs_anchor": "rrs-e3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E3003",
+    "severity": "warning",
+    "title": "Model has more parameters than the dataset has tokens",
+    "message": "The model has {parameter_count} parameters, but the dataset has only {token_count} tokens.",
+    "basic_text": "This model is very large for this much data, so it will likely memorize instead of learn.",
+    "fix_text": "Use a smaller model, or more data.",
+    "docs_anchor": "rrs-e3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E4001",
+    "severity": "info",
+    "title": "File from a newer schema version; opened read-only",
+    "message": "This file is from schema version {version}; this version of Rastai reads up to {current_version}, so it opens read-only.",
+    "basic_text": "This file was made by a newer version of Rastai. You can look at it but not change it.",
+    "fix_text": "Update Rastai to edit it.",
+    "docs_anchor": "rrs-e4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E4002",
+    "severity": "error",
+    "title": "Migration step failed",
+    "message": "Upgrading this file from schema version {from_version} failed: {reason}.",
+    "basic_text": "This file is from an older version of Rastai and couldn't be upgraded.",
+    "fix_text": "Open it with the version that made it, or report the problem.",
+    "docs_anchor": "rrs-e4002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5001",
+    "severity": "error",
+    "title": "Zip entry escapes its folder (zip slip)",
+    "message": "The zip entry {entry_name} would be written outside its folder; the archive is refused.",
+    "basic_text": "This archive tries to put a file somewhere it shouldn't, so Rastai won't open it.",
+    "fix_text": "Only open archives from sources you trust, and ask the sender for a fixed copy.",
+    "docs_anchor": "rrs-e5001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5002",
+    "severity": "error",
+    "title": "Zip exceeds size or ratio caps (zip bomb)",
+    "message": "The zip expands past the import limits: {reason}.",
+    "basic_text": "This archive would unpack into far more data than it looks like, so Rastai won't open it.",
+    "fix_text": "Only open archives from sources you trust.",
+    "docs_anchor": "rrs-e5002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5003",
+    "severity": "error",
+    "title": "File is larger than the import limit",
+    "message": "The file is {size_bytes} bytes; the import limit is {limit_bytes} bytes.",
+    "basic_text": "This file is bigger than Rastai will read in one go.",
+    "fix_text": "Split the file, or use a smaller one.",
+    "docs_anchor": "rrs-e5003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5004",
+    "severity": "error",
+    "title": "JSON nested deeper than the import limit",
+    "message": "The JSON is nested deeper than the limit of {limit_depth} levels.",
+    "basic_text": "This file is nested too deeply to read safely.",
+    "fix_text": "Flatten the file's structure.",
+    "docs_anchor": "rrs-e5004",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5005",
+    "severity": "error",
+    "title": "Graph has more nodes or parameters than the import limit",
+    "message": "The graph has more graph nodes or parameters than the import limit ({limit}).",
+    "basic_text": "This model design is larger than Rastai will import.",
+    "fix_text": "Import a smaller model.",
+    "docs_anchor": "rrs-e5005",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5006",
+    "severity": "error",
+    "title": "JSON has more values than the import limit",
+    "message": "The JSON has more than {limit_count} values.",
+    "basic_text": "This file holds more items than Rastai will read safely at once.",
+    "fix_text": "Split the file into smaller ones.",
+    "docs_anchor": "rrs-e5006",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6001",
+    "severity": "error",
+    "title": "Safetensors: file is shorter than the 8-byte header length",
+    "message": "Safetensors: the file is shorter than the 8-byte header length.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6002",
+    "severity": "error",
+    "title": "Safetensors: header length points past the end of the file",
+    "message": "Safetensors: the header length ({header_bytes} bytes) points past the end of the file.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6003",
+    "severity": "error",
+    "title": "Safetensors: header is over the 100 MB limit",
+    "message": "Safetensors: the header is {header_bytes} bytes, over the 100 MB limit.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6004",
+    "severity": "error",
+    "title": "Safetensors: header is not valid UTF-8 JSON",
+    "message": "Safetensors: the header is not valid UTF-8 JSON (this includes NaN and trailing bytes).",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6004",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6005",
+    "severity": "error",
+    "title": "Safetensors: header is not a JSON object",
+    "message": "Safetensors: the header is not a JSON object.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6005",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6006",
+    "severity": "error",
+    "title": "Safetensors: header has duplicate keys",
+    "message": "Safetensors: the header has the key {key} twice.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6006",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6007",
+    "severity": "error",
+    "title": "Safetensors: a tensor entry is not an object",
+    "message": "Safetensors: the entry for tensor {tensor_name} is not an object.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6007",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6008",
+    "severity": "error",
+    "title": "Safetensors: unsupported dtype",
+    "message": "Safetensors: tensor {tensor_name} has the unsupported dtype {dtype}.",
+    "basic_text": "This weights file uses a number format Rastai can't read.",
+    "fix_text": "Convert the weights to a supported dtype, such as bf16, fp16 or fp32.",
+    "docs_anchor": "rrs-e6008",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6009",
+    "severity": "error",
+    "title": "Safetensors: shape is not a list of non-negative integers",
+    "message": "Safetensors: the shape of tensor {tensor_name} is not a list of non-negative integers.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6009",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6010",
+    "severity": "error",
+    "title": "Safetensors: data_offsets is not two integers",
+    "message": "Safetensors: data_offsets of tensor {tensor_name} is not two integers.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6010",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6011",
+    "severity": "error",
+    "title": "Safetensors: data_offsets fall outside the data section",
+    "message": "Safetensors: data_offsets of tensor {tensor_name} fall outside the data section (reversed, past the end, or beyond 64 bits).",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6011",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6012",
+    "severity": "error",
+    "title": "Safetensors: the shape's byte size overflows 64 bits",
+    "message": "Safetensors: the byte size of tensor {tensor_name}'s shape overflows 64 bits.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6012",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6013",
+    "severity": "error",
+    "title": "Safetensors: the shape's byte size doesn't match the offsets",
+    "message": "Safetensors: tensor {tensor_name}'s shape needs {expected_bytes} bytes, but its offsets hold {found_bytes}.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6013",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6014",
+    "severity": "error",
+    "title": "Safetensors: tensors overlap",
+    "message": "Safetensors: tensors {tensor_name} and {other_tensor_name} overlap.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6014",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6015",
+    "severity": "error",
+    "title": "Safetensors: gap in the data section",
+    "message": "Safetensors: the data section has a gap at byte {offset}.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6015",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6016",
+    "severity": "error",
+    "title": "Safetensors: bytes at the end belong to no tensor",
+    "message": "Safetensors: the last {extra_bytes} bytes belong to no tensor.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6016",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6017",
+    "severity": "error",
+    "title": "Safetensors: __metadata__ must map strings to strings",
+    "message": "Safetensors: __metadata__ must map strings to strings.",
+    "basic_text": "This weights file is damaged or isn't a valid safetensors file.",
+    "fix_text": "Download or export the file again.",
+    "docs_anchor": "rrs-e6017",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6501",
+    "severity": "error",
+    "title": "GGUF: not a GGUF file",
+    "message": "GGUF: not a GGUF file (bad magic).",
+    "basic_text": "This GGUF model file is damaged, or isn't a GGUF file Rastai can read.",
+    "fix_text": "Download the file again, or pick another GGUF file.",
+    "docs_anchor": "rrs-e6501",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6502",
+    "severity": "error",
+    "title": "GGUF: unsupported version",
+    "message": "GGUF: version {version} is not supported; only version 3 is read.",
+    "basic_text": "This GGUF file uses a version Rastai can't read.",
+    "fix_text": "Convert it with a current llama.cpp, or pick another file.",
+    "docs_anchor": "rrs-e6502",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6503",
+    "severity": "error",
+    "title": "GGUF: header ends before its declared key-values or tensor infos",
+    "message": "GGUF: the header ends before its declared key-values or tensor infos.",
+    "basic_text": "This GGUF model file is damaged, or isn't a GGUF file Rastai can read.",
+    "fix_text": "Download the file again, or pick another GGUF file.",
+    "docs_anchor": "rrs-e6503",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6504",
+    "severity": "error",
+    "title": "GGUF: a count, string or array length is over the import limit",
+    "message": "GGUF: a count, string or array length ({count}) is over the import limit.",
+    "basic_text": "This GGUF model file is damaged, or isn't a GGUF file Rastai can read.",
+    "fix_text": "Download the file again, or pick another GGUF file.",
+    "docs_anchor": "rrs-e6504",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6505",
+    "severity": "error",
+    "title": "GGUF: unknown value type or tensor type",
+    "message": "GGUF: unknown value type or tensor type {type_id}.",
+    "basic_text": "This GGUF model file is damaged, or isn't a GGUF file Rastai can read.",
+    "fix_text": "Download the file again, or pick another GGUF file.",
+    "docs_anchor": "rrs-e6505",
+    "retired": false
+  },
+  {
+    "code": "RRS-E6506",
+    "severity": "error",
+    "title": "GGUF: a tensor's data lies outside the file",
+    "message": "GGUF: the data of tensor {tensor_name} lies outside the file.",
+    "basic_text": "This GGUF model file is damaged, or isn't a GGUF file Rastai can read.",
+    "fix_text": "Download the file again, or pick another GGUF file.",
+    "docs_anchor": "rrs-e6506",
+    "retired": false
+  },
+  {
+    "code": "RRS-E7001",
+    "severity": "warning",
+    "title": "Model type not recognized; imported as one opaque graph node",
+    "message": "config.json has no model_type or architectures; the model is imported as one opaque graph node.",
+    "basic_text": "Rastai couldn't recognize this model's architecture, so it shows it as one sealed block.",
+    "fix_text": "You can still run it; install a plugin with a family for this model to see inside it.",
+    "docs_anchor": "rrs-e7001",
+    "retired": false
+  },
+  {
+    "code": "RRS-E7002",
+    "severity": "warning",
+    "title": "Unsupported config feature or unmapped tensors; the owning block is opaque",
+    "message": "{block_name} uses an unsupported config feature or has unmapped tensors ({detail}); it is imported as opaque.",
+    "basic_text": "Rastai couldn't map part of this model, so that part shows as a sealed block.",
+    "fix_text": "The rest of the model works as usual; you can inspect the sealed block at its edges.",
+    "docs_anchor": "rrs-e7002",
+    "retired": false
+  },
+  {
+    "code": "RRS-E7003",
+    "severity": "warning",
+    "title": "The repository declares remote code; Rastai never runs it",
+    "message": "The repository declares remote code (auto_map); Rastai never runs it.",
+    "basic_text": "This model comes with its own Python code. Rastai never runs downloaded code.",
+    "fix_text": "",
+    "docs_anchor": "rrs-e7003",
+    "retired": false
+  },
+  {
+    "code": "RRS-E7004",
+    "severity": "error",
+    "title": "The .pt2 archive holds pickled data; refused",
+    "message": "The .pt2 archive {path} holds pickled data; it is refused.",
+    "basic_text": "This file contains pickled Python data, which can run code when it loads, so Rastai refuses it.",
+    "fix_text": "Export the model with safetensors weights instead.",
+    "docs_anchor": "rrs-e7004",
+    "retired": false
+  },
+  {
+    "code": "RRS-E7005",
+    "severity": "warning",
+    "title": "An ONNX op has no ModelSpec mapping; imported as opaque",
+    "message": "The ONNX op {op_type} has no ModelSpec mapping; it is imported as opaque.",
+    "basic_text": "Rastai couldn't map one operation of this model, so it shows as a sealed block.",
+    "fix_text": "",
+    "docs_anchor": "rrs-e7005",
+    "retired": false
+  },
+  {
+    "code": "RRS-E7006",
+    "severity": "error",
+    "title": "Weight shapes don't match the config; compile refused",
+    "message": "Tensor {tensor_name} has shape {found_shape}, but the config needs {expected_shape}; compile refused.",
+    "basic_text": "These weights don't belong to this model's configuration.",
+    "fix_text": "Check that the weights and config.json come from the same model.",
+    "docs_anchor": "rrs-e7006",
+    "retired": false
+  }
+]

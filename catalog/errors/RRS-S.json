@@ -1,0 +1,294 @@
+[
+  {
+    "code": "RRS-S0001",
+    "severity": "error",
+    "title": "Another daemon owns this data directory",
+    "message": "Another daemon (process {pid}) owns the data directory {path}.",
+    "basic_text": "Rastai is already running with this data folder.",
+    "fix_text": "Use the Rastai that is already running, or stop it first.",
+    "docs_anchor": "rrs-s0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-S0002",
+    "severity": "error",
+    "title": "Database schema is newer than this app",
+    "message": "The database {path} has schema version {version}, newer than this app supports.",
+    "basic_text": "Your data was saved by a newer version of Rastai.",
+    "fix_text": "Update Rastai.",
+    "docs_anchor": "rrs-s0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-S0003",
+    "severity": "error",
+    "title": "rastai.db integrity check failed",
+    "message": "rastai.db failed its integrity check: {reason}.",
+    "basic_text": "Rastai's index of your runs is damaged. Your runs themselves are safe.",
+    "fix_text": "Run rastai storage rebuild-index.",
+    "docs_anchor": "rrs-s0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-S0004",
+    "severity": "error",
+    "title": "Data directory not writable",
+    "message": "The data directory {path} is not writable.",
+    "basic_text": "Rastai can't save to its data folder.",
+    "fix_text": "Check the folder's permissions, or set RASTAI_HOME to a folder you can write to.",
+    "docs_anchor": "rrs-s0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-S0005",
+    "severity": "error",
+    "title": "vault.db integrity check failed; chat is off until it is recovered",
+    "message": "vault.db failed its integrity check; chat is off until it is recovered.",
+    "basic_text": "The file that holds your conversations is damaged, so chat is turned off for now.",
+    "fix_text": "Recover the vault from its newest good snapshot.",
+    "fix_command_id": "storage.vault.recover",
+    "docs_anchor": "rrs-s0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-S1001",
+    "severity": "error",
+    "title": "Blob hash mismatch; quarantined",
+    "message": "The blob {content_hash} doesn't match its hash, so it was quarantined.",
+    "basic_text": "A stored file was damaged, so Rastai set it aside.",
+    "fix_text": "Download or produce the file again.",
+    "docs_anchor": "rrs-s1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-S1002",
+    "severity": "error",
+    "title": "Referenced blob missing",
+    "message": "The blob {content_hash} is referenced but missing.",
+    "basic_text": "A file Rastai needs is missing from its store.",
+    "fix_text": "Download or produce the file again.",
+    "docs_anchor": "rrs-s1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-S2001",
+    "severity": "info",
+    "title": "Torn tail in an event log ignored",
+    "message": "A torn record at the end of {path} was ignored.",
+    "basic_text": "The last entry of a log was cut off, probably by a crash, so Rastai skipped it.",
+    "fix_text": "",
+    "docs_anchor": "rrs-s2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-S2002",
+    "severity": "error",
+    "title": "Event log corrupt: a bad frame before the end of the file",
+    "message": "The event log {path} has a bad frame at byte {offset}, before the end of the file.",
+    "basic_text": "A run's log is damaged in the middle.",
+    "fix_text": "Report the problem with a bundle of the run.",
+    "docs_anchor": "rrs-s2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-S2003",
+    "severity": "error",
+    "title": "Event sequence gap",
+    "message": "Event sequence gap in {path}: expected {expected_sequence}, found {found_sequence}.",
+    "basic_text": "Some entries are missing from a run's log.",
+    "fix_text": "Report the problem with a bundle of the run.",
+    "docs_anchor": "rrs-s2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-S3001",
+    "severity": "error",
+    "title": "Not enough free disk space",
+    "message": "{operation} needs {needed_bytes} bytes on {volume}, but only {free_bytes} are free.",
+    "basic_text": "Your disk is almost full, so Rastai can't save this.",
+    "fix_text": "Free up space, or let Rastai delete old checkpoints and unused files.",
+    "fix_command_id": "storage.gc",
+    "docs_anchor": "rrs-s3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-S3002",
+    "severity": "error",
+    "title": "Disk full during a write",
+    "message": "The disk filled up during a write: {reason}.",
+    "basic_text": "Your disk filled up while Rastai was saving.",
+    "fix_text": "Free up space, then try again.",
+    "docs_anchor": "rrs-s3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-S3003",
+    "severity": "error",
+    "title": "Storage quota exceeded",
+    "message": "Rastai's storage quota is exceeded: {used_bytes} bytes used of {quota_bytes}.",
+    "basic_text": "Rastai has used all the space you allowed it.",
+    "fix_text": "Delete old files, or raise storage.quota_bytes.",
+    "docs_anchor": "rrs-s3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-S3004",
+    "severity": "warning",
+    "title": "Database snapshot skipped or failed; older snapshots kept",
+    "message": "The database snapshot was skipped or failed ({reason}); older snapshots are kept.",
+    "basic_text": "Rastai couldn't make today's backup of its databases. Older backups are still there.",
+    "fix_text": "Free up disk space so the next snapshot can run.",
+    "docs_anchor": "rrs-s3004",
+    "retired": false
+  },
+  {
+    "code": "RRS-S3005",
+    "severity": "error",
+    "title": "Write failed for a reason other than a full disk",
+    "message": "A write failed: {reason}.",
+    "basic_text": "Rastai couldn't save a file.",
+    "fix_text": "Check the folder's permissions and the disk, then try again.",
+    "docs_anchor": "rrs-s3005",
+    "retired": false
+  },
+  {
+    "code": "RRS-S3006",
+    "severity": "error",
+    "title": "Storage, archive or secret command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-s3006",
+    "retired": false
+  },
+  {
+    "code": "RRS-S4001",
+    "severity": "warning",
+    "title": "OS keychain unavailable; fallback store in use",
+    "message": "The OS keychain is unavailable ({reason}); secrets are kept in Rastai's fallback store.",
+    "basic_text": "Your system's password store isn't available, so Rastai keeps secrets in its own file.",
+    "fix_text": "Unlock or install a system keychain to use it instead.",
+    "docs_anchor": "rrs-s4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5001",
+    "severity": "error",
+    "title": "Archive database unreachable; retrying with backoff",
+    "message": "The archive database at {host} is unreachable ({reason}); retrying in {retry_seconds} seconds.",
+    "basic_text": "Rastai couldn't save to your long-term archive. Rastai keeps trying.",
+    "fix_text": "Check that the archive server is running and reachable.",
+    "docs_anchor": "rrs-s5001",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5002",
+    "severity": "error",
+    "title": "Archive schema needs a newer Rastai",
+    "message": "The archive needs Rastai {min_writer_version} or newer; this daemon stops writing to it.",
+    "basic_text": "Your long-term archive was upgraded by a newer version of Rastai.",
+    "fix_text": "Update Rastai.",
+    "docs_anchor": "rrs-s5002",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5003",
+    "severity": "error",
+    "title": "Archive connection without TLS refused",
+    "message": "The connection to the archive at {host} has no TLS, so it is refused.",
+    "basic_text": "Rastai won't send your data to the archive over an unencrypted connection.",
+    "fix_text": "Turn on TLS on the archive server, or connect through loopback or a Unix socket.",
+    "docs_anchor": "rrs-s5003",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5004",
+    "severity": "error",
+    "title": "Archive table doesn't report encryption; conversations are not archived there",
+    "message": "The archive table {table} doesn't report encryption at rest, so conversations are not archived there.",
+    "basic_text": "Your archive doesn't say it encrypts stored data, so Rastai keeps conversations out of it.",
+    "fix_text": "Turn on table encryption on the archive server.",
+    "docs_anchor": "rrs-s5004",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5005",
+    "severity": "error",
+    "title": "Archive credentials missing or rejected",
+    "message": "The archive credentials are missing or were rejected.",
+    "basic_text": "Rastai couldn't save to your long-term archive. The login was refused.",
+    "fix_text": "Set the archive's user and password again.",
+    "docs_anchor": "rrs-s5005",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5006",
+    "severity": "warning",
+    "title": "Archive more than 24 hours behind; local pruning paused",
+    "message": "The archive is {lag_hours} hours behind; local pruning is paused.",
+    "basic_text": "Your long-term archive has fallen behind, so Rastai stopped freeing local space.",
+    "fix_text": "Check the archive's status and connection.",
+    "docs_anchor": "rrs-s5006",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5007",
+    "severity": "error",
+    "title": "Archived blob failed its BLAKE3 check",
+    "message": "The archived blob {content_hash} failed its BLAKE3 check.",
+    "basic_text": "A file in your long-term archive is damaged.",
+    "fix_text": "Restore it from another copy, then verify the archive again.",
+    "docs_anchor": "rrs-s5007",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5008",
+    "severity": "error",
+    "title": "Archived event frame failed its CRC check; restore stopped",
+    "message": "An archived event frame of {run_id} failed its CRC check; the restore stopped.",
+    "basic_text": "Part of an archived run is damaged, so it couldn't be restored.",
+    "fix_text": "Verify the archive, and restore the run from another copy if you have one.",
+    "docs_anchor": "rrs-s5008",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5009",
+    "severity": "error",
+    "title": "Prune refused",
+    "message": "{item_id} can't be pruned: it is pinned, running, or not yet acknowledged and verified by the archive.",
+    "basic_text": "Rastai won't free this item's space yet, because it isn't safely archived or is still in use.",
+    "fix_text": "",
+    "docs_anchor": "rrs-s5009",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5010",
+    "severity": "error",
+    "title": "Archive purge needs admin credentials",
+    "message": "Purging the archive needs admin credentials.",
+    "basic_text": "Permanently deleting from the archive needs an administrator login.",
+    "fix_text": "Enter the archive's admin credentials for this purge.",
+    "docs_anchor": "rrs-s5010",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5011",
+    "severity": "info",
+    "title": "Archive migration waiting for another daemon's migration lock",
+    "message": "The archive migration is waiting for the migration lock that {source_id} holds.",
+    "basic_text": "Another Rastai is upgrading the archive, so this one is waiting.",
+    "fix_text": "",
+    "docs_anchor": "rrs-s5011",
+    "retired": false
+  },
+  {
+    "code": "RRS-S5012",
+    "severity": "error",
+    "title": "Archive blob target unavailable or not writable",
+    "message": "The archive's blob target {target} is unavailable or not writable: {reason}.",
+    "basic_text": "Rastai couldn't save to your long-term archive. Its file storage isn't reachable.",
+    "fix_text": "Check the archive's file storage folder or bucket.",
+    "docs_anchor": "rrs-s5012",
+    "retired": false
+  }
+]

@@ -22,6 +22,8 @@ const CODE_MIGRATION_FAILED: &str = "RRS-E4002";
 
 /// Schema versions start at 1 (contracts 5.1).
 const FIRST_SCHEMA_VERSION: u32 = 1;
+/// What RRS-E1004's message says a schema version must be.
+const SCHEMA_VERSION_EXPECTED: &str = "a whole number of 1 or more";
 const NO_STEP_REASON: &str = "no migration step from this version";
 
 /// What the runner did.
@@ -64,7 +66,8 @@ pub fn migrate_to_current(value: Value, input: &MigrationInput, diagnostics: &mu
         Some(version) if version >= FIRST_SCHEMA_VERSION => version,
         _ => {
             let found = raw_version.to_string();
-            diagnostics.push(version_diagnostic(CODE_VALUE_NOT_ALLOWED, &[("found", &found)], input));
+            let values = [("found", found.as_str()), ("expected", SCHEMA_VERSION_EXPECTED)];
+            diagnostics.push(version_diagnostic(CODE_VALUE_NOT_ALLOWED, &values, input));
             return unchanged(value);
         }
     };
@@ -263,6 +266,8 @@ mod tests {
         ] {
             let (result, diagnostics) = migrate(text, SAMPLE_STEPS);
             assert_eq!(codes(&diagnostics), vec!["RRS-E1004"], "{text}");
+            // A placeholder without a value would stay visible as `{name}`.
+            assert!(!diagnostics[0].message.contains('{'), "{}", diagnostics[0].message);
             assert!(!result.failed);
         }
         for text in [r#"{}"#, r#"{"schema_version": "1"}"#, r#"{"schema_version": 1.5}"#] {

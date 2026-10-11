@@ -1,0 +1,192 @@
+[
+  {
+    "code": "RRS-D0001",
+    "severity": "error",
+    "title": "No task matches the columns",
+    "message": "No task matches the columns {columns}.",
+    "basic_text": "Rastai couldn't tell what this data is for from its columns.",
+    "fix_text": "Rename the columns, or pick the task yourself.",
+    "docs_anchor": "rrs-d0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-D0002",
+    "severity": "error",
+    "title": "Data command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-d0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-D1001",
+    "severity": "error",
+    "title": "File format not recognized; no converter",
+    "message": "The format of {path} isn't recognized, and no converter reads it.",
+    "basic_text": "Rastai doesn't know how to read this file.",
+    "fix_text": "Convert it to JSON Lines or CSV, or install a converter.",
+    "docs_anchor": "rrs-d1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-D1002",
+    "severity": "error",
+    "title": "More than 1% of rows failed conversion",
+    "message": "{failed_rows} of {total_rows} rows failed conversion, more than 1%.",
+    "basic_text": "Too many rows in this file couldn't be read.",
+    "fix_text": "Check the rows the report lists.",
+    "docs_anchor": "rrs-d1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-D1003",
+    "severity": "error",
+    "title": "Python converter raised",
+    "message": "The converter {converter} raised: {reason}.",
+    "basic_text": "The converter that reads this file failed.",
+    "fix_text": "Check the file, or report it to the converter's author.",
+    "docs_anchor": "rrs-d1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-D1004",
+    "severity": "error",
+    "title": "Image larger than the decode limit",
+    "message": "The image {path} is larger than the decode limit.",
+    "basic_text": "This image is too large to read safely.",
+    "fix_text": "Resize the image.",
+    "docs_anchor": "rrs-d1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-D2001",
+    "severity": "info",
+    "title": "Exact duplicates dropped",
+    "message": "{count} exact duplicate rows were dropped.",
+    "basic_text": "Rastai removed rows that appeared more than once.",
+    "fix_text": "",
+    "docs_anchor": "rrs-d2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-D2002",
+    "severity": "warning",
+    "title": "Train/test leakage found",
+    "message": "{count} test rows also appear in the training split.",
+    "basic_text": "Some test examples are also in the training data, so test scores would be too high.",
+    "fix_text": "Remove the overlap before training.",
+    "docs_anchor": "rrs-d2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-D2003",
+    "severity": "warning",
+    "title": "Possible PII found",
+    "message": "{count} rows may contain personal information ({kinds}).",
+    "basic_text": "This data may contain personal information, like names or email addresses.",
+    "fix_text": "Review the rows the report lists.",
+    "docs_anchor": "rrs-d2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3001",
+    "severity": "error",
+    "title": "Source missing or not readable",
+    "message": "The source can't be read: {reason}.",
+    "basic_text": "Rastai couldn't read this file or data source.",
+    "fix_text": "Check that it exists and that you can read it.",
+    "docs_anchor": "rrs-d3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3002",
+    "severity": "error",
+    "title": "HF dataset gated or download failed",
+    "message": "The Hugging Face dataset {repository} is gated or its download failed: {reason}.",
+    "basic_text": "Rastai couldn't download this dataset.",
+    "fix_text": "Accept the dataset's terms on Hugging Face, then try again.",
+    "docs_anchor": "rrs-d3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3003",
+    "severity": "error",
+    "title": "Source changed since the check",
+    "message": "{path} changed since it was checked (its hash differs).",
+    "basic_text": "This data changed after Rastai checked it.",
+    "fix_text": "Check the data again.",
+    "docs_anchor": "rrs-d3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3005",
+    "severity": "error",
+    "title": "MySQL source unreachable",
+    "message": "The MySQL source {connection_name} is unreachable: {reason}.",
+    "basic_text": "Rastai couldn't read your MySQL data source.",
+    "fix_text": "Check that the server is running and reachable.",
+    "docs_anchor": "rrs-d3005",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3006",
+    "severity": "error",
+    "title": "MySQL login rejected",
+    "message": "The MySQL source {connection_name} rejected the login.",
+    "basic_text": "Rastai couldn't read your MySQL data source. The login was refused.",
+    "fix_text": "Check the user name and password.",
+    "docs_anchor": "rrs-d3006",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3007",
+    "severity": "error",
+    "title": "MySQL source refused by the TLS policy",
+    "message": "The MySQL source {connection_name} has no TLS and isn't loopback or a Unix socket, so it is refused.",
+    "basic_text": "Rastai won't read data over an unencrypted connection.",
+    "fix_text": "Turn on TLS on the MySQL server.",
+    "docs_anchor": "rrs-d3007",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3008",
+    "severity": "error",
+    "title": "MySQL query failed",
+    "message": "The query on {connection_name} failed: {reason}.",
+    "basic_text": "Rastai couldn't read your MySQL data source. The query failed.",
+    "fix_text": "Check the query.",
+    "docs_anchor": "rrs-d3008",
+    "retired": false
+  },
+  {
+    "code": "RRS-D3009",
+    "severity": "error",
+    "title": "MySQL column type has no row in the type-mapping table",
+    "message": "The MySQL column {column} has the type {column_type}, which Rastai can't map.",
+    "basic_text": "One column in this table has a type Rastai can't read.",
+    "fix_text": "Leave the column out, or cast it in the query.",
+    "docs_anchor": "rrs-d3009",
+    "retired": false
+  },
+  {
+    "code": "RRS-D4001",
+    "severity": "error",
+    "title": "Run-log format version not supported",
+    "message": "The run log {path} has format version {version}, which isn't supported.",
+    "basic_text": "This run log was made by a version of Rastai this one can't read.",
+    "fix_text": "Update Rastai.",
+    "docs_anchor": "rrs-d4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-D4002",
+    "severity": "warning",
+    "title": "Corrupt run-log record; that source run skipped",
+    "message": "A record of {source_run_id} in {path} is corrupt; that run was skipped.",
+    "basic_text": "One run in this log is damaged, so Rastai skipped it.",
+    "fix_text": "",
+    "docs_anchor": "rrs-d4002",
+    "retired": false
+  }
+]

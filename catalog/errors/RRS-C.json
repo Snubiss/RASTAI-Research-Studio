@@ -1,0 +1,263 @@
+[
+  {
+    "code": "RRS-C0001",
+    "severity": "error",
+    "title": "Unknown command",
+    "message": "Unknown command {command_id}.",
+    "basic_text": "Rastai doesn't have this command.",
+    "fix_text": "Check the command's spelling.",
+    "docs_anchor": "rrs-c0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0002",
+    "severity": "error",
+    "title": "Invalid command arguments",
+    "message": "Invalid arguments for {command_id}: {reason}.",
+    "basic_text": "This request is missing something or has a wrong value.",
+    "fix_text": "Fix the argument shown and try again.",
+    "docs_anchor": "rrs-c0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0003",
+    "severity": "error",
+    "title": "Command belongs to a disabled or missing plugin",
+    "message": "{command_id} belongs to the plugin {plugin_id}, which is disabled or missing.",
+    "basic_text": "This command comes from a plugin that is off or not installed.",
+    "fix_text": "Install or turn on the plugin.",
+    "docs_anchor": "rrs-c0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0004",
+    "severity": "error",
+    "title": "Idempotency key reused with different arguments",
+    "message": "The idempotency key {idempotency_key} was already used with different arguments.",
+    "basic_text": "This request reuses the id of a different request.",
+    "fix_text": "Send a new idempotency key with a different request.",
+    "docs_anchor": "rrs-c0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0005",
+    "severity": "warning",
+    "title": "Command interrupted by a daemon restart",
+    "message": "{command_id} was interrupted by a daemon restart.",
+    "basic_text": "Rastai restarted while this was running, so it didn't finish.",
+    "fix_text": "Run it again.",
+    "docs_anchor": "rrs-c0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0006",
+    "severity": "warning",
+    "title": "The daemon is running a different app version",
+    "message": "The daemon is running version {daemon_version}, but this app is version {app_version}.",
+    "basic_text": "The background service is a different version from this app.",
+    "fix_text": "Restart the daemon.",
+    "docs_anchor": "rrs-c0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0007",
+    "severity": "error",
+    "title": "Command retired; use its replacement",
+    "message": "{command_id} is retired; use {replacement_command_id} instead.",
+    "basic_text": "This command was replaced by a newer one.",
+    "fix_text": "Use the replacement shown.",
+    "docs_anchor": "rrs-c0007",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0008",
+    "severity": "error",
+    "title": "Update in progress",
+    "message": "An update is in progress; try again in a moment.",
+    "basic_text": "Rastai is updating itself right now.",
+    "fix_text": "Wait for the update to finish, then try again.",
+    "docs_anchor": "rrs-c0008",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0009",
+    "severity": "error",
+    "title": "A settings file doesn't parse",
+    "message": "The settings file {path} doesn't parse, so it was left as it is: {reason}.",
+    "basic_text": "One of your settings files has a mistake. Rastai never overwrites it.",
+    "fix_text": "Fix the file first, then try again.",
+    "docs_anchor": "rrs-c0009",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0010",
+    "severity": "error",
+    "title": "Command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-c0010",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0401",
+    "severity": "warning",
+    "title": "Events missed outside the daemon's bus buffer",
+    "message": "Events after sequence {sequence} are no longer in the daemon's bus buffer; the client refetches state.",
+    "basic_text": "The app fell behind on updates and is reloading the current state.",
+    "fix_text": "",
+    "docs_anchor": "rrs-c0401",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0501",
+    "severity": "error",
+    "title": "No home folder for the data folders",
+    "message": "There is no home folder to put Rastai's data folders in.",
+    "basic_text": "Rastai couldn't find your home folder, so it has nowhere to keep its data.",
+    "fix_text": "Set RASTAI_HOME to a folder, or HOME on Linux and macOS and USERPROFILE on Windows.",
+    "docs_anchor": "rrs-c0501",
+    "retired": false
+  },
+  {
+    "code": "RRS-C0502",
+    "severity": "error",
+    "title": "The operating system's random source can't be read",
+    "message": "The operating system's random source can't be read: {reason}.",
+    "basic_text": "Rastai couldn't get the random numbers it needs from your system.",
+    "fix_text": "Restart the computer; if it keeps happening, report the problem.",
+    "docs_anchor": "rrs-c0502",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1001",
+    "severity": "error",
+    "title": "No free port in 47820–47829",
+    "message": "No free port in 47820–47829.",
+    "basic_text": "Rastai couldn't find a free network port to start on.",
+    "fix_text": "Close the programs using these ports, or set daemon.port to a free one.",
+    "docs_anchor": "rrs-c1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1002",
+    "severity": "error",
+    "title": "Not signed in, or unknown credential",
+    "message": "Not signed in, or the credential is unknown.",
+    "basic_text": "You're not signed in.",
+    "fix_text": "Sign in again.",
+    "docs_anchor": "rrs-c1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1003",
+    "severity": "error",
+    "title": "Host header not allowed",
+    "message": "The Host header {host} is not allowed.",
+    "basic_text": "This request came through an address Rastai doesn't accept.",
+    "fix_text": "Open Rastai through the address it printed when it started.",
+    "docs_anchor": "rrs-c1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1004",
+    "severity": "error",
+    "title": "Origin not allowed",
+    "message": "The Origin {origin} is not allowed.",
+    "basic_text": "This request came from a web page Rastai doesn't trust.",
+    "fix_text": "Open Rastai through the address it printed when it started.",
+    "docs_anchor": "rrs-c1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1005",
+    "severity": "error",
+    "title": "Scope not granted",
+    "message": "This needs the scope {scope}, which the credential wasn't granted.",
+    "basic_text": "You don't have permission to do this.",
+    "fix_text": "Use a token that has the scope shown.",
+    "docs_anchor": "rrs-c1005",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1006",
+    "severity": "error",
+    "title": "Token revoked",
+    "message": "This token was revoked.",
+    "basic_text": "This access key no longer works.",
+    "fix_text": "Create a new token.",
+    "docs_anchor": "rrs-c1006",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1007",
+    "severity": "error",
+    "title": "Login code expired or already used",
+    "message": "The login code expired or was already used.",
+    "basic_text": "This sign-in link no longer works.",
+    "fix_text": "Open Rastai again to get a new link.",
+    "docs_anchor": "rrs-c1007",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1008",
+    "severity": "error",
+    "title": "Owner token is readable by group or others; the daemon refuses to start",
+    "message": "The owner token {path} is readable by group or others, so the daemon refuses to start.",
+    "basic_text": "Rastai's key file can be read by other users on this computer, so Rastai won't start.",
+    "fix_text": "Run chmod 600 {path}, then start Rastai again.",
+    "docs_anchor": "rrs-c1008",
+    "retired": false
+  },
+  {
+    "code": "RRS-C1009",
+    "severity": "error",
+    "title": "The project's data policy forbids this",
+    "message": "The project's data policy ({data_policy}) forbids this.",
+    "basic_text": "This project's privacy setting doesn't allow sending this data off this computer.",
+    "fix_text": "Change privacy.data_policy for the project, or for your user outside a project, if you want to allow it.",
+    "fix_command_id": "settings.set",
+    "docs_anchor": "rrs-c1009",
+    "retired": false
+  },
+  {
+    "code": "RRS-C2001",
+    "severity": "info",
+    "title": "Nothing to undo or redo",
+    "message": "Nothing to undo or redo.",
+    "basic_text": "There is nothing to undo or redo.",
+    "fix_text": "",
+    "docs_anchor": "rrs-c2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-C2002",
+    "severity": "info",
+    "title": "Document changed outside Rastai; undo history cleared",
+    "message": "{path} changed outside Rastai, so its undo history was cleared.",
+    "basic_text": "This file was changed by another program, so its undo history was reset.",
+    "fix_text": "",
+    "docs_anchor": "rrs-c2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-C3001",
+    "severity": "error",
+    "title": "Malformed MCP request",
+    "message": "Malformed MCP request: {reason}.",
+    "basic_text": "An assistant tool sent Rastai a request it couldn't understand.",
+    "fix_text": "Check the MCP client's version and settings.",
+    "docs_anchor": "rrs-c3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-C3002",
+    "severity": "error",
+    "title": "MCP bridge has no token",
+    "message": "The MCP bridge has no token.",
+    "basic_text": "The assistant connection isn't set up with an access key.",
+    "fix_text": "Create a token and set it in the MCP bridge's settings.",
+    "docs_anchor": "rrs-c3002",
+    "retired": false
+  }
+]

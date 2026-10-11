@@ -11,73 +11,3022 @@ then add its entry to the owner's catalog file.
 
 Source: `catalog/errors/RRS-E.json`.
 
-No codes yet.
+<a id="rrs-e0001"></a>
+
+### RRS-E0001: JSON syntax error
+
+- **Severity:** error
+- **Message:** JSON syntax error: expected {expected}.
+- **In plain words:** This file isn't valid JSON, so Rastai can't read it.
+- **Fix:** Fix the text at the line and column shown, or restore the file from a backup.
+
+<a id="rrs-e0002"></a>
+
+### RRS-E0002: File is not valid UTF-8
+
+- **Severity:** error
+- **Message:** The file is not valid UTF-8 text.
+- **In plain words:** This file contains bytes that aren't text, so Rastai can't read it.
+- **Fix:** Save the file as UTF-8, or check that it is the file you meant to open.
+
+<a id="rrs-e0003"></a>
+
+### RRS-E0003: Duplicate key in a JSON object
+
+- **Severity:** error
+- **Message:** This object has the same key twice.
+- **In plain words:** A setting appears twice in this file, so Rastai can't tell which one you meant.
+- **Fix:** Remove one of the two keys.
+
+<a id="rrs-e0004"></a>
+
+### RRS-E0004: NaN or Infinity is not valid JSON
+
+- **Severity:** error
+- **Message:** NaN, Infinity and numbers too large for a 64-bit float are not valid JSON.
+- **In plain words:** This file has a number that isn't a real number, such as NaN or Infinity.
+- **Fix:** Replace it with a finite number, or with null where the field allows it.
+
+<a id="rrs-e1001"></a>
+
+### RRS-E1001: Required field missing
+
+- **Severity:** error
+- **Message:** Required field {field} is missing; it should be {expected}.
+- **In plain words:** Something this file needs is missing.
+- **Fix:** Add the field shown.
+
+<a id="rrs-e1002"></a>
+
+### RRS-E1002: Field has the wrong kind
+
+- **Severity:** error
+- **Message:** {field} should be {expected}, but it is {found}.
+- **In plain words:** A value in this file is the wrong kind, for example text where a number belongs.
+- **Fix:** Change the value to the kind shown.
+
+<a id="rrs-e1003"></a>
+
+### RRS-E1003: Unknown field
+
+- **Severity:** error
+- **Message:** Unknown field {field}.
+- **In plain words:** This file has a setting Rastai doesn't know. It may be a typo, or come from a newer version.
+- **Fix:** Check the spelling, or remove the field.
+
+<a id="rrs-e1004"></a>
+
+### RRS-E1004: Value is not one of the allowed values
+
+- **Severity:** error
+- **Message:** {found} is not one of the allowed values; expected {expected}.
+- **In plain words:** A value in this file isn't one of the choices Rastai accepts.
+- **Fix:** Change it to one of the allowed values.
+
+<a id="rrs-e1005"></a>
+
+### RRS-E1005: The type field doesn't match the file extension
+
+- **Severity:** error
+- **Message:** The type field says {type}, but the file extension is for {extension_type}.
+- **In plain words:** The file's name says one kind of file, but its contents say another.
+- **Fix:** Rename the file with the right extension, or fix its type field.
+
+<a id="rrs-e1006"></a>
+
+### RRS-E1006: A value can't be written as JSON
+
+- **Severity:** error
+- **Message:** A value can't be written as JSON: {reason}.
+- **In plain words:** Rastai hit an internal problem while saving. This is a bug, not something you did.
+- **Fix:** Please report this bug; the log has the details.
+
+<a id="rrs-e2001"></a>
+
+### RRS-E2001: Reference doesn't resolve
+
+- **Severity:** error
+- **Message:** The reference {reference} doesn't resolve.
+- **In plain words:** Something in this file points to a part that doesn't exist.
+- **Fix:** Fix the reference, or add the part it names.
+
+<a id="rrs-e2002"></a>
+
+### RRS-E2002: Shapes don't match along a graph edge
+
+- **Severity:** error
+- **Message:** {from_graph_node} gives shape {from_shape}, but {to_graph_node} expects {to_shape}.
+- **In plain words:** Two connected blocks in this design don't fit together.
+- **Fix:** Change one block's size, or add a block between them that reshapes the data.
+
+<a id="rrs-e2003"></a>
+
+### RRS-E2003: Graph has a cycle with no recurrent node
+
+- **Severity:** error
+- **Message:** The graph has a cycle through {graph_nodes} with no recurrent graph node.
+- **In plain words:** This design loops back on itself, which only a recurrent block can do.
+- **Fix:** Remove one connection in the loop, or make one of its blocks recurrent.
+
+<a id="rrs-e2004"></a>
+
+### RRS-E2004: Input ranges overlap
+
+- **Severity:** error
+- **Message:** Input {input_name} overlaps input {other_input_name} ({other_range}).
+- **In plain words:** Two inputs claim the same part of the data.
+- **Fix:** Shrink one of the ranges, or merge the two inputs.
+
+<a id="rrs-e2005"></a>
+
+### RRS-E2005: Duplicate id
+
+- **Severity:** error
+- **Message:** The id {id} is used more than once.
+- **In plain words:** Two items in this file have the same name, so Rastai can't tell them apart.
+- **Fix:** Rename one of them.
+
+<a id="rrs-e3001"></a>
+
+### RRS-E3001: File requires a plugin that isn't installed or enabled
+
+- **Severity:** warning
+- **Message:** This file needs the plugin {plugin_id} ({range}), which isn't installed or enabled.
+- **In plain words:** This file uses a plugin you don't have turned on.
+- **Fix:** Install or enable the plugin, then open the file again.
+
+<a id="rrs-e3002"></a>
+
+### RRS-E3002: No handler for this file type
+
+- **Severity:** warning
+- **Message:** No installed handler opens {extension} files.
+- **In plain words:** Rastai doesn't know how to open this kind of file.
+- **Fix:** Install a plugin that handles this file type.
+
+<a id="rrs-e3003"></a>
+
+### RRS-E3003: Model has more parameters than the dataset has tokens
+
+- **Severity:** warning
+- **Message:** The model has {parameter_count} parameters, but the dataset has only {token_count} tokens.
+- **In plain words:** This model is very large for this much data, so it will likely memorize instead of learn.
+- **Fix:** Use a smaller model, or more data.
+
+<a id="rrs-e4001"></a>
+
+### RRS-E4001: File from a newer schema version; opened read-only
+
+- **Severity:** info
+- **Message:** This file is from schema version {version}; this version of Rastai reads up to {current_version}, so it opens read-only.
+- **In plain words:** This file was made by a newer version of Rastai. You can look at it but not change it.
+- **Fix:** Update Rastai to edit it.
+
+<a id="rrs-e4002"></a>
+
+### RRS-E4002: Migration step failed
+
+- **Severity:** error
+- **Message:** Upgrading this file from schema version {from_version} failed: {reason}.
+- **In plain words:** This file is from an older version of Rastai and couldn't be upgraded.
+- **Fix:** Open it with the version that made it, or report the problem.
+
+<a id="rrs-e5001"></a>
+
+### RRS-E5001: Zip entry escapes its folder (zip slip)
+
+- **Severity:** error
+- **Message:** The zip entry {entry_name} would be written outside its folder; the archive is refused.
+- **In plain words:** This archive tries to put a file somewhere it shouldn't, so Rastai won't open it.
+- **Fix:** Only open archives from sources you trust, and ask the sender for a fixed copy.
+
+<a id="rrs-e5002"></a>
+
+### RRS-E5002: Zip exceeds size or ratio caps (zip bomb)
+
+- **Severity:** error
+- **Message:** The zip expands past the import limits: {reason}.
+- **In plain words:** This archive would unpack into far more data than it looks like, so Rastai won't open it.
+- **Fix:** Only open archives from sources you trust.
+
+<a id="rrs-e5003"></a>
+
+### RRS-E5003: File is larger than the import limit
+
+- **Severity:** error
+- **Message:** The file is {size_bytes} bytes; the import limit is {limit_bytes} bytes.
+- **In plain words:** This file is bigger than Rastai will read in one go.
+- **Fix:** Split the file, or use a smaller one.
+
+<a id="rrs-e5004"></a>
+
+### RRS-E5004: JSON nested deeper than the import limit
+
+- **Severity:** error
+- **Message:** The JSON is nested deeper than the limit of {limit_depth} levels.
+- **In plain words:** This file is nested too deeply to read safely.
+- **Fix:** Flatten the file's structure.
+
+<a id="rrs-e5005"></a>
+
+### RRS-E5005: Graph has more nodes or parameters than the import limit
+
+- **Severity:** error
+- **Message:** The graph has more graph nodes or parameters than the import limit ({limit}).
+- **In plain words:** This model design is larger than Rastai will import.
+- **Fix:** Import a smaller model.
+
+<a id="rrs-e5006"></a>
+
+### RRS-E5006: JSON has more values than the import limit
+
+- **Severity:** error
+- **Message:** The JSON has more than {limit_count} values.
+- **In plain words:** This file holds more items than Rastai will read safely at once.
+- **Fix:** Split the file into smaller ones.
+
+<a id="rrs-e6001"></a>
+
+### RRS-E6001: Safetensors: file is shorter than the 8-byte header length
+
+- **Severity:** error
+- **Message:** Safetensors: the file is shorter than the 8-byte header length.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6002"></a>
+
+### RRS-E6002: Safetensors: header length points past the end of the file
+
+- **Severity:** error
+- **Message:** Safetensors: the header length ({header_bytes} bytes) points past the end of the file.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6003"></a>
+
+### RRS-E6003: Safetensors: header is over the 100 MB limit
+
+- **Severity:** error
+- **Message:** Safetensors: the header is {header_bytes} bytes, over the 100 MB limit.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6004"></a>
+
+### RRS-E6004: Safetensors: header is not valid UTF-8 JSON
+
+- **Severity:** error
+- **Message:** Safetensors: the header is not valid UTF-8 JSON (this includes NaN and trailing bytes).
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6005"></a>
+
+### RRS-E6005: Safetensors: header is not a JSON object
+
+- **Severity:** error
+- **Message:** Safetensors: the header is not a JSON object.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6006"></a>
+
+### RRS-E6006: Safetensors: header has duplicate keys
+
+- **Severity:** error
+- **Message:** Safetensors: the header has the key {key} twice.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6007"></a>
+
+### RRS-E6007: Safetensors: a tensor entry is not an object
+
+- **Severity:** error
+- **Message:** Safetensors: the entry for tensor {tensor_name} is not an object.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6008"></a>
+
+### RRS-E6008: Safetensors: unsupported dtype
+
+- **Severity:** error
+- **Message:** Safetensors: tensor {tensor_name} has the unsupported dtype {dtype}.
+- **In plain words:** This weights file uses a number format Rastai can't read.
+- **Fix:** Convert the weights to a supported dtype, such as bf16, fp16 or fp32.
+
+<a id="rrs-e6009"></a>
+
+### RRS-E6009: Safetensors: shape is not a list of non-negative integers
+
+- **Severity:** error
+- **Message:** Safetensors: the shape of tensor {tensor_name} is not a list of non-negative integers.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6010"></a>
+
+### RRS-E6010: Safetensors: data_offsets is not two integers
+
+- **Severity:** error
+- **Message:** Safetensors: data_offsets of tensor {tensor_name} is not two integers.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6011"></a>
+
+### RRS-E6011: Safetensors: data_offsets fall outside the data section
+
+- **Severity:** error
+- **Message:** Safetensors: data_offsets of tensor {tensor_name} fall outside the data section (reversed, past the end, or beyond 64 bits).
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6012"></a>
+
+### RRS-E6012: Safetensors: the shape's byte size overflows 64 bits
+
+- **Severity:** error
+- **Message:** Safetensors: the byte size of tensor {tensor_name}'s shape overflows 64 bits.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6013"></a>
+
+### RRS-E6013: Safetensors: the shape's byte size doesn't match the offsets
+
+- **Severity:** error
+- **Message:** Safetensors: tensor {tensor_name}'s shape needs {expected_bytes} bytes, but its offsets hold {found_bytes}.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6014"></a>
+
+### RRS-E6014: Safetensors: tensors overlap
+
+- **Severity:** error
+- **Message:** Safetensors: tensors {tensor_name} and {other_tensor_name} overlap.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6015"></a>
+
+### RRS-E6015: Safetensors: gap in the data section
+
+- **Severity:** error
+- **Message:** Safetensors: the data section has a gap at byte {offset}.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6016"></a>
+
+### RRS-E6016: Safetensors: bytes at the end belong to no tensor
+
+- **Severity:** error
+- **Message:** Safetensors: the last {extra_bytes} bytes belong to no tensor.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6017"></a>
+
+### RRS-E6017: Safetensors: __metadata__ must map strings to strings
+
+- **Severity:** error
+- **Message:** Safetensors: __metadata__ must map strings to strings.
+- **In plain words:** This weights file is damaged or isn't a valid safetensors file.
+- **Fix:** Download or export the file again.
+
+<a id="rrs-e6501"></a>
+
+### RRS-E6501: GGUF: not a GGUF file
+
+- **Severity:** error
+- **Message:** GGUF: not a GGUF file (bad magic).
+- **In plain words:** This GGUF model file is damaged, or isn't a GGUF file Rastai can read.
+- **Fix:** Download the file again, or pick another GGUF file.
+
+<a id="rrs-e6502"></a>
+
+### RRS-E6502: GGUF: unsupported version
+
+- **Severity:** error
+- **Message:** GGUF: version {version} is not supported; only version 3 is read.
+- **In plain words:** This GGUF file uses a version Rastai can't read.
+- **Fix:** Convert it with a current llama.cpp, or pick another file.
+
+<a id="rrs-e6503"></a>
+
+### RRS-E6503: GGUF: header ends before its declared key-values or tensor infos
+
+- **Severity:** error
+- **Message:** GGUF: the header ends before its declared key-values or tensor infos.
+- **In plain words:** This GGUF model file is damaged, or isn't a GGUF file Rastai can read.
+- **Fix:** Download the file again, or pick another GGUF file.
+
+<a id="rrs-e6504"></a>
+
+### RRS-E6504: GGUF: a count, string or array length is over the import limit
+
+- **Severity:** error
+- **Message:** GGUF: a count, string or array length ({count}) is over the import limit.
+- **In plain words:** This GGUF model file is damaged, or isn't a GGUF file Rastai can read.
+- **Fix:** Download the file again, or pick another GGUF file.
+
+<a id="rrs-e6505"></a>
+
+### RRS-E6505: GGUF: unknown value type or tensor type
+
+- **Severity:** error
+- **Message:** GGUF: unknown value type or tensor type {type_id}.
+- **In plain words:** This GGUF model file is damaged, or isn't a GGUF file Rastai can read.
+- **Fix:** Download the file again, or pick another GGUF file.
+
+<a id="rrs-e6506"></a>
+
+### RRS-E6506: GGUF: a tensor's data lies outside the file
+
+- **Severity:** error
+- **Message:** GGUF: the data of tensor {tensor_name} lies outside the file.
+- **In plain words:** This GGUF model file is damaged, or isn't a GGUF file Rastai can read.
+- **Fix:** Download the file again, or pick another GGUF file.
+
+<a id="rrs-e7001"></a>
+
+### RRS-E7001: Model type not recognized; imported as one opaque graph node
+
+- **Severity:** warning
+- **Message:** config.json has no model_type or architectures; the model is imported as one opaque graph node.
+- **In plain words:** Rastai couldn't recognize this model's architecture, so it shows it as one sealed block.
+- **Fix:** You can still run it; install a plugin with a family for this model to see inside it.
+
+<a id="rrs-e7002"></a>
+
+### RRS-E7002: Unsupported config feature or unmapped tensors; the owning block is opaque
+
+- **Severity:** warning
+- **Message:** {block_name} uses an unsupported config feature or has unmapped tensors ({detail}); it is imported as opaque.
+- **In plain words:** Rastai couldn't map part of this model, so that part shows as a sealed block.
+- **Fix:** The rest of the model works as usual; you can inspect the sealed block at its edges.
+
+<a id="rrs-e7003"></a>
+
+### RRS-E7003: The repository declares remote code; Rastai never runs it
+
+- **Severity:** warning
+- **Message:** The repository declares remote code (auto_map); Rastai never runs it.
+- **In plain words:** This model comes with its own Python code. Rastai never runs downloaded code.
+
+<a id="rrs-e7004"></a>
+
+### RRS-E7004: The .pt2 archive holds pickled data; refused
+
+- **Severity:** error
+- **Message:** The .pt2 archive {path} holds pickled data; it is refused.
+- **In plain words:** This file contains pickled Python data, which can run code when it loads, so Rastai refuses it.
+- **Fix:** Export the model with safetensors weights instead.
+
+<a id="rrs-e7005"></a>
+
+### RRS-E7005: An ONNX op has no ModelSpec mapping; imported as opaque
+
+- **Severity:** warning
+- **Message:** The ONNX op {op_type} has no ModelSpec mapping; it is imported as opaque.
+- **In plain words:** Rastai couldn't map one operation of this model, so it shows as a sealed block.
+
+<a id="rrs-e7006"></a>
+
+### RRS-E7006: Weight shapes don't match the config; compile refused
+
+- **Severity:** error
+- **Message:** Tensor {tensor_name} has shape {found_shape}, but the config needs {expected_shape}; compile refused.
+- **In plain words:** These weights don't belong to this model's configuration.
+- **Fix:** Check that the weights and config.json come from the same model.
 
 ## RRS-P: Plugins
 
 Source: `catalog/errors/RRS-P.json`.
 
-No codes yet.
+<a id="rrs-p0001"></a>
+
+### RRS-P0001: Plugin manifest invalid
+
+- **Severity:** error
+- **Message:** The manifest of {plugin_id} is invalid: {reason}.
+- **In plain words:** This plugin's description file has a mistake, so Rastai can't load it.
+- **Fix:** Ask the plugin's author for a fixed version.
+
+<a id="rrs-p0002"></a>
+
+### RRS-P0002: Plugin id reserved or already installed
+
+- **Severity:** error
+- **Message:** The plugin id {plugin_id} is reserved or already installed.
+- **In plain words:** A plugin with this name is already installed, or the name is reserved.
+- **Fix:** Remove the installed plugin first, or give yours another id.
+
+<a id="rrs-p0004"></a>
+
+### RRS-P0004: Plugin command id outside the plugin's namespace or in a reserved area
+
+- **Severity:** error
+- **Message:** The command id {command_id} is outside the plugin's namespace or in a reserved area.
+- **In plain words:** This plugin tries to add a command under a name it isn't allowed to use.
+- **Fix:** The plugin's author must name the command under the plugin's own id.
+
+<a id="rrs-p0005"></a>
+
+### RRS-P0005: Plugin command type missing from types.json
+
+- **Severity:** error
+- **Message:** The command {command_id} names the type {type_name}, which types.json doesn't define.
+- **In plain words:** This plugin is incomplete: a command refers to a definition it doesn't ship.
+- **Fix:** Ask the plugin's author for a fixed version.
+
+<a id="rrs-p0006"></a>
+
+### RRS-P0006: Plugin contributes to an extension point it doesn't require
+
+- **Severity:** error
+- **Message:** The plugin contributes to {extension_point}, which it doesn't require.
+- **In plain words:** This plugin adds a feature it didn't declare.
+- **Fix:** Ask the plugin's author for a fixed version.
+
+<a id="rrs-p0101"></a>
+
+### RRS-P0101: Manifest declares a UI id that the UI didn't register
+
+- **Severity:** error
+- **Message:** The manifest declares {ui_id}, but the plugin's UI didn't register it.
+- **In plain words:** A panel or view this plugin promised didn't appear.
+- **Fix:** Ask the plugin's author for a fixed version.
+
+<a id="rrs-p0102"></a>
+
+### RRS-P0102: The UI registered an id the manifest doesn't declare
+
+- **Severity:** error
+- **Message:** The plugin's UI registered {ui_id}, which the manifest doesn't declare.
+- **In plain words:** This plugin tried to add a panel or view it didn't declare.
+- **Fix:** Ask the plugin's author for a fixed version.
+
+<a id="rrs-p0103"></a>
+
+### RRS-P0103: Python register() names differ from the manifest's ids
+
+- **Severity:** error
+- **Message:** The names the plugin's Python register() returns differ from the manifest's ids: {difference}.
+- **In plain words:** This plugin's parts don't agree about what it provides.
+- **Fix:** Ask the plugin's author for a fixed version.
+
+<a id="rrs-p1001"></a>
+
+### RRS-P1001: Plugin's engines range excludes this plugin API
+
+- **Severity:** error
+- **Message:** {plugin_id} needs plugin API {range}; this version of Rastai provides {api_version}.
+- **In plain words:** This plugin was made for a different version of Rastai.
+- **Fix:** Update the plugin, or the app, so the two match.
+
+<a id="rrs-p1002"></a>
+
+### RRS-P1002: Required capability not provided
+
+- **Severity:** error
+- **Message:** {plugin_id} requires the capability {capability}, which isn't provided.
+- **In plain words:** This plugin needs a feature this version of Rastai doesn't have.
+- **Fix:** Update Rastai, or use a version of the plugin that doesn't need it.
+
+<a id="rrs-p1003"></a>
+
+### RRS-P1003: Experimental API used without the flag
+
+- **Severity:** error
+- **Message:** {plugin_id} uses the experimental API {api_name}, but experimental APIs are off.
+- **In plain words:** This plugin uses an experimental feature that is turned off.
+- **Fix:** Turn on plugins.experimental_apis if you trust the plugin.
+
+<a id="rrs-p1004"></a>
+
+### RRS-P1004: Plugin command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-p2001"></a>
+
+### RRS-P2001: User namespaces unavailable: a third-party plugin module can't be isolated
+
+- **Severity:** error
+- **Message:** User namespaces are unavailable, so the plugin module of {plugin_id}, which has no network permission, can't be isolated; it is refused.
+- **In plain words:** Your system can't sandbox this plugin, so Rastai won't run it.
+- **Fix:** Install Rastai's AppArmor profile, or grant the plugin network access.
+
+<a id="rrs-p2002"></a>
+
+### RRS-P2002: Trust prompt declined
+
+- **Severity:** info
+- **Message:** The trust prompt for {plugin_id} was declined; nothing was installed.
+- **In plain words:** You chose not to install this plugin.
+
+<a id="rrs-p2003"></a>
+
+### RRS-P2003: Plugin archive changed since the trust prompt
+
+- **Severity:** error
+- **Message:** The plugin archive {path} changed since its trust prompt; the install stopped.
+- **In plain words:** The plugin file changed after you approved it, so Rastai stopped.
+- **Fix:** Get the plugin again from its source and review its permissions again.
+
+<a id="rrs-p2004"></a>
+
+### RRS-P2004: Iframe called a command outside the plugin's granted scopes
+
+- **Severity:** error
+- **Message:** The plugin's panel called {command_id}, which needs the scope {scope} that the plugin wasn't granted.
+- **In plain words:** This plugin tried to do something you didn't allow.
+- **Fix:** Grant the permission in the plugin's settings if you trust it.
+
+<a id="rrs-p2005"></a>
+
+### RRS-P2005: User namespaces unavailable: a first-party plugin module runs without network isolation
+
+- **Severity:** warning
+- **Message:** User namespaces are unavailable; the plugin module of {plugin_id} runs without network isolation.
+- **In plain words:** Your system can't fully sandbox this built-in plugin, so it runs with less isolation.
+- **Fix:** Install Rastai's AppArmor profile to restore isolation.
+
+<a id="rrs-p3001"></a>
+
+### RRS-P3001: Plugin dependency missing or unsatisfiable
+
+- **Severity:** error
+- **Message:** The dependency {dependency} of {plugin_id} is missing or can't be satisfied.
+- **In plain words:** This plugin needs something that isn't installed.
+- **Fix:** Install the dependency, or a version of the plugin that works without it.
+
+<a id="rrs-p3003"></a>
+
+### RRS-P3003: Plugin lockfile conflicts with the base environment
+
+- **Severity:** error
+- **Message:** The lockfile of {plugin_id} conflicts with the base environment: {reason}.
+- **In plain words:** This plugin needs Python packages that clash with Rastai's own.
+- **Fix:** Ask the plugin's author for a version that matches this Rastai.
+
+<a id="rrs-p3004"></a>
+
+### RRS-P3004: Plugin install interrupted
+
+- **Severity:** error
+- **Message:** Installing {plugin_id} was interrupted.
+- **In plain words:** The plugin install stopped before it finished.
+- **Fix:** Install the plugin again.
+
+<a id="rrs-p3005"></a>
+
+### RRS-P3005: Plugin data from a newer version of this plugin; opened read-only
+
+- **Severity:** warning
+- **Message:** This data is from version {version} of {plugin_id}, newer than the installed one; it opens read-only.
+- **In plain words:** This data was made by a newer version of the plugin. You can look at it but not change it.
+- **Fix:** Update the plugin.
+
+<a id="rrs-p4001"></a>
+
+### RRS-P4001: Plugin module crashed
+
+- **Severity:** error
+- **Message:** The plugin module of {plugin_id} crashed.
+- **In plain words:** Part of this plugin stopped unexpectedly.
+- **Fix:** Try again; if it keeps happening, report it to the plugin's author.
+
+<a id="rrs-p4002"></a>
+
+### RRS-P4002: Plugin module didn't answer in time
+
+- **Severity:** error
+- **Message:** The plugin module of {plugin_id} didn't answer within {timeout_seconds} seconds.
+- **In plain words:** This plugin took too long to respond.
+- **Fix:** Try again; if it keeps happening, report it to the plugin's author.
+
+<a id="rrs-p4003"></a>
+
+### RRS-P4003: Plugin module crashed repeatedly; plugin disabled
+
+- **Severity:** error
+- **Message:** The plugin module of {plugin_id} crashed repeatedly, so the plugin was disabled.
+- **In plain words:** This plugin kept crashing, so Rastai turned it off.
+- **Fix:** Update the plugin or report the problem to its author, then turn it back on.
+
+<a id="rrs-p4101"></a>
+
+### RRS-P4101: Malformed bridge message
+
+- **Severity:** error
+- **Message:** The plugin's panel sent a malformed bridge message: {reason}.
+- **In plain words:** This plugin's panel sent something Rastai couldn't understand.
+- **Fix:** Report it to the plugin's author.
+
+<a id="rrs-p4102"></a>
+
+### RRS-P4102: Too many bridge calls in flight
+
+- **Severity:** error
+- **Message:** The plugin's panel has more than {limit} bridge calls in flight.
+- **In plain words:** This plugin's panel is sending requests too fast.
+- **Fix:** Report it to the plugin's author.
+
+<a id="rrs-p4103"></a>
+
+### RRS-P4103: Bridge message too large
+
+- **Severity:** error
+- **Message:** A bridge message from the plugin's panel is {size_bytes} bytes; the limit is {limit_bytes}.
+- **In plain words:** This plugin's panel sent a message that is too large.
+- **Fix:** Report it to the plugin's author.
+
+<a id="rrs-p4104"></a>
+
+### RRS-P4104: Iframe didn't initialize in time
+
+- **Severity:** error
+- **Message:** The panel of {plugin_id} didn't initialize within {timeout_seconds} seconds.
+- **In plain words:** This plugin's panel didn't start.
+- **Fix:** Reload the panel; if it keeps happening, report it to the plugin's author.
+
+<a id="rrs-p4105"></a>
+
+### RRS-P4105: Plugin UI threw while loading or registering
+
+- **Severity:** error
+- **Message:** The UI of {plugin_id} threw while loading or registering: {reason}.
+- **In plain words:** This plugin's panel failed to load.
+- **Fix:** Report it to the plugin's author.
+
+<a id="rrs-p5001"></a>
+
+### RRS-P5001: Unknown template
+
+- **Severity:** error
+- **Message:** Unknown plugin template {template_name}.
+- **In plain words:** There is no plugin template with that name.
+- **Fix:** Pick one of the listed templates.
+
+<a id="rrs-p5002"></a>
+
+### RRS-P5002: Target folder for plugin new is not empty
+
+- **Severity:** error
+- **Message:** The target folder {path} for plugin new is not empty.
+- **In plain words:** The folder for the new plugin already has files in it.
+- **Fix:** Pick an empty or new folder.
+
+<a id="rrs-p5003"></a>
+
+### RRS-P5003: Generated plugin types are out of date
+
+- **Severity:** error
+- **Message:** The generated plugin types are out of date.
+- **In plain words:** The plugin's generated code no longer matches its types.json.
+- **Fix:** Run rastai plugin codegen.
+
+<a id="rrs-p5004"></a>
+
+### RRS-P5004: types.json is invalid
+
+- **Severity:** error
+- **Message:** types.json is invalid: {reason}.
+- **In plain words:** The plugin's type definitions file has a mistake.
+- **Fix:** Fix types.json at the place shown.
 
 ## RRS-C: Commands and API
 
 Source: `catalog/errors/RRS-C.json`.
 
-No codes yet.
+<a id="rrs-c0001"></a>
+
+### RRS-C0001: Unknown command
+
+- **Severity:** error
+- **Message:** Unknown command {command_id}.
+- **In plain words:** Rastai doesn't have this command.
+- **Fix:** Check the command's spelling.
+
+<a id="rrs-c0002"></a>
+
+### RRS-C0002: Invalid command arguments
+
+- **Severity:** error
+- **Message:** Invalid arguments for {command_id}: {reason}.
+- **In plain words:** This request is missing something or has a wrong value.
+- **Fix:** Fix the argument shown and try again.
+
+<a id="rrs-c0003"></a>
+
+### RRS-C0003: Command belongs to a disabled or missing plugin
+
+- **Severity:** error
+- **Message:** {command_id} belongs to the plugin {plugin_id}, which is disabled or missing.
+- **In plain words:** This command comes from a plugin that is off or not installed.
+- **Fix:** Install or turn on the plugin.
+
+<a id="rrs-c0004"></a>
+
+### RRS-C0004: Idempotency key reused with different arguments
+
+- **Severity:** error
+- **Message:** The idempotency key {idempotency_key} was already used with different arguments.
+- **In plain words:** This request reuses the id of a different request.
+- **Fix:** Send a new idempotency key with a different request.
+
+<a id="rrs-c0005"></a>
+
+### RRS-C0005: Command interrupted by a daemon restart
+
+- **Severity:** warning
+- **Message:** {command_id} was interrupted by a daemon restart.
+- **In plain words:** Rastai restarted while this was running, so it didn't finish.
+- **Fix:** Run it again.
+
+<a id="rrs-c0006"></a>
+
+### RRS-C0006: The daemon is running a different app version
+
+- **Severity:** warning
+- **Message:** The daemon is running version {daemon_version}, but this app is version {app_version}.
+- **In plain words:** The background service is a different version from this app.
+- **Fix:** Restart the daemon.
+
+<a id="rrs-c0007"></a>
+
+### RRS-C0007: Command retired; use its replacement
+
+- **Severity:** error
+- **Message:** {command_id} is retired; use {replacement_command_id} instead.
+- **In plain words:** This command was replaced by a newer one.
+- **Fix:** Use the replacement shown.
+
+<a id="rrs-c0008"></a>
+
+### RRS-C0008: Update in progress
+
+- **Severity:** error
+- **Message:** An update is in progress; try again in a moment.
+- **In plain words:** Rastai is updating itself right now.
+- **Fix:** Wait for the update to finish, then try again.
+
+<a id="rrs-c0009"></a>
+
+### RRS-C0009: A settings file doesn't parse
+
+- **Severity:** error
+- **Message:** The settings file {path} doesn't parse, so it was left as it is: {reason}.
+- **In plain words:** One of your settings files has a mistake. Rastai never overwrites it.
+- **Fix:** Fix the file first, then try again.
+
+<a id="rrs-c0010"></a>
+
+### RRS-C0010: Command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-c0401"></a>
+
+### RRS-C0401: Events missed outside the daemon's bus buffer
+
+- **Severity:** warning
+- **Message:** Events after sequence {sequence} are no longer in the daemon's bus buffer; the client refetches state.
+- **In plain words:** The app fell behind on updates and is reloading the current state.
+
+<a id="rrs-c0501"></a>
+
+### RRS-C0501: No home folder for the data folders
+
+- **Severity:** error
+- **Message:** There is no home folder to put Rastai's data folders in.
+- **In plain words:** Rastai couldn't find your home folder, so it has nowhere to keep its data.
+- **Fix:** Set RASTAI_HOME to a folder, or HOME on Linux and macOS and USERPROFILE on Windows.
+
+<a id="rrs-c0502"></a>
+
+### RRS-C0502: The operating system's random source can't be read
+
+- **Severity:** error
+- **Message:** The operating system's random source can't be read: {reason}.
+- **In plain words:** Rastai couldn't get the random numbers it needs from your system.
+- **Fix:** Restart the computer; if it keeps happening, report the problem.
+
+<a id="rrs-c1001"></a>
+
+### RRS-C1001: No free port in 47820–47829
+
+- **Severity:** error
+- **Message:** No free port in 47820–47829.
+- **In plain words:** Rastai couldn't find a free network port to start on.
+- **Fix:** Close the programs using these ports, or set daemon.port to a free one.
+
+<a id="rrs-c1002"></a>
+
+### RRS-C1002: Not signed in, or unknown credential
+
+- **Severity:** error
+- **Message:** Not signed in, or the credential is unknown.
+- **In plain words:** You're not signed in.
+- **Fix:** Sign in again.
+
+<a id="rrs-c1003"></a>
+
+### RRS-C1003: Host header not allowed
+
+- **Severity:** error
+- **Message:** The Host header {host} is not allowed.
+- **In plain words:** This request came through an address Rastai doesn't accept.
+- **Fix:** Open Rastai through the address it printed when it started.
+
+<a id="rrs-c1004"></a>
+
+### RRS-C1004: Origin not allowed
+
+- **Severity:** error
+- **Message:** The Origin {origin} is not allowed.
+- **In plain words:** This request came from a web page Rastai doesn't trust.
+- **Fix:** Open Rastai through the address it printed when it started.
+
+<a id="rrs-c1005"></a>
+
+### RRS-C1005: Scope not granted
+
+- **Severity:** error
+- **Message:** This needs the scope {scope}, which the credential wasn't granted.
+- **In plain words:** You don't have permission to do this.
+- **Fix:** Use a token that has the scope shown.
+
+<a id="rrs-c1006"></a>
+
+### RRS-C1006: Token revoked
+
+- **Severity:** error
+- **Message:** This token was revoked.
+- **In plain words:** This access key no longer works.
+- **Fix:** Create a new token.
+
+<a id="rrs-c1007"></a>
+
+### RRS-C1007: Login code expired or already used
+
+- **Severity:** error
+- **Message:** The login code expired or was already used.
+- **In plain words:** This sign-in link no longer works.
+- **Fix:** Open Rastai again to get a new link.
+
+<a id="rrs-c1008"></a>
+
+### RRS-C1008: Owner token is readable by group or others; the daemon refuses to start
+
+- **Severity:** error
+- **Message:** The owner token {path} is readable by group or others, so the daemon refuses to start.
+- **In plain words:** Rastai's key file can be read by other users on this computer, so Rastai won't start.
+- **Fix:** Run chmod 600 {path}, then start Rastai again.
+
+<a id="rrs-c1009"></a>
+
+### RRS-C1009: The project's data policy forbids this
+
+- **Severity:** error
+- **Message:** The project's data policy ({data_policy}) forbids this.
+- **In plain words:** This project's privacy setting doesn't allow sending this data off this computer.
+- **Fix:** Change privacy.data_policy for the project, or for your user outside a project, if you want to allow it.
+- **Fix command:** `settings.set`
+
+<a id="rrs-c2001"></a>
+
+### RRS-C2001: Nothing to undo or redo
+
+- **Severity:** info
+- **Message:** Nothing to undo or redo.
+- **In plain words:** There is nothing to undo or redo.
+
+<a id="rrs-c2002"></a>
+
+### RRS-C2002: Document changed outside Rastai; undo history cleared
+
+- **Severity:** info
+- **Message:** {path} changed outside Rastai, so its undo history was cleared.
+- **In plain words:** This file was changed by another program, so its undo history was reset.
+
+<a id="rrs-c3001"></a>
+
+### RRS-C3001: Malformed MCP request
+
+- **Severity:** error
+- **Message:** Malformed MCP request: {reason}.
+- **In plain words:** An assistant tool sent Rastai a request it couldn't understand.
+- **Fix:** Check the MCP client's version and settings.
+
+<a id="rrs-c3002"></a>
+
+### RRS-C3002: MCP bridge has no token
+
+- **Severity:** error
+- **Message:** The MCP bridge has no token.
+- **In plain words:** The assistant connection isn't set up with an access key.
+- **Fix:** Create a token and set it in the MCP bridge's settings.
 
 ## RRS-S: Storage and durability
 
 Source: `catalog/errors/RRS-S.json`.
 
-No codes yet.
+<a id="rrs-s0001"></a>
+
+### RRS-S0001: Another daemon owns this data directory
+
+- **Severity:** error
+- **Message:** Another daemon (process {pid}) owns the data directory {path}.
+- **In plain words:** Rastai is already running with this data folder.
+- **Fix:** Use the Rastai that is already running, or stop it first.
+
+<a id="rrs-s0002"></a>
+
+### RRS-S0002: Database schema is newer than this app
+
+- **Severity:** error
+- **Message:** The database {path} has schema version {version}, newer than this app supports.
+- **In plain words:** Your data was saved by a newer version of Rastai.
+- **Fix:** Update Rastai.
+
+<a id="rrs-s0003"></a>
+
+### RRS-S0003: rastai.db integrity check failed
+
+- **Severity:** error
+- **Message:** rastai.db failed its integrity check: {reason}.
+- **In plain words:** Rastai's index of your runs is damaged. Your runs themselves are safe.
+- **Fix:** Run rastai storage rebuild-index.
+
+<a id="rrs-s0004"></a>
+
+### RRS-S0004: Data directory not writable
+
+- **Severity:** error
+- **Message:** The data directory {path} is not writable.
+- **In plain words:** Rastai can't save to its data folder.
+- **Fix:** Check the folder's permissions, or set RASTAI_HOME to a folder you can write to.
+
+<a id="rrs-s0005"></a>
+
+### RRS-S0005: vault.db integrity check failed; chat is off until it is recovered
+
+- **Severity:** error
+- **Message:** vault.db failed its integrity check; chat is off until it is recovered.
+- **In plain words:** The file that holds your conversations is damaged, so chat is turned off for now.
+- **Fix:** Recover the vault from its newest good snapshot.
+- **Fix command:** `storage.vault.recover`
+
+<a id="rrs-s1001"></a>
+
+### RRS-S1001: Blob hash mismatch; quarantined
+
+- **Severity:** error
+- **Message:** The blob {content_hash} doesn't match its hash, so it was quarantined.
+- **In plain words:** A stored file was damaged, so Rastai set it aside.
+- **Fix:** Download or produce the file again.
+
+<a id="rrs-s1002"></a>
+
+### RRS-S1002: Referenced blob missing
+
+- **Severity:** error
+- **Message:** The blob {content_hash} is referenced but missing.
+- **In plain words:** A file Rastai needs is missing from its store.
+- **Fix:** Download or produce the file again.
+
+<a id="rrs-s2001"></a>
+
+### RRS-S2001: Torn tail in an event log ignored
+
+- **Severity:** info
+- **Message:** A torn record at the end of {path} was ignored.
+- **In plain words:** The last entry of a log was cut off, probably by a crash, so Rastai skipped it.
+
+<a id="rrs-s2002"></a>
+
+### RRS-S2002: Event log corrupt: a bad frame before the end of the file
+
+- **Severity:** error
+- **Message:** The event log {path} has a bad frame at byte {offset}, before the end of the file.
+- **In plain words:** A run's log is damaged in the middle.
+- **Fix:** Report the problem with a bundle of the run.
+
+<a id="rrs-s2003"></a>
+
+### RRS-S2003: Event sequence gap
+
+- **Severity:** error
+- **Message:** Event sequence gap in {path}: expected {expected_sequence}, found {found_sequence}.
+- **In plain words:** Some entries are missing from a run's log.
+- **Fix:** Report the problem with a bundle of the run.
+
+<a id="rrs-s3001"></a>
+
+### RRS-S3001: Not enough free disk space
+
+- **Severity:** error
+- **Message:** {operation} needs {needed_bytes} bytes on {volume}, but only {free_bytes} are free.
+- **In plain words:** Your disk is almost full, so Rastai can't save this.
+- **Fix:** Free up space, or let Rastai delete old checkpoints and unused files.
+- **Fix command:** `storage.gc`
+
+<a id="rrs-s3002"></a>
+
+### RRS-S3002: Disk full during a write
+
+- **Severity:** error
+- **Message:** The disk filled up during a write: {reason}.
+- **In plain words:** Your disk filled up while Rastai was saving.
+- **Fix:** Free up space, then try again.
+
+<a id="rrs-s3003"></a>
+
+### RRS-S3003: Storage quota exceeded
+
+- **Severity:** error
+- **Message:** Rastai's storage quota is exceeded: {used_bytes} bytes used of {quota_bytes}.
+- **In plain words:** Rastai has used all the space you allowed it.
+- **Fix:** Delete old files, or raise storage.quota_bytes.
+
+<a id="rrs-s3004"></a>
+
+### RRS-S3004: Database snapshot skipped or failed; older snapshots kept
+
+- **Severity:** warning
+- **Message:** The database snapshot was skipped or failed ({reason}); older snapshots are kept.
+- **In plain words:** Rastai couldn't make today's backup of its databases. Older backups are still there.
+- **Fix:** Free up disk space so the next snapshot can run.
+
+<a id="rrs-s3005"></a>
+
+### RRS-S3005: Write failed for a reason other than a full disk
+
+- **Severity:** error
+- **Message:** A write failed: {reason}.
+- **In plain words:** Rastai couldn't save a file.
+- **Fix:** Check the folder's permissions and the disk, then try again.
+
+<a id="rrs-s3006"></a>
+
+### RRS-S3006: Storage, archive or secret command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-s4001"></a>
+
+### RRS-S4001: OS keychain unavailable; fallback store in use
+
+- **Severity:** warning
+- **Message:** The OS keychain is unavailable ({reason}); secrets are kept in Rastai's fallback store.
+- **In plain words:** Your system's password store isn't available, so Rastai keeps secrets in its own file.
+- **Fix:** Unlock or install a system keychain to use it instead.
+
+<a id="rrs-s5001"></a>
+
+### RRS-S5001: Archive database unreachable; retrying with backoff
+
+- **Severity:** error
+- **Message:** The archive database at {host} is unreachable ({reason}); retrying in {retry_seconds} seconds.
+- **In plain words:** Rastai couldn't save to your long-term archive. Rastai keeps trying.
+- **Fix:** Check that the archive server is running and reachable.
+
+<a id="rrs-s5002"></a>
+
+### RRS-S5002: Archive schema needs a newer Rastai
+
+- **Severity:** error
+- **Message:** The archive needs Rastai {min_writer_version} or newer; this daemon stops writing to it.
+- **In plain words:** Your long-term archive was upgraded by a newer version of Rastai.
+- **Fix:** Update Rastai.
+
+<a id="rrs-s5003"></a>
+
+### RRS-S5003: Archive connection without TLS refused
+
+- **Severity:** error
+- **Message:** The connection to the archive at {host} has no TLS, so it is refused.
+- **In plain words:** Rastai won't send your data to the archive over an unencrypted connection.
+- **Fix:** Turn on TLS on the archive server, or connect through loopback or a Unix socket.
+
+<a id="rrs-s5004"></a>
+
+### RRS-S5004: Archive table doesn't report encryption; conversations are not archived there
+
+- **Severity:** error
+- **Message:** The archive table {table} doesn't report encryption at rest, so conversations are not archived there.
+- **In plain words:** Your archive doesn't say it encrypts stored data, so Rastai keeps conversations out of it.
+- **Fix:** Turn on table encryption on the archive server.
+
+<a id="rrs-s5005"></a>
+
+### RRS-S5005: Archive credentials missing or rejected
+
+- **Severity:** error
+- **Message:** The archive credentials are missing or were rejected.
+- **In plain words:** Rastai couldn't save to your long-term archive. The login was refused.
+- **Fix:** Set the archive's user and password again.
+
+<a id="rrs-s5006"></a>
+
+### RRS-S5006: Archive more than 24 hours behind; local pruning paused
+
+- **Severity:** warning
+- **Message:** The archive is {lag_hours} hours behind; local pruning is paused.
+- **In plain words:** Your long-term archive has fallen behind, so Rastai stopped freeing local space.
+- **Fix:** Check the archive's status and connection.
+
+<a id="rrs-s5007"></a>
+
+### RRS-S5007: Archived blob failed its BLAKE3 check
+
+- **Severity:** error
+- **Message:** The archived blob {content_hash} failed its BLAKE3 check.
+- **In plain words:** A file in your long-term archive is damaged.
+- **Fix:** Restore it from another copy, then verify the archive again.
+
+<a id="rrs-s5008"></a>
+
+### RRS-S5008: Archived event frame failed its CRC check; restore stopped
+
+- **Severity:** error
+- **Message:** An archived event frame of {run_id} failed its CRC check; the restore stopped.
+- **In plain words:** Part of an archived run is damaged, so it couldn't be restored.
+- **Fix:** Verify the archive, and restore the run from another copy if you have one.
+
+<a id="rrs-s5009"></a>
+
+### RRS-S5009: Prune refused
+
+- **Severity:** error
+- **Message:** {item_id} can't be pruned: it is pinned, running, or not yet acknowledged and verified by the archive.
+- **In plain words:** Rastai won't free this item's space yet, because it isn't safely archived or is still in use.
+
+<a id="rrs-s5010"></a>
+
+### RRS-S5010: Archive purge needs admin credentials
+
+- **Severity:** error
+- **Message:** Purging the archive needs admin credentials.
+- **In plain words:** Permanently deleting from the archive needs an administrator login.
+- **Fix:** Enter the archive's admin credentials for this purge.
+
+<a id="rrs-s5011"></a>
+
+### RRS-S5011: Archive migration waiting for another daemon's migration lock
+
+- **Severity:** info
+- **Message:** The archive migration is waiting for the migration lock that {source_id} holds.
+- **In plain words:** Another Rastai is upgrading the archive, so this one is waiting.
+
+<a id="rrs-s5012"></a>
+
+### RRS-S5012: Archive blob target unavailable or not writable
+
+- **Severity:** error
+- **Message:** The archive's blob target {target} is unavailable or not writable: {reason}.
+- **In plain words:** Rastai couldn't save to your long-term archive. Its file storage isn't reachable.
+- **Fix:** Check the archive's file storage folder or bucket.
 
 ## RRS-N: Nodes, transport, remote
 
 Source: `catalog/errors/RRS-N.json`.
 
-No codes yet.
+<a id="rrs-n0001"></a>
+
+### RRS-N0001: Node protocol version not supported
+
+- **Severity:** error
+- **Message:** Node {node_id} speaks protocol version {version}; this daemon supports {supported_versions}.
+- **In plain words:** This computer runs a version of Rastai that can't talk to yours.
+- **Fix:** Update Rastai on both computers.
+
+<a id="rrs-n0002"></a>
+
+### RRS-N0002: Daemon key not paired with this node
+
+- **Severity:** error
+- **Message:** This daemon's key is not paired with node {node_id}.
+- **In plain words:** This computer hasn't been paired with your Rastai.
+- **Fix:** Pair the node again.
+
+<a id="rrs-n0003"></a>
+
+### RRS-N0003: A node is already running on this machine
+
+- **Severity:** error
+- **Message:** A node is already running on this machine (process {pid}).
+- **In plain words:** Rastai's node service is already running here.
+- **Fix:** Use the running node, or stop it first.
+
+<a id="rrs-n0004"></a>
+
+### RRS-N0004: The node lacks a capability this job needs
+
+- **Severity:** error
+- **Message:** Node {node_id} lacks the capability {capability} that this job needs.
+- **In plain words:** This computer can't run this kind of task.
+- **Fix:** Pick another node, or update this one.
+
+<a id="rrs-n0005"></a>
+
+### RRS-N0005: Node, transfer or Hugging Face command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-n1001"></a>
+
+### RRS-N1001: SSH authentication failed
+
+- **Severity:** error
+- **Message:** SSH authentication to {host} failed.
+- **In plain words:** Rastai couldn't log in to that computer.
+- **Fix:** Check your SSH key and user name for this host.
+
+<a id="rrs-n1002"></a>
+
+### RRS-N1002: SSH host key changed; refused
+
+- **Severity:** error
+- **Message:** The SSH host key of {host} changed; the connection is refused.
+- **In plain words:** That computer's identity changed since last time, so Rastai won't connect. This can mean an attack.
+- **Fix:** If the host was reinstalled, remove its old key from known_hosts and confirm the new fingerprint.
+
+<a id="rrs-n1003"></a>
+
+### RRS-N1003: Unknown SSH host key; confirm the fingerprint
+
+- **Severity:** info
+- **Message:** The SSH host key of {host} is unknown: {fingerprint}.
+- **In plain words:** Rastai hasn't connected to this computer before.
+- **Fix:** Check the fingerprint with the host's owner, then confirm it.
+
+<a id="rrs-n1004"></a>
+
+### RRS-N1004: Remote OS or CPU architecture not supported
+
+- **Severity:** error
+- **Message:** {host} runs {os} on {architecture}, which Rastai doesn't support.
+- **In plain words:** Rastai can't run on that computer.
+- **Fix:** Use a host whose system Rastai supports; the install guide lists them.
+
+<a id="rrs-n1005"></a>
+
+### RRS-N1005: Linger unavailable; the node stops when you log out
+
+- **Severity:** warning
+- **Message:** Linger is unavailable on {host}; the node stops when you log out.
+- **In plain words:** Rastai on that computer stops when you log out of it.
+- **Fix:** Ask the host's admin to enable linger for your user (loginctl enable-linger).
+
+<a id="rrs-n1006"></a>
+
+### RRS-N1006: ssh binary not found
+
+- **Severity:** error
+- **Message:** The ssh binary {ssh_binary} was not found.
+- **In plain words:** Rastai couldn't find the SSH program on this computer.
+- **Fix:** Install OpenSSH, or set nodes.ssh_binary to its path.
+
+<a id="rrs-n1007"></a>
+
+### RRS-N1007: Rastai isn't installed on the host
+
+- **Severity:** error
+- **Message:** Rastai isn't installed on {host}.
+- **In plain words:** Rastai isn't installed on that computer yet.
+- **Fix:** Install Rastai on the host, then pair it again.
+
+<a id="rrs-n1008"></a>
+
+### RRS-N1008: SSH connection timed out or the host is unreachable
+
+- **Severity:** error
+- **Message:** The SSH connection to {host} timed out, or the host is unreachable.
+- **In plain words:** Rastai couldn't reach that computer.
+- **Fix:** Check the host name, the network and that the computer is on.
+
+<a id="rrs-n1009"></a>
+
+### RRS-N1009: No free local port for the tunnel
+
+- **Severity:** error
+- **Message:** No free local port for the tunnel to {host}.
+- **In plain words:** Rastai couldn't find a free network port for the connection.
+- **Fix:** Close programs that use many ports, then try again.
+
+<a id="rrs-n2001"></a>
+
+### RRS-N2001: Node unreachable
+
+- **Severity:** warning
+- **Message:** Node {node_id} missed {missed_heartbeats} heartbeats and is unreachable.
+- **In plain words:** Rastai lost contact with that computer.
+- **Fix:** Check that the computer is on and connected.
+
+<a id="rrs-n2002"></a>
+
+### RRS-N2002: Connection to the node dropped; its streams ended
+
+- **Severity:** warning
+- **Message:** The connection to node {node_id} dropped; its streams ended.
+- **In plain words:** The connection to that computer dropped. Its tasks keep running and reconnect.
+
+<a id="rrs-n2003"></a>
+
+### RRS-N2003: Node reconnected; jobs reattached
+
+- **Severity:** info
+- **Message:** Node {node_id} reconnected; its jobs were reattached.
+- **In plain words:** The connection to that computer is back.
+
+<a id="rrs-n3001"></a>
+
+### RRS-N3001: Transfer path outside the allowed folders
+
+- **Severity:** error
+- **Message:** The path {path} is outside the allowed folders.
+- **In plain words:** Rastai won't copy files to or from that folder.
+- **Fix:** Pick a file inside Rastai's data or project folders.
+
+<a id="rrs-n3002"></a>
+
+### RRS-N3002: Transfer chunk at the wrong offset
+
+- **Severity:** error
+- **Message:** A transfer chunk arrived at offset {offset}; expected {expected_offset}.
+- **In plain words:** A file copy got out of step.
+- **Fix:** Try the transfer again.
+
+<a id="rrs-n3003"></a>
+
+### RRS-N3003: Transferred file hash mismatch
+
+- **Severity:** error
+- **Message:** The transferred file {path} doesn't match its hash.
+- **In plain words:** A copied file arrived damaged.
+- **Fix:** Try the transfer again.
+
+<a id="rrs-n3004"></a>
+
+### RRS-N3004: Model repository or file not found
+
+- **Severity:** error
+- **Message:** {repository} or its file {file_name} was not found.
+- **In plain words:** Rastai couldn't find that model online.
+- **Fix:** Check the model's name and spelling.
+
+<a id="rrs-n3005"></a>
+
+### RRS-N3005: Gated model: license not accepted or no access
+
+- **Severity:** error
+- **Message:** {repository} is gated: its license isn't accepted, or this account has no access.
+- **In plain words:** This model needs you to accept its license first.
+- **Fix:** Accept the license on the model's Hugging Face page, then try again.
+
+<a id="rrs-n3006"></a>
+
+### RRS-N3006: Offline mode: download refused
+
+- **Severity:** error
+- **Message:** Offline mode is on, so the download of {repository} is refused.
+- **In plain words:** Rastai is set to work offline, so it won't download anything.
+- **Fix:** Turn off hf.offline to download.
+
+<a id="rrs-n3007"></a>
+
+### RRS-N3007: Hugging Face token missing or rejected
+
+- **Severity:** error
+- **Message:** The Hugging Face token is missing or was rejected.
+- **In plain words:** Rastai needs your Hugging Face access token for this.
+- **Fix:** Sign in to Hugging Face in Rastai again.
+
+<a id="rrs-n3008"></a>
+
+### RRS-N3008: Outbound HTTPS request without an egress tag
+
+- **Severity:** error
+- **Message:** An outbound HTTPS request to {host} had no egress tag; it was refused.
+- **In plain words:** Rastai blocked a network request that wasn't labeled. This is a bug.
+- **Fix:** Please report this bug; the log has the details.
+
+<a id="rrs-n3009"></a>
+
+### RRS-N3009: Download interrupted; retries used up
+
+- **Severity:** error
+- **Message:** The download of {file_name} was interrupted and its retries are used up; it can resume.
+- **In plain words:** The download stopped and couldn't restart by itself. What was downloaded is kept.
+- **Fix:** Check your connection, then start the download again to resume it.
+
+<a id="rrs-n3010"></a>
+
+### RRS-N3010: Waiting for another program's download of this file
+
+- **Severity:** info
+- **Message:** Waiting for another program's download of {file_name}.
+- **In plain words:** Another program is downloading the same file, so Rastai is waiting for it.
+
+<a id="rrs-n3011"></a>
+
+### RRS-N3011: Another program held this file's download lock for 10 minutes
+
+- **Severity:** error
+- **Message:** Another program held the download lock of {file_name} for 10 minutes.
+- **In plain words:** Another program has been downloading this file for a long time.
+- **Fix:** Check whether the other download is stuck, then try again.
+
+<a id="rrs-n3012"></a>
+
+### RRS-N3012: Transfer cancelled; partial file kept
+
+- **Severity:** info
+- **Message:** The transfer of {file_name} was cancelled; the partial file is kept.
+- **In plain words:** The copy was cancelled. What was copied is kept so it can resume.
+
+<a id="rrs-n4001"></a>
+
+### RRS-N4001: Update signature or hash invalid
+
+- **Severity:** error
+- **Message:** The update's signature or hash is invalid; nothing was installed.
+- **In plain words:** The update didn't pass its security check, so Rastai didn't install it.
+- **Fix:** Try the update again later.
+
+<a id="rrs-n4002"></a>
+
+### RRS-N4002: Update download failed
+
+- **Severity:** error
+- **Message:** The update download failed: {reason}.
+- **In plain words:** Rastai couldn't download the update.
+- **Fix:** Check your connection and try again.
+
+<a id="rrs-n4003"></a>
+
+### RRS-N4003: Update would make installed plugins incompatible
+
+- **Severity:** warning
+- **Message:** Updating to {version} would make these plugins incompatible: {plugin_ids}.
+- **In plain words:** This update would stop some of your plugins from working.
+- **Fix:** Update those plugins first, or update anyway and turn them back on later.
+
+<a id="rrs-n4004"></a>
+
+### RRS-N4004: Update waiting for running jobs
+
+- **Severity:** info
+- **Message:** The update waits for {job_count} running jobs to finish.
+- **In plain words:** Rastai will update once its running tasks finish.
+
+<a id="rrs-n4005"></a>
+
+### RRS-N4005: The new version failed its health check; the previous version was restored
+
+- **Severity:** error
+- **Message:** Version {version} failed its health check; the previous version was restored.
+- **In plain words:** The update didn't work, so Rastai went back to the version you had.
+- **Fix:** Report the problem with a bundle.
 
 ## RRS-H: Hardware and environments
 
 Source: `catalog/errors/RRS-H.json`.
 
-No codes yet.
+<a id="rrs-h0001"></a>
+
+### RRS-H0001: No usable GPU; running on CPU
+
+- **Severity:** info
+- **Message:** No usable GPU was found; running on the CPU.
+- **In plain words:** Rastai didn't find a graphics card it can use, so it runs on the processor. That is slower.
+
+<a id="rrs-h0002"></a>
+
+### RRS-H0002: A detection tool failed or timed out; profile is partial
+
+- **Severity:** warning
+- **Message:** {tool} failed or timed out; the hardware profile is partial.
+- **In plain words:** Rastai couldn't check all of this computer's hardware.
+- **Fix:** Run the hardware check again.
+
+<a id="rrs-h0003"></a>
+
+### RRS-H0003: Hardware or environment command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-h1001"></a>
+
+### RRS-H1001: Numerical self-test mismatch against the CPU reference; GPU not used
+
+- **Severity:** error
+- **Message:** GPU {gpu_index} gave results that differ from the CPU reference ({detail}); it is not used.
+- **In plain words:** This GPU failed Rastai's safety check, so Rastai won't use it.
+- **Fix:** Update the GPU driver, then run the hardware check again.
+
+<a id="rrs-h1002"></a>
+
+### RRS-H1002: Self-test could not run a kernel
+
+- **Severity:** error
+- **Message:** The self-test could not run {kernel} on GPU {gpu_index}.
+- **In plain words:** This GPU failed Rastai's safety check, so Rastai won't use it.
+- **Fix:** Update the GPU driver, then run the hardware check again.
+
+<a id="rrs-h1003"></a>
+
+### RRS-H1003: Self-test exceeded its time budget
+
+- **Severity:** error
+- **Message:** The self-test on GPU {gpu_index} took longer than {budget_seconds} seconds.
+- **In plain words:** This GPU failed Rastai's safety check, so Rastai won't use it.
+- **Fix:** Close other programs using the GPU, then run the hardware check again.
+
+<a id="rrs-h1004"></a>
+
+### RRS-H1004: Self-test: decode graph capture failed on this GPU; eager decode used there
+
+- **Severity:** warning
+- **Message:** Decode graph capture failed on GPU {gpu_index}; eager decode is used there.
+- **In plain words:** This GPU works, but chat on it will be a little slower.
+
+<a id="rrs-h2001"></a>
+
+### RRS-H2001: uv missing or its hash is wrong
+
+- **Severity:** error
+- **Message:** uv at {path} is missing or its hash is wrong.
+- **In plain words:** Rastai couldn't set up the Python environment it needs to run this.
+- **Fix:** Reinstall Rastai.
+
+<a id="rrs-h2002"></a>
+
+### RRS-H2002: Environment lockfile can't be installed on this platform
+
+- **Severity:** error
+- **Message:** The {environment} environment's lockfile can't be installed on {platform}.
+- **In plain words:** Rastai couldn't set up the Python environment it needs to run this.
+- **Fix:** Pick another backend for this computer.
+
+<a id="rrs-h2003"></a>
+
+### RRS-H2003: Environment import check failed
+
+- **Severity:** error
+- **Message:** The {environment} environment failed its import check: {reason}.
+- **In plain words:** Rastai couldn't set up the Python environment it needs to run this.
+- **Fix:** Reinstall the environment.
+
+<a id="rrs-h2004"></a>
+
+### RRS-H2004: Environment sync failed
+
+- **Severity:** error
+- **Message:** Syncing the {environment} environment failed: {reason}.
+- **In plain words:** Rastai couldn't set up the Python environment it needs to run this.
+- **Fix:** Check your connection, then install the environment again.
+
+<a id="rrs-h2005"></a>
+
+### RRS-H2005: A package's hash doesn't match the lockfile
+
+- **Severity:** error
+- **Message:** The package {package} doesn't match the hash in the lockfile.
+- **In plain words:** A downloaded package didn't pass its security check.
+- **Fix:** Install the environment again.
+
+<a id="rrs-h2006"></a>
+
+### RRS-H2006: Environment not installed or incomplete
+
+- **Severity:** error
+- **Message:** The {environment} environment is not installed or is incomplete.
+- **In plain words:** Rastai couldn't set up the Python environment it needs to run this.
+- **Fix:** Install the environment.
+
+<a id="rrs-h3001"></a>
+
+### RRS-H3001: Not enough GPU memory for this lease
+
+- **Severity:** error
+- **Message:** GPU {gpu_index} has {free_bytes} bytes free but this needs {needed_bytes}; held by {holders}.
+- **In plain words:** The graphics card doesn't have enough free memory for this.
+- **Fix:** Unload a model or stop another task, then try again.
+
+<a id="rrs-h3004"></a>
+
+### RRS-H3004: Model is being evicted; generation stopped
+
+- **Severity:** info
+- **Message:** {model_name} is being unloaded to free GPU memory; generation stopped.
+- **In plain words:** The model was unloaded to make room for another task.
+
+<a id="rrs-h3005"></a>
+
+### RRS-H3005: Process uses more GPU memory than its lease
+
+- **Severity:** warning
+- **Message:** Job {job_id} uses {used_bytes} bytes of GPU memory, more than its lease of {lease_bytes}.
+- **In plain words:** A task is using more graphics memory than it asked for.
+
+<a id="rrs-h3006"></a>
+
+### RRS-H3006: Out of GPU memory while loading
+
+- **Severity:** error
+- **Message:** Out of GPU memory while loading {model_name}.
+- **In plain words:** The graphics card ran out of memory while loading the model.
+- **Fix:** Unload other models, or use a smaller or quantized model.
+
+<a id="rrs-h3007"></a>
+
+### RRS-H3007: Out of GPU memory inside a job step
+
+- **Severity:** error
+- **Message:** Out of GPU memory during {operation}.
+- **In plain words:** The graphics card ran out of memory.
+- **Fix:** Use a smaller batch or model, or stop other tasks on this GPU.
+
+<a id="rrs-h4001"></a>
+
+### RRS-H4001: NVIDIA driver too old for CUDA 13; using cuda126
+
+- **Severity:** warning
+- **Message:** NVIDIA driver {driver_version} is too old for CUDA 13; using the cuda126 environment.
+- **In plain words:** Your graphics driver is a bit old, so Rastai uses an older GPU toolkit.
+- **Fix:** Update the NVIDIA driver for the newest toolkit.
+
+<a id="rrs-h4002"></a>
+
+### RRS-H4002: HSA_OVERRIDE_GFX_VERSION removed from a job
+
+- **Severity:** warning
+- **Message:** HSA_OVERRIDE_GFX_VERSION was removed from job {job_id}.
+- **In plain words:** Rastai removed a risky AMD override setting from this task.
+
+<a id="rrs-h4003"></a>
+
+### RRS-H4003: No permission to use the AMD GPU
+
+- **Severity:** error
+- **Message:** No permission to use the AMD GPU; the user isn't in the render and video groups.
+- **In plain words:** Your user isn't allowed to use the graphics card.
+- **Fix:** Add your user to the render and video groups, then log in again.
+
+<a id="rrs-h4004"></a>
+
+### RRS-H4004: GPU architecture not supported by this backend; GPU not used
+
+- **Severity:** warning
+- **Message:** GPU {gpu_index} ({architecture}) isn't supported by the {backend} backend; it is not used.
+- **In plain words:** This graphics card isn't supported, so Rastai won't use it.
 
 ## RRS-J: Jobs and worker protocol
 
 Source: `catalog/errors/RRS-J.json`.
 
-No codes yet.
+<a id="rrs-j0001"></a>
+
+### RRS-J0001: Job process could not be started
+
+- **Severity:** error
+- **Message:** The process of job {job_id} could not be started: {reason}.
+- **In plain words:** Rastai couldn't start this task.
+- **Fix:** Try again; if it keeps happening, run the hardware check.
+
+<a id="rrs-j0002"></a>
+
+### RRS-J0002: Worker didn't register in time
+
+- **Severity:** error
+- **Message:** The worker of job {job_id} didn't register within {timeout_seconds} seconds.
+- **In plain words:** This task didn't start in time.
+- **Fix:** Try again; if it keeps happening, reinstall the environment.
+
+<a id="rrs-j1001"></a>
+
+### RRS-J1001: Job killed by a signal
+
+- **Severity:** error
+- **Message:** Job {job_id} was killed by signal {signal}.
+- **In plain words:** This task stopped before it finished.
+- **Fix:** Run it again.
+
+<a id="rrs-j1002"></a>
+
+### RRS-J1002: Job killed by the kernel's out-of-memory killer
+
+- **Severity:** error
+- **Message:** Job {job_id} was killed by the kernel's out-of-memory killer.
+- **In plain words:** This computer ran out of memory, so the system stopped the task.
+- **Fix:** Close other programs, or use a smaller batch or model.
+
+<a id="rrs-j1003"></a>
+
+### RRS-J1003: Job killed by the node
+
+- **Severity:** error
+- **Message:** Job {job_id} was killed by the node: {reason}.
+- **In plain words:** This task stopped before it finished.
+
+<a id="rrs-j1004"></a>
+
+### RRS-J1004: Worker exited with no final record or diagnostic
+
+- **Severity:** error
+- **Message:** The worker of job {job_id} exited with code {exit_code} and no final record or diagnostic.
+- **In plain words:** This task stopped before it finished. It didn't say why.
+- **Fix:** Check the job's stderr.log, then run it again.
+
+<a id="rrs-j2001"></a>
+
+### RRS-J2001: Worker couldn't start
+
+- **Severity:** error
+- **Message:** The worker of job {job_id} couldn't start: {reason}.
+- **In plain words:** Rastai couldn't start this task.
+- **Fix:** Reinstall the environment, then try again.
+
+<a id="rrs-j2002"></a>
+
+### RRS-J2002: Job token rejected
+
+- **Severity:** error
+- **Message:** The token of job {job_id} was rejected.
+- **In plain words:** A task tried to connect with a key Rastai doesn't accept.
+
+<a id="rrs-j2003"></a>
+
+### RRS-J2003: Worker protocol version not supported by this node; stopped with a checkpoint
+
+- **Severity:** error
+- **Message:** The worker of job {job_id} speaks protocol version {version}, which this node doesn't support; it stopped with a checkpoint.
+- **In plain words:** This task and Rastai are different versions. The task saved its progress and stopped.
+- **Fix:** Update Rastai, then resume the run.
+
+<a id="rrs-j3002"></a>
+
+### RRS-J3002: Job ended while no node was watching; no final state
+
+- **Severity:** error
+- **Message:** Job {job_id} ended while no node was watching, so it has no final state.
+- **In plain words:** This task ended while Rastai wasn't running, so its result is unknown.
+- **Fix:** Check its output, or run it again.
+
+<a id="rrs-j3003"></a>
+
+### RRS-J3003: Job didn't reconnect after a node restart
+
+- **Severity:** error
+- **Message:** Job {job_id} didn't reconnect after the node restarted.
+- **In plain words:** This task didn't come back after Rastai restarted.
+- **Fix:** Run it again.
+
+<a id="rrs-j3004"></a>
+
+### RRS-J3004: Job lost with the daemon; resubmitted
+
+- **Severity:** info
+- **Message:** Job {job_id} was lost with the daemon and resubmitted.
+- **In plain words:** This task was interrupted when Rastai stopped, so it started again.
+
+<a id="rrs-j3005"></a>
+
+### RRS-J3005: Job ran inside the daemon and stopped with it
+
+- **Severity:** error
+- **Message:** Job {job_id} ran inside the daemon and stopped with it.
+- **In plain words:** This task stopped when Rastai stopped.
+- **Fix:** Run it again.
 
 ## RRS-G: Gateway and inference
 
 Source: `catalog/errors/RRS-G.json`.
 
-No codes yet.
+<a id="rrs-g0001"></a>
+
+### RRS-G0001: Invalid request
+
+- **Severity:** error
+- **Message:** Invalid request: {reason}.
+- **In plain words:** This chat request is missing something or has a wrong value.
+- **Fix:** Fix the request and try again.
+
+<a id="rrs-g0002"></a>
+
+### RRS-G0002: Unknown model name
+
+- **Severity:** error
+- **Message:** Unknown model name {model_name}.
+- **In plain words:** There is no model with that name.
+- **Fix:** Pick a model from the list.
+
+<a id="rrs-g0004"></a>
+
+### RRS-G0004: Steering preset needs its model on the Inspectable runtime
+
+- **Severity:** error
+- **Message:** The steering preset {preset_name} needs {model_name} on the Inspectable runtime.
+- **In plain words:** This steering preset only works with Rastai's own runtime.
+- **Fix:** Switch the model to the Inspectable runtime.
+
+<a id="rrs-g0005"></a>
+
+### RRS-G0005: Model not ready
+
+- **Severity:** error
+- **Message:** {model_name} is not loaded.
+- **In plain words:** This model isn't loaded yet.
+- **Fix:** Load the model.
+- **Fix command:** `model.load`
+
+<a id="rrs-g0006"></a>
+
+### RRS-G0006: The model's node is unreachable
+
+- **Severity:** error
+- **Message:** The node {node_id} that serves {model_name} is unreachable.
+- **In plain words:** Rastai lost contact with the computer running this model.
+- **Fix:** Check that the computer is on and connected.
+
+<a id="rrs-g0007"></a>
+
+### RRS-G0007: Tool calls not supported for this model family
+
+- **Severity:** error
+- **Message:** Tool calls are not supported for the {family} family.
+- **In plain words:** This model can't use tools.
+- **Fix:** Pick a model that supports tool calls.
+
+<a id="rrs-g0009"></a>
+
+### RRS-G0009: Generation timed out or stalled
+
+- **Severity:** error
+- **Message:** Generation timed out or stalled after {timeout_seconds} seconds.
+- **In plain words:** The model stopped answering.
+- **Fix:** Try again; if it keeps happening, reload the model.
+
+<a id="rrs-g0010"></a>
+
+### RRS-G0010: Steering preset was made for different weights
+
+- **Severity:** error
+- **Message:** The steering preset {preset_name} was made for different weights than {model_name}.
+- **In plain words:** This steering preset was made for another model.
+- **Fix:** Pick a preset made for this model.
+
+<a id="rrs-g0011"></a>
+
+### RRS-G0011: Inference command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-g1001"></a>
+
+### RRS-G1001: Tokenizer couldn't be loaded
+
+- **Severity:** error
+- **Message:** The tokenizer of {model_name} couldn't be loaded: {reason}.
+- **In plain words:** Rastai couldn't load the part of the model that reads text.
+- **Fix:** Download the model again.
+
+<a id="rrs-g1002"></a>
+
+### RRS-G1002: Chat template error
+
+- **Severity:** error
+- **Message:** The chat template of {model_name} failed: {reason}.
+- **In plain words:** Rastai couldn't format this conversation for the model.
+- **Fix:** Check the model's chat template, or pick another model.
+
+<a id="rrs-g1003"></a>
+
+### RRS-G1003: No tokenizer files for this model
+
+- **Severity:** error
+- **Message:** {model_name} has no tokenizer files.
+- **In plain words:** This model is missing the files that read text.
+- **Fix:** Download the model again with its tokenizer.
+
+<a id="rrs-g1004"></a>
+
+### RRS-G1004: Tokenizer mismatch between the gateway and llama-server
+
+- **Severity:** error
+- **Message:** The tokenizer of {model_name} differs between the gateway and llama-server.
+- **In plain words:** Two parts of Rastai read this model's text differently, so it won't use the fast engine.
+- **Fix:** Use the Inspectable runtime, or pick a GGUF made from the same model.
+
+<a id="rrs-g1005"></a>
+
+### RRS-G1005: Prompt longer than the model's context
+
+- **Severity:** error
+- **Message:** The prompt is {prompt_tokens} tokens; {model_name}'s context holds {context_tokens}.
+- **In plain words:** This conversation is too long for the model. Rastai never cuts it short on its own.
+- **Fix:** Start a new conversation, or shorten this one.
+
+<a id="rrs-g1006"></a>
+
+### RRS-G1006: Template can't produce a training mask for this conversation
+
+- **Severity:** error
+- **Message:** The chat template of {model_name} can't produce a training mask for this conversation.
+- **In plain words:** Rastai can't tell which parts of this conversation to train on.
+- **Fix:** Use another chat template, or another conversation.
+
+<a id="rrs-g1007"></a>
+
+### RRS-G1007: Two plugins contribute a chat template or tokenizer for this model; neither is used
+
+- **Severity:** warning
+- **Message:** {plugin_id} and {other_plugin_id} both contribute a chat template or tokenizer for {model_name}; neither is used.
+- **In plain words:** Two plugins both try to handle this model's text, so Rastai uses neither.
+- **Fix:** Turn off one of the two plugins.
+
+<a id="rrs-g2001"></a>
+
+### RRS-G2001: API key missing
+
+- **Severity:** error
+- **Message:** The API key for {adapter_name} is missing.
+- **In plain words:** Rastai needs an API key for this service.
+- **Fix:** Add the API key for this service.
+- **Fix command:** `adapter.configure`
+
+<a id="rrs-g2002"></a>
+
+### RRS-G2002: API provider returned an error
+
+- **Severity:** error
+- **Message:** {adapter_name} returned an error: {reason}.
+- **In plain words:** The online model service returned an error.
+- **Fix:** Check the service's status and your API key.
+
+<a id="rrs-g2003"></a>
+
+### RRS-G2003: API provider rate limit
+
+- **Severity:** error
+- **Message:** {adapter_name} is rate limiting requests; wait {wait_seconds} seconds.
+- **In plain words:** The online model service asked Rastai to slow down.
+- **Fix:** Wait a moment, then try again.
+
+<a id="rrs-g2004"></a>
+
+### RRS-G2004: API connection failed or dropped
+
+- **Severity:** error
+- **Message:** The connection to {adapter_name} failed or dropped: {reason}.
+- **In plain words:** Rastai lost its connection to the online model service.
+- **Fix:** Check your connection and try again.
+
+<a id="rrs-g3002"></a>
+
+### RRS-G3002: llama-server didn't become healthy
+
+- **Severity:** error
+- **Message:** llama-server didn't become healthy for {model_name}: {reason}.
+- **In plain words:** The fast chat engine had a problem. It didn't start.
+- **Fix:** Unload other models, or use a smaller GGUF.
+
+<a id="rrs-g3003"></a>
+
+### RRS-G3003: llama-server stopped unexpectedly
+
+- **Severity:** error
+- **Message:** llama-server stopped unexpectedly while serving {model_name}.
+- **In plain words:** The fast chat engine had a problem. It stopped.
+- **Fix:** Load the model again.
+
+<a id="rrs-g3004"></a>
+
+### RRS-G3004: Needs the Inspectable runtime
+
+- **Severity:** error
+- **Message:** This needs {model_name} on the Inspectable runtime.
+- **In plain words:** This feature only works with Rastai's own runtime.
+- **Fix:** Switch the chat to the Inspectable runtime.
+- **Fix command:** `chat.runtime.set`
+
+<a id="rrs-g3005"></a>
+
+### RRS-G3005: llama-server build hash mismatch
+
+- **Severity:** error
+- **Message:** The llama-server build at {path} doesn't match its pinned hash.
+- **In plain words:** The fast chat engine had a problem. Its program file didn't pass the security check.
+- **Fix:** Reinstall Rastai.
+
+<a id="rrs-g3006"></a>
+
+### RRS-G3006: Fast runtime busy
+
+- **Severity:** error
+- **Message:** The Fast runtime is busy with another request.
+- **In plain words:** The fast chat engine is busy.
+- **Fix:** Wait for the current answer to finish.
+
+<a id="rrs-g3007"></a>
+
+### RRS-G3007: Malformed event from llama-server
+
+- **Severity:** error
+- **Message:** llama-server sent a malformed event: {reason}.
+- **In plain words:** The fast chat engine had a problem. It sent something Rastai couldn't read.
+- **Fix:** Load the model again.
+
+<a id="rrs-g3008"></a>
+
+### RRS-G3008: No GGUF for the Fast runtime
+
+- **Severity:** error
+- **Message:** {model_name} has no GGUF file for the Fast runtime.
+- **In plain words:** The fast chat engine needs a GGUF version of this model.
+- **Fix:** Download a GGUF of this model, or export one from a checkpoint.
+- **Fix command:** `model.download`
+
+<a id="rrs-g3009"></a>
+
+### RRS-G3009: No full-precision twin for this GGUF
+
+- **Severity:** error
+- **Message:** {model_name} has no full-precision twin for inspection.
+- **In plain words:** To look inside this compressed model, Rastai needs its full-size version.
+- **Fix:** Set the full-precision twin of this model.
+- **Fix command:** `model.twin.set`
+
+<a id="rrs-g3010"></a>
+
+### RRS-G3010: Twin doesn't match the GGUF
+
+- **Severity:** error
+- **Message:** The twin {twin_model_name} doesn't match {model_name}: {reason}.
+- **In plain words:** The full-size model you picked isn't the same model as this compressed one.
+- **Fix:** Pick the full-precision model this GGUF was made from.
+
+<a id="rrs-g4001"></a>
+
+### RRS-G4001: Gateway log write failed
+
+- **Severity:** error
+- **Message:** Writing the gateway log failed: {reason}.
+- **In plain words:** Rastai couldn't save this chat to its log.
+- **Fix:** Check free disk space.
 
 ## RRS-M: Model runtime
 
 Source: `catalog/errors/RRS-M.json`.
 
-No codes yet.
+<a id="rrs-m0001"></a>
+
+### RRS-M0001: A graph node has no implementation; the design is view only
+
+- **Severity:** error
+- **Message:** The graph node {graph_node} ({op}) has no implementation, so the design is view only.
+- **In plain words:** Part of this design can be shown but not run.
+- **Fix:** Replace the block with one Rastai can run.
+
+<a id="rrs-m0002"></a>
+
+### RRS-M0002: Smoke forward shape differs from the inferred shape
+
+- **Severity:** error
+- **Message:** The smoke forward gave shape {found_shape} at {graph_node}, but the inferred shape is {expected_shape}.
+- **In plain words:** Rastai's model builder made a mistake. This is a bug, not something you did.
+- **Fix:** Please report this bug with the design file.
+
+<a id="rrs-m0003"></a>
+
+### RRS-M0003: Compiled parameter count differs from live stats
+
+- **Severity:** warning
+- **Message:** The compiled model has {compiled_count} parameters, but the live stats said {stats_count}.
+- **In plain words:** The parameter count shown while designing was wrong. This is a bug.
+- **Fix:** Please report this bug with the design file.
+
+<a id="rrs-m0004"></a>
+
+### RRS-M0004: Designer command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-m0601"></a>
+
+### RRS-M0601: Graph nodes without Eject or ONNX support
+
+- **Severity:** error
+- **Message:** These graph nodes have no Eject or ONNX support: {graph_nodes}.
+- **In plain words:** Some blocks in this design can't be exported.
+- **Fix:** Replace those blocks, or export a format that supports them.
+
+<a id="rrs-m0602"></a>
+
+### RRS-M0602: ONNX lowering failed for a graph node
+
+- **Severity:** error
+- **Message:** ONNX lowering failed for {graph_node}: {reason}.
+- **In plain words:** Rastai couldn't convert part of this model to ONNX.
+- **Fix:** Report the problem with the design file.
+
+<a id="rrs-m0603"></a>
+
+### RRS-M0603: ONNX round trip differs beyond tolerance; file kept as unverified
+
+- **Severity:** warning
+- **Message:** The ONNX round trip differs by {difference}, beyond the tolerance of {tolerance}; the file is kept as unverified.
+- **In plain words:** The exported ONNX file gives slightly different answers from the original, so it is marked unverified.
+
+<a id="rrs-m0604"></a>
+
+### RRS-M0604: Ejected code doesn't reproduce the compiled model, or imports rastai
+
+- **Severity:** error
+- **Message:** The ejected code doesn't reproduce the compiled model, or imports rastai: {reason}.
+- **In plain words:** The exported PyTorch code doesn't behave like the original model. This is a bug.
+- **Fix:** Please report this bug with the design file.
+
+<a id="rrs-m1001"></a>
+
+### RRS-M1001: No in-house family; the compat runtime can run this model
+
+- **Severity:** info
+- **Message:** {model_name} has no in-house family; the compat runtime can run it.
+- **In plain words:** Rastai can run this model, but can only look at it from the outside.
+
+<a id="rrs-m1002"></a>
+
+### RRS-M1002: The compat runtime isn't installed in this environment
+
+- **Severity:** error
+- **Message:** The compat runtime isn't installed in the {environment} environment.
+- **In plain words:** The extra software this model needs isn't installed.
+- **Fix:** Install the compat group for this environment.
+
+<a id="rrs-m1003"></a>
+
+### RRS-M1003: The model needs remote code; refused
+
+- **Severity:** error
+- **Message:** {model_name} needs remote code; it is refused.
+- **In plain words:** This model only runs with its own downloaded code, which Rastai never runs.
+- **Fix:** Pick another model, or a version of it that needs no remote code.
+
+<a id="rrs-m2001"></a>
+
+### RRS-M2001: Weights not found in the HF cache or the blob store; nothing is downloaded
+
+- **Severity:** error
+- **Message:** The weights of {model_name} are not in the Hugging Face cache or the blob store; nothing is downloaded.
+- **In plain words:** This model's weights aren't on this computer.
+- **Fix:** Download the model first.
+
+<a id="rrs-m2002"></a>
+
+### RRS-M2002: The weights lack tensors the ModelSpec needs
+
+- **Severity:** error
+- **Message:** The weights lack tensors the ModelSpec needs: {tensor_names}.
+- **In plain words:** The weights file is missing parts this model needs.
+- **Fix:** Check that the weights belong to this model.
+
+<a id="rrs-m2003"></a>
+
+### RRS-M2003: The weights hold tensors the ModelSpec doesn't use
+
+- **Severity:** error
+- **Message:** The weights hold tensors the ModelSpec doesn't use: {tensor_names}.
+- **In plain words:** The weights file has parts this model doesn't use.
+- **Fix:** Check that the weights belong to this model.
+
+<a id="rrs-m2004"></a>
+
+### RRS-M2004: Tensor shape mismatch
+
+- **Severity:** error
+- **Message:** Tensor {tensor_name} has shape {found_shape}, but the ModelSpec needs {expected_shape}.
+- **In plain words:** A weight in this file is the wrong size for this model.
+- **Fix:** Check that the weights belong to this model.
+
+<a id="rrs-m2005"></a>
+
+### RRS-M2005: Weights exist only in pickle format; refused
+
+- **Severity:** error
+- **Message:** The weights of {model_name} exist only in pickle format; they are refused.
+- **In plain words:** This model's weights are in a format that can run code when it loads, so Rastai refuses them.
+- **Fix:** Use a version of the model with safetensors weights.
+
+<a id="rrs-m3001"></a>
+
+### RRS-M3001: Non-finite logits in the smoke forward
+
+- **Severity:** error
+- **Message:** The smoke forward of {model_name} gave non-finite logits.
+- **In plain words:** This model gave broken numbers on a test input.
+- **Fix:** Check the weights and the dtype.
+
+<a id="rrs-m3002"></a>
+
+### RRS-M3002: Reference parity outside tolerance
+
+- **Severity:** error
+- **Message:** {model_name} differs from the reference by {difference} in {dtype}, beyond the tolerance of {tolerance}.
+- **In plain words:** This model's answers differ too much from the original implementation.
+- **Fix:** Report the problem with the model's name.
+
+<a id="rrs-m3003"></a>
+
+### RRS-M3003: Reference parity skipped; the compat group isn't installed
+
+- **Severity:** warning
+- **Message:** The reference parity check was skipped because the compat group isn't installed.
+- **In plain words:** Rastai couldn't compare this model with the original implementation.
+- **Fix:** Install the compat group to run the check.
+
+<a id="rrs-m4001"></a>
+
+### RRS-M4001: CUDA graph capture failed; eager decode in use
+
+- **Severity:** warning
+- **Message:** CUDA graph capture failed for {model_name}; eager decode is in use.
+- **In plain words:** This model works, but chat will be a little slower.
+
+<a id="rrs-m5001"></a>
+
+### RRS-M5001: Doesn't fit the chosen GPUs
+
+- **Severity:** error
+- **Message:** {model_name} needs {needed_bytes} bytes but the chosen GPUs have {free_bytes} free.
+- **In plain words:** This model doesn't fit on the graphics cards you picked.
+- **Fix:** Pick more GPUs, or a smaller or quantized model.
+
+<a id="rrs-m5002"></a>
+
+### RRS-M5002: One placement unit is larger than any GPU
+
+- **Severity:** error
+- **Message:** {unit_name} needs {needed_bytes} bytes, more than any GPU has.
+- **In plain words:** One part of this model is too big for any of your graphics cards.
+- **Fix:** Use a smaller or quantized model.
+
+<a id="rrs-m5003"></a>
+
+### RRS-M5003: The dtype isn't supported on every chosen GPU
+
+- **Severity:** error
+- **Message:** {dtype} isn't supported on GPU {gpu_index}.
+- **In plain words:** One of the graphics cards you picked can't use this number format.
+- **Fix:** Pick other GPUs, or another dtype.
+
+<a id="rrs-m5004"></a>
+
+### RRS-M5004: Out of memory loading a placement unit on GPU n
+
+- **Severity:** error
+- **Message:** Out of memory loading {unit_name} on GPU {gpu_index}.
+- **In plain words:** A graphics card ran out of memory while loading the model.
+- **Fix:** Free GPU memory, or pick another placement.
 
 ## RRS-T: Training
 
 Source: `catalog/errors/RRS-T.json`.
 
-No codes yet.
+<a id="rrs-t0001"></a>
+
+### RRS-T0001: Recipe not available on this node
+
+- **Severity:** info
+- **Message:** The recipe {recipe} isn't available on this node: {reason}.
+- **In plain words:** This training method can't run on this computer.
+
+<a id="rrs-t0002"></a>
+
+### RRS-T0002: Recipe, reward-function or required plugin not installed
+
+- **Severity:** error
+- **Message:** {name} is not installed.
+- **In plain words:** Something this training needs isn't installed.
+- **Fix:** Install the plugin that provides it.
+
+<a id="rrs-t0003"></a>
+
+### RRS-T0003: No usable rows for this recipe
+
+- **Severity:** error
+- **Message:** The dataset {dataset_id} has no rows the {recipe} recipe can use.
+- **In plain words:** This dataset has nothing this training method can learn from.
+- **Fix:** Pick another dataset, or check its columns.
+
+<a id="rrs-t0004"></a>
+
+### RRS-T0004: No method fits the memory budget
+
+- **Severity:** error
+- **Message:** No training method for {model_name} fits the memory budget of {budget_bytes} bytes.
+- **In plain words:** This model is too big to train on this computer.
+- **Fix:** Use a smaller model, or a computer with more memory.
+
+<a id="rrs-t0005"></a>
+
+### RRS-T0005: Dataset task doesn't match the recipe
+
+- **Severity:** error
+- **Message:** The dataset's task {task} doesn't match the {recipe} recipe.
+- **In plain words:** This dataset doesn't fit this training method.
+- **Fix:** Pick a dataset or a method that match.
+
+<a id="rrs-t0006"></a>
+
+### RRS-T0006: Training command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-t0201"></a>
+
+### RRS-T0201: Reward model accuracy below the RLHF gate
+
+- **Severity:** error
+- **Message:** The reward model's accuracy is {accuracy}, below the RLHF gate of {minimum_accuracy}.
+- **In plain words:** The reward model isn't accurate enough to train with.
+- **Fix:** Train the reward model on more or cleaner preference data.
+
+<a id="rrs-t0202"></a>
+
+### RRS-T0202: Reward model base differs from the policy base
+
+- **Severity:** warning
+- **Message:** The reward model's base {reward_base} differs from the policy's base {policy_base}; this needs extra VRAM.
+- **In plain words:** The two models in this training are different, so it needs more graphics memory.
+
+<a id="rrs-t2001"></a>
+
+### RRS-T2001: Checkpoint write failed: disk full; run paused
+
+- **Severity:** error
+- **Message:** Writing a checkpoint of {run_id} failed because the disk is full; the run is paused.
+- **In plain words:** Your disk filled up while saving training progress, so the training paused.
+- **Fix:** Free up space, then resume the run.
+
+<a id="rrs-t2002"></a>
+
+### RRS-T2002: Checkpoint files don't match their recorded hashes; falling back to an older one
+
+- **Severity:** warning
+- **Message:** Checkpoint {checkpoint_id} doesn't match its recorded hashes; falling back to {fallback_checkpoint_id}.
+- **In plain words:** The latest saved training progress was damaged, so Rastai used an older one.
+
+<a id="rrs-t2003"></a>
+
+### RRS-T2003: Resuming on a different environment or hardware
+
+- **Severity:** warning
+- **Message:** Resuming {run_id} on a different environment or hardware: {difference}.
+- **In plain words:** This training continues on a different setup, so results may differ slightly.
+
+<a id="rrs-t2004"></a>
+
+### RRS-T2004: No complete checkpoint to resume from
+
+- **Severity:** error
+- **Message:** {run_id} has no complete checkpoint to resume from.
+- **In plain words:** There is no saved training progress to continue from.
+- **Fix:** Start the run again.
+
+<a id="rrs-t2005"></a>
+
+### RRS-T2005: Checkpoint belongs to a different run
+
+- **Severity:** error
+- **Message:** Checkpoint {checkpoint_id} belongs to a different run: {difference}.
+- **In plain words:** This saved progress is from another training.
+- **Fix:** Pick a checkpoint of this run.
+
+<a id="rrs-t3001"></a>
+
+### RRS-T3001: Non-finite loss or gradients, repeatedly
+
+- **Severity:** error
+- **Message:** The loss or gradients of {run_id} were non-finite {count} times in a row.
+- **In plain words:** The training went unstable and stopped.
+- **Fix:** Lower the learning rate, or check the data.
+
+<a id="rrs-t3002"></a>
+
+### RRS-T3002: Policy KL above max_kl; stopped early
+
+- **Severity:** error
+- **Message:** The policy's KL ({kl}) went above max_kl ({max_kl}); stopped early.
+- **In plain words:** The model drifted too far from where it started, so the training stopped.
+- **Fix:** Lower the learning rate, or raise max_kl if the drift is expected.
+
+<a id="rrs-t4001"></a>
+
+### RRS-T4001: No GGUF mapping for this family, or opaque nodes
+
+- **Severity:** error
+- **Message:** {model_name} can't be exported to GGUF: {reason}.
+- **In plain words:** This model can't be exported for the fast chat engine.
+- **Fix:** Export to safetensors instead.
+
+<a id="rrs-t4002"></a>
+
+### RRS-T4002: Dataset license needs confirmation before publishing
+
+- **Severity:** warning
+- **Message:** The license of {dataset_id} ({license}) needs your confirmation before publishing.
+- **In plain words:** The data this model learned from has a license you should check before sharing it.
+- **Fix:** Read the license, then confirm.
+
+<a id="rrs-t4003"></a>
+
+### RRS-T4003: Export check failed
+
+- **Severity:** warning
+- **Message:** The export check failed: {reason}.
+- **In plain words:** The exported model doesn't give exactly the same answers as the original.
+
+<a id="rrs-t4004"></a>
+
+### RRS-T4004: HF token can't write this repo
+
+- **Severity:** error
+- **Message:** The Hugging Face token can't write to {repository}.
+- **In plain words:** Your Hugging Face access key isn't allowed to upload here.
+- **Fix:** Use a token with write access to this repository.
+
+<a id="rrs-t4005"></a>
+
+### RRS-T4005: HF push failed after retries
+
+- **Severity:** error
+- **Message:** Pushing to {repository} failed after retries: {reason}.
+- **In plain words:** Rastai couldn't upload the model to Hugging Face.
+- **Fix:** Check your connection and try again.
+
+<a id="rrs-t4006"></a>
+
+### RRS-T4006: No Ollama template for this family; Ollama falls back to the GGUF's chat template
+
+- **Severity:** warning
+- **Message:** There is no Ollama template for the {family} family; Ollama falls back to the GGUF's chat template.
+- **In plain words:** Ollama will use the chat format stored in the model file.
 
 ## RRS-D: Data
 
 Source: `catalog/errors/RRS-D.json`.
 
-No codes yet.
+<a id="rrs-d0001"></a>
+
+### RRS-D0001: No task matches the columns
+
+- **Severity:** error
+- **Message:** No task matches the columns {columns}.
+- **In plain words:** Rastai couldn't tell what this data is for from its columns.
+- **Fix:** Rename the columns, or pick the task yourself.
+
+<a id="rrs-d0002"></a>
+
+### RRS-D0002: Data command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-d1001"></a>
+
+### RRS-D1001: File format not recognized; no converter
+
+- **Severity:** error
+- **Message:** The format of {path} isn't recognized, and no converter reads it.
+- **In plain words:** Rastai doesn't know how to read this file.
+- **Fix:** Convert it to JSON Lines or CSV, or install a converter.
+
+<a id="rrs-d1002"></a>
+
+### RRS-D1002: More than 1% of rows failed conversion
+
+- **Severity:** error
+- **Message:** {failed_rows} of {total_rows} rows failed conversion, more than 1%.
+- **In plain words:** Too many rows in this file couldn't be read.
+- **Fix:** Check the rows the report lists.
+
+<a id="rrs-d1003"></a>
+
+### RRS-D1003: Python converter raised
+
+- **Severity:** error
+- **Message:** The converter {converter} raised: {reason}.
+- **In plain words:** The converter that reads this file failed.
+- **Fix:** Check the file, or report it to the converter's author.
+
+<a id="rrs-d1004"></a>
+
+### RRS-D1004: Image larger than the decode limit
+
+- **Severity:** error
+- **Message:** The image {path} is larger than the decode limit.
+- **In plain words:** This image is too large to read safely.
+- **Fix:** Resize the image.
+
+<a id="rrs-d2001"></a>
+
+### RRS-D2001: Exact duplicates dropped
+
+- **Severity:** info
+- **Message:** {count} exact duplicate rows were dropped.
+- **In plain words:** Rastai removed rows that appeared more than once.
+
+<a id="rrs-d2002"></a>
+
+### RRS-D2002: Train/test leakage found
+
+- **Severity:** warning
+- **Message:** {count} test rows also appear in the training split.
+- **In plain words:** Some test examples are also in the training data, so test scores would be too high.
+- **Fix:** Remove the overlap before training.
+
+<a id="rrs-d2003"></a>
+
+### RRS-D2003: Possible PII found
+
+- **Severity:** warning
+- **Message:** {count} rows may contain personal information ({kinds}).
+- **In plain words:** This data may contain personal information, like names or email addresses.
+- **Fix:** Review the rows the report lists.
+
+<a id="rrs-d3001"></a>
+
+### RRS-D3001: Source missing or not readable
+
+- **Severity:** error
+- **Message:** The source can't be read: {reason}.
+- **In plain words:** Rastai couldn't read this file or data source.
+- **Fix:** Check that it exists and that you can read it.
+
+<a id="rrs-d3002"></a>
+
+### RRS-D3002: HF dataset gated or download failed
+
+- **Severity:** error
+- **Message:** The Hugging Face dataset {repository} is gated or its download failed: {reason}.
+- **In plain words:** Rastai couldn't download this dataset.
+- **Fix:** Accept the dataset's terms on Hugging Face, then try again.
+
+<a id="rrs-d3003"></a>
+
+### RRS-D3003: Source changed since the check
+
+- **Severity:** error
+- **Message:** {path} changed since it was checked (its hash differs).
+- **In plain words:** This data changed after Rastai checked it.
+- **Fix:** Check the data again.
+
+<a id="rrs-d3005"></a>
+
+### RRS-D3005: MySQL source unreachable
+
+- **Severity:** error
+- **Message:** The MySQL source {connection_name} is unreachable: {reason}.
+- **In plain words:** Rastai couldn't read your MySQL data source.
+- **Fix:** Check that the server is running and reachable.
+
+<a id="rrs-d3006"></a>
+
+### RRS-D3006: MySQL login rejected
+
+- **Severity:** error
+- **Message:** The MySQL source {connection_name} rejected the login.
+- **In plain words:** Rastai couldn't read your MySQL data source. The login was refused.
+- **Fix:** Check the user name and password.
+
+<a id="rrs-d3007"></a>
+
+### RRS-D3007: MySQL source refused by the TLS policy
+
+- **Severity:** error
+- **Message:** The MySQL source {connection_name} has no TLS and isn't loopback or a Unix socket, so it is refused.
+- **In plain words:** Rastai won't read data over an unencrypted connection.
+- **Fix:** Turn on TLS on the MySQL server.
+
+<a id="rrs-d3008"></a>
+
+### RRS-D3008: MySQL query failed
+
+- **Severity:** error
+- **Message:** The query on {connection_name} failed: {reason}.
+- **In plain words:** Rastai couldn't read your MySQL data source. The query failed.
+- **Fix:** Check the query.
+
+<a id="rrs-d3009"></a>
+
+### RRS-D3009: MySQL column type has no row in the type-mapping table
+
+- **Severity:** error
+- **Message:** The MySQL column {column} has the type {column_type}, which Rastai can't map.
+- **In plain words:** One column in this table has a type Rastai can't read.
+- **Fix:** Leave the column out, or cast it in the query.
+
+<a id="rrs-d4001"></a>
+
+### RRS-D4001: Run-log format version not supported
+
+- **Severity:** error
+- **Message:** The run log {path} has format version {version}, which isn't supported.
+- **In plain words:** This run log was made by a version of Rastai this one can't read.
+- **Fix:** Update Rastai.
+
+<a id="rrs-d4002"></a>
+
+### RRS-D4002: Corrupt run-log record; that source run skipped
+
+- **Severity:** warning
+- **Message:** A record of {source_run_id} in {path} is corrupt; that run was skipped.
+- **In plain words:** One run in this log is damaged, so Rastai skipped it.
 
 ## RRS-R: Agent Gym and sandboxes
 
 Source: `catalog/errors/RRS-R.json`.
 
-No codes yet.
+<a id="rrs-r0001"></a>
+
+### RRS-R0001: Reward or metric name not found
+
+- **Severity:** error
+- **Message:** The reward or metric {name} was not found.
+- **In plain words:** This harness uses a reward or metric that isn't installed.
+- **Fix:** Install the plugin that provides it.
+
+<a id="rrs-r0002"></a>
+
+### RRS-R0002: A tool needs network hosts that aren't allowed
+
+- **Severity:** error
+- **Message:** The tool {tool_name} needs network hosts that aren't allowed: {hosts}.
+- **In plain words:** A tool in this harness wants internet access you haven't allowed.
+- **Fix:** Allow the hosts in the harness, or remove the tool.
+
+<a id="rrs-r0003"></a>
+
+### RRS-R0003: Import entry skipped: unsupported transport
+
+- **Severity:** warning
+- **Message:** The entry {entry_name} uses the unsupported transport {transport}; it was skipped.
+- **In plain words:** One tool couldn't be imported.
+
+<a id="rrs-r0004"></a>
+
+### RRS-R0004: Harbor task folder incomplete; task skipped
+
+- **Severity:** warning
+- **Message:** The Harbor task folder {path} is incomplete; the task was skipped.
+- **In plain words:** One task couldn't be imported because files are missing.
+
+<a id="rrs-r0005"></a>
+
+### RRS-R0005: MCP env values not imported; set them as secrets
+
+- **Severity:** warning
+- **Message:** The env values of {server_name} were not imported.
+- **In plain words:** Settings that may be secret weren't copied.
+- **Fix:** Set them as secrets in Rastai.
+
+<a id="rrs-r0006"></a>
+
+### RRS-R0006: Harbor task has no prebuilt image
+
+- **Severity:** warning
+- **Message:** The Harbor task {task_id} has no prebuilt image.
+- **In plain words:** This task needs a container image that hasn't been built.
+- **Fix:** Build the image, then set environment.image in the task.
+
+<a id="rrs-r0007"></a>
+
+### RRS-R0007: Agent Gym command not available yet
+
+- **Severity:** error
+- **Message:** {command_id} isn't available in this version of Rastai yet.
+- **In plain words:** This feature is planned but not built yet in this version of Rastai.
+- **Fix:** Nothing to fix on your side: the feature arrives in a later version.
+
+<a id="rrs-r1001"></a>
+
+### RRS-R1001: Sandbox cap reached
+
+- **Severity:** error
+- **Message:** The sandbox cap of {cap} is reached.
+- **In plain words:** Rastai is already running as many sandboxes as allowed.
+- **Fix:** Wait for some to finish, or raise compute.sandbox_cap.
+
+<a id="rrs-r1002"></a>
+
+### RRS-R1002: No container engine found
+
+- **Severity:** error
+- **Message:** No container engine was found.
+- **In plain words:** Rastai couldn't run the sandbox this task needs. No container software is installed.
+- **Fix:** Install Podman or Docker.
+
+<a id="rrs-r1003"></a>
+
+### RRS-R1003: Container engine API version not supported
+
+- **Severity:** error
+- **Message:** The container engine's API version {version} is not supported.
+- **In plain words:** Rastai couldn't run the sandbox this task needs. The container software is too old or too new.
+- **Fix:** Update Podman or Docker.
+
+<a id="rrs-r1004"></a>
+
+### RRS-R1004: Sandbox image pull failed
+
+- **Severity:** error
+- **Message:** Pulling the image {image} failed: {reason}.
+- **In plain words:** Rastai couldn't run the sandbox this task needs. Its image couldn't be downloaded.
+- **Fix:** Check the image name and your connection.
+
+<a id="rrs-r1005"></a>
+
+### RRS-R1005: Sandbox container exited at start
+
+- **Severity:** error
+- **Message:** The sandbox container exited at start with code {exit_code}.
+- **In plain words:** Rastai couldn't run the sandbox this task needs. It stopped as soon as it started.
+- **Fix:** Check the image's start command.
+
+<a id="rrs-r1006"></a>
+
+### RRS-R1006: Sandbox time cap reached
+
+- **Severity:** error
+- **Message:** The sandbox reached its time cap of {time_seconds} seconds.
+- **In plain words:** The sandbox ran out of time and was stopped.
+- **Fix:** Raise the time cap, or make the task shorter.
+
+<a id="rrs-r1007"></a>
+
+### RRS-R1007: Container engine can't pause sandboxes
+
+- **Severity:** error
+- **Message:** The container engine can't pause sandboxes.
+- **In plain words:** Your container software can't pause sandboxes, so step mode isn't available.
+- **Fix:** Use Podman or Docker with pause support.
+
+<a id="rrs-r1008"></a>
+
+### RRS-R1008: Not enough RAM for the requested sandboxes
+
+- **Severity:** error
+- **Message:** The requested sandboxes need {needed_bytes} bytes of RAM, but {free_bytes} are free.
+- **In plain words:** This computer doesn't have enough memory for that many sandboxes.
+- **Fix:** Request fewer sandboxes.
+
+<a id="rrs-r1009"></a>
+
+### RRS-R1009: Requested sandboxes exceed the node's sandbox cap
+
+- **Severity:** error
+- **Message:** {requested} sandboxes were requested, more than the node's cap of {cap}.
+- **In plain words:** You asked for more sandboxes than this computer allows.
+- **Fix:** Request fewer sandboxes.
+
+<a id="rrs-r1010"></a>
+
+### RRS-R1010: Sandbox egress network or proxy unavailable; refusing an open network
+
+- **Severity:** error
+- **Message:** The sandbox egress network or proxy is unavailable; Rastai refuses to give the sandbox an open network.
+- **In plain words:** Rastai couldn't set up the sandbox's filtered network, so it won't start the sandbox.
+- **Fix:** Check the container engine's network setup.
+
+<a id="rrs-r1011"></a>
+
+### RRS-R1011: Permission denied on the container engine socket
+
+- **Severity:** error
+- **Message:** Permission denied on the container engine socket {path}.
+- **In plain words:** Rastai isn't allowed to use the container software.
+- **Fix:** Give your user access to the engine's socket, or use rootless Podman.
+
+<a id="rrs-r1012"></a>
+
+### RRS-R1012: Sandbox killed by its memory cap
+
+- **Severity:** info
+- **Message:** The sandbox of {rollout_id} was killed by its memory cap.
+- **In plain words:** A sandbox used more memory than allowed and was stopped.
+
+<a id="rrs-r1013"></a>
+
+### RRS-R1013: Container engine failed during the run, or a container can't be removed
+
+- **Severity:** error
+- **Message:** The container engine failed during the run, or a container can't be removed: {reason}.
+- **In plain words:** Rastai couldn't run the sandbox this task needs. The container software failed.
+- **Fix:** Check the container engine, then try again.
+
+<a id="rrs-r2001"></a>
+
+### RRS-R2001: Infra failure; rollout retried
+
+- **Severity:** info
+- **Message:** Rollout {rollout_id} hit an infrastructure failure and was retried.
+- **In plain words:** One attempt failed for a technical reason and was retried.
+
+<a id="rrs-r2002"></a>
+
+### RRS-R2002: Group dropped: too few valid members
+
+- **Severity:** warning
+- **Message:** Group {group_id} was dropped: only {valid_count} valid members.
+- **In plain words:** One group of attempts had too few usable results, so it was left out.
+
+<a id="rrs-r2003"></a>
+
+### RRS-R2003: Too many dropped groups in a row; run failed
+
+- **Severity:** error
+- **Message:** {count} groups were dropped in a row; the run failed.
+- **In plain words:** Too many attempts failed, so the training stopped.
+- **Fix:** Check the harness and the sandboxes.
+
+<a id="rrs-r2004"></a>
+
+### RRS-R2004: Reward code raised an error; rollout excluded
+
+- **Severity:** warning
+- **Message:** The reward code raised on rollout {rollout_id}: {reason}.
+- **In plain words:** The scoring code failed for one attempt, so it was left out.
+- **Fix:** Fix the reward code.
+
+<a id="rrs-r2005"></a>
+
+### RRS-R2005: Held sandbox released after the hold timeout
+
+- **Severity:** info
+- **Message:** The held sandbox of {rollout_id} was released after the hold timeout.
+- **In plain words:** A paused sandbox was closed because it waited too long.
+
+<a id="rrs-r3001"></a>
+
+### RRS-R3001: An MCP tool server failed to start in the sandbox
+
+- **Severity:** error
+- **Message:** The MCP tool server {server_name} failed to start in the sandbox: {reason}.
+- **In plain words:** A tool the agent needs didn't start.
+- **Fix:** Check the tool server's command in the harness.
+
+<a id="rrs-r3002"></a>
+
+### RRS-R3002: A harness tool isn't offered by its server
+
+- **Severity:** error
+- **Message:** The tool {tool_name} isn't offered by its server {server_name}.
+- **In plain words:** A tool the harness lists doesn't exist on its server.
+- **Fix:** Fix the tool's name in the harness.
+
+<a id="rrs-r3003"></a>
+
+### RRS-R3003: A tool server crashed twice in one rollout; rollout excluded
+
+- **Severity:** warning
+- **Message:** The tool server {server_name} crashed twice in rollout {rollout_id}; the rollout was excluded.
+- **In plain words:** A tool kept crashing, so that attempt was left out.
 
 ## RRS-L: Psychology plugin
 
@@ -95,4 +3044,154 @@ No codes yet.
 
 Source: `catalog/errors/RRS-U.json`.
 
-No codes yet.
+<a id="rrs-u0001"></a>
+
+### RRS-U0001: Daemon not reachable
+
+- **Severity:** error
+- **Message:** The daemon at {address} is not reachable.
+- **In plain words:** The app can't reach Rastai's background service.
+- **Fix:** Start Rastai again.
+
+<a id="rrs-u0002"></a>
+
+### RRS-U0002: Login code rejected or expired
+
+- **Severity:** error
+- **Message:** The login code was rejected or expired.
+- **In plain words:** This sign-in link no longer works.
+- **Fix:** Open Rastai again to get a new link.
+
+<a id="rrs-u0003"></a>
+
+### RRS-U0003: Session expired or rejected
+
+- **Severity:** error
+- **Message:** The session expired or was rejected; you are signed out.
+- **In plain words:** You were signed out.
+- **Fix:** Open Rastai again to sign in.
+
+<a id="rrs-u0004"></a>
+
+### RRS-U0004: The web app's version differs from the daemon's
+
+- **Severity:** error
+- **Message:** The web app is version {app_version}, but the daemon is version {daemon_version}.
+- **In plain words:** This page is out of date.
+- **Fix:** Reload the page.
+
+<a id="rrs-u0005"></a>
+
+### RRS-U0005: Live stream fell behind; some tokens' readouts are missing
+
+- **Severity:** info
+- **Message:** The live stream fell behind; readouts for {count} tokens are missing.
+- **In plain words:** The live view couldn't keep up, so a few words have no details.
+
+<a id="rrs-u0006"></a>
+
+### RRS-U0006: File too large to upload from the browser; open it by path
+
+- **Severity:** error
+- **Message:** {file_name} is too large to upload from the browser.
+- **In plain words:** This file is too big to send from the browser.
+- **Fix:** Open it by its path on the computer instead.
+
+<a id="rrs-u0101"></a>
+
+### RRS-U0101: Desktop: bundled rastai binary not found
+
+- **Severity:** error
+- **Message:** The bundled rastai binary was not found at {path}.
+- **In plain words:** The Rastai desktop app had a problem starting.
+- **Fix:** Reinstall Rastai.
+
+<a id="rrs-u0102"></a>
+
+### RRS-U0102: Desktop: the daemon failed to start
+
+- **Severity:** error
+- **Message:** The daemon failed to start: {reason}.
+- **In plain words:** The Rastai desktop app had a problem starting. Its background service didn't start.
+- **Fix:** Check the daemon log, then start the app again.
+
+<a id="rrs-u0103"></a>
+
+### RRS-U0103: Desktop: launch line from the CLI is invalid
+
+- **Severity:** error
+- **Message:** The launch line from the CLI is invalid: {reason}.
+- **In plain words:** The Rastai desktop app had a problem starting.
+- **Fix:** Reinstall Rastai.
+
+<a id="rrs-u0104"></a>
+
+### RRS-U0104: Desktop: update check or install failed
+
+- **Severity:** error
+- **Message:** The update check or install failed: {reason}.
+- **In plain words:** The app couldn't check for or install an update.
+- **Fix:** Try again later.
+
+<a id="rrs-u0105"></a>
+
+### RRS-U0105: Desktop: update signature invalid; nothing installed
+
+- **Severity:** error
+- **Message:** The update's signature is invalid; nothing was installed.
+- **In plain words:** The update didn't pass its security check, so nothing was installed.
+- **Fix:** Try the update again later.
+
+<a id="rrs-u0106"></a>
+
+### RRS-U0106: Desktop: the window or webview could not be created
+
+- **Severity:** error
+- **Message:** The window or webview could not be created: {reason}.
+- **In plain words:** The Rastai desktop app had a problem starting.
+- **Fix:** Update your graphics driver and system web view, then start the app again.
+
+<a id="rrs-u1001"></a>
+
+### RRS-U1001: WebGL2 unavailable
+
+- **Severity:** error
+- **Message:** WebGL2 is unavailable in this browser.
+- **In plain words:** The app couldn't draw this view. Your browser can't draw 3D graphics.
+- **Fix:** Use a current browser, and turn on hardware acceleration.
+
+<a id="rrs-u1002"></a>
+
+### RRS-U1002: WebGL context lost and could not be restored
+
+- **Severity:** error
+- **Message:** The WebGL context was lost and could not be restored.
+- **In plain words:** The app couldn't draw this view.
+- **Fix:** Reload the page.
+
+<a id="rrs-u1003"></a>
+
+### RRS-U1003: Renderer self-check drew a blank frame
+
+- **Severity:** error
+- **Message:** The renderer's self-check drew a blank frame.
+- **In plain words:** The app couldn't draw this view. It came out blank.
+- **Fix:** Start the desktop app with --disable-dmabuf.
+
+<a id="rrs-u1004"></a>
+
+### RRS-U1004: A panel crashed
+
+- **Severity:** error
+- **Message:** The panel {panel_id} crashed: {reason}.
+- **In plain words:** This panel stopped working.
+- **Fix:** Reload the panel; a crash report was saved.
+
+<a id="rrs-u1005"></a>
+
+### RRS-U1005: Too many graph nodes visible; collapse blocks
+
+- **Severity:** error
+- **Message:** {count} graph nodes are visible, more than the limit of {limit}.
+- **In plain words:** This design is too big to show all at once.
+- **Fix:** Collapse some blocks.

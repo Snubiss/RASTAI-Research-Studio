@@ -1,0 +1,242 @@
+[
+  {
+    "code": "RRS-M0001",
+    "severity": "error",
+    "title": "A graph node has no implementation; the design is view only",
+    "message": "The graph node {graph_node} ({op}) has no implementation, so the design is view only.",
+    "basic_text": "Part of this design can be shown but not run.",
+    "fix_text": "Replace the block with one Rastai can run.",
+    "docs_anchor": "rrs-m0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0002",
+    "severity": "error",
+    "title": "Smoke forward shape differs from the inferred shape",
+    "message": "The smoke forward gave shape {found_shape} at {graph_node}, but the inferred shape is {expected_shape}.",
+    "basic_text": "Rastai's model builder made a mistake. This is a bug, not something you did.",
+    "fix_text": "Please report this bug with the design file.",
+    "docs_anchor": "rrs-m0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0003",
+    "severity": "warning",
+    "title": "Compiled parameter count differs from live stats",
+    "message": "The compiled model has {compiled_count} parameters, but the live stats said {stats_count}.",
+    "basic_text": "The parameter count shown while designing was wrong. This is a bug.",
+    "fix_text": "Please report this bug with the design file.",
+    "docs_anchor": "rrs-m0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0004",
+    "severity": "error",
+    "title": "Designer command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-m0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0601",
+    "severity": "error",
+    "title": "Graph nodes without Eject or ONNX support",
+    "message": "These graph nodes have no Eject or ONNX support: {graph_nodes}.",
+    "basic_text": "Some blocks in this design can't be exported.",
+    "fix_text": "Replace those blocks, or export a format that supports them.",
+    "docs_anchor": "rrs-m0601",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0602",
+    "severity": "error",
+    "title": "ONNX lowering failed for a graph node",
+    "message": "ONNX lowering failed for {graph_node}: {reason}.",
+    "basic_text": "Rastai couldn't convert part of this model to ONNX.",
+    "fix_text": "Report the problem with the design file.",
+    "docs_anchor": "rrs-m0602",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0603",
+    "severity": "warning",
+    "title": "ONNX round trip differs beyond tolerance; file kept as unverified",
+    "message": "The ONNX round trip differs by {difference}, beyond the tolerance of {tolerance}; the file is kept as unverified.",
+    "basic_text": "The exported ONNX file gives slightly different answers from the original, so it is marked unverified.",
+    "fix_text": "",
+    "docs_anchor": "rrs-m0603",
+    "retired": false
+  },
+  {
+    "code": "RRS-M0604",
+    "severity": "error",
+    "title": "Ejected code doesn't reproduce the compiled model, or imports rastai",
+    "message": "The ejected code doesn't reproduce the compiled model, or imports rastai: {reason}.",
+    "basic_text": "The exported PyTorch code doesn't behave like the original model. This is a bug.",
+    "fix_text": "Please report this bug with the design file.",
+    "docs_anchor": "rrs-m0604",
+    "retired": false
+  },
+  {
+    "code": "RRS-M1001",
+    "severity": "info",
+    "title": "No in-house family; the compat runtime can run this model",
+    "message": "{model_name} has no in-house family; the compat runtime can run it.",
+    "basic_text": "Rastai can run this model, but can only look at it from the outside.",
+    "fix_text": "",
+    "docs_anchor": "rrs-m1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-M1002",
+    "severity": "error",
+    "title": "The compat runtime isn't installed in this environment",
+    "message": "The compat runtime isn't installed in the {environment} environment.",
+    "basic_text": "The extra software this model needs isn't installed.",
+    "fix_text": "Install the compat group for this environment.",
+    "docs_anchor": "rrs-m1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-M1003",
+    "severity": "error",
+    "title": "The model needs remote code; refused",
+    "message": "{model_name} needs remote code; it is refused.",
+    "basic_text": "This model only runs with its own downloaded code, which Rastai never runs.",
+    "fix_text": "Pick another model, or a version of it that needs no remote code.",
+    "docs_anchor": "rrs-m1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-M2001",
+    "severity": "error",
+    "title": "Weights not found in the HF cache or the blob store; nothing is downloaded",
+    "message": "The weights of {model_name} are not in the Hugging Face cache or the blob store; nothing is downloaded.",
+    "basic_text": "This model's weights aren't on this computer.",
+    "fix_text": "Download the model first.",
+    "docs_anchor": "rrs-m2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-M2002",
+    "severity": "error",
+    "title": "The weights lack tensors the ModelSpec needs",
+    "message": "The weights lack tensors the ModelSpec needs: {tensor_names}.",
+    "basic_text": "The weights file is missing parts this model needs.",
+    "fix_text": "Check that the weights belong to this model.",
+    "docs_anchor": "rrs-m2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-M2003",
+    "severity": "error",
+    "title": "The weights hold tensors the ModelSpec doesn't use",
+    "message": "The weights hold tensors the ModelSpec doesn't use: {tensor_names}.",
+    "basic_text": "The weights file has parts this model doesn't use.",
+    "fix_text": "Check that the weights belong to this model.",
+    "docs_anchor": "rrs-m2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-M2004",
+    "severity": "error",
+    "title": "Tensor shape mismatch",
+    "message": "Tensor {tensor_name} has shape {found_shape}, but the ModelSpec needs {expected_shape}.",
+    "basic_text": "A weight in this file is the wrong size for this model.",
+    "fix_text": "Check that the weights belong to this model.",
+    "docs_anchor": "rrs-m2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-M2005",
+    "severity": "error",
+    "title": "Weights exist only in pickle format; refused",
+    "message": "The weights of {model_name} exist only in pickle format; they are refused.",
+    "basic_text": "This model's weights are in a format that can run code when it loads, so Rastai refuses them.",
+    "fix_text": "Use a version of the model with safetensors weights.",
+    "docs_anchor": "rrs-m2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-M3001",
+    "severity": "error",
+    "title": "Non-finite logits in the smoke forward",
+    "message": "The smoke forward of {model_name} gave non-finite logits.",
+    "basic_text": "This model gave broken numbers on a test input.",
+    "fix_text": "Check the weights and the dtype.",
+    "docs_anchor": "rrs-m3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-M3002",
+    "severity": "error",
+    "title": "Reference parity outside tolerance",
+    "message": "{model_name} differs from the reference by {difference} in {dtype}, beyond the tolerance of {tolerance}.",
+    "basic_text": "This model's answers differ too much from the original implementation.",
+    "fix_text": "Report the problem with the model's name.",
+    "docs_anchor": "rrs-m3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-M3003",
+    "severity": "warning",
+    "title": "Reference parity skipped; the compat group isn't installed",
+    "message": "The reference parity check was skipped because the compat group isn't installed.",
+    "basic_text": "Rastai couldn't compare this model with the original implementation.",
+    "fix_text": "Install the compat group to run the check.",
+    "docs_anchor": "rrs-m3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-M4001",
+    "severity": "warning",
+    "title": "CUDA graph capture failed; eager decode in use",
+    "message": "CUDA graph capture failed for {model_name}; eager decode is in use.",
+    "basic_text": "This model works, but chat will be a little slower.",
+    "fix_text": "",
+    "docs_anchor": "rrs-m4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-M5001",
+    "severity": "error",
+    "title": "Doesn't fit the chosen GPUs",
+    "message": "{model_name} needs {needed_bytes} bytes but the chosen GPUs have {free_bytes} free.",
+    "basic_text": "This model doesn't fit on the graphics cards you picked.",
+    "fix_text": "Pick more GPUs, or a smaller or quantized model.",
+    "docs_anchor": "rrs-m5001",
+    "retired": false
+  },
+  {
+    "code": "RRS-M5002",
+    "severity": "error",
+    "title": "One placement unit is larger than any GPU",
+    "message": "{unit_name} needs {needed_bytes} bytes, more than any GPU has.",
+    "basic_text": "One part of this model is too big for any of your graphics cards.",
+    "fix_text": "Use a smaller or quantized model.",
+    "docs_anchor": "rrs-m5002",
+    "retired": false
+  },
+  {
+    "code": "RRS-M5003",
+    "severity": "error",
+    "title": "The dtype isn't supported on every chosen GPU",
+    "message": "{dtype} isn't supported on GPU {gpu_index}.",
+    "basic_text": "One of the graphics cards you picked can't use this number format.",
+    "fix_text": "Pick other GPUs, or another dtype.",
+    "docs_anchor": "rrs-m5003",
+    "retired": false
+  },
+  {
+    "code": "RRS-M5004",
+    "severity": "error",
+    "title": "Out of memory loading a placement unit on GPU n",
+    "message": "Out of memory loading {unit_name} on GPU {gpu_index}.",
+    "basic_text": "A graphics card ran out of memory while loading the model.",
+    "fix_text": "Free GPU memory, or pick another placement.",
+    "docs_anchor": "rrs-m5004",
+    "retired": false
+  }
+]

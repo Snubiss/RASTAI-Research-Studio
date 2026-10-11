@@ -7,8 +7,12 @@
 //! table and compares the two: a prefix, an area or a range that only one of them has fails it, and neither can
 //! drift from the other unnoticed.
 //!
-//! Two rules of layout 2.6 join later, with their inputs: placeholders used at Rust call sites (M1-13, with the
-//! source scan) and `fix_command_id` naming a real command (M1-22, with the first rows of the command table).
+//! The catalog and contracts 10.3 hold the same codes with the same severities (M1-13): a code is listed there first,
+//! and a row marked for a later milestone ("(M4)", the plugins' catalogs) may wait for its entry. The source scan
+//! finds every code that first-party source names outside its tests and checks that the catalog has it, and the
+//! placeholder scan checks that a `diagnostic("RRS-...", &[("name", ...)])` call and its entry name the same values
+//! (layout 2.6, M1-13). One rule joins later, with its input: `fix_command_id` naming a real command (M1-22, with the
+//! first rows of the command table).
 //!
 //! Each rule is a small function that returns its problems. The tests run each rule on the real catalog, and on a
 //! small sample that breaks it, so a rule that stops catching anything fails too.
@@ -22,6 +26,7 @@ use std::process::Command;
 
 use rastai_codegen::catalog_ranges::{CATALOG_PREFIXES, CatalogPrefix, CodeRange, find_prefix, find_range, split_code};
 use rastai_codegen::catalog_source::{ErrorRecord, TermRecord, read_catalog, read_error_codes};
+use rastai_codegen::literals::severity_word;
 use rastai_codegen::repo_root::find_repo_root;
 use rastai_diag::diagnostic::Severity;
 
@@ -45,6 +50,58 @@ const RANGE_DASH: char = '–';
 /// A range's area in contracts may end in a note in brackets ("compiler (0600–0699 Eject and ONNX)"), which
 /// catalog_ranges.rs keeps as a comment or leaves out.
 const AREA_NOTE_START: &str = " (";
+
+/// The code tables of contracts 10.3: every table line from this heading to the next section that starts with a
+/// code. Their columns are Code (with an optional milestone marker after it), Severity and Meaning.
+const CODES_HEADING: &str = "### 10.3 Codes assigned so far";
+const NEXT_SECTION_START: &str = "\n## ";
+const CODE_ROW_START: &str = "| `RRS-";
+const CODE_COLUMN: usize = 0;
+const SEVERITY_COLUMN: usize = 1;
+
+/// The source scan (layout rust-control-plane.md 3.2: "it scans the source for RRS- literals and checks each against
+/// the catalog") reads these folders, relative to the repository root, and these kinds of file.
+const SCANNED_FOLDERS: [&str; 7] = ["crates", "tools", "python", "packages", "apps", "plugins", "proto"];
+const SCANNED_EXTENSIONS: [&str; 5] = [".rs", ".py", ".js", ".jsx", ".proto"];
+/// Never entered: build output and installed packages (large, not ours), and test folders, whose files name made-up
+/// codes on purpose (an unknown code, a code outside every range).
+const SKIPPED_FOLDERS: [&str; 6] = ["target", "node_modules", ".venv", "__pycache__", "dist", "tests"];
+/// Test files that sit beside the code instead of in a tests folder.
+const PYTHON_TEST_FILE_START: &str = "test_";
+const PYTHON_TEST_SETUP_FILE: &str = "conftest.py";
+const JAVASCRIPT_TEST_FILE_ENDS: [&str; 2] = [".test.js", ".test.jsx"];
+/// A Rust file's unit tests start at this line; the scans read only what comes before it.
+const RUST_EXTENSION: &str = ".rs";
+const RUST_TEST_MODULE_START: &str = "#[cfg(test)]";
+/// A code is "RRS-", one capital letter and four digits: nine characters.
+const CODE_START: &str = "RRS-";
+const CODE_LENGTH: usize = 9;
+/// rastai-diag's two builders; the placeholder scan reads their calls.
+const DIAGNOSTIC_FUNCTIONS: [&str; 2] = ["diagnostic_at", "diagnostic"];
+const VALUES_ARRAY_START: &str = "&[";
+
+/// A small contracts 10.3: two core rows and a plugin row marked for a later milestone.
+const SAMPLE_CODES_SECTION: &str = "### 10.3 Codes assigned so far (M1)
+
+**`RRS-E`**
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `RRS-E0001` | error | JSON syntax error at a line and column |
+| `RRS-E4001` | info | File from a newer schema version; opened read-only |
+
+**`RRS-L`**
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `RRS-L0001` (M4) | error | Replay weights not present (fix `model.download`) |
+
+---
+
+## 11. Configuration
+
+| `RRS-E9999` | error | not a code row: it is past the section |
+";
 
 /// A small contracts 10.1 and the catalog_ranges.rs rows that match it, for the tests that break one of the two.
 const SAMPLE_CONTRACTS: &str = "## 10. Error Catalog
@@ -785,4 +842,562 @@ fn a_prefix_or_an_area_in_only_one_table_is_caught() {
         code_rows.len(),
         "a missing table reports every prefix"
     );
+}
+
+// ---- The catalog equals contracts 10.3 ----
+
+/// One row of the contracts 10.3 tables: a code, its severity, and whether a milestone marker after the code puts it
+/// in a later milestone's catalog ("`RRS-L0001` (M4)": the plugins' catalogs, written by M4-E01 and M5-E01).
+#[derive(Debug, Clone)]
+struct ContractsCode {
+    code: String,
+    severity: String,
+    later_milestone: bool,
+}
+
+/// The rows of every table under the 10.3 heading, up to the next section. Empty when the heading is missing.
+fn contracts_codes(contracts_text: &str) -> Vec<ContractsCode> {
+    let Some((_, after_heading)) = contracts_text.split_once(CODES_HEADING) else {
+        return Vec::new();
+    };
+    let section = match after_heading.split_once(NEXT_SECTION_START) {
+        Some((section, _)) => section,
+        None => after_heading,
+    };
+    let mut codes = Vec::new();
+    for line in section.lines() {
+        if line.starts_with(CODE_ROW_START) {
+            codes.push(parse_code_row(line));
+        }
+    }
+    codes
+}
+
+/// One table line: "| `RRS-L0001` (M4) | error | Replay weights not present |".
+fn parse_code_row(line: &str) -> ContractsCode {
+    let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
+    assert!(
+        cells.len() > SEVERITY_COLUMN,
+        "a contracts 10.3 row has too few cells: {line}"
+    );
+    let code_cell = cells[CODE_COLUMN];
+    let code = code_cell.split('`').nth(1).unwrap_or_default();
+    // Whatever follows the closing backtick is a marker: "(M4)", "(M5)".
+    let after_code = code_cell.rsplit('`').next().unwrap_or_default();
+    ContractsCode {
+        code: code.to_string(),
+        severity: cells[SEVERITY_COLUMN].to_string(),
+        later_milestone: !after_code.trim().is_empty(),
+    }
+}
+
+/// Where the catalog and contracts 10.3 differ: a code in only one of them, or a code whose severity differs. A row
+/// marked for a later milestone may be missing from the catalog, but once its entry exists it must match.
+fn catalog_code_differences(contracts: &[ContractsCode], errors: &[ErrorRecord]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for row in contracts {
+        match errors.iter().find(|record| record.code == row.code) {
+            None if row.later_milestone => {}
+            None => problems.push(format!("{}: in contracts 10.3, missing from the catalog", row.code)),
+            Some(record) if severity_word(record.severity) != row.severity => problems.push(format!(
+                "{} ({}): severity {} in contracts 10.3, {} in the catalog",
+                row.code,
+                record.source_file,
+                row.severity,
+                severity_word(record.severity)
+            )),
+            Some(_) => {}
+        }
+    }
+    for record in errors {
+        if !contracts.iter().any(|row| row.code == record.code) {
+            problems.push(format!(
+                "{} ({}): in the catalog, missing from contracts 10.3 (list a new code there first)",
+                record.code, record.source_file
+            ));
+        }
+    }
+    problems
+}
+
+#[test]
+fn catalog_codes_equal_the_contracts_codes_table() {
+    let contracts_path = find_repo_root().unwrap().join(CONTRACTS_FILE);
+    let contracts_text = std::fs::read_to_string(&contracts_path).expect("contracts.md reads");
+    let contracts = contracts_codes(&contracts_text);
+    assert!(
+        !contracts.is_empty(),
+        "no rows after {CODES_HEADING:?} in {CONTRACTS_FILE}"
+    );
+    assert_eq!(
+        catalog_code_differences(&contracts, &real_errors()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn contracts_code_rows_are_read_with_their_markers() {
+    let codes = contracts_codes(SAMPLE_CODES_SECTION);
+    let read: Vec<(&str, &str, bool)> = codes
+        .iter()
+        .map(|row| (row.code.as_str(), row.severity.as_str(), row.later_milestone))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            ("RRS-E0001", "error", false),
+            ("RRS-E4001", "info", false),
+            ("RRS-L0001", "error", true),
+        ]
+    );
+    assert!(contracts_codes("## 10. Error Catalog\n").is_empty());
+}
+
+#[test]
+fn a_code_in_only_one_place_or_with_another_severity_is_caught() {
+    let contracts = contracts_codes(SAMPLE_CODES_SECTION);
+    let mut newer_file = sample("RRS-E4001", CORE_E_FILE);
+    newer_file.severity = Severity::Warning;
+    let errors = [
+        sample("RRS-E0001", CORE_E_FILE),
+        newer_file,
+        sample("RRS-E0002", CORE_E_FILE),
+    ];
+    assert_eq!(
+        catalog_code_differences(&contracts, &errors),
+        [
+            "RRS-E4001 (catalog/errors/RRS-E.json): severity info in contracts 10.3, warning in the catalog",
+            "RRS-E0002 (catalog/errors/RRS-E.json): in the catalog, missing from contracts 10.3 (list a new code there first)",
+        ]
+    );
+    let mut matching_file = sample("RRS-E4001", CORE_E_FILE);
+    matching_file.severity = Severity::Info;
+    let without_the_first = [matching_file];
+    assert_eq!(
+        catalog_code_differences(&contracts, &without_the_first),
+        ["RRS-E0001: in contracts 10.3, missing from the catalog"]
+    );
+}
+
+#[test]
+fn a_later_milestone_code_may_wait_but_must_match_once_written() {
+    let contracts = contracts_codes(SAMPLE_CODES_SECTION);
+    let mut info_file = sample("RRS-E4001", CORE_E_FILE);
+    info_file.severity = Severity::Info;
+    let mut wrong_plugin_entry = sample("RRS-L0001", "plugins/psychology/catalog/errors.json");
+    wrong_plugin_entry.severity = Severity::Warning;
+    let errors = [sample("RRS-E0001", CORE_E_FILE), info_file, wrong_plugin_entry];
+    assert_eq!(catalog_code_differences(&contracts, &errors[..2]), Vec::<String>::new());
+    assert_eq!(
+        catalog_code_differences(&contracts, &errors),
+        [
+            "RRS-L0001 (plugins/psychology/catalog/errors.json): severity error in contracts 10.3, warning in the catalog"
+        ]
+    );
+}
+
+// ---- The source names only catalog codes ----
+
+/// One code a source file names, and where.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodeMention {
+    code: String,
+    place: String,
+}
+
+/// Every well-formed code ("RRS-", a capital letter, four digits, then no further letter or digit) in a text, with
+/// its file and line. Comments count: a comment that names a code points readers at it.
+fn code_mentions(text: &str, file_name: &str) -> Vec<CodeMention> {
+    let mut mentions = Vec::new();
+    for (line_index, line) in text.lines().enumerate() {
+        let mut rest = line;
+        while let Some(start) = rest.find(CODE_START) {
+            let candidate = &rest[start..];
+            let code = candidate.get(..CODE_LENGTH).unwrap_or(candidate);
+            let next_character = candidate[code.len()..].chars().next();
+            let ends_cleanly = !next_character.is_some_and(|character| character.is_ascii_alphanumeric());
+            if split_code(code).is_some() && ends_cleanly {
+                mentions.push(CodeMention {
+                    code: code.to_string(),
+                    place: format!("{file_name}:{}", line_index + 1),
+                });
+            }
+            rest = &candidate[CODE_START.len()..];
+        }
+    }
+    mentions
+}
+
+/// The part of a file the scans read. Tests name made-up codes on purpose (an unknown code, one outside every range),
+/// so a Rust file is read up to its `#[cfg(test)]` module, and test files are skipped whole (`is_scanned_file`).
+fn scanned_text(text: &str, file_name: &str) -> String {
+    if !file_name.ends_with(RUST_EXTENSION) {
+        return text.to_string();
+    }
+    match text.find(RUST_TEST_MODULE_START) {
+        Some(test_start) => text[..test_start].to_string(),
+        None => text.to_string(),
+    }
+}
+
+/// Source files outside test folders and build output, by extension. Test files (`test_*.py`, `conftest.py`,
+/// `*.test.js`, `*.test.jsx`) are skipped like test folders.
+fn is_scanned_file(relative_path: &str) -> bool {
+    let parts: Vec<&str> = relative_path.split('/').collect();
+    let Some((file_name, folders)) = parts.split_last() else {
+        return false;
+    };
+    if folders.iter().any(|folder| SKIPPED_FOLDERS.contains(folder)) {
+        return false;
+    }
+    let is_test_file = file_name.starts_with(PYTHON_TEST_FILE_START)
+        || *file_name == PYTHON_TEST_SETUP_FILE
+        || JAVASCRIPT_TEST_FILE_ENDS.iter().any(|end| file_name.ends_with(end));
+    let has_scanned_extension = SCANNED_EXTENSIONS
+        .iter()
+        .any(|extension| file_name.ends_with(extension));
+    has_scanned_extension && !is_test_file
+}
+
+/// Every scanned file under the scanned folders, relative to the repository root with `/` separators, sorted.
+fn scanned_files(repo_root: &std::path::Path) -> Vec<String> {
+    let mut files = Vec::new();
+    for folder in SCANNED_FOLDERS {
+        collect_files(repo_root, folder, &mut files);
+    }
+    files.retain(|file| is_scanned_file(file));
+    files.sort();
+    files
+}
+
+/// Adds every file under `folder` (relative to the root) to `files`. Skipped folders aren't entered, so build output
+/// and installed packages cost nothing. A folder that doesn't exist yet (apps/, plugins/) adds nothing.
+fn collect_files(repo_root: &std::path::Path, folder: &str, files: &mut Vec<String>) {
+    let Ok(listing) = std::fs::read_dir(repo_root.join(folder)) else {
+        return;
+    };
+    for item in listing {
+        let item = item.expect("a folder lists");
+        let name = item.file_name().into_string().expect("file names are UTF-8");
+        let relative = format!("{folder}/{name}");
+        let file_type = item.file_type().expect("a file type reads");
+        if file_type.is_dir() && !SKIPPED_FOLDERS.contains(&name.as_str()) {
+            collect_files(repo_root, &relative, files);
+        } else if file_type.is_file() {
+            files.push(relative);
+        }
+    }
+}
+
+/// Mentions of codes the catalog doesn't hold.
+fn mentions_missing_from_catalog(mentions: &[CodeMention], errors: &[ErrorRecord]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for mention in mentions {
+        if !errors.iter().any(|record| record.code == mention.code) {
+            problems.push(format!("{}: {} is not in the catalog", mention.place, mention.code));
+        }
+    }
+    problems
+}
+
+#[test]
+fn no_source_names_a_code_missing_from_the_catalog() {
+    let repo_root = find_repo_root().unwrap();
+    let mut mentions = Vec::new();
+    for file in scanned_files(&repo_root) {
+        let Ok(text) = std::fs::read_to_string(repo_root.join(&file)) else {
+            continue; // not text, so it names no code
+        };
+        mentions.extend(code_mentions(&scanned_text(&text, &file), &file));
+    }
+    assert!(
+        !mentions.is_empty(),
+        "the scan found no code at all; is it reading the source?"
+    );
+    assert_eq!(
+        mentions_missing_from_catalog(&mentions, &real_errors()),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn code_mentions_are_found_with_their_lines() {
+    let text = "a \"RRS-E0001\" b\n// RRS-S3001, `RRS-D4xxx`, RRS-E10030 and RRS-e0001\nRRS-C0401.";
+    assert_eq!(
+        code_mentions(text, "src/a.rs"),
+        [
+            CodeMention {
+                code: "RRS-E0001".to_string(),
+                place: "src/a.rs:1".to_string()
+            },
+            CodeMention {
+                code: "RRS-S3001".to_string(),
+                place: "src/a.rs:2".to_string()
+            },
+            CodeMention {
+                code: "RRS-C0401".to_string(),
+                place: "src/a.rs:3".to_string()
+            },
+        ]
+    );
+    let errors = [sample("RRS-E0001", CORE_E_FILE)];
+    assert_eq!(
+        mentions_missing_from_catalog(&code_mentions(text, "src/a.rs"), &errors),
+        [
+            "src/a.rs:2: RRS-S3001 is not in the catalog",
+            "src/a.rs:3: RRS-C0401 is not in the catalog"
+        ]
+    );
+}
+
+#[test]
+fn tests_and_build_output_are_not_scanned() {
+    assert!(is_scanned_file("crates/rastai-formats/src/error.rs"));
+    assert!(is_scanned_file("python/rastai_data/rastai_data/errors.py"));
+    assert!(is_scanned_file("packages/client/src/client.js"));
+    assert!(is_scanned_file("proto/rastai/events/v1/event_service.proto"));
+    assert!(!is_scanned_file("crates/rastai-formats/tests/documents_corpus.rs"));
+    assert!(!is_scanned_file("python/rastai_data/tests/test_readers.py"));
+    assert!(!is_scanned_file("python/conftest.py"));
+    assert!(!is_scanned_file("packages/proto/src/golden.test.js"));
+    assert!(!is_scanned_file("tools/codegen/target/debug/build.rs"));
+    assert!(!is_scanned_file("packages/catalog/node_modules/x/index.js"));
+    assert!(!is_scanned_file("crates/rastai-formats/src/notes.md"));
+    let rust = "const CODE: &str = \"RRS-E0001\";\n#[cfg(test)]\nmod tests { const MISSING: &str = \"RRS-E9999\"; }\n";
+    assert_eq!(scanned_text(rust, "src/a.rs"), "const CODE: &str = \"RRS-E0001\";\n");
+    assert_eq!(scanned_text("RRS-E9999", "a/b.py"), "RRS-E9999");
+}
+
+// ---- Placeholders at Rust call sites ----
+
+/// One `diagnostic(...)` or `diagnostic_at(...)` call whose code and values are written out at the call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CallSite {
+    code: String,
+    value_names: Vec<String>,
+    place: String,
+}
+
+/// The call sites a plain text search can read whole (layout rust-control-plane.md 2.6, no macro): the code is a
+/// string literal or a `const NAME: &str = "RRS-...";` of the same file, and the values are an inline
+/// `&[("name", ...), ...]`. A call that builds its values elsewhere is skipped; its own tests check its message.
+fn call_sites(text: &str, file_name: &str) -> Vec<CallSite> {
+    // Each site with its position, so the list comes out in file order whichever function found it.
+    let mut sites_by_position = Vec::new();
+    for function_name in DIAGNOSTIC_FUNCTIONS {
+        let call_start = format!("{function_name}(");
+        for (index, _) in text.match_indices(&call_start) {
+            if is_part_of_longer_name(text, index) {
+                continue; // syntax_diagnostic( is another function; `fn diagnostic(` passes, its argument is no code
+            }
+            let arguments = &text[index + call_start.len()..];
+            if let Some(site) = read_call_site(text, arguments, file_name, index) {
+                sites_by_position.push((index, site));
+            }
+        }
+    }
+    sites_by_position.sort_by_key(|(index, _)| *index);
+    sites_by_position.into_iter().map(|(_, site)| site).collect()
+}
+
+/// True when the character before `index` continues a name, so `index` isn't the start of the function name.
+fn is_part_of_longer_name(text: &str, index: usize) -> bool {
+    text[..index]
+        .chars()
+        .next_back()
+        .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+/// The code and value names of one call, from the text right after its opening bracket.
+fn read_call_site(text: &str, arguments: &str, file_name: &str, call_index: usize) -> Option<CallSite> {
+    let (code_argument, after_code) = arguments.split_once(',')?;
+    let code = resolve_code(code_argument.trim(), text)?;
+    let values = after_code.trim_start().strip_prefix(VALUES_ARRAY_START)?;
+    let line = text[..call_index].matches('\n').count() + 1;
+    Some(CallSite {
+        code,
+        value_names: tuple_names(values),
+        place: format!("{file_name}:{line}"),
+    })
+}
+
+/// A code argument: a string literal, or the name of a `const` in the same file whose value is one.
+fn resolve_code(argument: &str, text: &str) -> Option<String> {
+    if let Some(literal) = argument.strip_prefix('"') {
+        return Some(literal.trim_end_matches('"').to_string());
+    }
+    let declaration = format!("const {argument}: &str = \"");
+    let (_, after_declaration) = text.split_once(&declaration)?;
+    let (code, _) = after_declaration.split_once('"')?;
+    Some(code.to_string())
+}
+
+/// The first string of each tuple in an array's text, up to the array's closing bracket: `("name", value), ...]`
+/// gives ["name"]. Depth counting keeps brackets inside the values (`&format!("{}", x)`) out of the way, and strings
+/// are skipped whole so a bracket inside one doesn't count.
+fn tuple_names(array_text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut depth = 1; // inside the array's [
+    let mut characters = array_text.char_indices();
+    while let Some((index, character)) = characters.next() {
+        match character {
+            '"' => {
+                let string_end = string_length(&array_text[index..]);
+                if depth == 2 && is_first_in_tuple(&array_text[..index]) {
+                    names.push(array_text[index + 1..index + string_end - 1].to_string());
+                }
+                // Skip the rest of the string.
+                for _ in 1..array_text[index..index + string_end].chars().count() {
+                    characters.next();
+                }
+            }
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break; // the array ended
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+/// The length in bytes of the string literal at the start of `text`, quotes included; an escaped quote doesn't end it.
+fn string_length(text: &str) -> usize {
+    let mut escaped = false;
+    for (index, character) in text.char_indices().skip(1) {
+        match character {
+            '\\' if !escaped => escaped = true,
+            '"' if !escaped => return index + 1,
+            _ => escaped = false,
+        }
+    }
+    text.len()
+}
+
+/// True when only spaces stand between a tuple's opening bracket and this point: the string is the tuple's first item.
+fn is_first_in_tuple(text_before: &str) -> bool {
+    text_before.trim_end().ends_with('(')
+}
+
+/// The `{name}` placeholders of a catalog text.
+fn placeholder_names(template: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for (open_index, _) in template.match_indices('{') {
+        let after_open = &template[open_index + 1..];
+        let Some(close_index) = after_open.find('}') else {
+            continue;
+        };
+        let name = &after_open[..close_index];
+        let is_name = name.starts_with(|first: char| first.is_ascii_lowercase())
+            && name
+                .chars()
+                .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_');
+        if is_name {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Where a call site and its entry disagree: a value the message and fix never use, or a placeholder the call site
+/// doesn't fill (it would show as `{name}`). A code missing from the catalog is the source scan's problem.
+fn placeholder_problems(sites: &[CallSite], errors: &[ErrorRecord]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for site in sites {
+        let Some(record) = errors.iter().find(|record| record.code == site.code) else {
+            continue;
+        };
+        // A name may sit in both the message and the fix ("free {needed_bytes} bytes"); it counts once.
+        let mut used = BTreeSet::new();
+        used.extend(placeholder_names(&record.message));
+        used.extend(placeholder_names(&record.fix_text));
+        for name in &site.value_names {
+            if !used.contains(name) {
+                problems.push(format!(
+                    "{}: passes {name} to {}, whose message and fix don't use it",
+                    site.place, site.code
+                ));
+            }
+        }
+        for name in &used {
+            if !site.value_names.contains(name) {
+                problems.push(format!(
+                    "{}: {} uses {{{name}}}, which the call doesn't pass",
+                    site.place, site.code
+                ));
+            }
+        }
+    }
+    problems
+}
+
+#[test]
+fn call_site_placeholders_match_their_entries() {
+    let repo_root = find_repo_root().unwrap();
+    let mut sites = Vec::new();
+    for file in scanned_files(&repo_root) {
+        if !file.ends_with(RUST_EXTENSION) {
+            continue;
+        }
+        let text = std::fs::read_to_string(repo_root.join(&file)).expect("a Rust file reads");
+        sites.extend(call_sites(&scanned_text(&text, &file), &file));
+    }
+    assert_eq!(placeholder_problems(&sites, &real_errors()), Vec::<String>::new());
+}
+
+#[test]
+fn call_sites_are_read_from_literals_and_same_file_constants() {
+    let text = r#"const CODE_DISK_FULL: &str = "RRS-S3001";
+fn check() {
+    let a = diagnostic("RRS-E2004", &[("input_name", name), ("other", &format!("({})", x))]);
+    let b = diagnostic_at(CODE_DISK_FULL, &[("operation", "Saving \"x\" ]")], path);
+    let c = diagnostic_at(code, &[("skipped", x)], path);
+    let d = diagnostic("RRS-E1003", &values);
+    let e = syntax_diagnostic("RRS-E0001", &[("skipped", x)]);
+}
+"#;
+    let sites = call_sites(text, "src/a.rs");
+    assert_eq!(
+        sites,
+        [
+            CallSite {
+                code: "RRS-E2004".to_string(),
+                value_names: vec!["input_name".to_string(), "other".to_string()],
+                place: "src/a.rs:3".to_string(),
+            },
+            CallSite {
+                code: "RRS-S3001".to_string(),
+                value_names: vec!["operation".to_string()],
+                place: "src/a.rs:4".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn unused_values_and_unfilled_placeholders_are_caught() {
+    let mut record = sample("RRS-S3001", "catalog/errors/RRS-S.json");
+    record.message = "{operation} needs {needed_bytes} bytes.".to_string();
+    record.fix_text = "Free {needed_bytes} bytes.".to_string();
+    let site = |names: &[&str]| CallSite {
+        code: "RRS-S3001".to_string(),
+        value_names: names.iter().map(|name| name.to_string()).collect(),
+        place: "src/a.rs:7".to_string(),
+    };
+    let errors = [record];
+    assert_eq!(
+        placeholder_problems(&[site(&["operation", "needed_bytes"])], &errors),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        placeholder_problems(&[site(&["operation", "volume"])], &errors),
+        [
+            "src/a.rs:7: passes volume to RRS-S3001, whose message and fix don't use it",
+            "src/a.rs:7: RRS-S3001 uses {needed_bytes}, which the call doesn't pass",
+        ]
+    );
+    assert_eq!(placeholder_names("{a} {b_2} {Not} {} { c} {"), ["a", "b_2"]);
 }

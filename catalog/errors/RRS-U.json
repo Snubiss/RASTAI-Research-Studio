@@ -1,0 +1,172 @@
+[
+  {
+    "code": "RRS-U0001",
+    "severity": "error",
+    "title": "Daemon not reachable",
+    "message": "The daemon at {address} is not reachable.",
+    "basic_text": "The app can't reach Rastai's background service.",
+    "fix_text": "Start Rastai again.",
+    "docs_anchor": "rrs-u0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0002",
+    "severity": "error",
+    "title": "Login code rejected or expired",
+    "message": "The login code was rejected or expired.",
+    "basic_text": "This sign-in link no longer works.",
+    "fix_text": "Open Rastai again to get a new link.",
+    "docs_anchor": "rrs-u0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0003",
+    "severity": "error",
+    "title": "Session expired or rejected",
+    "message": "The session expired or was rejected; you are signed out.",
+    "basic_text": "You were signed out.",
+    "fix_text": "Open Rastai again to sign in.",
+    "docs_anchor": "rrs-u0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0004",
+    "severity": "error",
+    "title": "The web app's version differs from the daemon's",
+    "message": "The web app is version {app_version}, but the daemon is version {daemon_version}.",
+    "basic_text": "This page is out of date.",
+    "fix_text": "Reload the page.",
+    "docs_anchor": "rrs-u0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0005",
+    "severity": "info",
+    "title": "Live stream fell behind; some tokens' readouts are missing",
+    "message": "The live stream fell behind; readouts for {count} tokens are missing.",
+    "basic_text": "The live view couldn't keep up, so a few words have no details.",
+    "fix_text": "",
+    "docs_anchor": "rrs-u0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0006",
+    "severity": "error",
+    "title": "File too large to upload from the browser; open it by path",
+    "message": "{file_name} is too large to upload from the browser.",
+    "basic_text": "This file is too big to send from the browser.",
+    "fix_text": "Open it by its path on the computer instead.",
+    "docs_anchor": "rrs-u0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0101",
+    "severity": "error",
+    "title": "Desktop: bundled rastai binary not found",
+    "message": "The bundled rastai binary was not found at {path}.",
+    "basic_text": "The Rastai desktop app had a problem starting.",
+    "fix_text": "Reinstall Rastai.",
+    "docs_anchor": "rrs-u0101",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0102",
+    "severity": "error",
+    "title": "Desktop: the daemon failed to start",
+    "message": "The daemon failed to start: {reason}.",
+    "basic_text": "The Rastai desktop app had a problem starting. Its background service didn't start.",
+    "fix_text": "Check the daemon log, then start the app again.",
+    "docs_anchor": "rrs-u0102",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0103",
+    "severity": "error",
+    "title": "Desktop: launch line from the CLI is invalid",
+    "message": "The launch line from the CLI is invalid: {reason}.",
+    "basic_text": "The Rastai desktop app had a problem starting.",
+    "fix_text": "Reinstall Rastai.",
+    "docs_anchor": "rrs-u0103",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0104",
+    "severity": "error",
+    "title": "Desktop: update check or install failed",
+    "message": "The update check or install failed: {reason}.",
+    "basic_text": "The app couldn't check for or install an update.",
+    "fix_text": "Try again later.",
+    "docs_anchor": "rrs-u0104",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0105",
+    "severity": "error",
+    "title": "Desktop: update signature invalid; nothing installed",
+    "message": "The update's signature is invalid; nothing was installed.",
+    "basic_text": "The update didn't pass its security check, so nothing was installed.",
+    "fix_text": "Try the update again later.",
+    "docs_anchor": "rrs-u0105",
+    "retired": false
+  },
+  {
+    "code": "RRS-U0106",
+    "severity": "error",
+    "title": "Desktop: the window or webview could not be created",
+    "message": "The window or webview could not be created: {reason}.",
+    "basic_text": "The Rastai desktop app had a problem starting.",
+    "fix_text": "Update your graphics driver and system web view, then start the app again.",
+    "docs_anchor": "rrs-u0106",
+    "retired": false
+  },
+  {
+    "code": "RRS-U1001",
+    "severity": "error",
+    "title": "WebGL2 unavailable",
+    "message": "WebGL2 is unavailable in this browser.",
+    "basic_text": "The app couldn't draw this view. Your browser can't draw 3D graphics.",
+    "fix_text": "Use a current browser, and turn on hardware acceleration.",
+    "docs_anchor": "rrs-u1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-U1002",
+    "severity": "error",
+    "title": "WebGL context lost and could not be restored",
+    "message": "The WebGL context was lost and could not be restored.",
+    "basic_text": "The app couldn't draw this view.",
+    "fix_text": "Reload the page.",
+    "docs_anchor": "rrs-u1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-U1003",
+    "severity": "error",
+    "title": "Renderer self-check drew a blank frame",
+    "message": "The renderer's self-check drew a blank frame.",
+    "basic_text": "The app couldn't draw this view. It came out blank.",
+    "fix_text": "Start the desktop app with --disable-dmabuf.",
+    "docs_anchor": "rrs-u1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-U1004",
+    "severity": "error",
+    "title": "A panel crashed",
+    "message": "The panel {panel_id} crashed: {reason}.",
+    "basic_text": "This panel stopped working.",
+    "fix_text": "Reload the panel; a crash report was saved.",
+    "docs_anchor": "rrs-u1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-U1005",
+    "severity": "error",
+    "title": "Too many graph nodes visible; collapse blocks",
+    "message": "{count} graph nodes are visible, more than the limit of {limit}.",
+    "basic_text": "This design is too big to show all at once.",
+    "fix_text": "Collapse some blocks.",
+    "docs_anchor": "rrs-u1005",
+    "retired": false
+  }
+]

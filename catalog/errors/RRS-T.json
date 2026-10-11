@@ -1,0 +1,212 @@
+[
+  {
+    "code": "RRS-T0001",
+    "severity": "info",
+    "title": "Recipe not available on this node",
+    "message": "The recipe {recipe} isn't available on this node: {reason}.",
+    "basic_text": "This training method can't run on this computer.",
+    "fix_text": "",
+    "docs_anchor": "rrs-t0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0002",
+    "severity": "error",
+    "title": "Recipe, reward-function or required plugin not installed",
+    "message": "{name} is not installed.",
+    "basic_text": "Something this training needs isn't installed.",
+    "fix_text": "Install the plugin that provides it.",
+    "docs_anchor": "rrs-t0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0003",
+    "severity": "error",
+    "title": "No usable rows for this recipe",
+    "message": "The dataset {dataset_id} has no rows the {recipe} recipe can use.",
+    "basic_text": "This dataset has nothing this training method can learn from.",
+    "fix_text": "Pick another dataset, or check its columns.",
+    "docs_anchor": "rrs-t0003",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0004",
+    "severity": "error",
+    "title": "No method fits the memory budget",
+    "message": "No training method for {model_name} fits the memory budget of {budget_bytes} bytes.",
+    "basic_text": "This model is too big to train on this computer.",
+    "fix_text": "Use a smaller model, or a computer with more memory.",
+    "docs_anchor": "rrs-t0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0005",
+    "severity": "error",
+    "title": "Dataset task doesn't match the recipe",
+    "message": "The dataset's task {task} doesn't match the {recipe} recipe.",
+    "basic_text": "This dataset doesn't fit this training method.",
+    "fix_text": "Pick a dataset or a method that match.",
+    "docs_anchor": "rrs-t0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0006",
+    "severity": "error",
+    "title": "Training command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-t0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0201",
+    "severity": "error",
+    "title": "Reward model accuracy below the RLHF gate",
+    "message": "The reward model's accuracy is {accuracy}, below the RLHF gate of {minimum_accuracy}.",
+    "basic_text": "The reward model isn't accurate enough to train with.",
+    "fix_text": "Train the reward model on more or cleaner preference data.",
+    "docs_anchor": "rrs-t0201",
+    "retired": false
+  },
+  {
+    "code": "RRS-T0202",
+    "severity": "warning",
+    "title": "Reward model base differs from the policy base",
+    "message": "The reward model's base {reward_base} differs from the policy's base {policy_base}; this needs extra VRAM.",
+    "basic_text": "The two models in this training are different, so it needs more graphics memory.",
+    "fix_text": "",
+    "docs_anchor": "rrs-t0202",
+    "retired": false
+  },
+  {
+    "code": "RRS-T2001",
+    "severity": "error",
+    "title": "Checkpoint write failed: disk full; run paused",
+    "message": "Writing a checkpoint of {run_id} failed because the disk is full; the run is paused.",
+    "basic_text": "Your disk filled up while saving training progress, so the training paused.",
+    "fix_text": "Free up space, then resume the run.",
+    "docs_anchor": "rrs-t2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-T2002",
+    "severity": "warning",
+    "title": "Checkpoint files don't match their recorded hashes; falling back to an older one",
+    "message": "Checkpoint {checkpoint_id} doesn't match its recorded hashes; falling back to {fallback_checkpoint_id}.",
+    "basic_text": "The latest saved training progress was damaged, so Rastai used an older one.",
+    "fix_text": "",
+    "docs_anchor": "rrs-t2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-T2003",
+    "severity": "warning",
+    "title": "Resuming on a different environment or hardware",
+    "message": "Resuming {run_id} on a different environment or hardware: {difference}.",
+    "basic_text": "This training continues on a different setup, so results may differ slightly.",
+    "fix_text": "",
+    "docs_anchor": "rrs-t2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-T2004",
+    "severity": "error",
+    "title": "No complete checkpoint to resume from",
+    "message": "{run_id} has no complete checkpoint to resume from.",
+    "basic_text": "There is no saved training progress to continue from.",
+    "fix_text": "Start the run again.",
+    "docs_anchor": "rrs-t2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-T2005",
+    "severity": "error",
+    "title": "Checkpoint belongs to a different run",
+    "message": "Checkpoint {checkpoint_id} belongs to a different run: {difference}.",
+    "basic_text": "This saved progress is from another training.",
+    "fix_text": "Pick a checkpoint of this run.",
+    "docs_anchor": "rrs-t2005",
+    "retired": false
+  },
+  {
+    "code": "RRS-T3001",
+    "severity": "error",
+    "title": "Non-finite loss or gradients, repeatedly",
+    "message": "The loss or gradients of {run_id} were non-finite {count} times in a row.",
+    "basic_text": "The training went unstable and stopped.",
+    "fix_text": "Lower the learning rate, or check the data.",
+    "docs_anchor": "rrs-t3001",
+    "retired": false
+  },
+  {
+    "code": "RRS-T3002",
+    "severity": "error",
+    "title": "Policy KL above max_kl; stopped early",
+    "message": "The policy's KL ({kl}) went above max_kl ({max_kl}); stopped early.",
+    "basic_text": "The model drifted too far from where it started, so the training stopped.",
+    "fix_text": "Lower the learning rate, or raise max_kl if the drift is expected.",
+    "docs_anchor": "rrs-t3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-T4001",
+    "severity": "error",
+    "title": "No GGUF mapping for this family, or opaque nodes",
+    "message": "{model_name} can't be exported to GGUF: {reason}.",
+    "basic_text": "This model can't be exported for the fast chat engine.",
+    "fix_text": "Export to safetensors instead.",
+    "docs_anchor": "rrs-t4001",
+    "retired": false
+  },
+  {
+    "code": "RRS-T4002",
+    "severity": "warning",
+    "title": "Dataset license needs confirmation before publishing",
+    "message": "The license of {dataset_id} ({license}) needs your confirmation before publishing.",
+    "basic_text": "The data this model learned from has a license you should check before sharing it.",
+    "fix_text": "Read the license, then confirm.",
+    "docs_anchor": "rrs-t4002",
+    "retired": false
+  },
+  {
+    "code": "RRS-T4003",
+    "severity": "warning",
+    "title": "Export check failed",
+    "message": "The export check failed: {reason}.",
+    "basic_text": "The exported model doesn't give exactly the same answers as the original.",
+    "fix_text": "",
+    "docs_anchor": "rrs-t4003",
+    "retired": false
+  },
+  {
+    "code": "RRS-T4004",
+    "severity": "error",
+    "title": "HF token can't write this repo",
+    "message": "The Hugging Face token can't write to {repository}.",
+    "basic_text": "Your Hugging Face access key isn't allowed to upload here.",
+    "fix_text": "Use a token with write access to this repository.",
+    "docs_anchor": "rrs-t4004",
+    "retired": false
+  },
+  {
+    "code": "RRS-T4005",
+    "severity": "error",
+    "title": "HF push failed after retries",
+    "message": "Pushing to {repository} failed after retries: {reason}.",
+    "basic_text": "Rastai couldn't upload the model to Hugging Face.",
+    "fix_text": "Check your connection and try again.",
+    "docs_anchor": "rrs-t4005",
+    "retired": false
+  },
+  {
+    "code": "RRS-T4006",
+    "severity": "warning",
+    "title": "No Ollama template for this family; Ollama falls back to the GGUF's chat template",
+    "message": "There is no Ollama template for the {family} family; Ollama falls back to the GGUF's chat template.",
+    "basic_text": "Ollama will use the chat format stored in the model file.",
+    "fix_text": "",
+    "docs_anchor": "rrs-t4006",
+    "retired": false
+  }
+]

@@ -1,0 +1,307 @@
+[
+  {
+    "code": "RRS-G0001",
+    "severity": "error",
+    "title": "Invalid request",
+    "message": "Invalid request: {reason}.",
+    "basic_text": "This chat request is missing something or has a wrong value.",
+    "fix_text": "Fix the request and try again.",
+    "docs_anchor": "rrs-g0001",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0002",
+    "severity": "error",
+    "title": "Unknown model name",
+    "message": "Unknown model name {model_name}.",
+    "basic_text": "There is no model with that name.",
+    "fix_text": "Pick a model from the list.",
+    "docs_anchor": "rrs-g0002",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0004",
+    "severity": "error",
+    "title": "Steering preset needs its model on the Inspectable runtime",
+    "message": "The steering preset {preset_name} needs {model_name} on the Inspectable runtime.",
+    "basic_text": "This steering preset only works with Rastai's own runtime.",
+    "fix_text": "Switch the model to the Inspectable runtime.",
+    "docs_anchor": "rrs-g0004",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0005",
+    "severity": "error",
+    "title": "Model not ready",
+    "message": "{model_name} is not loaded.",
+    "basic_text": "This model isn't loaded yet.",
+    "fix_text": "Load the model.",
+    "fix_command_id": "model.load",
+    "docs_anchor": "rrs-g0005",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0006",
+    "severity": "error",
+    "title": "The model's node is unreachable",
+    "message": "The node {node_id} that serves {model_name} is unreachable.",
+    "basic_text": "Rastai lost contact with the computer running this model.",
+    "fix_text": "Check that the computer is on and connected.",
+    "docs_anchor": "rrs-g0006",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0007",
+    "severity": "error",
+    "title": "Tool calls not supported for this model family",
+    "message": "Tool calls are not supported for the {family} family.",
+    "basic_text": "This model can't use tools.",
+    "fix_text": "Pick a model that supports tool calls.",
+    "docs_anchor": "rrs-g0007",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0009",
+    "severity": "error",
+    "title": "Generation timed out or stalled",
+    "message": "Generation timed out or stalled after {timeout_seconds} seconds.",
+    "basic_text": "The model stopped answering.",
+    "fix_text": "Try again; if it keeps happening, reload the model.",
+    "docs_anchor": "rrs-g0009",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0010",
+    "severity": "error",
+    "title": "Steering preset was made for different weights",
+    "message": "The steering preset {preset_name} was made for different weights than {model_name}.",
+    "basic_text": "This steering preset was made for another model.",
+    "fix_text": "Pick a preset made for this model.",
+    "docs_anchor": "rrs-g0010",
+    "retired": false
+  },
+  {
+    "code": "RRS-G0011",
+    "severity": "error",
+    "title": "Inference command not available yet",
+    "message": "{command_id} isn't available in this version of Rastai yet.",
+    "basic_text": "This feature is planned but not built yet in this version of Rastai.",
+    "fix_text": "Nothing to fix on your side: the feature arrives in a later version.",
+    "docs_anchor": "rrs-g0011",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1001",
+    "severity": "error",
+    "title": "Tokenizer couldn't be loaded",
+    "message": "The tokenizer of {model_name} couldn't be loaded: {reason}.",
+    "basic_text": "Rastai couldn't load the part of the model that reads text.",
+    "fix_text": "Download the model again.",
+    "docs_anchor": "rrs-g1001",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1002",
+    "severity": "error",
+    "title": "Chat template error",
+    "message": "The chat template of {model_name} failed: {reason}.",
+    "basic_text": "Rastai couldn't format this conversation for the model.",
+    "fix_text": "Check the model's chat template, or pick another model.",
+    "docs_anchor": "rrs-g1002",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1003",
+    "severity": "error",
+    "title": "No tokenizer files for this model",
+    "message": "{model_name} has no tokenizer files.",
+    "basic_text": "This model is missing the files that read text.",
+    "fix_text": "Download the model again with its tokenizer.",
+    "docs_anchor": "rrs-g1003",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1004",
+    "severity": "error",
+    "title": "Tokenizer mismatch between the gateway and llama-server",
+    "message": "The tokenizer of {model_name} differs between the gateway and llama-server.",
+    "basic_text": "Two parts of Rastai read this model's text differently, so it won't use the fast engine.",
+    "fix_text": "Use the Inspectable runtime, or pick a GGUF made from the same model.",
+    "docs_anchor": "rrs-g1004",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1005",
+    "severity": "error",
+    "title": "Prompt longer than the model's context",
+    "message": "The prompt is {prompt_tokens} tokens; {model_name}'s context holds {context_tokens}.",
+    "basic_text": "This conversation is too long for the model. Rastai never cuts it short on its own.",
+    "fix_text": "Start a new conversation, or shorten this one.",
+    "docs_anchor": "rrs-g1005",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1006",
+    "severity": "error",
+    "title": "Template can't produce a training mask for this conversation",
+    "message": "The chat template of {model_name} can't produce a training mask for this conversation.",
+    "basic_text": "Rastai can't tell which parts of this conversation to train on.",
+    "fix_text": "Use another chat template, or another conversation.",
+    "docs_anchor": "rrs-g1006",
+    "retired": false
+  },
+  {
+    "code": "RRS-G1007",
+    "severity": "warning",
+    "title": "Two plugins contribute a chat template or tokenizer for this model; neither is used",
+    "message": "{plugin_id} and {other_plugin_id} both contribute a chat template or tokenizer for {model_name}; neither is used.",
+    "basic_text": "Two plugins both try to handle this model's text, so Rastai uses neither.",
+    "fix_text": "Turn off one of the two plugins.",
+    "docs_anchor": "rrs-g1007",
+    "retired": false
+  },
+  {
+    "code": "RRS-G2001",
+    "severity": "error",
+    "title": "API key missing",
+    "message": "The API key for {adapter_name} is missing.",
+    "basic_text": "Rastai needs an API key for this service.",
+    "fix_text": "Add the API key for this service.",
+    "fix_command_id": "adapter.configure",
+    "docs_anchor": "rrs-g2001",
+    "retired": false
+  },
+  {
+    "code": "RRS-G2002",
+    "severity": "error",
+    "title": "API provider returned an error",
+    "message": "{adapter_name} returned an error: {reason}.",
+    "basic_text": "The online model service returned an error.",
+    "fix_text": "Check the service's status and your API key.",
+    "docs_anchor": "rrs-g2002",
+    "retired": false
+  },
+  {
+    "code": "RRS-G2003",
+    "severity": "error",
+    "title": "API provider rate limit",
+    "message": "{adapter_name} is rate limiting requests; wait {wait_seconds} seconds.",
+    "basic_text": "The online model service asked Rastai to slow down.",
+    "fix_text": "Wait a moment, then try again.",
+    "docs_anchor": "rrs-g2003",
+    "retired": false
+  },
+  {
+    "code": "RRS-G2004",
+    "severity": "error",
+    "title": "API connection failed or dropped",
+    "message": "The connection to {adapter_name} failed or dropped: {reason}.",
+    "basic_text": "Rastai lost its connection to the online model service.",
+    "fix_text": "Check your connection and try again.",
+    "docs_anchor": "rrs-g2004",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3002",
+    "severity": "error",
+    "title": "llama-server didn't become healthy",
+    "message": "llama-server didn't become healthy for {model_name}: {reason}.",
+    "basic_text": "The fast chat engine had a problem. It didn't start.",
+    "fix_text": "Unload other models, or use a smaller GGUF.",
+    "docs_anchor": "rrs-g3002",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3003",
+    "severity": "error",
+    "title": "llama-server stopped unexpectedly",
+    "message": "llama-server stopped unexpectedly while serving {model_name}.",
+    "basic_text": "The fast chat engine had a problem. It stopped.",
+    "fix_text": "Load the model again.",
+    "docs_anchor": "rrs-g3003",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3004",
+    "severity": "error",
+    "title": "Needs the Inspectable runtime",
+    "message": "This needs {model_name} on the Inspectable runtime.",
+    "basic_text": "This feature only works with Rastai's own runtime.",
+    "fix_text": "Switch the chat to the Inspectable runtime.",
+    "fix_command_id": "chat.runtime.set",
+    "docs_anchor": "rrs-g3004",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3005",
+    "severity": "error",
+    "title": "llama-server build hash mismatch",
+    "message": "The llama-server build at {path} doesn't match its pinned hash.",
+    "basic_text": "The fast chat engine had a problem. Its program file didn't pass the security check.",
+    "fix_text": "Reinstall Rastai.",
+    "docs_anchor": "rrs-g3005",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3006",
+    "severity": "error",
+    "title": "Fast runtime busy",
+    "message": "The Fast runtime is busy with another request.",
+    "basic_text": "The fast chat engine is busy.",
+    "fix_text": "Wait for the current answer to finish.",
+    "docs_anchor": "rrs-g3006",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3007",
+    "severity": "error",
+    "title": "Malformed event from llama-server",
+    "message": "llama-server sent a malformed event: {reason}.",
+    "basic_text": "The fast chat engine had a problem. It sent something Rastai couldn't read.",
+    "fix_text": "Load the model again.",
+    "docs_anchor": "rrs-g3007",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3008",
+    "severity": "error",
+    "title": "No GGUF for the Fast runtime",
+    "message": "{model_name} has no GGUF file for the Fast runtime.",
+    "basic_text": "The fast chat engine needs a GGUF version of this model.",
+    "fix_text": "Download a GGUF of this model, or export one from a checkpoint.",
+    "fix_command_id": "model.download",
+    "docs_anchor": "rrs-g3008",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3009",
+    "severity": "error",
+    "title": "No full-precision twin for this GGUF",
+    "message": "{model_name} has no full-precision twin for inspection.",
+    "basic_text": "To look inside this compressed model, Rastai needs its full-size version.",
+    "fix_text": "Set the full-precision twin of this model.",
+    "fix_command_id": "model.twin.set",
+    "docs_anchor": "rrs-g3009",
+    "retired": false
+  },
+  {
+    "code": "RRS-G3010",
+    "severity": "error",
+    "title": "Twin doesn't match the GGUF",
+    "message": "The twin {twin_model_name} doesn't match {model_name}: {reason}.",
+    "basic_text": "The full-size model you picked isn't the same model as this compressed one.",
+    "fix_text": "Pick the full-precision model this GGUF was made from.",
+    "docs_anchor": "rrs-g3010",
+    "retired": false
+  },
+  {
+    "code": "RRS-G4001",
+    "severity": "error",
+    "title": "Gateway log write failed",
+    "message": "Writing the gateway log failed: {reason}.",
+    "basic_text": "Rastai couldn't save this chat to its log.",
+    "fix_text": "Check free disk space.",
+    "docs_anchor": "rrs-g4001",
+    "retired": false
+  }
+]
