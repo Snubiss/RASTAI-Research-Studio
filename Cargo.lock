@@ -562,7 +562,10 @@ dependencies = [
 name = "rastai-store"
 version = "0.1.0"
 dependencies = [
+ "prost",
  "rastai-core",
+ "rastai-formats",
+ "rastai-proto",
  "rusqlite",
  "serde_json",
  "tokio",

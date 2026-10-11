@@ -1,8 +1,10 @@
 //! `StoreError`, the one error type of this crate (contracts 12.2). Library functions return it; the edge (a command
-//! handler, the daemon's startup, the CLI) turns it into a `Diagnostic` through `code()`.
+//! handler, the daemon's startup, the node's tailer, the CLI) turns it into a `Diagnostic` through `code()`.
 //!
 //! Every variant maps to a code that contracts 10.3 lists in the `RRS-S` range. SQLite's own failures are sorted by
 //! `sqlite.rs` into these variants, so a full disk, a damaged file and an unwritable folder each get their own code.
+//! A torn event-log tail is not an error: the reader reports it as `FrameRead::Incomplete`, and the writer truncates
+//! it and says how many bytes it dropped (`truncated_tail_bytes`), which the caller logs as `RRS-S2001` (info).
 
 use std::path::PathBuf;
 
@@ -12,6 +14,8 @@ const CODE_INDEX_DAMAGED: &str = "RRS-S0003";
 const CODE_DATA_DIRECTORY_NOT_WRITABLE: &str = "RRS-S0004";
 const CODE_READ_FAILED: &str = "RRS-S0006";
 const CODE_RUNTIME_NOT_PRIVATE: &str = "RRS-S0007";
+const CODE_EVENT_LOG_CORRUPT: &str = "RRS-S2002";
+const CODE_EVENT_SEQUENCE_GAP: &str = "RRS-S2003";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
 
@@ -36,7 +40,8 @@ pub enum StoreError {
     /// link, not a folder, another user's or open to group or others, or `daemon.lock` is a link or not a regular
     /// file. Nothing was written to it. `reason` says which.
     RuntimeNotPrivate { path: PathBuf, reason: String },
-    /// SQLite reported a full disk during a write.
+    /// SQLite reported a full disk during a write, or the disk filled up during an event-log write (the writer has
+    /// already cut the partial frame off again).
     DiskFull { reason: String },
     /// A write failed for any other reason (a constraint, an I/O error, a lock held past the busy timeout).
     /// `reason` keeps SQLite's own words.
@@ -46,6 +51,19 @@ pub enum StoreError {
     DatabaseReadFailed { reason: String },
     /// The writer thread has stopped (the store was closed, or the thread ended), so the write was never applied.
     WriterStopped,
+    /// A bad event-log frame with more of the file after it, or a file that doesn't start with `RRSEVLG1` (offset 0).
+    /// Bit rot or a foreign file, never a crash: a crash only tears the tail.
+    EventLogCorrupt { path: PathBuf, offset: u64 },
+    /// An event record's sequence isn't the previous one plus 1 (the first is 1). The reader stops before that record.
+    EventSequenceGap {
+        path: PathBuf,
+        expected_sequence: u64,
+        found_sequence: u64,
+    },
+    /// Opening, reading, writing or syncing an event log failed for another reason; `reason` keeps the operating
+    /// system's words. Reads that fail this way (a missing file, a permission) share the write code until the
+    /// catalog has one for them.
+    EventLogIoFailed { path: PathBuf, reason: String },
 }
 
 impl StoreError {
@@ -61,7 +79,24 @@ impl StoreError {
             StoreError::DatabaseWriteFailed { .. } => CODE_WRITE_FAILED,
             StoreError::DatabaseReadFailed { .. } => CODE_READ_FAILED,
             StoreError::WriterStopped => CODE_WRITE_FAILED,
+            StoreError::EventLogCorrupt { .. } => CODE_EVENT_LOG_CORRUPT,
+            StoreError::EventSequenceGap { .. } => CODE_EVENT_SEQUENCE_GAP,
+            StoreError::EventLogIoFailed { .. } => CODE_WRITE_FAILED,
         }
+    }
+}
+
+/// Sorts an I/O error on an event log into its variant: a full disk gets its own code, everything else keeps the
+/// operating system's reason.
+pub(crate) fn event_log_io_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
+    if error.kind() == std::io::ErrorKind::StorageFull {
+        return StoreError::DiskFull {
+            reason: format!("{}: {error}", path.display()),
+        };
+    }
+    StoreError::EventLogIoFailed {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
     }
 }
 
@@ -102,5 +137,35 @@ mod tests {
         assert_eq!(write_failed.code(), "RRS-S3005");
         assert_eq!(read_failed.code(), "RRS-S0006");
         assert_eq!(StoreError::WriterStopped.code(), "RRS-S3005");
+    }
+
+    #[test]
+    fn every_event_log_error_has_its_catalog_code() {
+        let path = PathBuf::from("events.log");
+        let corrupt = StoreError::EventLogCorrupt {
+            path: path.clone(),
+            offset: 8,
+        };
+        let gap = StoreError::EventSequenceGap {
+            path: path.clone(),
+            expected_sequence: 3,
+            found_sequence: 4,
+        };
+        let failed = StoreError::EventLogIoFailed {
+            path,
+            reason: "r".to_string(),
+        };
+        assert_eq!(corrupt.code(), "RRS-S2002");
+        assert_eq!(gap.code(), "RRS-S2003");
+        assert_eq!(failed.code(), "RRS-S3005");
+    }
+
+    #[test]
+    fn a_full_disk_is_sorted_into_its_own_variant() {
+        let path = std::path::Path::new("events.log");
+        let full = std::io::Error::from(std::io::ErrorKind::StorageFull);
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(event_log_io_error(path, &full).code(), "RRS-S3002");
+        assert_eq!(event_log_io_error(path, &denied).code(), "RRS-S3005");
     }
 }

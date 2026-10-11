@@ -1315,6 +1315,7 @@ flowchart TD
 ```
 
 - Only the writer truncates. Readers (the tailer, the daemon, a rebuild) stop at a torn tail and leave the file alone. A resumed worker opens the log, truncates the torn tail and continues from the last valid sequence plus 1.
+- "Last frame in the file" means the bad frame ends exactly at the end of the file, or only zeros follow its start (a power cut can leave a zero-filled block, and an all-zero frame header even has a matching CRC-32). A frame whose CRC-32 matches but whose body isn't a version-1 `EventRecord` is corruption wherever it is (contracts 7.1). A header that is a prefix of `RRSEVLG1`, or zeros, is a torn tail at offset 0.
 - "Writer still alive" is known to the tailer from the job state. An offline reader (6.4) treats every writer as gone.
 
 **Persisted:** no new writes; this is recovery. **Tests:** the kill -9 matrix (6.5) and the reader fixtures (6.1); a tmpfs test: fill the volume mid-run (TextCNN on CPU), check the run goes `paused` with `RRS-S3002` and the job keeps its pid, free space, send `RESUME`, and the run continues from memory with every step's `run.metrics` present once (no lost or repeated steps); a variant with no reserve file left exits with code 4.

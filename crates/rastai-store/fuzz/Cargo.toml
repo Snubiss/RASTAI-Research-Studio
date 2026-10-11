@@ -1,0 +1,34 @@
+# The cargo-fuzz crate for rastai-store (contracts 12.5, ADR-0037): one target per in-house parser of untrusted
+# input. An event log arrives from a node, a crashed writer or a damaged disk, so the frame reader has one. It is its
+# own workspace (the root Cargo.toml excludes this folder) because it builds only on the nightly toolchain `just fuzz`
+# pins. Run the target with: just fuzz rastai-store event_frame 60
+[package]
+name = "rastai-store-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly, like every external crate (root Cargo.toml); a dev dependency of the fuzz crates only.
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.rastai-store]
+path = ".."
+
+# For `crc32`: the target checks each frame's checksum itself, with the same one table.
+[dependencies.rastai-formats]
+path = "../../rastai-formats"
+
+# An independent workspace for the fuzz targets.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "event_frame"
+path = "fuzz_targets/event_frame.rs"
+test = false
+doc = false
+bench = false
