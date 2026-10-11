@@ -1274,7 +1274,7 @@ crates/rastai-core/
     error.rs                  CoreError
     versions.rs               APP_VERSION, PLUGIN_API_VERSION, NODE_PROTOCOL_VERSION, WORKER_PROTOCOL_VERSION, API_PACKAGES
     paths.rs                  DataPaths, PathEnvironment, resolve_paths(), one function per well-known path, hf_cache_dir()
-    ids.rs                    IdPrefix, new_id(), id_has_prefix(), node_id_from_public_key()
+    ids.rs                    IdPrefix, id_prefix_text(), new_id(), id_has_prefix(), node_id_from_public_key()
     crockford.rs              Crockford base32 encode and decode (ids, node ids)
     random.rs                 random_bytes() from the OS: /dev/urandom on Linux and macOS (Windows later)
     time.rs                   now_unix_ms(), format_rfc3339(), parse_rfc3339() (in-house, UTC only)
@@ -1400,7 +1400,8 @@ pub fn scopes_allow(held: &[Scope], needed: &Scope) -> bool
 // ids.rs
 pub enum IdPrefix { Run, Job, Checkpoint, Artifact, Conversation, Message, Request, Lease, Sandbox, Transfer,
                     Project, Document, Journal, Token, Session, Rollout, Group }
-pub fn new_id(prefix: IdPrefix) -> String                                  // "run_01JA2B3C4D5E6F7G8H9J0K1M2N"
+pub fn id_prefix_text(prefix: IdPrefix) -> &'static str                   // "run", "ckpt", "ro"
+pub fn new_id(prefix: IdPrefix) -> Result<String, CoreError>               // "run_01JA2B3C4D5E6F7G8H9J0K1M2N"; fails only if /dev/urandom does
 pub fn id_has_prefix(id: &str, prefix: IdPrefix) -> bool
 pub fn node_id_from_public_key(public_key: &[u8; 32]) -> String
 
@@ -1462,7 +1463,7 @@ pub struct PathEnvironment { pub rastai_home: Option<PathBuf>, pub home: PathBuf
                              pub xdg_state_home: Option<PathBuf>, pub xdg_runtime_dir: Option<PathBuf>,
                              pub hf_hub_cache: Option<PathBuf>, pub hf_home: Option<PathBuf> }
 pub struct DataPaths { pub config: PathBuf, pub data: PathBuf, pub cache: PathBuf, pub state: PathBuf, pub runtime: PathBuf }
-pub fn read_path_environment() -> PathEnvironment
+pub fn read_path_environment() -> Result<PathEnvironment, CoreError>    // HomeNotFound when neither HOME nor the user database names one
 pub fn resolve_paths(environment: &PathEnvironment) -> DataPaths
 pub fn rastai_db_path(paths: &DataPaths) -> PathBuf
 pub fn vault_db_path(paths: &DataPaths) -> PathBuf
