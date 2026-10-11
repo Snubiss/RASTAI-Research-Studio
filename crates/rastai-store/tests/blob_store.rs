@@ -83,7 +83,10 @@ fn the_same_bytes_twice_are_stored_once_and_touch_the_blob() {
     let first = put_bytes(&store, BLOB_BYTES, MEDIA_TYPE).unwrap();
     let path = expected_blob_path(&store, &first.hash);
     let an_hour_ago = SystemTime::now() - AN_HOUR;
-    std::fs::File::open(&path).unwrap().set_modified(an_hour_ago).unwrap();
+    // Write access, because Windows refuses to set the time through a read-only handle.
+    let blob_file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    blob_file.set_modified(an_hour_ago).unwrap();
+    drop(blob_file);
 
     let second = put_bytes(&store, BLOB_BYTES, MEDIA_TYPE).unwrap();
 

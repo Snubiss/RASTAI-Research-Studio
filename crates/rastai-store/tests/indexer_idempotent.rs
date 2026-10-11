@@ -360,18 +360,23 @@ fn the_run_ack_only_moves_forward() {
     let runtime = runtime();
     let store = open_store(&paths).unwrap();
     write_starting_rows(&runtime, &store);
-    let batch = run_log_batch();
+    // The run fails rather than completes, so `train.resume` may reopen it below (contracts 9.5: failed → resuming).
+    let mut batch = run_log_batch();
+    batch[6] = run_state(7, RunState::Failed);
     apply_run_batch(&runtime, &store, batch.clone());
     let rows_after_batch = every_row(&store);
+    let reader = open_index_reader(&store.index_readers).unwrap();
+    assert!(get_run(&reader, RUN_ID).unwrap().unwrap().finished_unix_ms.is_some());
+    drop(reader);
 
     // An older batch re-sent after a reconnect: its records are below the ack, so nothing changes. Applied again,
-    // `run.state_changed running` would put the completed run back to running.
+    // `run.state_changed running` would put the failed run back to running.
     apply_run_batch(&runtime, &store, batch[..3].to_vec());
 
     assert_eq!(run_acked_sequence(&store), 8);
     assert_eq!(every_row(&store), rows_after_batch);
     let reader = open_index_reader(&store.index_readers).unwrap();
-    assert_eq!(get_run(&reader, RUN_ID).unwrap().unwrap().state, "completed");
+    assert_eq!(get_run(&reader, RUN_ID).unwrap().unwrap().state, "failed");
     drop(reader);
 
     // A later batch, overlapping the last one, moves it on and indexes only what is new.
@@ -490,10 +495,7 @@ fn the_daemon_cursor_only_moves_forward() {
     write_starting_rows(&runtime, &store);
     apply_daemon_batch(&runtime, &store, daemon_log_batch());
 
-    // Tags set again by an older record: below the cursor, so skipped.
-    apply_daemon_batch(&runtime, &store, daemon_log_batch()[..1].to_vec());
-    assert_eq!(daemon_cursor(&store), Some(8));
-
+    // A later record removes the tags and moves the cursor on.
     let untag = RunTagsChanged {
         run_id: RUN_ID.to_string(),
         tags: Vec::new(),
@@ -503,6 +505,12 @@ fn the_daemon_cursor_only_moves_forward() {
         &store,
         vec![record(9, "", "run.tags_changed", Payload::RunTagsChanged(untag))],
     );
+    assert_eq!(daemon_cursor(&store), Some(9));
+    assert!(rows_of(&store, "run_tags").is_empty());
+
+    // The older record that set the tags, re-sent after a crash: below the cursor, so skipped. Applied again, it
+    // would bring the removed tags back.
+    apply_daemon_batch(&runtime, &store, daemon_log_batch()[..1].to_vec());
 
     assert_eq!(daemon_cursor(&store), Some(9));
     assert!(rows_of(&store, "run_tags").is_empty());
