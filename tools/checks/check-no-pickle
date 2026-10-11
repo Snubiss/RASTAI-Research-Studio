@@ -46,6 +46,8 @@ BANNED_IDENTIFIERS = {
     "read_pickle": "read_pickle unpickles",
     "to_pickle": "to_pickle pickles",
 }
+# Functions that import the module a string names, so `importlib.import_module("pickle")` is an import too.
+DYNAMIC_IMPORT_FUNCTIONS = {"importlib.import_module", "__import__"}
 # Pickle-format files: PyTorch's .bin, .pt and .pth weights and plain pickles. Weights are safetensors.
 PICKLE_FILE_SUFFIXES = (".bin", ".pt", ".pth", ".pkl", ".pickle")
 # The first line of a Python script without a .py ending (the checks in tools/checks are such scripts).
@@ -126,7 +128,29 @@ def names_used_by(node: ast.AST, aliases: dict[str, str]) -> list[str]:
         return [node.id]
     if isinstance(node, ast.keyword) and node.arg:
         return [node.arg]
+    if isinstance(node, ast.Call):
+        return dynamically_imported_names(node, aliases)
     return []
+
+
+def dynamically_imported_names(call: ast.Call, aliases: dict[str, str]) -> list[str]:
+    """The module a dynamic import names with a string literal: importlib.import_module("pickle") and
+    __import__("pickle") give ["pickle"]. A name built at run time can't be read here; review catches that."""
+    if not call.args or not isinstance(call.args[0], ast.Constant) or not isinstance(call.args[0].value, str):
+        return []
+    if called_name(call.func, aliases) in DYNAMIC_IMPORT_FUNCTIONS:
+        return [call.args[0].value]
+    return []
+
+
+def called_name(function: ast.expr, aliases: dict[str, str]) -> str:
+    """The full name of the function a call calls: `import_module` from importlib gives importlib.import_module."""
+    if isinstance(function, ast.Name):
+        return aliases.get(function.id, function.id)
+    if isinstance(function, ast.Attribute):
+        dotted_names = resolved_dotted_name(function, aliases)
+        return dotted_names[0] if dotted_names else ""
+    return ""
 
 
 def import_from_names(node: ast.ImportFrom) -> list[str]:

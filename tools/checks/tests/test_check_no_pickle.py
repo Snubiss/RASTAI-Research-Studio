@@ -10,6 +10,8 @@ import torch
 
 # torch.save would pickle; this file writes safetensors instead.
 BANNED_NOTE = "torch.load and pickle are banned"
+# A dynamic import of an allowed module passes.
+json_module = __import__("json")
 
 
 def save_state(model: torch.nn.Module) -> str:
@@ -28,6 +30,9 @@ FAILING_SOURCES = [
     ("numpy_pickle.py", "def read(numpy, path):\n    return numpy.load(path, allow_pickle=True)\n"),
     ("process_spawn.py", "import multiprocessing\n"),
     ("process_pool.py", "from concurrent.futures import ProcessPoolExecutor\n"),
+    ("import_module.py", "import importlib\n\nloader = importlib.import_module('pickle')\n"),
+    ("import_module_from.py", "from importlib import import_module\n\nimport_module('torch.serialization')\n"),
+    ("dunder_import.py", "codec = __import__('pickle')\n"),
 ]
 
 

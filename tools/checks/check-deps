@@ -4,11 +4,13 @@
 Three allowlists, three package managers:
 - Rust: each workspace member's direct crates against [workspace.metadata.rastai.allowlist] in Cargo.toml, read
   through `cargo metadata`. A crate must be listed, the member must be one of its users, and a dev-only crate may
-  only sit in [dev-dependencies]. cargo-deny (`just deny`) checks licenses, advisories and single owners.
+  only sit in [dev-dependencies]. The cargo-fuzz crates the root excludes are read from their manifests; each is
+  dev-only as a whole. cargo-deny (`just deny`) checks licenses, advisories and single owners.
 - Python: every package in every uv lock named by deps/allowlist-python.json, at the listed version, with a license
   that passes the file's `licenses`.
-- npm: every direct dependency of every pnpm importer against deps/allowlist-npm.json, at the listed version, and
-  the license of every installed package in pnpm-lock.yaml (transitive ones too, ADR-0012 decision 5).
+- npm: every direct dependency of every pnpm importer against deps/allowlist-npm.json, at the listed version, with
+  a license that passes the file's `licenses`, and the license of every other package in pnpm-lock.yaml
+  (transitive ones too, ADR-0012 decision 5), read from node_modules.
 """
 
 import argparse
@@ -28,6 +30,11 @@ EVERY_MEMBER = "*"
 DEV_CATEGORY = "dev"
 # cargo metadata's dependency kinds and the Cargo.toml section each one is written in.
 CARGO_SECTIONS = {None: "dependencies", "dev": "dev-dependencies", "build": "build-dependencies"}
+# The root manifest, whose [workspace] exclude list names the cargo-fuzz workspaces (contracts 12.5). cargo
+# metadata of the root never sees them, because each is its own workspace on the nightly toolchain.
+ROOT_MANIFEST = "Cargo.toml"
+# A crate's [package.metadata] marks it as a cargo-fuzz crate with `cargo-fuzz = true`.
+CARGO_FUZZ_MARKER = "cargo-fuzz"
 
 PYTHON_ALLOWLIST = "deps/allowlist-python.json"
 NPM_ALLOWLIST = "deps/allowlist-npm.json"
@@ -36,17 +43,24 @@ LOCAL_PYTHON_SOURCES = {"virtual", "editable", "directory"}
 
 # The sections of a pnpm importer that list its direct dependencies.
 NPM_DEPENDENCY_GROUPS = {"dependencies", "devDependencies", "optionalDependencies", "packageManagerDependencies"}
+# The group that holds pnpm itself. corepack installs it outside node_modules, so its license comes from the
+# allowlist entry (check_listed_licenses) instead of an installed package.json.
+PACKAGE_MANAGER_GROUP = "packageManagerDependencies"
 # Versions of workspace packages linked from inside the repository, not downloaded.
 LOCAL_NPM_VERSION_PREFIXES = ("link:", "workspace:", "file:")
 # Where pnpm installs every package of the lock: node_modules/.pnpm/<id>/node_modules/<name>/.
 PNPM_STORE_FOLDER = "node_modules/.pnpm"
 NPM_MANIFEST = "package.json"
 # The indentation pnpm-lock.yaml uses (2 spaces per level) for a dependency group, a dependency name and its
-# `version:` line inside an importer, and for a package id under `packages:`.
+# `version:` line inside an importer, for a package id under `packages:`, and for that package's fields.
 GROUP_INDENT = 4
 DEPENDENCY_INDENT = 6
 VERSION_INDENT = 8
 PACKAGE_INDENT = 2
+PACKAGE_FIELD_INDENT = 4
+# The package fields that limit it to some platforms (os: [darwin], cpu: [arm64], libc: [musl]). pnpm installs
+# such a package only on a matching machine, so it is the one kind of locked package that may be missing here.
+PLATFORM_FIELDS = {"os", "cpu", "libc"}
 
 # An SPDX license expression's parts: parentheses, operators and license ids.
 LICENSE_TOKEN = re.compile(r"\(|\)|[^\s()]+")
@@ -54,7 +68,9 @@ LICENSE_TOKEN = re.compile(r"\(|\)|[^\s()]+")
 
 def main() -> int:
     root, cargo_metadata_file = parse_arguments()
-    problems = check_cargo(read_cargo_metadata(root, cargo_metadata_file))
+    cargo_metadata = read_cargo_metadata(root, cargo_metadata_file)
+    problems = check_cargo(cargo_metadata)
+    problems += check_fuzz_crates(root, cargo_metadata)
     problems += check_python(root)
     problems += check_npm(root)
     return report("check-deps", problems, "every dependency is on its allowlist")
@@ -90,11 +106,15 @@ def check_cargo(metadata: dict) -> list[str]:
     for package in metadata["packages"]:
         if package["id"] in member_ids:
             for dependency in package["dependencies"]:
-                problems.extend(check_crate_dependency(package["name"], dependency, allowlist))
+                problems.extend(
+                    check_crate_dependency(package["name"], dependency, allowlist, member_is_dev_only=False)
+                )
     return problems
 
 
-def check_crate_dependency(member: str, dependency: dict, allowlist: dict) -> list[str]:
+def check_crate_dependency(member: str, dependency: dict, allowlist: dict, member_is_dev_only: bool) -> list[str]:
+    """One direct dependency of a crate, as cargo metadata writes it ({name, source, kind}). A dev-only member
+    (a fuzz crate) may use a "dev" crate in any section."""
     if dependency["source"] is None:
         return []  # a path dependency: one of our own crates
     name = dependency["name"]
@@ -106,9 +126,63 @@ def check_crate_dependency(member: str, dependency: dict, allowlist: dict) -> li
     if EVERY_MEMBER not in users and member not in users:
         problems.append(f"{member}: depends on `{name}`, but the allowlist names only {', '.join(users)} as its users")
     section = CARGO_SECTIONS.get(dependency["kind"], dependency["kind"])
-    if entry.get("category") == DEV_CATEGORY and dependency["kind"] != "dev":
+    if entry.get("category") == DEV_CATEGORY and dependency["kind"] != "dev" and not member_is_dev_only:
         problems.append(f'{member}: `{name}` is dev-only (category "dev") but sits in [{section}]')
     return problems
+
+
+def check_fuzz_crates(root: Path, cargo_metadata: dict) -> list[str]:
+    """The cargo-fuzz crates against the same allowlist. Each one is dev-only as a whole (it never ships), so
+    libfuzzer-sys may sit in its [dependencies], where cargo-fuzz puts it."""
+    allowlist = cargo_metadata.get("metadata", {}).get("rastai", {}).get("allowlist") or {}
+    problems = []
+    for manifest_path in find_fuzz_manifests(root):
+        manifest = tomllib.loads((root / manifest_path).read_text())
+        crate_name = manifest["package"]["name"]
+        for dependency in manifest_dependencies(manifest):
+            problems.extend(check_crate_dependency(crate_name, dependency, allowlist, member_is_dev_only=True))
+    return problems
+
+
+def find_fuzz_manifests(root: Path) -> list[str]:
+    """The Cargo.toml of each folder the root workspace excludes that is a cargo-fuzz crate. A listed folder
+    whose crate hasn't landed yet has no Cargo.toml and is skipped."""
+    root_manifest = root / ROOT_MANIFEST
+    if not root_manifest.is_file():
+        return []
+    excluded_folders = tomllib.loads(root_manifest.read_text()).get("workspace", {}).get("exclude", [])
+    manifests = []
+    for folder in excluded_folders:
+        manifest_path = f"{folder}/{ROOT_MANIFEST}"
+        if (root / manifest_path).is_file() and is_cargo_fuzz_crate(root / manifest_path):
+            manifests.append(manifest_path)
+    return manifests
+
+
+def is_cargo_fuzz_crate(manifest_file: Path) -> bool:
+    package_metadata = tomllib.loads(manifest_file.read_text()).get("package", {}).get("metadata", {})
+    return package_metadata.get(CARGO_FUZZ_MARKER) is True
+
+
+def manifest_dependencies(manifest: dict) -> list[dict]:
+    """Every dependency a Cargo.toml declares, in the shape cargo metadata uses ({name, source, kind}), from the
+    plain sections and the [target.'cfg(...)'.*] ones. A path dependency (one of our crates) has source None."""
+    section_tables = [manifest] + list(manifest.get("target", {}).values())
+    dependencies = []
+    for table in section_tables:
+        for kind, section in CARGO_SECTIONS.items():
+            for key, specification in table.get(section, {}).items():
+                dependencies.append(manifest_dependency(key, specification, kind))
+    return dependencies
+
+
+def manifest_dependency(key: str, specification: str | dict, kind: str | None) -> dict:
+    """A plain `name = "=1.0"` is a registry crate. A table may rename the crate (`package = "real-name"`) or
+    point at a folder (`path = ".."`)."""
+    if isinstance(specification, str):
+        return {"name": key, "source": "registry", "kind": kind}
+    source = None if "path" in specification else "registry"
+    return {"name": specification.get("package", key), "source": source, "kind": kind}
 
 
 # ---- Python ----
@@ -166,30 +240,34 @@ def check_listed_licenses(allowlist_path: str, allowlist: dict) -> list[str]:
 def check_npm(root: Path) -> list[str]:
     allowlist = json.loads((root / NPM_ALLOWLIST).read_text())
     listed = allowlist["packages"]
-    problems = []
+    problems = check_listed_licenses(NPM_ALLOWLIST, allowlist)
     direct_names = set()
-    locked_packages = set()
+    locked_packages = {}
+    package_managers = set()
     for lock_path in allowlist["locks"]:
         direct_dependencies, packages = read_pnpm_lock((root / lock_path).read_text())
         locked_packages.update(packages)
-        for name, version in direct_dependencies:
+        for name, version, group in direct_dependencies:
             direct_names.add(name)
             problems.extend(check_listed_version(NPM_ALLOWLIST, lock_path, name, version, listed))
+            if group == PACKAGE_MANAGER_GROUP:
+                package_managers.add((name, version))
     for name in sorted(set(listed) - direct_names):
         problems.append(f"{NPM_ALLOWLIST}: `{name}` is listed, but no package.json depends on it; remove the entry")
-    problems.extend(check_installed_npm_licenses(root, locked_packages, allowlist["licenses"]))
+    problems.extend(check_installed_npm_licenses(root, locked_packages, package_managers, allowlist))
     return problems
 
 
-def read_pnpm_lock(text: str) -> tuple[list[tuple[str, str]], set[tuple[str, str]]]:
-    """(direct dependencies, every package) of a pnpm-lock.yaml, each as (name, version).
+def read_pnpm_lock(text: str) -> tuple[list[tuple[str, str, str]], dict[tuple[str, str], bool]]:
+    """(direct dependencies, every package) of a pnpm-lock.yaml. A direct dependency is (name, version, group);
+    the packages map (name, version) to whether the package is limited to some platforms (PLATFORM_FIELDS).
 
     A small reader for the one YAML layout pnpm writes, not general YAML: the standard library has no YAML
     parser, and the lock's shape is fixed by its lockfileVersion. Indentation says what each line is.
     """
     direct_dependencies = []
-    packages = set()
-    section = group = dependency_name = None
+    packages = {}
+    section = group = dependency_name = package = None
     for line in text.splitlines():
         indent = len(line) - len(line.lstrip(" "))
         key, _, value = line.strip().partition(":")
@@ -205,9 +283,12 @@ def read_pnpm_lock(text: str) -> tuple[list[tuple[str, str]], set[tuple[str, str
             dependency_name = key
         elif section == "importers" and indent == VERSION_INDENT and group and key == "version":
             if not value.startswith(LOCAL_NPM_VERSION_PREFIXES):
-                direct_dependencies.append((dependency_name, without_peer_suffix(value)))
+                direct_dependencies.append((dependency_name, without_peer_suffix(value), group))
         elif section == "packages" and indent == PACKAGE_INDENT:
-            packages.add(split_package_id(key))
+            package = split_package_id(key)
+            packages.setdefault(package, False)
+        elif section == "packages" and indent == PACKAGE_FIELD_INDENT and key in PLATFORM_FIELDS:
+            packages[package] = True
     return direct_dependencies, packages
 
 
@@ -223,26 +304,49 @@ def split_package_id(package_id: str) -> tuple[str, str]:
     return package_id[:at], without_peer_suffix(package_id[at + 1 :])
 
 
-def check_installed_npm_licenses(root: Path, locked_packages: set, licenses: dict) -> list[str]:
-    """pnpm-lock.yaml holds no licenses, so they're read from the installed packages. Packages for other
-    platforms (another OS's native binary) aren't installed here; their own platform's run checks them."""
+def check_installed_npm_licenses(
+    root: Path, locked_packages: dict, package_managers: set, allowlist: dict
+) -> list[str]:
+    """pnpm-lock.yaml holds no licenses, so they're read from the installed packages. Two kinds of locked package
+    may be missing from node_modules: one built for another platform (its own platform's run checks it), and
+    pnpm itself, which corepack keeps elsewhere and whose license the allowlist records (check_listed_licenses).
+    Any other missing package fails: a stale or partial node_modules must not let a license through unread."""
     store = root / PNPM_STORE_FOLDER
     if not store.is_dir():
         return [f"{PNPM_STORE_FOLDER} is missing, so npm licenses can't be read; run `just env-js` first"]
     installed = read_installed_npm_packages(store)
     problems = []
-    for name, version in sorted(locked_packages):
+    counts = {"installed": 0, "listed": 0, "other platforms": 0}
+    for (name, version), is_platform_specific in sorted(locked_packages.items()):
         license_expression = installed.get((name, version))
-        if license_expression is None:
-            continue
-        if not license_passes(license_expression, name, licenses):
-            problems.append(f"npm package `{name}` {version} has license {license_expression}, outside `licenses`")
-    checked_count = len([package for package in locked_packages if package in installed])
+        if license_expression is not None:
+            counts["installed"] += 1
+            problems.extend(check_installed_license(name, version, license_expression, allowlist))
+        elif (name, version) in package_managers:
+            counts["listed"] += 1
+        elif is_platform_specific:
+            counts["other platforms"] += 1
+        else:
+            problems.append(
+                f"npm package `{name}` {version} is in the lock but not installed, so its license can't be read; "
+                "run `just env-js`"
+            )
     print(
-        f"check-deps: npm licenses read for {checked_count} of {len(locked_packages)} locked packages (the rest "
-        "are for other platforms and aren't installed here)"
+        f"check-deps: npm licenses: {counts['installed']} read from node_modules, {counts['listed']} from "
+        f"{NPM_ALLOWLIST}, {counts['other platforms']} skipped as builds for other platforms"
     )
     return problems
+
+
+def check_installed_license(name: str, version: str, license_expression: str, allowlist: dict) -> list[str]:
+    """An installed package's license passes `licenses`, and a listed one matches the license recorded for it."""
+    if not license_passes(license_expression, name, allowlist["licenses"]):
+        return [f"npm package `{name}` {version} has license {license_expression}, outside `licenses`"]
+    entry = allowlist["packages"].get(name)
+    if entry is not None and entry["license"] != license_expression:
+        recorded = entry["license"]
+        return [f"{NPM_ALLOWLIST}: `{name}` records license {recorded}, but {version} declares {license_expression}"]
+    return []
 
 
 def read_installed_npm_packages(store: Path) -> dict[tuple[str, str], str]:

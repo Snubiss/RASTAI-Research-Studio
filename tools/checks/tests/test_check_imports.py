@@ -194,12 +194,22 @@ def test_rust_wrapper_files(write_tree, run_check):
             "crates/rastai-formats/src/json/canonical.rs": "// hashed through crate::hashing, never blake3::hash\n"
             "use crate::hashing::hash_bytes;\n",
             "crates/rastai-formats/src/model_hash.rs": MODEL_HASH_USING_BLAKE3,
+            # A path inside a string or a block comment isn't a use.
+            "crates/rastai-formats/src/messages.rs": 'const HINT: &str = "call blake3::hash";\n/* rusqlite::open */\n',
         }
     )
     result = run_check("check-imports", "--root", str(root))
     assert result.returncode == 1
     assert "crates/rastai-formats/src/model_hash.rs:2: uses `blake3`, which only" in result.stdout
     assert "1 problem(s)" in result.stdout
+
+
+def test_a_rust_use_after_a_double_slash_in_a_string_fails(write_tree, run_check):
+    """`//` inside a string starts no comment, so the blake3 call after it on the same line is still seen."""
+    root = write_tree({"crates/rastai-formats/src/digest.rs": 'let d = "x//y"; blake3::hash(b"a");\n'})
+    result = run_check("check-imports", "--root", str(root))
+    assert result.returncode == 1
+    assert "crates/rastai-formats/src/digest.rs:1: uses `blake3`" in result.stdout
 
 
 def test_every_contracts_package_has_a_row(load_check):

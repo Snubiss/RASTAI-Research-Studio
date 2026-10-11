@@ -45,13 +45,22 @@ source = { registry = "https://download.pytorch.org/whl/cpu" }
 NPM_ALLOWLIST = {
     "locks": ["pnpm-lock.yaml"],
     "licenses": {"allowed": ALLOWED_LICENSES, "named_entries": {}},
-    "packages": {"vitest": {"version": "5.0.2", "category": "dev", "license": "MIT", "reason": "tests"}},
+    "packages": {
+        "pnpm": {"version": "12.7.0", "category": "dev", "license": "MIT", "reason": "the workspace"},
+        "vitest": {"version": "5.0.2", "category": "dev", "license": "MIT", "reason": "tests"},
+    },
 }
+# pnpm itself (installed by corepack, not into node_modules) and a native build for another platform are in the
+# lock but not installed; every other package is.
 PNPM_LOCK = """lockfileVersion: '9.0'
 
 importers:
 
   .:
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.7.0
+        version: 12.7.0
     devDependencies:
       vitest:
         specifier: 5.0.2
@@ -65,8 +74,16 @@ importers:
 
 packages:
 
+  '@rolldown/binding-darwin-arm64@1.2.11':
+    resolution: {integrity: sha512-z}
+    cpu: [arm64]
+    os: [darwin]
+
   '@vitest/spy@5.0.2':
     resolution: {integrity: sha512-x}
+
+  pnpm@12.7.0:
+    resolution: {integrity: sha512-w}
 
   vitest@5.0.2:
     resolution: {integrity: sha512-y}
@@ -115,7 +132,31 @@ def run_deps(run_check, root):
 def test_passing_tree(write_tree, run_check):
     result = run_deps(run_check, write_tree(passing_files()))
     assert result.returncode == 0, result.stdout
-    assert "npm licenses read for 2 of 2 locked packages" in result.stdout
+    assert "npm licenses: 2 read from node_modules, 1 from deps/allowlist-npm.json, 1 skipped" in result.stdout
+
+
+def test_a_locked_npm_package_that_isnt_installed_fails(write_tree, run_check):
+    """A package for every platform that is missing from node_modules (a stale install) has an unread license."""
+    lock = PNPM_LOCK.replace(
+        "  vitest@5.0.2:", "  left-pad@1.3.0:\n    resolution: {integrity: sha512-v}\n\n  vitest@5.0.2:"
+    )
+    files = passing_files() | {"pnpm-lock.yaml": lock}
+    result = run_deps(run_check, write_tree(files))
+    assert result.returncode == 1
+    assert "npm package `left-pad` 1.3.0 is in the lock but not installed" in result.stdout
+
+
+def test_npm_allowlist_licenses_are_checked(write_tree, run_check):
+    """pnpm's license is never installed to read, so its recorded one must pass `licenses`; an installed listed
+    package must declare the license recorded for it."""
+    allowlist = json.loads(json.dumps(NPM_ALLOWLIST))
+    allowlist["packages"]["pnpm"]["license"] = "GPL-3.0-only"
+    allowlist["packages"]["vitest"]["license"] = "Apache-2.0"
+    files = passing_files() | {"deps/allowlist-npm.json": json.dumps(allowlist)}
+    result = run_deps(run_check, write_tree(files))
+    assert result.returncode == 1
+    assert "deps/allowlist-npm.json: `pnpm` has license GPL-3.0-only, which `licenses` doesn't allow" in result.stdout
+    assert "deps/allowlist-npm.json: `vitest` records license Apache-2.0, but 5.0.2 declares MIT" in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -145,6 +186,50 @@ def test_a_crate_used_by_a_member_it_doesnt_list_fails(write_tree, run_check):
     result = run_deps(run_check, write_tree(files))
     assert result.returncode == 1
     assert "rastai-core: depends on `blake3`, but the allowlist names only rastai-formats as its users" in result.stdout
+
+
+ROOT_MANIFEST = """[workspace]
+members = ["crates/rastai-formats"]
+exclude = ["crates/rastai-formats/fuzz", "crates/rastai-store/fuzz", "spike"]
+"""
+FUZZ_MANIFEST = """[package]
+name = "rastai-formats-fuzz"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.rastai-formats]
+path = ".."
+"""
+
+
+def test_a_fuzz_crate_may_hold_a_dev_crate_in_its_dependencies(write_tree, run_check):
+    """cargo-fuzz puts libfuzzer-sys under [dependencies]; the fuzz crate is dev-only as a whole, so that passes.
+    crates/rastai-store/fuzz hasn't landed yet and the spike isn't a fuzz crate: both are skipped."""
+    files = passing_files() | {
+        "Cargo.toml": ROOT_MANIFEST,
+        "crates/rastai-formats/fuzz/Cargo.toml": FUZZ_MANIFEST,
+        "spike/Cargo.toml": '[package]\nname = "spike"\n\n[dependencies]\nmemmap2 = "0.9"\n',
+    }
+    result = run_deps(run_check, write_tree(files))
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_fuzz_crate_dependency_off_the_allowlist_fails(write_tree, run_check):
+    """The fuzz crates are their own workspaces, so cargo metadata of the root never lists them; their manifests
+    are read instead, and their crates must be on the allowlist like any other."""
+    fuzz_manifest = FUZZ_MANIFEST + "\n[target.'cfg(unix)'.dependencies]\nreqwest = \"=0.12.0\"\n"
+    fuzz_manifest += '\n[dev-dependencies.hash]\npackage = "blake3"\nversion = "=1.8.7"\n'
+    files = passing_files() | {"Cargo.toml": ROOT_MANIFEST, "crates/rastai-formats/fuzz/Cargo.toml": fuzz_manifest}
+    result = run_deps(run_check, write_tree(files))
+    assert result.returncode == 1
+    assert "rastai-formats-fuzz: depends on `reqwest`, which isn't in [workspace.metadata.rastai.allowlist]" in (
+        result.stdout
+    )
+    assert "rastai-formats-fuzz: depends on `blake3`, but the allowlist names only rastai-formats" in result.stdout
 
 
 @pytest.mark.parametrize(
