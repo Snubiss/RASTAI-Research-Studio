@@ -53,6 +53,61 @@ def test_a_failing_generator_fails(write_tree, load_check):
     assert "type description is broken" in problems
 
 
+# A generator that writes one of its two files and then fails, the way a generator dies partway through.
+PARTLY_WRITING_FAILING_SCRIPT = """import sys
+from pathlib import Path
+
+output_root = Path(sys.argv[1])
+(output_root / "generated").mkdir(parents=True, exist_ok=True)
+(output_root / "generated/greeting.txt").write_text("hello\\n")
+sys.exit("error: expected one of `!` or `::`, found `<eof>`")
+"""
+
+
+def test_a_failing_generator_reports_only_its_error_and_never_says_delete(write_tree, load_check):
+    # The checked-in outputs are present (and one is even hand-edited). The generator fails, so its temporary tree
+    # is empty: comparing against it would call every checked-in file stale and tell the reader to delete it.
+    check = load_check("check-generated")
+    root = write_tree(
+        {
+            "tools/greeting_codegen.py": "import sys\nsys.exit('error: expected one of `!` or `::`, found `<eof>`')\n",
+            "generated/greeting.txt": "hello, edited by hand\n",
+            "generated/nested/count.txt": "2\n",
+        }
+    )
+    problems = check.find_stale_files(root, [make_generator(check)])
+    assert problems == [
+        "greeting-codegen failed (exit 1):",
+        "error: expected one of `!` or `::`, found `<eof>`",
+    ]
+
+
+def test_a_generator_that_fails_partway_is_not_compared(write_tree, load_check):
+    check = load_check("check-generated")
+    root = write_tree({"tools/greeting_codegen.py": PARTLY_WRITING_FAILING_SCRIPT} | FRESH_FILES)
+    problems = check.find_stale_files(root, [make_generator(check)])
+    assert problems == [
+        "greeting-codegen failed (exit 1):",
+        "error: expected one of `!` or `::`, found `<eof>`",
+    ]
+
+
+def test_a_failing_generator_prints_its_recovery_hint(write_tree, load_check):
+    check = load_check("check-generated")
+    root = write_tree({"tools/broken_codegen.py": "import sys\nsys.exit('broken')\n"})
+    generator = check.Generator(
+        name="broken-codegen",
+        command=[sys.executable, "tools/broken_codegen.py", check.OUTPUT_ROOT_PLACEHOLDER],
+        outputs=["generated"],
+        failure_hint="see the recovery note",
+    )
+    assert check.find_stale_files(root, [generator]) == [
+        "broken-codegen failed (exit 1):",
+        "broken",
+        "broken-codegen: see the recovery note",
+    ]
+
+
 def test_a_missing_generator_tool_is_named(write_tree, load_check):
     check = load_check("check-generated")
     generator = check.Generator(name="buf generate", command=["rastai-no-such-tool", "generate"], outputs=["generated"])
@@ -157,4 +212,28 @@ def test_the_catalog_generator_writes_its_four_outputs_after_buf(load_check):
         "packages/catalog/src/generated",
         "python/rastai_plugin/rastai_plugin/catalog/generated.py",
         "docs/reference/errors.md",
+    ]
+    # rastai-codegen builds on rastai-diag, so its failure points at the documented way out.
+    assert "crates/rastai-diag/CLAUDE.md" in catalog.failure_hint
+
+
+def test_a_failing_generator_does_not_stop_the_next_one_being_compared(write_tree, load_check):
+    check = load_check("check-generated")
+    root = write_tree(
+        {
+            "tools/broken_codegen.py": "import sys\nsys.exit('broken')\n",
+            "tools/errors_page_codegen.py": SINGLE_FILE_GENERATOR_SCRIPT,
+            "generated/notes/errors.md": "# Edited\n",
+        }
+    )
+    broken = check.Generator(
+        name="broken-codegen",
+        command=[sys.executable, "tools/broken_codegen.py", check.OUTPUT_ROOT_PLACEHOLDER],
+        outputs=["generated/broken"],
+    )
+    problems = check.find_stale_files(root, [broken, make_single_file_generator(check)])
+    assert problems == [
+        "broken-codegen failed (exit 1):",
+        "broken",
+        "generated/notes/errors.md: differs from a fresh codegen run; never edit it, run `just codegen`",
     ]
