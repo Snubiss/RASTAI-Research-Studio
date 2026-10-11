@@ -1,0 +1,5 @@
+# Every OS checks out each file byte for byte as git stores it: no end-of-line conversion, ever (M1-06).
+# Git for Windows, and so GitHub's Windows runners, turn LF into CRLF on checkout by default, and then the snapshot
+# and fixture tests, which compare bytes, fail on Windows only. Files are written with LF; prettier, rustfmt and ruff
+# keep them that way. Nothing is marked as text, so a binary fixture is never altered either.
+* -text

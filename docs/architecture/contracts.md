@@ -81,6 +81,7 @@ RASTAI/
   vitest.config.js           the list of JS test files for `just test-js` (unit tests next to their source)
   .prettierrc.json           prettier settings (dev tooling); ruff settings live in python/pyproject.toml
   .prettierignore            what prettier skips: prose (*.md, docs/), generated folders, spike/, build output
+  .gitattributes             `* -text`: no end-of-line conversion, so every OS checks out the bytes git stores
   buf.yaml  buf.gen.yaml     protobuf lint, `buf breaking`, codegen for Rust, JS (protobuf-es, target js+dts) and Python
   .github/workflows/         ci.yml, nightly.yml, nightly-gpu.yml, release.yml (thin: each step calls a `just` recipe)
 
