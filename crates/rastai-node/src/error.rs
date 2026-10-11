@@ -18,6 +18,8 @@ const CODE_IDENTITY_FILE_UNUSABLE: &str = "RRS-N0006";
 const CODE_HANDSHAKE_STALE: &str = "RRS-N0007";
 /// What N0003's message shows when the running node's process id can't be read.
 const UNKNOWN_PROCESS_ID: &str = "unknown";
+/// What N0002's message shows for a signature checked without a node to name (see `SignatureRefused`).
+const UNKNOWN_NODE_ID: &str = "unknown";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeError {
@@ -30,8 +32,9 @@ pub enum NodeError {
     /// The daemon's key isn't pinned in paired_daemons.json, its id isn't a key, or its signature doesn't verify
     /// with that key: in each case the caller hasn't proved it holds a paired daemon key.
     DaemonNotPaired { node_id: String, reason: String },
-    /// A signature didn't verify, or a public key or signature had the wrong form (identity.rs). The handshake turns
-    /// it into `DaemonNotPaired`, which names the node.
+    /// A signature didn't verify, or a public key or signature had the wrong form (identity.rs). identity.rs doesn't
+    /// know whose key it checked, so a caller that does names it: the handshake turns this into `DaemonNotPaired`
+    /// with the node's id. Reaching the edge unmapped, its message names node "unknown".
     SignatureRefused { reason: String },
     /// The daemon's clock is more than 5 minutes off ours, or its nonce was used before (designer flow C3a).
     HandshakeStale { daemon_id: String, reason: String },
@@ -88,7 +91,7 @@ pub fn node_error_diagnostic(error: &NodeError) -> Diagnostic {
             let daemon_version = daemon_version.to_string();
             // The message is written from the daemon's side: "Node X speaks version N; this daemon supports M".
             diagnostic(
-                "RRS-N0001",
+                CODE_PROTOCOL_VERSION_UNSUPPORTED,
                 &[
                     ("node_id", node_id),
                     ("version", &node_version),
@@ -96,15 +99,15 @@ pub fn node_error_diagnostic(error: &NodeError) -> Diagnostic {
                 ],
             )
         }
-        NodeError::DaemonNotPaired { node_id, .. } => diagnostic("RRS-N0002", &[("node_id", node_id)]),
-        NodeError::SignatureRefused { .. } => diagnostic("RRS-N0002", &[("node_id", "")]),
+        NodeError::DaemonNotPaired { node_id, .. } => diagnostic(CODE_DAEMON_NOT_PAIRED, &[("node_id", node_id)]),
+        NodeError::SignatureRefused { .. } => diagnostic(CODE_DAEMON_NOT_PAIRED, &[("node_id", UNKNOWN_NODE_ID)]),
         NodeError::HandshakeStale { daemon_id, reason } => {
-            diagnostic("RRS-N0007", &[("daemon_id", daemon_id), ("reason", reason)])
+            diagnostic(CODE_HANDSHAKE_STALE, &[("daemon_id", daemon_id), ("reason", reason)])
         }
         NodeError::NodeAlreadyRunning { process_id } => node_already_running_diagnostic(*process_id),
         NodeError::IdentityFileUnusable { path, reason } => {
             let path = path.display().to_string();
-            diagnostic("RRS-N0006", &[("path", &path), ("reason", reason)])
+            diagnostic(CODE_IDENTITY_FILE_UNUSABLE, &[("path", &path), ("reason", reason)])
         }
         NodeError::Core(core_error) => core_error_diagnostic(core_error),
         NodeError::Transport(transport_error) => transport_error_diagnostic(transport_error),
@@ -116,7 +119,7 @@ fn node_already_running_diagnostic(process_id: Option<i32>) -> Diagnostic {
         Some(process_id) => process_id.to_string(),
         None => UNKNOWN_PROCESS_ID.to_string(),
     };
-    diagnostic("RRS-N0003", &[("pid", &process_id)])
+    diagnostic(CODE_NODE_ALREADY_RUNNING, &[("pid", &process_id)])
 }
 
 /// rastai-core's errors that reach this crate's edge: the random source (the session token, a new node.key) and
@@ -203,5 +206,16 @@ mod tests {
         assert!(result.message.contains("node_x"), "{}", result.message);
         assert!(result.message.contains("version 1"), "{}", result.message);
         assert!(result.message.contains('7'), "{}", result.message);
+    }
+
+    // A signature refusal no caller named a node for still reads as a sentence, never "with node .".
+    #[test]
+    fn a_signature_refusal_without_a_node_says_unknown() {
+        let error = NodeError::SignatureRefused {
+            reason: "the signature doesn't verify".to_string(),
+        };
+        let result = node_error_diagnostic(&error);
+        assert_eq!(result.code, "RRS-N0002");
+        assert!(result.message.contains("node unknown."), "{}", result.message);
     }
 }

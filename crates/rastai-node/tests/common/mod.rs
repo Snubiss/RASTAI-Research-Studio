@@ -26,6 +26,8 @@ pub const HUNG_TOOL_SCRIPT: &str = "#!/bin/sh\nexec sleep 600\n";
 const NODE_START_WAIT: Duration = Duration::from_secs(20);
 const NODE_START_POLL: Duration = Duration::from_millis(20);
 const EXECUTABLE_MODE: u32 = 0o755;
+/// Where the stand-in nvidia-smi's telemetry stream writes its process id, in the machine's tools folder.
+const STREAM_PID_FILE: &str = "nvidia-smi-stream.pid";
 
 /// Numbers the folders of one test binary, so tests running at the same time never share one.
 static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
@@ -39,14 +41,30 @@ pub enum NvidiaSmi {
     Hung,
 }
 
+/// One test's folder, removed when the test ends, also when an assertion fails.
+pub struct TestFolder {
+    pub path: PathBuf,
+}
+
+impl Drop for TestFolder {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 /// A fresh, empty folder for one test. The name stays short so node.sock inside it fits a Unix socket address.
 #[allow(clippy::unwrap_used)]
-pub fn new_test_folder(prefix: &str) -> PathBuf {
+pub fn new_test_folder(prefix: &str) -> TestFolder {
     let number = NEXT_FOLDER_NUMBER.fetch_add(1, Ordering::SeqCst);
-    let folder = std::env::temp_dir().join(format!("{prefix}-{}-{number}", std::process::id()));
-    let _ = fs::remove_dir_all(&folder);
-    fs::create_dir_all(&folder).unwrap();
-    folder
+    let path = std::env::temp_dir().join(format!("{prefix}-{}-{number}", std::process::id()));
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).unwrap();
+    TestFolder { path }
+}
+
+/// The file where the stand-in nvidia-smi of the machine in `folder` writes its telemetry stream's process id.
+pub fn stream_pid_path(folder: &Path) -> PathBuf {
+    folder.join("bin").join(STREAM_PID_FILE)
 }
 
 /// The five data roots, each a folder inside the test folder.
@@ -91,7 +109,10 @@ pub fn machine_from_fixture(
     let recorded_gpus = fixture.join("tools/nvidia-smi-gpus.csv");
     let nvidia_smi_path = tools.join("nvidia-smi");
     match nvidia_smi {
-        NvidiaSmi::Recorded if recorded_gpus.exists() => write_tool(&nvidia_smi_path, &recorded_nvidia_smi(&fixture)),
+        NvidiaSmi::Recorded if recorded_gpus.exists() => {
+            let script = recorded_nvidia_smi(&fixture, &stream_pid_path(folder));
+            write_tool(&nvidia_smi_path, &script);
+        }
         NvidiaSmi::Recorded => {}
         NvidiaSmi::Hung => write_tool(&nvidia_smi_path, HUNG_TOOL_SCRIPT),
     }
@@ -140,14 +161,16 @@ pub async fn start_node(
 }
 
 /// A stand-in nvidia-smi that answers each query with the fixture's recording. The telemetry stream stays open
-/// after its lines, as the real `-l 5` does; `exec` makes sleep the process the node kills.
-fn recorded_nvidia_smi(fixture: &Path) -> String {
+/// after its lines, as the real `-l 5` does; `exec` makes sleep the process the node kills, under the process id
+/// written to `pid_path` first.
+fn recorded_nvidia_smi(fixture: &Path, pid_path: &Path) -> String {
     let tools = fixture.join("tools");
     let stream = tools.join("nvidia-smi-telemetry-stream.csv");
     let processes = tools.join("nvidia-smi-compute-apps.csv");
     format!(
-        "#!/bin/sh\ncase \"$*\" in\n  *pci.bus_id*) cat '{}' ;;\n  *utilization.gpu*) cat '{}' 2>/dev/null; exec sleep 600 ;;\n  *compute-apps*) cat '{}' 2>/dev/null ;;\nesac\n",
+        "#!/bin/sh\ncase \"$*\" in\n  *pci.bus_id*) cat '{}' ;;\n  *utilization.gpu*) echo $$ > '{}'; cat '{}' 2>/dev/null; exec sleep 600 ;;\n  *compute-apps*) cat '{}' 2>/dev/null ;;\nesac\n",
         tools.join("nvidia-smi-gpus.csv").display(),
+        pid_path.display(),
         stream.display(),
         processes.display()
     )

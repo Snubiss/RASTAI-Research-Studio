@@ -1291,7 +1291,7 @@ pub fn pin_daemon_key(path: &Path, daemon_id: &str) -> Result<(), NodeError>;  /
 
 // hardware.rs: never fails; whatever can't be read is a note and a partial profile
 pub struct HardwareSources { pub sys_root: PathBuf, pub proc_root: PathBuf, pub nvidia_smi: PathBuf, pub rocm_smi: PathBuf, pub tool_timeout: Duration }
-pub struct DetectedHardware { pub profile: HardwareProfile, pub notes: Vec<Diagnostic>, pub nvidia_gpus: Vec<GpuAddress> }
+pub struct DetectedHardware { pub profile: HardwareProfile, pub notes: Vec<Diagnostic>, pub nvidia_gpus: Vec<GpuAddress>, pub amd_gpus: Vec<GpuAddress> }
 pub fn system_hardware_sources() -> HardwareSources;                           // /sys, /proc, the tools on PATH, DETECTION_TOOL_TIMEOUT_SECONDS
 pub async fn detect_hardware(sources: &HardwareSources) -> DetectedHardware;
 ```
@@ -1322,7 +1322,7 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
     reattach_jobs(&state).await;                // section 7.4
     reattach_llama_servers(&state).await;       // pid, boot id, start ticks and /health with the saved key; re-adopt, never reload (7.8)
     adopt_and_sweep_sandboxes(&state).await;    // only after reattach (section 5.3)
-    start_telemetry(&state, &hardware_sources, detected.nvidia_gpus);
+    let _telemetry = start_telemetry(&state, &hardware_sources, detected.nvidia_gpus, detected.amd_gpus);   // stops when dropped
     start_heartbeat_loop(&state);
     serve_node_services(state).await            // NodeService + SandboxService on node.sock, until shutdown
 }
@@ -1477,8 +1477,8 @@ sequenceDiagram
 
 **Telemetry** (`telemetry.rs`):
 - NVIDIA: one long-running `nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits -l 5` child, read line by line, plus `nvidia-smi --query-compute-apps=pid,gpu_bus_id,used_memory --format=csv,noheader,nounits` every 5 s for per-process VRAM. A long-running reader avoids one process spawn per sample.
-- AMD: `rocm-smi --showuse --showmemuse --showtemp --showpower --showpids --json` every 5 s.
-- The result is `NodeTelemetry` in `NodeState`, sent in every heartbeat and in `GetHardware`. If the tool is missing or dies, telemetry shows "unavailable" for that GPU (it is left out of `NodeTelemetry.gpus`) and leases fall back to total VRAM from the hardware profile; jobs are not affected. A dead long-running reader starts again after 30 s.
+- AMD: `rocm-smi --showuse --showmemuse --showtemp --showpower --showpids --showbus --json` every 5 s. Each card is matched to its GPU by its PCI bus against the kfd addresses detection found, never by the N of `cardN` (rocm-smi's order need not be kfd's).
+- The result is `NodeTelemetry` in `NodeState`, sent in every heartbeat and in `GetHardware`. If the tool is missing or dies, telemetry shows "unavailable" for that GPU (it is left out of `NodeTelemetry.gpus`) and leases fall back to total VRAM from the hardware profile; jobs are not affected. A long-running reader that exits, or prints nothing for three intervals (a hung driver), is stopped and starts again after 30 s.
 - Only the backend's vendor is sampled: NVIDIA on a box with both (flows/platform.md 1.2), so the two vendors' driver indexes never meet in one list. rocm-smi gives memory in percent, so its bytes come from the profile's VRAM total. Its `--showpids` rows aren't read yet: their layout needs a recording from a ROCm box (M10's AMD runner).
 
 **Leases** (`vram_leases.rs`, states from contracts §9.4):

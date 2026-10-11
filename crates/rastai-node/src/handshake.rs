@@ -32,20 +32,22 @@ use rastai_proto::node::v1::{HandshakeRequest, HandshakeResponse};
 use serde_json::{Value, json};
 
 use crate::error::{NodeError, node_error_diagnostic};
-use crate::identity::{public_key_from_id, sign_challenge, verify_challenge};
+use crate::identity::{
+    public_key_from_id, sign_challenge, temporary_path_beside, verify_challenge, write_private_file,
+};
 use crate::node::{NodeState, current_hardware};
 
 /// The first field of every signed handshake message.
 const HANDSHAKE_DOMAIN: &str = "rastai-node-handshake-v1";
 /// The daemon's clock may differ from ours by this much (the proto comment on `sent_unix_ms`). A recorded handshake
 /// older than this is refused even before its nonce would be forgotten.
-const MAX_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
+const MAX_CLOCK_SKEW_MS: u64 = 5 * 60 * 1000;
 /// A nonce shorter than this can't be trusted to be fresh; the daemon sends 32 random bytes.
 const MIN_NONCE_BYTES: usize = 16;
 /// The session token: 32 random bytes as base32 text, like the job token (contracts 3.2).
 const SESSION_TOKEN_BYTES: usize = 32;
 /// Used nonces are kept this long: past it, the clock check refuses a replay on its own.
-const NONCE_MEMORY_MS: i64 = 2 * MAX_CLOCK_SKEW_MS;
+const NONCE_MEMORY_MS: u64 = 2 * MAX_CLOCK_SKEW_MS;
 /// At most this many used nonces are kept. A daemon handshakes once per connection, so a full list within ten minutes
 /// means only signed requests from a paired daemon arrived that fast; the oldest is then forgotten.
 const NONCE_MEMORY_LIMIT: usize = 4096;
@@ -53,11 +55,10 @@ const DAEMON_ID_PREFIX: &str = "daemon_";
 const PAIRED_DAEMONS_FORMAT_VERSION: u64 = 1;
 const FORMAT_VERSION_KEY: &str = "format_version";
 const DAEMON_IDS_KEY: &str = "daemon_ids";
-/// paired_daemons.json decides who may drive this node, so nobody but its owner may write it.
+/// paired_daemons.json decides who may drive this node, so nobody but its owner may write it. It is written mode
+/// 0600 (identity.rs's private files).
 #[cfg(unix)]
 const GROUP_AND_OTHER_WRITE_BITS: u32 = 0o022;
-#[cfg(unix)]
-const PAIRED_DAEMONS_FILE_MODE: u32 = 0o600;
 
 /// The daemon that holds the current session. A reconnect replaces it (designer flow C3a).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,8 +136,8 @@ pub fn read_paired_daemons(path: &Path) -> Result<Vec<String>, NodeError> {
     parse_paired_daemons(&text).map_err(|reason| unusable(path, reason))
 }
 
-/// Adds `daemon_id` to paired_daemons.json, which is written whole to a temporary file and renamed over the old one,
-/// mode 0600. Pinning a daemon that is already pinned changes nothing.
+/// Adds `daemon_id` to paired_daemons.json, which is written whole to a temporary file of this call's own, mode 0600,
+/// synced, and renamed over the old one. Pinning a daemon that is already pinned changes nothing.
 pub fn pin_daemon_key(path: &Path, daemon_id: &str) -> Result<(), NodeError> {
     if public_key_from_id(daemon_id, DAEMON_ID_PREFIX).is_none() {
         return Err(unusable(path, format!("{daemon_id} isn't a daemon key id")));
@@ -213,7 +214,8 @@ fn remember_fresh_nonce(state: &NodeState, request: &HandshakeRequest, now_ms: i
         daemon_id: request.daemon_id.clone(),
         reason,
     };
-    let skew_ms = (now_ms - request.sent_unix_ms).abs();
+    // abs_diff can't overflow, whatever time a request claims.
+    let skew_ms = now_ms.abs_diff(request.sent_unix_ms);
     if skew_ms > MAX_CLOCK_SKEW_MS {
         return Err(stale(format!(
             "its clock is {} seconds off this node's; at most {} are allowed",
@@ -230,7 +232,7 @@ fn remember_fresh_nonce(state: &NodeState, request: &HandshakeRequest, now_ms: i
     let mut table = lock_handshakes(state);
     table
         .recent_nonces
-        .retain(|(_, seen_ms)| now_ms - seen_ms <= NONCE_MEMORY_MS);
+        .retain(|(_, seen_ms)| now_ms.abs_diff(*seen_ms) <= NONCE_MEMORY_MS);
     if table
         .recent_nonces
         .iter()
@@ -274,12 +276,14 @@ fn write_paired_daemons(path: &Path, daemon_ids: &[String]) -> Result<(), NodeEr
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder).map_err(|error| unusable(path, format!("its folder can't be created: {error}")))?;
     }
-    let mut temporary_name = path.as_os_str().to_os_string();
-    temporary_name.push(".new");
-    let temporary_path = std::path::PathBuf::from(temporary_name);
-    fs::write(&temporary_path, text).map_err(|error| unusable(path, format!("can't be written: {error}")))?;
-    set_owner_only_mode(&temporary_path)?;
-    fs::rename(&temporary_path, path).map_err(|error| unusable(path, format!("can't be replaced: {error}")))
+    let temporary_path = temporary_path_beside(path)?;
+    write_private_file(&temporary_path, text.as_bytes())?;
+    let renamed = fs::rename(&temporary_path, path);
+    if let Err(error) = renamed {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(unusable(path, format!("can't be replaced: {error}")));
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -300,19 +304,6 @@ fn check_owner_only_writes(path: &Path) -> Result<(), NodeError> {
 /// Windows file access is set by ACLs, which the Windows build checks when it lands (tier 2).
 #[cfg(not(unix))]
 fn check_owner_only_writes(_path: &Path) -> Result<(), NodeError> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_owner_only_mode(path: &Path) -> Result<(), NodeError> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(PAIRED_DAEMONS_FILE_MODE))
-        .map_err(|error| unusable(path, format!("its mode can't be set: {error}")))
-}
-
-#[cfg(not(unix))]
-fn set_owner_only_mode(_path: &Path) -> Result<(), NodeError> {
     Ok(())
 }
 
@@ -344,6 +335,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Barrier};
 
     use rastai_core::paths::DataPaths;
     use rastai_core::settings::{default_settings, node_settings, resolve_settings};
@@ -355,14 +347,24 @@ mod tests {
 
     const HUB_SOCKET: &str = "/run/user/1000/rastai/node-hub.sock";
     const NOW_MS: i64 = 1_800_000_000_000;
+    /// Writers racing to pin a daemon in one paired_daemons.json, and how many times they race.
+    const RACING_WRITERS: usize = 8;
+    const RACE_ROUNDS: usize = 50;
     static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
 
-    /// A node in a fresh folder, and a daemon identity in the same folder.
+    /// A node in a fresh folder, and a daemon identity in the same folder. The folder is removed when the test ends,
+    /// also when an assertion fails.
     struct Setup {
         node: NodeState,
         daemon: NodeIdentity,
         daemon_id: String,
         folder: PathBuf,
+    }
+
+    impl Drop for Setup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.folder);
+        }
     }
 
     fn setup() -> Setup {
@@ -434,7 +436,6 @@ mod tests {
         let session = lock_handshakes(&setup.node).session.clone().unwrap();
         assert_eq!(session.session_token, response.session_token);
         assert_eq!(session.hub_socket_path, HUB_SOCKET);
-        let _ = fs::remove_dir_all(&setup.folder);
     }
 
     // The version check comes first, so even an unpaired daemon learns the node's version and can offer an update.
@@ -449,7 +450,6 @@ mod tests {
         assert_eq!(response.protocol_version, NODE_PROTOCOL_VERSION);
         assert!(response.session_token.is_empty());
         assert!(response.hardware.is_none());
-        let _ = fs::remove_dir_all(&setup.folder);
     }
 
     #[test]
@@ -466,7 +466,6 @@ mod tests {
         let mut changed = signed_request(&setup, &setup.daemon, &[4; 32], NOW_MS);
         changed.hub_socket_path = "/tmp/elsewhere.sock".to_string();
         assert_eq!(refusal_code(&setup, &changed), "RRS-N0002");
-        let _ = fs::remove_dir_all(&setup.folder);
     }
 
     #[test]
@@ -476,13 +475,61 @@ mod tests {
         let request = signed_request(&setup, &setup.daemon, &[5; 32], NOW_MS);
         assert!(accept_handshake(&setup.node, &request, NOW_MS).is_ok());
         assert_eq!(refusal_code(&setup, &request), "RRS-N0007");
-        let late = signed_request(&setup, &setup.daemon, &[6; 32], NOW_MS - MAX_CLOCK_SKEW_MS - 1);
+        let max_skew_ms = i64::try_from(MAX_CLOCK_SKEW_MS).unwrap();
+        let late = signed_request(&setup, &setup.daemon, &[6; 32], NOW_MS - max_skew_ms - 1);
         assert_eq!(refusal_code(&setup, &late), "RRS-N0007");
-        let early = signed_request(&setup, &setup.daemon, &[8; 32], NOW_MS + MAX_CLOCK_SKEW_MS + 1);
+        let early = signed_request(&setup, &setup.daemon, &[8; 32], NOW_MS + max_skew_ms + 1);
         assert_eq!(refusal_code(&setup, &early), "RRS-N0007");
         let short_nonce = signed_request(&setup, &setup.daemon, &[9; 4], NOW_MS);
         assert_eq!(refusal_code(&setup, &short_nonce), "RRS-N0007");
-        let _ = fs::remove_dir_all(&setup.folder);
+    }
+
+    // A paired daemon could sign any time at all; the farthest ones are stale too, never an overflow.
+    #[test]
+    fn a_time_at_either_end_of_the_range_is_stale() {
+        let setup = setup();
+        pin(&setup);
+        let far_past = signed_request(&setup, &setup.daemon, &[11; 32], i64::MIN);
+        assert_eq!(refusal_code(&setup, &far_past), "RRS-N0007");
+        let far_future = signed_request(&setup, &setup.daemon, &[12; 32], i64::MAX);
+        assert_eq!(refusal_code(&setup, &far_future), "RRS-N0007");
+    }
+
+    // Writers at the same time each use a temporary file of their own, so none fails and none leaves one behind.
+    #[test]
+    fn writers_racing_to_pin_all_succeed() {
+        let setup = setup();
+        let start = Arc::new(Barrier::new(RACING_WRITERS));
+        let mut writers = Vec::new();
+        for _ in 0..RACING_WRITERS {
+            let start = Arc::clone(&start);
+            let root = setup.folder.join("pins");
+            let daemon_id = setup.daemon_id.clone();
+            writers.push(std::thread::spawn(move || {
+                let mut results = Vec::new();
+                for round in 0..RACE_ROUNDS {
+                    let path = root.join(round.to_string()).join("paired_daemons.json");
+                    start.wait();
+                    results.push(pin_daemon_key(&path, &daemon_id));
+                }
+                results
+            }));
+        }
+        for writer in writers {
+            for result in writer.join().unwrap() {
+                assert_eq!(result, Ok(()));
+            }
+        }
+        for round in 0..RACE_ROUNDS {
+            let folder = setup.folder.join("pins").join(round.to_string());
+            let names: Vec<String> = fs::read_dir(&folder)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            assert_eq!(names, ["paired_daemons.json"], "round {round}");
+            let pinned = read_paired_daemons(&folder.join("paired_daemons.json")).unwrap();
+            assert_eq!(pinned, std::slice::from_ref(&setup.daemon_id));
+        }
     }
 
     // Length prefixes keep two different field lists from signing the same bytes.
@@ -514,7 +561,6 @@ mod tests {
         assert_eq!(read_paired_daemons(&path).unwrap_err().code(), "RRS-N0006");
         let request = signed_request(&setup, &setup.daemon, &[10; 32], NOW_MS);
         assert_eq!(refusal_code(&setup, &request), "RRS-N0006");
-        let _ = fs::remove_dir_all(&setup.folder);
     }
 
     #[cfg(unix)]
@@ -528,6 +574,5 @@ mod tests {
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
         assert_eq!(read_paired_daemons(&path).unwrap_err().code(), "RRS-N0006");
-        let _ = fs::remove_dir_all(&setup.folder);
     }
 }

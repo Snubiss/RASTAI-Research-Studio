@@ -29,7 +29,10 @@ mod on_unix {
     use rastai_proto::node::v1::{GetHardwareRequest, HandshakeRequest, HandshakeResponse};
     use tonic::transport::Channel;
 
-    use crate::common::{NvidiaSmi, machine_from_fixture, new_test_folder, start_node, test_node_options, test_paths};
+    use crate::common::{
+        NvidiaSmi, TestFolder, machine_from_fixture, new_test_folder, start_node, stream_pid_path, test_node_options,
+        test_paths,
+    };
 
     const TEST_FOLDER_PREFIX: &str = "rnhk";
     const TOOL_TIMEOUT: Duration = Duration::from_secs(5);
@@ -39,10 +42,14 @@ mod on_unix {
     /// How long the telemetry test waits for the stand-in nvidia-smi's first lines to reach GetHardware.
     const TELEMETRY_WAIT: Duration = Duration::from_secs(10);
     const TELEMETRY_POLL: Duration = Duration::from_millis(50);
+    /// Time an unstopped telemetry reader would have to start the stand-in nvidia-smi after a failed start.
+    const LEFTOVER_READER_WAIT: Duration = Duration::from_millis(1500);
+    /// A socket folder others can enter, which bind_local_socket refuses (RRS-N2005).
+    const OPEN_FOLDER_MODE: u32 = 0o777;
 
     /// A test machine with a daemon identity of its own, and the node's id (from the node key made up front).
     struct Machine {
-        folder: std::path::PathBuf,
+        folder: TestFolder,
         daemon: NodeIdentity,
         daemon_id: String,
         node_id: String,
@@ -50,8 +57,8 @@ mod on_unix {
 
     fn machine() -> Machine {
         let folder = new_test_folder(TEST_FOLDER_PREFIX);
-        let node = load_or_create_identity(&node_key_path(&test_paths(&folder))).unwrap();
-        let daemon = load_or_create_identity(&folder.join("daemon.key")).unwrap();
+        let node = load_or_create_identity(&node_key_path(&test_paths(&folder.path))).unwrap();
+        let daemon = load_or_create_identity(&folder.path.join("daemon.key")).unwrap();
         Machine {
             daemon_id: daemon_id_from_public_key(&public_key_bytes(&daemon)),
             node_id: rastai_core::ids::node_id_from_public_key(&public_key_bytes(&node)),
@@ -87,8 +94,8 @@ mod on_unix {
         tokio::task::JoinHandle<Result<(), rastai_node::error::NodeError>>,
         NodeServiceClient<Channel>,
     ) {
-        let sources = machine_from_fixture("no_gpu", &machine.folder, NvidiaSmi::Recorded, TOOL_TIMEOUT);
-        start_node(test_node_options(&machine.folder, sources)).await
+        let sources = machine_from_fixture("no_gpu", &machine.folder.path, NvidiaSmi::Recorded, TOOL_TIMEOUT);
+        start_node(test_node_options(&machine.folder.path, sources)).await
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -102,7 +109,6 @@ mod on_unix {
         assert_eq!(response.node_id, machine.node_id);
         assert!(response.session_token.is_empty());
         node.abort();
-        let _ = fs::remove_dir_all(&machine.folder);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -116,7 +122,6 @@ mod on_unix {
         assert!(response.session_token.is_empty());
         assert!(response.node_signature.is_empty());
         node.abort();
-        let _ = fs::remove_dir_all(&machine.folder);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -138,7 +143,6 @@ mod on_unix {
         let replayed = handshake(&mut client, request).await;
         assert_eq!(replayed.diagnostic.unwrap().code, "RRS-N0007");
         node.abort();
-        let _ = fs::remove_dir_all(&machine.folder);
     }
 
     // The stand-in nvidia-smi prints the recorded stream; GetHardware returns the profile and those samples.
@@ -147,11 +151,11 @@ mod on_unix {
         let machine = machine();
         let sources = machine_from_fixture(
             "rtx5080_rtx3090_gfx1036",
-            &machine.folder,
+            &machine.folder.path,
             NvidiaSmi::Recorded,
             TOOL_TIMEOUT,
         );
-        let (node, mut client) = start_node(test_node_options(&machine.folder, sources)).await;
+        let (node, mut client) = start_node(test_node_options(&machine.folder.path, sources)).await;
         let started = Instant::now();
         loop {
             let answer = client.get_hardware(GetHardwareRequest {}).await.unwrap().into_inner();
@@ -172,7 +176,6 @@ mod on_unix {
             tokio::time::sleep(TELEMETRY_POLL).await;
         }
         node.abort();
-        let _ = fs::remove_dir_all(&machine.folder);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -180,9 +183,11 @@ mod on_unix {
         let machine = machine();
         let (node, _client) = start_quiet_node(&machine).await;
         // The same data folders, so the same node.sock; the stand-in machine is a copy of its own.
-        let second_machine = machine.folder.join("second");
+        let second_machine = machine.folder.path.join("second");
         let sources = machine_from_fixture("no_gpu", &second_machine, NvidiaSmi::Recorded, TOOL_TIMEOUT);
-        let error = run_node(test_node_options(&machine.folder, sources)).await.unwrap_err();
+        let error = run_node(test_node_options(&machine.folder.path, sources))
+            .await
+            .unwrap_err();
         assert_eq!(error.code(), "RRS-N0003");
         let diagnostic = rastai_node::error::node_error_diagnostic(&error);
         assert!(
@@ -191,11 +196,47 @@ mod on_unix {
             diagnostic.message
         );
         node.abort();
-        let _ = fs::remove_dir_all(&machine.folder);
+    }
+
+    // A start that fails after telemetry began must not leave its readers, or their nvidia-smi, running.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_node_that_cant_serve_stops_its_telemetry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let machine = machine();
+        let sources = machine_from_fixture("rtx5080", &machine.folder.path, NvidiaSmi::Recorded, TOOL_TIMEOUT);
+        let socket_folder = test_paths(&machine.folder.path).runtime;
+        fs::create_dir_all(&socket_folder).unwrap();
+        fs::set_permissions(&socket_folder, fs::Permissions::from_mode(OPEN_FOLDER_MODE)).unwrap();
+        let error = run_node(test_node_options(&machine.folder.path, sources))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "RRS-N2005");
+        tokio::time::sleep(LEFTOVER_READER_WAIT).await;
+        // No pid file: the reader was stopped before it started nvidia-smi.
+        let Ok(pid) = fs::read_to_string(stream_pid_path(&machine.folder.path)) else {
+            return;
+        };
+        let pid = pid.trim();
+        let running = process_is_running(pid);
+        if running {
+            let _ = std::process::Command::new("kill").args(["-9", pid]).status();
+        }
+        assert!(!running, "the telemetry reader's nvidia-smi ({pid}) is still running");
+    }
+
+    /// True while `pid` is a live process; a zombie waiting to be reaped is not.
+    fn process_is_running(pid: &str) -> bool {
+        let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        // The state letter follows the command name, which is in parentheses and may hold spaces.
+        let after_name = stat.rsplit_once(')').map(|(_, rest)| rest).unwrap_or_default();
+        !after_name.trim_start().starts_with('Z')
     }
 
     fn pin(machine: &Machine) {
-        let path = paired_daemons_path(&test_paths(&machine.folder));
+        let path = paired_daemons_path(&test_paths(&machine.folder.path));
         pin_daemon_key(&path, &machine.daemon_id).unwrap();
         assert!(Path::new(&path).exists());
     }

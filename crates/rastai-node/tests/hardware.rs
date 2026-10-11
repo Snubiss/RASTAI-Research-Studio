@@ -42,32 +42,41 @@ mod on_unix {
     async fn each_recorded_machine_gives_its_expected_profile() {
         for case in CASES {
             let folder = new_test_folder(TEST_FOLDER_PREFIX);
-            let sources = machine_from_fixture(case, &folder, NvidiaSmi::Recorded, TOOL_TIMEOUT);
+            let sources = machine_from_fixture(case, &folder.path, NvidiaSmi::Recorded, TOOL_TIMEOUT);
             let detected = detect_hardware(&sources).await;
             let (expected_profile, expected_notes) = read_expected(case);
             assert_eq!(detected.profile, expected_profile, "{case}");
             let note_codes: Vec<String> = detected.notes.iter().map(|note| note.code.clone()).collect();
             assert_eq!(note_codes, expected_notes, "{case}");
-            let _ = fs::remove_dir_all(&folder);
         }
     }
 
-    // The bus ids telemetry maps per-process rows with come from the same recorded query.
+    // The bus ids telemetry matches tool rows with: NVIDIA's from the recorded query, AMD's from the kfd nodes.
     #[tokio::test]
-    async fn the_nvidia_bus_ids_are_kept_for_telemetry() {
+    async fn the_bus_ids_are_kept_for_telemetry() {
         let folder = new_test_folder(TEST_FOLDER_PREFIX);
-        let sources = machine_from_fixture("rtx5080_rtx3090_gfx1036", &folder, NvidiaSmi::Recorded, TOOL_TIMEOUT);
+        let sources = machine_from_fixture(
+            "rtx5080_rtx3090_gfx1036",
+            &folder.path,
+            NvidiaSmi::Recorded,
+            TOOL_TIMEOUT,
+        );
         let detected = detect_hardware(&sources).await;
         let bus_ids: Vec<&str> = detected.nvidia_gpus.iter().map(|gpu| gpu.bus_id.as_str()).collect();
         assert_eq!(bus_ids, ["00000000:01:00.0", "00000000:0D:00.0"]);
-        let _ = fs::remove_dir_all(&folder);
+        let amd_gpus: Vec<(u32, &str)> = detected
+            .amd_gpus
+            .iter()
+            .map(|gpu| (gpu.index, gpu.bus_id.as_str()))
+            .collect();
+        assert_eq!(amd_gpus, [(0, "0000:17:00.0")]);
     }
 
     // The GPU stays listed from sysfs, with no architecture, so nothing schedules on it (flows/platform.md 1.2).
     #[tokio::test]
     async fn a_hung_nvidia_smi_times_out_with_h0002_and_a_partial_profile() {
         let folder = new_test_folder(TEST_FOLDER_PREFIX);
-        let sources = machine_from_fixture("rtx5080", &folder, NvidiaSmi::Hung, SHORT_TOOL_TIMEOUT);
+        let sources = machine_from_fixture("rtx5080", &folder.path, NvidiaSmi::Hung, SHORT_TOOL_TIMEOUT);
         let started = Instant::now();
         let detected = detect_hardware(&sources).await;
         let elapsed = started.elapsed();
@@ -87,16 +96,15 @@ mod on_unix {
         assert_eq!(detected.profile.gpus[0].architecture, "");
         assert_eq!(detected.profile.gpus[0].name, "NVIDIA GPU 10de:2c02");
         assert_eq!(detected.profile.cpu_count, 2);
-        let _ = fs::remove_dir_all(&folder);
     }
 
     // The node's start waits for detection at most one timeout; then it serves, with the GPU listed as unknown.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_hung_nvidia_smi_does_not_block_the_node_start() {
         let folder = new_test_folder(TEST_FOLDER_PREFIX);
-        let sources = machine_from_fixture("rtx5080", &folder, NvidiaSmi::Hung, SHORT_TOOL_TIMEOUT);
+        let sources = machine_from_fixture("rtx5080", &folder.path, NvidiaSmi::Hung, SHORT_TOOL_TIMEOUT);
         let started = Instant::now();
-        let (node, mut client) = start_node(test_node_options(&folder, sources)).await;
+        let (node, mut client) = start_node(test_node_options(&folder.path, sources)).await;
         let answer = client.get_hardware(GetHardwareRequest {}).await.unwrap().into_inner();
         let elapsed = started.elapsed();
         assert!(
@@ -107,7 +115,6 @@ mod on_unix {
         assert_eq!(hardware.gpus.len(), 1);
         assert_eq!(hardware.gpus[0].architecture, "");
         node.abort();
-        let _ = fs::remove_dir_all(&folder);
     }
 
     /// The profile and note codes in `fixtures/hardware/<case>/expected.json`.
