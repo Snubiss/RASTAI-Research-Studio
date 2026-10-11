@@ -5,9 +5,9 @@
 *.md
 docs/
 
-# Generated, never edited by hand; check-generated diffs it against a fresh codegen run instead.
+# Generated, never edited by hand; check-generated diffs it against a fresh codegen run instead. @rastai/proto's
+# generated code is in its src/generated/; its package.json, index.js and golden test are hand-written.
 schemas/
-packages/proto/
 packages/catalog/
 **/src/generated/
 pnpm-lock.yaml

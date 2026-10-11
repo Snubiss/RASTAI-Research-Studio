@@ -227,7 +227,7 @@ Decisions in this tree:
 | Crate | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
 | `rastai-diag` | Catalog tables (generated from `catalog/`), `Diagnostic` type, text renderer, JSON-lines logger (`init_logger`, `log_info`) | all Rust processes, WASM | none | serde, serde_json |
-| `rastai-proto` (M1) | Generated protobuf messages and gRPC stubs | daemon, node, CLI, provider | none | prost, tonic |
+| `rastai-proto` | Generated protobuf messages and gRPC stubs | daemon, node, CLI, provider | none | prost, tonic |
 | `rastai-formats` | Every document type: parse, validate (4 layers), migrate, write; safetensors reader/writer (the one header validator); GGUF header reader and writer; zip reader and writer; content hashing (the one BLAKE3 wrapper); CRC-32 table; type descriptions for codegen | daemon, node, CLI, browser (WASM), Python (PyO3) | `rastai-diag` | serde, serde_json, blake3, miniz_oxide |
 | `rastai-formats-wasm` (M4) | `crates/rastai-formats/bindings/wasm/`: cdylib, plain string and byte functions for the browser | browser | `rastai-formats`, `rastai-diag` | wasm-bindgen |
 | `rastai-formats-python` (M1) | `crates/rastai-formats/bindings/python/`: cdylib, module `rastai_formats._native` | Python | `rastai-formats`, `rastai-diag` | pyo3 |
@@ -250,7 +250,7 @@ Decisions in this tree:
 
 | Package | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
-| `rastai_proto` (M1) | Generated protobuf and grpcio stubs | worker jobs | none | grpcio, protobuf runtime |
+| `rastai_proto` | Generated protobuf and grpcio stubs | worker jobs | none | grpcio, protobuf runtime |
 | `rastai_formats` (M1) | PyO3 wheel of `rastai-formats` + generated dataclasses for every document type; the safetensors header validator for Python | worker jobs, notebooks | none | none (native wheel) |
 | `rastai_plugin` (M1) | Extension-point base classes, the in-process registry, the WorkerHost client, plugin test host | worker jobs, plugin modules | `rastai_proto`, `rastai_formats` | grpcio |
 | `rastai_models` (M1) | ModelSpec compiler, blocks (attention variants, MoE, MLA, ALiBi, AttnRes), families, tensor I/O (header checks through `rastai_formats`), KV caches, static decode, LoRA, `apply_placement` (never plans) | worker jobs, notebooks | `rastai_formats`, `rastai_plugin` | torch; transformers only for the compat runtime (optional); onnx and onnxscript through `torch.onnx` (export jobs only) |
@@ -269,7 +269,7 @@ All hand-written code here is plain JavaScript (`.js`, `.jsx`) with JSDoc types 
 
 | Package | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
-| `@rastai/proto` (M1) | Generated protobuf-es messages and connect-es service stubs (`.js` + `.d.ts`) | browser | none | connect-es, protobuf-es runtime |
+| `@rastai/proto` | Generated protobuf-es messages and connect-es service stubs (`.js` + `.d.ts`) | browser | none | connect-es, protobuf-es runtime |
 | `@rastai/formats` (M1) | Generated document types (JSDoc `@typedef` modules or `.d.ts`) + WASM validator | browser | none | none |
 | `@rastai/catalog` (M1) | Generated error and term catalog | browser | none | none |
 | `@rastai/ui` (M1) | Design system: theme tokens (5.6), locked security-UI tokens and components, components, Basic/Advanced primitives, diagnostics view | browser, iframes, viewer | `@rastai/catalog`; `@rastai/proto`, `@rastai/canvas`, `@rastai/viz` (JSDoc type imports only: `Diagnostic`, `CanvasColors`, `VizColors`) | react, react-dom |
@@ -416,7 +416,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | typescript (the package) | Dev tooling: checker only | `just check-js` | runs `tsc --noEmit -p jsconfig.json` in checkJs mode; never ships, nobody writes TS syntax |
 | vite, vitest, `@vitest/browser`, pnpm, prettier, Playwright, axe-core, Tauri CLI | Dev tooling | JS workspace | build, tests, formatting, packaging |
 | pytest, ruff | Dev tooling | Python workspace | tests, lint and format |
-| buf, cargo-deny, cargo-fuzz, maturin, wasm-bindgen-cli, dist, release-please, just | Dev tooling | repo | build, codegen, release |
+| buf, cargo-deny, cargo-fuzz, maturin, wasm-bindgen-cli, dist, release-please, just | Dev tooling | repo | build, codegen, release. buf's plugins (node layout 3.4): `protoc-gen-prost` and `protoc-gen-tonic` (cargo install), `protoc-gen-es` (`package.json`), grpcio-tools (the cpu environment's dev group) |
 
 **Never bundled:** MySQL server and MariaDB are GPL-2.0. Rastai never bundles or distributes them; the user runs their own. The clients are `mysql_async` and PyMySQL only: not sqlx (RUSTSEC-2023-0071 through `rsa`), not Oracle's connectors, not mysqlclient. MinIO is a test-only CI service (the `mysql-archive` job's S3 target), never shipped.
 
@@ -569,16 +569,18 @@ All wire types live in `proto/rastai/<package>/v1/*.proto`, one file per service
 
 ### 4.1 `rastai.common.v1`
 
+Files `diagnostic.proto`, `blob.proto`, `hardware.proto`, `resources.proto` and `states.proto` (node layout 3.1). Enum values carry their enum's name as a prefix and start at `<ENUM>_UNSPECIFIED = 0` (buf's STANDARD lint): `SEVERITY_ERROR`, `JOB_STATE_QUEUED`, `LEASE_CLASS_PINNED`. Golden messages: `fixtures/proto-golden/common/`.
+
 | Message / enum | One line |
 |---|---|
-| `Diagnostic` | `code`, `severity` (ERROR/WARNING/INFO), `message`, `path`, `fix_text`, `fix_command_id`, `fix_arguments_json`. `path` grammar: `[<file>[:<line>:<column>]][#<json pointer>]` |
+| `Diagnostic` | `code`, `severity` (`Severity`: ERROR/WARNING/INFO), `message`, `path`, `fix_text`, `fix_command_id`, `fix_arguments_json`. `path` grammar: `[<file>[:<line>:<column>]][#<json pointer>]` |
 | `BlobRef` | `hash`, `size_bytes`, `media_type` |
-| `HardwareProfile` | CPU, RAM, disk, `repeated GpuInfo`, driver, backend, self-test result |
+| `HardwareProfile` | `cpu_model`, `cpu_count`, `ram_total_bytes`, `disk_free_bytes`, `repeated GpuInfo gpus`, `driver_version`, `backend` (the environment the node picked: `cuda13`, `cuda126`, `rocm` or `cpu`). The self-test result joins with M2's contract task |
 | `GpuInfo` | `index`, `name`, `architecture` (e.g. `sm_120`, `gfx1100`), `vram_bytes`, `vendor`, `driver_version` |
-| `HardwareFingerprint` | `environment_hash`, `gpus`, `driver_version`, `backend_version`, `torch_version`, `dtype`, `quantization`, `attention_kernel`, `seed`, `deterministic` |
+| `HardwareFingerprint` | `environment_hash`, `repeated GpuInfo gpus`, `driver_version`, `backend_version`, `torch_version`, `dtype`, `quantization`, `attention_kernel`, `uint64 seed`, `deterministic` |
 | `ResourceRequest` | `gpu_indices`, `vram_bytes`, `vram_bytes_per_gpu[]` (per-GPU sizes for a placed model, parallel to `gpu_indices`), `lease_class`, `cpu_count`, `ram_bytes`, `sandbox_count`, `optional bool may_reclaim_evictable` (unset reads as `true`; auto-run evals and analysis jobs set `false`) |
 | `NodeTelemetry` | `sampled_unix_ms`, `repeated GpuTelemetry gpus`, `ram_used_bytes`, `ram_total_bytes`, `disk_free_bytes` |
-| `GpuTelemetry` | `gpu_index`, `utilization_percent`, `vram_used_bytes`, `vram_total_bytes`, `temperature_celsius`, `power_watts`, `repeated ProcessVram processes` |
+| `GpuTelemetry` | `gpu_index`, `utilization_percent` (`uint32`), `vram_used_bytes`, `vram_total_bytes`, `temperature_celsius` and `power_watts` (`float`), `repeated ProcessVram processes` |
 | `ProcessVram` | `pid`, `vram_bytes` |
 | `JobState`, `RunState`, `ModelState`, `LeaseState`, `NodeState`, `SandboxState`, `PluginState`, `EvalRunState` | enums mirroring section 9 |
 | `EventClass` | `DURABLE`, `EPHEMERAL` |
@@ -2798,9 +2800,12 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | `[workspace.metadata.rastai.allowlist]` in `Cargo.toml` | the §27 crate table as data, read by `check-deps` |
 | `deps/engines/uv.json` | pinned uv version and hashes; the pinned uv ships next to the `rastai` binary and is pushed to paired nodes |
 | `python/envs/environments.json` | per environment: selection rule, supported AMD gfx targets, expected download size |
-| `python/conftest.py`, `tests/conftest.py` | shared pytest fixtures. `python/conftest.py`: `repo_root`, `fixtures_folder` (`fixtures/`); skips `gpu` tests without a device and `posix_only` tests on Windows |
+| `python/conftest.py`, `tests/conftest.py` | shared pytest fixtures. `python/conftest.py`: `repo_root`, `fixtures_folder` (`fixtures/`); skips `gpu` tests without a device and `posix_only` tests on Windows; `import_workspace_packages` imports each `python/<name>/<name>/` package before collection, so pytest's importlib mode never stands a namespace package in for it |
 | `cache_folder` files (node-local) | `anchors/<base_model_hash12>-<anchor_set_hash12>-<template_hash12>.safetensors`, `drift/<model_hash12>-<prompt_set_hash12>.safetensors`, `tokenized/<dataset_hash12>-<template_hash12>.safetensors`, `images/<dataset_hash12>-<side>.safetensors` |
-| `tools/codegen/rewrite_python_imports`, `tools/fixtures/render_chat_templates.py`, `tools/bench/gateway-load/`, `tools/bench/tokenizer/` | dev tooling, never shipped |
+| `tools/codegen/rewrite_python_imports`, `tools/fixtures/render_chat_templates.py`, `tools/bench/gateway-load/`, `tools/bench/tokenizer/` | dev tooling, never shipped. `rewrite_python_imports` is buf's Python plugin: it runs grpcio-tools' generators and rewrites `rastai.` imports to `rastai_proto.` (node layout 3.4) |
+| `tools/codegen/pyproject.toml`, `tools/codegen/tests/` | the Python codegen tools' ruff and pytest settings (ruff extends `python/pyproject.toml`); `test_rewrite_python_imports.py` |
+| `crates/rastai-proto/src/generated/`, `python/rastai_proto/rastai_proto/`, `packages/proto/src/generated/`, `packages/proto/src/index.js` | the three folders `buf generate` writes from `buf.gen.yaml` and `check-generated` compares; `@rastai/proto`'s hand-written entry, one re-export line per `.proto` file |
+| `fixtures/proto-golden/<package>/<MessageName>.json`, `.binpb`, `fixtures/proto-golden/README.md` | one filled golden per message: protobuf JSON with proto field names, and its binary form from `buf convert`; read by `crates/rastai-proto/tests/golden.rs`, `python/rastai_proto/tests/test_golden.py` and `packages/proto/src/golden.test.js` |
 | `tools/checks/check-deps`, `tools/checks/check-imports`, `tools/checks/check-generated`, `tools/checks/check-colors`, `tools/checks/check-no-typescript`, `tools/checks/check-unsafe`, `tools/checks/check-no-pickle`, `tools/checks/check-dco`, `tools/checks/check-names`, `tools/checks/check-schema-diff` | CI checks (the last two in M1, 12.6) |
 | `tools/checks/repo_files.py`, `tools/checks/pyproject.toml`, `tools/checks/tests/` | the checks' shared helpers (tree walk, `--root`, the report format, the JavaScript and Rust string and comment splitters); their ruff and pytest settings (ruff extends `python/pyproject.toml`); one test file per check, each running it on passing and failing fixture trees, and `test_repo_files.py` for the shared splitters |
 | `schemas/names.json`, `schemas/events/<event_type>.json` | generated by codegen, checked in (12.6) |

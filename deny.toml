@@ -50,7 +50,12 @@ allow-wildcard-paths = true
 highlight = "all"
 deny = [
   # Banned outright (contracts §2.5 and §12.2).
-  { crate = "anyhow", reason = "one hand-written error enum per crate (contracts §12.2)" },
+  # prost-derive, the proc macro behind prost's `Message` derive (the §27 protobuf crate, M1-08), uses anyhow inside
+  # the macro. It runs at compile time and links into no binary, so it is anyhow's one allowed parent; our own
+  # crates still can't depend on it (check-deps' allowlist doesn't list it).
+  { crate = "anyhow", wrappers = [
+    "prost-derive",
+  ], reason = "one hand-written error enum per crate (contracts §12.2); prost-derive's compile-time use only" },
   { crate = "thiserror", reason = "one hand-written error enum per crate (contracts §12.2)" },
   { crate = "reqwest", reason = "not carried over from the spike; HTTP is rastai-transport's job (contracts §2.5)" },
   { crate = "memmap2", reason = "not carried over from the spike; no mmap (layout section 4.12)" },

@@ -3,8 +3,9 @@
 # uv.lock with `uv sync --frozen` (M2-16). Until then `just env-cpu` runs the same sync into .dev/envs/cpu.
 #
 # Direct dependencies are pinned exactly (==), like the crates in Cargo.toml, so uv.lock and
-# deps/allowlist-python.json agree and an update is a deliberate PR. The packages the later tasks need
-# (pyarrow, torchvision, PyMySQL, onnx, onnxscript and the workspace packages) join with those tasks.
+# deps/allowlist-python.json agree and an update is a deliberate PR. Workspace packages (rastai-proto so far) have no
+# pin: they come from their folder (tool.uv.sources). The packages the later tasks need (pyarrow, torchvision,
+# PyMySQL, onnx, onnxscript and the other workspace packages) join with those tasks.
 
 [project]
 name = "rastai-env-cpu"
@@ -15,12 +16,14 @@ dependencies = [
     "tokenizers==0.23.2",  # compatibility surface, same core as the gateway's crate
     "grpcio==1.84.0",      # the worker protocol (protobuf row of §27)
     "protobuf==7.36.2",    # runtime for the generated code
+    "rastai-proto",        # the generated protobuf and grpcio code (python/rastai_proto)
 ]
 
 [dependency-groups]
 dev = [
     "pytest==9.1.1",       # test runner (dev tooling, §27)
     "ruff==0.16.9",        # lint and format (dev tooling, §27); settings in python/pyproject.toml
+    "grpcio-tools==1.84.0",  # grpcio's protobuf and gRPC generators, which `just codegen` runs through buf
 ]
 
 [tool.uv]
@@ -42,3 +45,6 @@ explicit = true            # only the packages named in [tool.uv.sources] come f
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
+# Workspace packages resolve by path in development, editable so a fresh `just codegen` is seen without a resync
+# (python layout 11.2); releases install built wheels instead.
+rastai-proto = { path = "../../rastai_proto", editable = true }

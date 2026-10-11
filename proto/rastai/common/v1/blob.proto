@@ -1,0 +1,12 @@
+// BlobRef: a pointer to content-addressed bytes in the blob store (contracts 4.1, 8.4).
+syntax = "proto3";
+
+package rastai.common.v1;
+
+message BlobRef {
+  // "blake3:<64 hex>" of the bytes; also the blob's name in the store.
+  string hash = 1;
+  uint64 size_bytes = 2;
+  // What the bytes are, for example "application/x-protobuf" or "application/vnd.rastai.model+json".
+  string media_type = 3;
+}

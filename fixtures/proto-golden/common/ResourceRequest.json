@@ -1,0 +1,10 @@
+{
+  "gpu_indices": [0, 1],
+  "vram_bytes": "30064771072",
+  "vram_bytes_per_gpu": ["12884901888", "17179869184"],
+  "lease_class": "LEASE_CLASS_PINNED",
+  "cpu_count": 8,
+  "ram_bytes": "34359738368",
+  "sandbox_count": 4,
+  "may_reclaim_evictable": false
+}

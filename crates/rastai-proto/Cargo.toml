@@ -1,0 +1,17 @@
+[package]
+name = "rastai-proto"
+description = "Generated protobuf messages and gRPC services for Rastai's wire contracts (proto/)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# Everything under src/generated/ is written by `just codegen` (buf with protoc-gen-prost and protoc-gen-tonic) and
+# checked in, so there is no build.rs and building never needs buf or protoc (layout rust-node-gateway-proto.md 3.4).
+# tonic joins with the first service (M1-09); rastai.common.v1 has messages and enums only.
+[dependencies]
+prost = { workspace = true }
+
+[lints]
+workspace = true

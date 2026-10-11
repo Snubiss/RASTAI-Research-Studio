@@ -1,0 +1,28 @@
+// What a job asks the node for (contracts 4.1, 9.4; node layout 3.2 and 7.7).
+syntax = "proto3";
+
+package rastai.common.v1;
+
+// The two kinds of VRAM lease (contracts 9.4). Only a pinned request may reclaim, and only evictable leases.
+enum LeaseClass {
+  LEASE_CLASS_UNSPECIFIED = 0;
+  // Chat and Psychology: may be reclaimed after EVICTION_GRACE_SECONDS.
+  LEASE_CLASS_EVICTABLE = 1;
+  // Training, gym and analyses: never reclaimed.
+  LEASE_CLASS_PINNED = 2;
+}
+
+message ResourceRequest {
+  repeated uint32 gpu_indices = 1;
+  uint64 vram_bytes = 2;
+  // Per-GPU sizes for a placed model, parallel to gpu_indices; empty when the job asks for vram_bytes on one GPU.
+  repeated uint64 vram_bytes_per_gpu = 3;
+  LeaseClass lease_class = 4;
+  uint32 cpu_count = 5;
+  uint64 ram_bytes = 6;
+  uint32 sandbox_count = 7;
+  // Unset reads as true. Auto-run evals and analysis jobs set false, so they never evict chat (plan §10 row 25).
+  // `optional` because a plain proto3 bool defaults to false, which would silently stop every pinned job from
+  // reclaiming.
+  optional bool may_reclaim_evictable = 8;
+}

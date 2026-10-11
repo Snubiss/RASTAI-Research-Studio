@@ -42,6 +42,18 @@
       "category": "dev",
       "license": "MIT",
       "reason": "JavaScript, JSON, CSS and YAML formatting inside `just check` (owner decision 7)"
+    },
+    "@bufbuild/protoc-gen-es": {
+      "version": "2.15.0",
+      "category": "dev",
+      "license": "Apache-2.0",
+      "reason": "protobuf-es's generator, which buf runs for packages/proto in `just codegen` (target js+dts, ADR-0036); brings @bufbuild/protoplugin and its own typescript 5.4.5, used only to write the .d.ts files"
+    },
+    "@bufbuild/protobuf": {
+      "version": "2.15.0",
+      "category": "compatibility",
+      "license": "(Apache-2.0 AND BSD-3-Clause)",
+      "reason": "the protobuf-es runtime the generated @rastai/proto code imports (spec §27 protobuf row; contracts 2.5)"
     }
   }
 }

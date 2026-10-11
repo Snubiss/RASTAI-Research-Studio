@@ -3,8 +3,7 @@
 
 Generated folders are never edited by hand and aren't reviewed, so CI proves them instead: every generator
 writes into a temporary tree and each of its output folders must match the checked-in one file for file.
-Until the codegen tasks land (M1-08 buf, M1-12 the rastai-codegen binaries) the generator list is empty and the
-check passes with a note; each of those tasks adds its row to GENERATORS.
+Each codegen task adds its row to GENERATORS: buf for proto/ (M1-08), then the rastai-codegen binaries (M1-12).
 """
 
 import subprocess
@@ -13,7 +12,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from repo_files import parse_root_argument, report
+from repo_files import SKIPPED_FOLDER_NAMES, parse_root_argument, report
 
 # Replaced in a generator's command by the temporary folder it must write into, laid out like the repository.
 OUTPUT_ROOT_PLACEHOLDER = "{output_root}"
@@ -31,15 +30,23 @@ class Generator:
     outputs: list[str]
 
 
-# The codegen steps of `just codegen`, in its order (layout rust-control-plane.md 2.5). Empty until M1-08 and M1-12.
-GENERATORS: list[Generator] = []
+# The codegen steps of `just codegen`, in its order (layout rust-control-plane.md 2.5). buf's --output puts every
+# `out` folder of buf.gen.yaml under the temporary tree; its plugins run from the repository root as usual.
+GENERATORS: list[Generator] = [
+    Generator(
+        name="buf generate (proto/, buf.gen.yaml)",
+        command=["buf", "generate", "--output", OUTPUT_ROOT_PLACEHOLDER],
+        outputs=[
+            "crates/rastai-proto/src/generated",
+            "python/rastai_proto/rastai_proto",
+            "packages/proto/src/generated",
+        ],
+    ),
+]
 
 
 def main() -> int:
     root = parse_root_argument("Regenerates every generated folder into a temporary tree and fails on any change.")
-    if not GENERATORS:
-        print("check-generated: no generators yet (M1-08 and M1-12 add them); nothing to compare")
-        return 0
     problems = find_stale_files(root, GENERATORS)
     return report("check-generated", problems, "every generated folder matches a fresh codegen run")
 
@@ -57,7 +64,10 @@ def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
 
 def run_generator(root: Path, generator: Generator, output_root: Path) -> list[str]:
     command = [part.replace(OUTPUT_ROOT_PLACEHOLDER, str(output_root)) for part in generator.command]
-    result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+    try:
+        result = subprocess.run(command, cwd=root, capture_output=True, text=True)
+    except FileNotFoundError:
+        return [f"{generator.name}: `{command[0]}` isn't installed; the justfile header says how to install it"]
     if result.returncode == 0:
         return []
     error_lines = result.stderr.strip().splitlines()[-ERROR_OUTPUT_LINES:]
@@ -81,10 +91,17 @@ def compare_folders(root: Path, output_root: Path, folder: str) -> list[str]:
 
 
 def files_in(folder: Path) -> set[str]:
-    """Every file below folder, as relative paths with / separators. A folder that doesn't exist holds none."""
+    """Every file below folder, as relative paths with / separators. A folder that doesn't exist holds none.
+    Folders git ignores (SKIPPED_FOLDER_NAMES) are left out: importing the generated Python writes __pycache__/
+    beside it, and that is no codegen output."""
     if not folder.is_dir():
         return set()
-    return {path.relative_to(folder).as_posix() for path in folder.rglob("*") if path.is_file()}
+    files = set()
+    for path in folder.rglob("*"):
+        relative = path.relative_to(folder)
+        if path.is_file() and not SKIPPED_FOLDER_NAMES & set(relative.parts):
+            files.add(relative.as_posix())
+    return files
 
 
 if __name__ == "__main__":

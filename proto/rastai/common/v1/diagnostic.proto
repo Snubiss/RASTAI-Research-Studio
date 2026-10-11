@@ -1,0 +1,30 @@
+// Diagnostic: how every failure crosses the wire (contracts 4.1; ADR-0004 decision 6).
+// A call that ran returns gRPC status OK and carries its failures as Diagnostics with catalog codes; only
+// transport-level failures use gRPC status codes (contracts 4). rastai-diag's `Diagnostic` is the in-process twin
+// of this message, with the same fields and meaning.
+syntax = "proto3";
+
+package rastai.common.v1;
+
+// How bad a diagnostic is. Warnings and info never stop an operation.
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_ERROR = 1;
+  SEVERITY_WARNING = 2;
+  SEVERITY_INFO = 3;
+}
+
+message Diagnostic {
+  // A catalog code: "RRS-E2004", or "PLG-<plugin_id>-0001" for a third-party plugin (contracts 10).
+  string code = 1;
+  Severity severity = 2;
+  // The catalog message with its placeholders filled.
+  string message = 3;
+  // Where the problem is: [<file>[:<line>:<column>]][#<json pointer>]. Empty when it has no location.
+  string path = 4;
+  string fix_text = 5;
+  // The command a fix button runs; empty when there is none.
+  string fix_command_id = 6;
+  // That command's arguments as JSON; empty when there is no fix command.
+  string fix_arguments_json = 7;
+}

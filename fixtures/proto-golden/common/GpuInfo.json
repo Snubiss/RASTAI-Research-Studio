@@ -1,0 +1,8 @@
+{
+  "index": 1,
+  "name": "NVIDIA GeForce RTX 5080",
+  "architecture": "sm_120",
+  "vram_bytes": "17094934528",
+  "vendor": "nvidia",
+  "driver_version": "580.82.09"
+}

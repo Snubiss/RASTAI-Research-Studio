@@ -1,0 +1,23 @@
+# rastai_proto: the generated protobuf and grpcio code for the wire contracts in proto/ (contracts 2.2; layout
+# rust-node-gateway-proto.md 3.4). Everything in rastai_proto/ is written by `just codegen` and never edited by hand;
+# tests/ is hand-written.
+
+[project]
+name = "rastai-proto"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+dependencies = [
+    # The generated modules check the runtime on import: protobuf of the same major version and at least the
+    # generator's (grpcio-tools 1.84.0 bundles protoc 35.1), and grpcio at least the generator's version.
+    # The environments pin the exact versions (python/envs/).
+    "protobuf>=7.35.1,<8",
+    "grpcio>=1.84.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_proto/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""

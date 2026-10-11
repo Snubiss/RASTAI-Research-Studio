@@ -1,0 +1,22 @@
+# buf settings for the wire contracts in proto/ (contracts §1 and §4; layout rust-node-gateway-proto.md 3.3).
+# `just proto-check` runs `buf lint` and `buf breaking` with these rules; `just codegen` runs buf.gen.yaml.
+version: v2
+
+modules:
+  - path: proto
+
+lint:
+  use:
+    - STANDARD
+  # Domain messages are passed directly where contracts says so (`rpc StartJob(JobSpec) returns (JobInfo)`), with
+  # no wrapper layer, so the three rules that demand a <Rpc>Request and <Rpc>Response per RPC are off (layout 3.3).
+  except:
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+
+breaking:
+  # FILE is buf's strictest set: besides field numbers and types it refuses moving a message to another file,
+  # because the generated Python and JavaScript modules are one per .proto file and callers import them by file.
+  use:
+    - FILE
