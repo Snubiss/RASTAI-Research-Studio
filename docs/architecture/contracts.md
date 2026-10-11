@@ -220,7 +220,7 @@ Decisions in this tree:
 
 | Crate | Purpose | Process | Internal deps | External deps (§27) |
 |---|---|---|---|---|
-| `rastai-diag` (M1) | Catalog tables (generated from `catalog/`), `Diagnostic` type, text renderer, JSON-lines logger (`init_logger`, `log_info`) | all Rust processes, WASM | none | serde, serde_json |
+| `rastai-diag` | Catalog tables (generated from `catalog/`), `Diagnostic` type, text renderer, JSON-lines logger (`init_logger`, `log_info`) | all Rust processes, WASM | none | serde, serde_json |
 | `rastai-proto` (M1) | Generated protobuf messages and gRPC stubs | daemon, node, CLI, provider | none | prost, tonic |
 | `rastai-formats` (M1) | Every document type: parse, validate (4 layers), migrate, write; safetensors reader/writer (the one header validator); GGUF header reader and writer; zip reader and writer; content hashing (the one BLAKE3 wrapper); CRC-32 table; type descriptions for codegen | daemon, node, CLI, browser (WASM), Python (PyO3) | `rastai-diag` | serde, serde_json, blake3, miniz_oxide |
 | `rastai-formats-wasm` (M4) | `crates/rastai-formats/bindings/wasm/`: cdylib, plain string and byte functions for the browser | browser | `rastai-formats`, `rastai-diag` | wasm-bindgen |

@@ -20,3 +20,9 @@ __pycache__/
 .DS_Store
 .idea/
 *.swp
+
+# Rust: rustfmt backups
+**/*.rs.bk
+
+# Throwaway data directory for `just serve-dev` (RASTAI_HOME=.dev)
+.dev/
