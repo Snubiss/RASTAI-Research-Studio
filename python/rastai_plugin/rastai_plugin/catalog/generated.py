@@ -190,6 +190,7 @@ RRS_H4003 = "RRS-H4003"
 RRS_H4004 = "RRS-H4004"
 RRS_J0001 = "RRS-J0001"
 RRS_J0002 = "RRS-J0002"
+RRS_J0004 = "RRS-J0004"
 RRS_J1001 = "RRS-J1001"
 RRS_J1002 = "RRS-J1002"
 RRS_J1003 = "RRS-J1003"
@@ -2126,6 +2127,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Try again; if it keeps happening, reinstall the environment.",
         fix_command_id="",
         docs_anchor="rrs-j0002",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_J0004,
+        severity="error",
+        title="Signal not delivered to a job",
+        message="Signal {signal} wasn't delivered to job {job_id}: {reason}.",
+        basic_text="Rastai couldn't pass this request on to the task.",
+        fix_text="Refresh the job list; if the task is still running, try again.",
+        fix_command_id="",
+        docs_anchor="rrs-j0004",
         retired=False,
     ),
     CatalogEntry(

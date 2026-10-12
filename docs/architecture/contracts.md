@@ -501,8 +501,8 @@ Not obvious from the picture:
 | Daemon → embedded node | Unix socket `node.sock` | gRPC (tonic), `NodeService` + `SandboxService` | Peer credentials + handshake token |
 | Daemon → remote node | OpenSSH child process forwarding `<runtime>/remote/<node_id>/node.sock` to the remote `node.sock` (`ssh -N -L`) | gRPC, same services | SSH with the host key pinned in `<data>/node/ssh_known_hosts`; the handshake proves the node's Ed25519 identity (signed challenge) and the daemon's |
 | Node → daemon | the embedded node calls `node-hub.sock` directly; a remote node calls a fresh `<runtime>/node-hub-<session_id>.sock` on its side, reverse-forwarded (`-R`) in the same SSH session | gRPC, `NodeHubService` | Socket peer + node session token from the handshake |
-| Node → worker job | per-job Unix socket `jobs/<job_id>.sock` | gRPC, `WorkerService` (worker serves, grpcio) | `RASTAI_JOB_TOKEN` (32 random bytes) in gRPC metadata; socket dir 0700; only BLAKE3(token) is on disk (`job.json` `job_token_hash`) |
-| Worker job → node | per-node Unix socket `worker-host.sock` | gRPC, `WorkerHostService` (node serves) | the same job token; the node maps token → job → permissions |
+| Node → worker job | per-job Unix socket `jobs/<job_id>.sock` | gRPC, `WorkerService` (worker serves, grpcio) | `RASTAI_JOB_TOKEN` (32 random bytes, as 64 lowercase hex characters) in the gRPC metadata key `rastai-job-token` (4.5); socket dir 0700; only BLAKE3(token) is on disk (`job.json` `job_token_hash`) |
+| Worker job → node | per-node Unix socket `worker-host.sock` | gRPC, `WorkerHostService` (node serves) | the same job token in the same metadata key; the node maps token → job → permissions |
 | Worker job → event log | file `runs/<run_id>/events.log` | append-only frames (section 7) | file ownership (one writer) |
 | Node → llama-server | HTTP on `127.0.0.1:<random>` | llama-server `/completion`, `/health`, `/tokenize` (checks only) | `--api-key`, random per launch |
 | Node → container engine | `/run/user/<uid>/podman/podman.sock` or `/var/run/docker.sock` | Docker Engine HTTP API | socket permissions |
@@ -732,7 +732,7 @@ Files `event_service.proto`, `event_record.proto` and `payloads.proto`. Golden m
 | `JobSignal` | `jobs.proto` | `JOB_SIGNAL_CANCEL` = 1, `STOP`, `PAUSE`, `RESUME`, `CHECKPOINT_NOW`, `STEP`, `TERMINATE`, `KILL` = 8 |
 | `JobSpec` | `jobs.proto` | `job_id`, `run_id`, `JobKind kind`, `environment_id`, `entry`, `arguments_json`, `ResourceRequest resources`, `repeated string network_hosts`, `data_policy`, `checkpoint_policy_json`, `plugin_id` |
 | `JobInfo` | `jobs.proto` | `job_id`, `run_id`, `JobKind kind`, `JobState state`, `uint32 pid`, `uint32 process_group_id`, `started_unix_ms`, `optional int32 exit_code` (set only once the process exited, since 0 is a real code), `Diagnostic last_error` |
-| `SignalJobRequest` / `SignalJobResponse` | `jobs.proto` | `job_id`, `JobSignal signal` (`sandbox_id` and `arguments_json` join with step mode, M7) / `Diagnostic diagnostic` |
+| `SignalJobRequest` / `SignalJobResponse` | `jobs.proto` | `job_id`, `JobSignal signal` (`sandbox_id` and `arguments_json` join with step mode, M7) / `Diagnostic diagnostic`: unset when the node delivered the signal, else `RRS-J0004` with the reason (no such job, the job has ended, no signal named, a `Control` value before the worker registered, or the delivery failed), or the worker's own `ControlResponse.diagnostic` |
 | `ListJobsRequest` / `ListJobsResponse` | `jobs.proto` | no fields yet / `repeated JobInfo jobs` |
 | `WatchRunEventsRequest` | `jobs.proto` | `run_id`, `uint64 after_sequence`; the stream is `rastai.events.v1.EventRecord` |
 | `WatchLiveRequest` | `live.proto` | no fields yet |
@@ -774,7 +774,7 @@ Files `event_service.proto`, `event_record.proto` and `payloads.proto`. Golden m
 
 A plugin module starts jobs only through `CommandReply.follow_up_jobs`; the daemon starts them as the plugin principal, so scheduling and the journal stay in the daemon. There is no `WorkerHostService.StartJob` in the prototype (plan §10 row 31).
 
-**The M1 skeleton** (M1-10, worker protocol v0). Files `worker_service.proto` (`Hello`, `Control`, `WatchLive`) and `worker_host_service.proto` (`Register`); every other RPC above arrives with the milestone that uses it (node layout 3.6). Golden messages: `fixtures/proto-golden/worker/`. The job token is never a field: it travels in gRPC metadata (3.2).
+**The M1 skeleton** (M1-10, worker protocol v0). Files `worker_service.proto` (`Hello`, `Control`, `WatchLive`) and `worker_host_service.proto` (`Register`); every other RPC above arrives with the milestone that uses it (node layout 3.6). Golden messages: `fixtures/proto-golden/worker/`. The job token is never a field: it travels in gRPC metadata (3.2) under the key `rastai-job-token`, as the 64 lowercase hex characters of `RASTAI_JOB_TOKEN`. The worker sends it on every `WorkerHostService` call and the node on every `WorkerService` call; each side refuses a call without it or with another job's token. `job.json` `job_token_hash` is `rastai_formats::hashing::hash_bytes` of those 64 characters (`blake3:<64 hex>`, 8.6).
 
 | Message | File | Fields |
 |---|---|---|
@@ -1649,7 +1649,7 @@ Every row comes from a durable event, so `rebuild-index` restores all of them:
   outputs/                    files a job produced before they are registered as artifacts
 ```
 
-- **`job.json` fields** (written by the node): `job_spec`, `job_socket_path`, `worker_host_socket_path`, `run_folder`, `cache_folder`, `environment_id`, `environment_lock_hash`, `hardware_profile`, `granted_leases[]`, `resolved_models{}`, `plugins[]`, `resume_from`, `pid`, `process_group_id`, `process_start_ticks`, `boot_id`, `job_token_hash` (BLAKE3 of the job token; the token itself is never on disk), `final_state`; for `serve_fast` jobs also the llama-server port and `--api-key` (file mode 0600). Start ticks, process group and boot id together guard against PID reuse.
+- **`job.json` fields** (written by the node): the node's own `job_id`, `run_id`, `kind`, `state` and `started_unix_ms` (node layout 7.4), then `job_spec`, `job_socket_path`, `worker_host_socket_path`, `run_folder`, `cache_folder`, `environment_id`, `environment_lock_hash`, `hardware_profile`, `granted_leases[]`, `resolved_models{}`, `plugins[]`, `resume_from`, `pid`, `process_group_id`, `process_start_ticks`, `boot_id`, `job_token_hash` (BLAKE3 of the job token, 4.5; the token itself is never on disk), `final_state` (empty while the job is live, then its terminal state as `job_state_name` writes it: `succeeded`, `failed` or `cancelled`); for `serve_fast` jobs also the llama-server port and `--api-key` (file mode 0600). Start ticks, process group and boot id together guard against PID reuse.
 - A checkpoint becomes visible only by the rename from `.partial`. `checkpoint.saved` is emitted after the rename.
 - Checkpoint policy default: keep the last 3 plus the best plus any pinned. GC deletes the rest.
 - Pinning or exporting a checkpoint registers each file as a blob (hard link when on the same filesystem).
@@ -2182,6 +2182,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 |---|---|---|
 | `RRS-J0001` | error | Job process could not be started |
 | `RRS-J0002` | error | Worker didn't register in time |
+| `RRS-J0004` | error | Signal not delivered to a job: no such job, the job has ended, no signal named, a `Control` value before the worker registered, or the `Control` call or the `kill` tool failed (`SignalJobResponse.diagnostic`, 4.4) |
 | `RRS-J1001` | error | Job killed by a signal |
 | `RRS-J1002` | error | Job killed by the kernel's out-of-memory killer |
 | `RRS-J1003` | error | Job killed by the node |

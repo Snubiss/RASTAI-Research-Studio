@@ -20,6 +20,16 @@
     "retired": false
   },
   {
+    "code": "RRS-J0004",
+    "severity": "error",
+    "title": "Signal not delivered to a job",
+    "message": "Signal {signal} wasn't delivered to job {job_id}: {reason}.",
+    "basic_text": "Rastai couldn't pass this request on to the task.",
+    "fix_text": "Refresh the job list; if the task is still running, try again.",
+    "docs_anchor": "rrs-j0004",
+    "retired": false
+  },
+  {
     "code": "RRS-J1001",
     "severity": "error",
     "title": "Job killed by a signal",

@@ -1733,6 +1733,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-J0004",
+        severity: Severity::Error,
+        title: "Signal not delivered to a job",
+        message: "Signal {signal} wasn't delivered to job {job_id}: {reason}.",
+        basic_text: "Rastai couldn't pass this request on to the task.",
+        fix_text: "Refresh the job list; if the task is still running, try again.",
+        fix_command_id: "",
+        docs_anchor: "rrs-j0004",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-J1001",
         severity: Severity::Error,
         title: "Job killed by a signal",
