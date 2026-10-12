@@ -365,6 +365,7 @@ dependencies = [
     { name = "protobuf" },
     { name = "rastai-data" },
     { name = "rastai-formats" },
+    { name = "rastai-models" },
     { name = "rastai-plugin" },
     { name = "rastai-proto" },
     { name = "rastai-worker" },
@@ -387,6 +388,7 @@ requires-dist = [
     { name = "protobuf", specifier = "==7.36.2" },
     { name = "rastai-data", editable = "../../rastai_data" },
     { name = "rastai-formats", editable = "../../rastai_formats" },
+    { name = "rastai-models", editable = "../../rastai_models" },
     { name = "rastai-plugin", editable = "../../rastai_plugin" },
     { name = "rastai-proto", editable = "../../rastai_proto" },
     { name = "rastai-worker", editable = "../../rastai_worker" },
@@ -406,6 +408,22 @@ dev = [
 name = "rastai-formats"
 version = "0.1.0"
 source = { editable = "../../rastai_formats" }
+
+[[package]]
+name = "rastai-models"
+version = "0.1.0"
+source = { editable = "../../rastai_models" }
+dependencies = [
+    { name = "rastai-formats" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "rastai-formats", editable = "../../rastai_formats" },
+    { name = "torch" },
+]
 
 [[package]]
 name = "rastai-plugin"

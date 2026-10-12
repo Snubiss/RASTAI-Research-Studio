@@ -246,7 +246,7 @@ python/rastai_models/
       onnx_import.py            .onnx → ModelSpec; unmapped subgraphs become opaque nodes
       onnx_proto/               generated from proto/third_party/onnx/onnx.proto by buf (never edited)
     io/
-      safetensors_reader.py     memory-maps a file, hands its header to rastai_formats.check_safetensors_header and reads tensor bytes only after the wheel accepted it; parses no header itself
+      safetensors_reader.py     hands the length prefix and then the header to rastai_formats (read_safetensors_header_length, check_safetensors_header) and memory-maps the file only after the wheel accepted it; parses no header itself
       safetensors_writer.py     writer (spike port): sorted names, 8-byte aligned header, string metadata, fsync; every file it writes must pass the wheel's check
       weight_files.py           one file or a sharded index (model.safetensors.index.json)
       gguf_writer.py            GGUF export: tensor names, dtypes, metadata; the bytes are encoded by rastai_formats
@@ -474,7 +474,7 @@ flowchart TD
 - Never loads `.bin` weights. The compat runtime passes `use_safetensors=True` and `trust_remote_code=False`; a repo without safetensors is refused (RRS-M2xxx).
 - Exact replay uses `KERNEL_MATH` or `KERNEL_EAGER`. SDPA's fast kernels sum in a different order in bf16 and can flip near-ties (spike 01b).
 - Every family must pass the parity suite before it ships (section 12).
-- **Never parses a safetensors header.** `crates/rastai-formats/src/safetensors/reader.rs` is the one owner; `safetensors_reader.py` calls the wheel and reads tensor bytes only after it accepts the header. Python and Rust therefore give the same verdict and `RRS-E60xx` code on every file in `fixtures/safetensors/`, because there is one implementation. `check-imports` fails if the module imports `struct` or `json` to read a header.
+- **Never parses a safetensors header.** `crates/rastai-formats/src/safetensors/header_check.rs` is the one owner; `safetensors_reader.py` calls the wheel and reads tensor bytes only after it accepts the header. Python and Rust therefore give the same verdict and `RRS-E60xx` code on every file in `fixtures/safetensors/`, because there is one implementation. `check-imports` fails if the module imports `struct` or `json` to read a header.
 - **Never plans a layer placement.** `apply_placement` applies the ModelSpec field; the planner is `plan_layer_placement` in `rastai-server`.
 - **Per-op numbers have one source.** Each op's output shape, parameter count and FLOPs match `fixtures/ops/<op>.json`, the same file Rust live stats (`compute_design_stats`) match.
 
@@ -482,7 +482,7 @@ flowchart TD
 
 | Test | What it proves |
 |---|---|
-| `tests/test_safetensors_reader.py` | all 33 files in `fixtures/safetensors/` give the verdict and code in `safetensors_expected.json` (6 valid, 27 malformed), the same corpus the Rust tests use; valid files return the expected tensor bytes; handles are closed on rejection |
+| `tests/test_safetensors_reader.py` | all 33 files in `fixtures/safetensors/` give the verdict and code in its `expected.json` (6 valid, 27 malformed), the same corpus the Rust tests use; valid files return the expected tensor bytes; handles are closed on rejection |
 | `tests/test_safetensors_delegation.py` | with the wheel's `check_safetensors_header` replaced by a function that rejects everything, the reader rejects every file, including the 6 valid ones: proof that it asks the wheel and decides nothing itself |
 | `tests/test_safetensors_writer.py` | round trip for every dtype, metadata, 8-byte alignment, empty tensors; every written file passes the wheel's check |
 | `tests/test_compile.py` | TextCNN template and a tiny decoder compile; parameter counts equal `fixtures/models/<family>/expected_counts.json`, the values Rust live stats also check |
@@ -512,7 +512,7 @@ flowchart TD
 | `decoding.py` `StaticDecoder` | `decoding.py` + `sampling.py` + `sessions.py` | Greedy argmax becomes in-graph sampling with logprob and alternatives packed. Lens modes naive and batched are dropped from the product (they stay as benchmark references in `tests/gpu/`); only the fused readout ships. Per-device capture stream and side-stream warm-up are kept as is. |
 | `generation.py` | `generation.py` | Kept as the greedy reference (tests, drift, anchors). |
 | `lora.py` | `lora.py` + `compiler/train_modes.py` | Attaches by graph node `train_mode` instead of hard-coded Gemma projection paths. One adapter becomes named adapters (policy, reward). Adds merge for export. |
-| `safetensors_reader.py`, `safetensors_writer.py` | `io/`; the header checks went to `crates/rastai-formats/src/safetensors/reader.rs` | The reader no longer parses headers: it calls the wheel and reads tensor bytes. Writer fsyncs. Sharded index support in `weight_files.py`. |
+| `safetensors_reader.py`, `safetensors_writer.py` | `io/`; the header checks went to `crates/rastai-formats/src/safetensors/header_check.rs` | The reader no longer parses headers: it calls the wheel and reads tensor bytes. Writer fsyncs. Sharded index support in `weight_files.py`. |
 | `hf_cache.py` | `hf_cache.py` | SDK only. |
 
 ### 2.9 Build order

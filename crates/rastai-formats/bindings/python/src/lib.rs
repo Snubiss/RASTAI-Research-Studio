@@ -6,7 +6,8 @@
 //! each). Every rule here is rastai-formats' own: this file only reads the arguments, calls it and shapes the answer.
 //!
 //! The functions release the GIL while rastai-formats works, because a document can be large (up to the 64 MiB of
-//! `ImportLimits`) and other Python threads, such as the worker's gRPC handlers, must keep running meanwhile.
+//! `ImportLimits`, and a safetensors header up to 100 MiB) and other Python threads, such as the worker's gRPC
+//! handlers, must keep running meanwhile. `read_safetensors_header_length` reads 8 bytes, so it keeps the GIL.
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -21,6 +22,10 @@ use rastai_formats::documents::{Document, document_header};
 use rastai_formats::error::FormatsError;
 use rastai_formats::json::canonical::canonical_json;
 use rastai_formats::limits::ImportLimits;
+use rastai_formats::safetensors::dtypes::dtype_name;
+use rastai_formats::safetensors::header_check::{
+    SafetensorsHeader, TensorEntry, check_safetensors_header, read_safetensors_header_length,
+};
 use rastai_formats::validate::{ReadOutcome, document_content_hash, read_document, write_document};
 use serde_json::{Map, Value};
 
@@ -37,6 +42,16 @@ const DOCUMENT_JSON_KEY: &str = "document_json";
 const DIAGNOSTICS_KEY: &str = "diagnostics";
 const READ_ONLY_KEY: &str = "read_only";
 const MIGRATED_FROM_VERSION_KEY: &str = "migrated_from_version";
+
+// The keys of `check_safetensors_header`'s answer: the accepted header, for Python's reader to slice tensors with.
+const TENSORS_KEY: &str = "tensors";
+const METADATA_KEY: &str = "metadata";
+const DATA_START_KEY: &str = "data_start";
+const NAME_KEY: &str = "name";
+const DTYPE_KEY: &str = "dtype";
+const SHAPE_KEY: &str = "shape";
+const START_KEY: &str = "start";
+const END_KEY: &str = "end";
 
 create_exception!(
     rastai_formats,
@@ -86,6 +101,24 @@ fn hash_bytes_py(py: Python<'_>, data: &[u8]) -> String {
     py.detach(|| rastai_formats::hashing::hash_bytes(data))
 }
 
+/// The header length from the first 8 bytes of a safetensors file `file_length` bytes long, once rastai-formats has
+/// checked that the file is long enough, the header isn't over the 100 MiB cap and it ends inside the file. Python's
+/// reader reads the header bytes only after this returns.
+#[pyfunction(name = "read_safetensors_header_length")]
+fn read_safetensors_header_length_py(length_prefix: &[u8], file_length: u64) -> PyResult<u64> {
+    read_safetensors_header_length(length_prefix, file_length).map_err(|diagnostic| validation_error(&[diagnostic]))
+}
+
+/// The one strict check of a safetensors header (contracts 2.4 rule 10): `header_bytes` is the JSON after the 8-byte
+/// length, `data_length` the size of the data section after it. An accepted header comes back as
+/// `{"tensors": [{"name", "dtype", "shape", "start", "end"}], "metadata": {...}, "data_start": n}`, the tensors in
+/// data-section order; Python reads tensor bytes only after this returns.
+#[pyfunction(name = "check_safetensors_header")]
+fn check_safetensors_header_py(py: Python<'_>, header_bytes: &[u8], data_length: u64) -> PyResult<String> {
+    let answer = py.detach(|| checked_header_json(header_bytes, data_length));
+    answer.map_err(|diagnostics| validation_error(&diagnostics))
+}
+
 #[pymodule]
 #[pyo3(name = "_native")]
 fn native_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -94,6 +127,8 @@ fn native_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(write_document_py, module)?)?;
     module.add_function(wrap_pyfunction!(content_hash_py, module)?)?;
     module.add_function(wrap_pyfunction!(hash_bytes_py, module)?)?;
+    module.add_function(wrap_pyfunction!(read_safetensors_header_length_py, module)?)?;
+    module.add_function(wrap_pyfunction!(check_safetensors_header_py, module)?)?;
     let exception_type = module.py().get_type::<FormatsValidationError>();
     module.add("FormatsValidationError", exception_type)?;
     Ok(())
@@ -180,6 +215,40 @@ fn formats_error_diagnostic(error: &FormatsError) -> Diagnostic {
         other => format!("{other:?}"),
     };
     diagnostic(error.code(), &[("reason", &reason)])
+}
+
+fn checked_header_json(header_bytes: &[u8], data_length: u64) -> Result<String, Vec<Diagnostic>> {
+    match check_safetensors_header(header_bytes, data_length) {
+        Ok(header) => Ok(header_json(&header)),
+        Err(diagnostic) => Err(vec![diagnostic]),
+    }
+}
+
+fn header_json(header: &SafetensorsHeader) -> String {
+    let tensors: Vec<Value> = header.entries.iter().map(tensor_value).collect();
+    let mut metadata = Map::new();
+    for (key, text) in &header.metadata {
+        metadata.insert(key.clone(), Value::String(text.clone()));
+    }
+    let mut answer = Map::new();
+    answer.insert(TENSORS_KEY.to_string(), Value::Array(tensors));
+    answer.insert(METADATA_KEY.to_string(), Value::Object(metadata));
+    answer.insert(DATA_START_KEY.to_string(), Value::from(header.data_start));
+    Value::Object(answer).to_string()
+}
+
+fn tensor_value(entry: &TensorEntry) -> Value {
+    let shape: Vec<Value> = entry.shape.iter().map(|size| Value::from(*size)).collect();
+    let mut tensor = Map::new();
+    tensor.insert(NAME_KEY.to_string(), Value::String(entry.name.clone()));
+    tensor.insert(
+        DTYPE_KEY.to_string(),
+        Value::String(dtype_name(entry.dtype).to_string()),
+    );
+    tensor.insert(SHAPE_KEY.to_string(), Value::Array(shape));
+    tensor.insert(START_KEY.to_string(), Value::from(entry.start));
+    tensor.insert(END_KEY.to_string(), Value::from(entry.end));
+    Value::Object(tensor)
 }
 
 fn diagnostics_value(diagnostics: &[Diagnostic]) -> Value {

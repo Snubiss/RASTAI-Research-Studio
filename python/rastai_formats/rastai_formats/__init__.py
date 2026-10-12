@@ -12,17 +12,24 @@ in for one with `monkeypatch.setattr(rastai_formats._native, ...)`.
 A refusal raises `FormatsValidationError`; its one argument is the diagnostics as a JSON array, each object with the
 fields of `rastai.common.v1.Diagnostic` (`code`, `severity`, `message`, `path`, `fix_text`, `fix_command_id`,
 `fix_arguments_json`).
+
+The two safetensors functions are the one header check (contracts 2.4 rule 10): rastai_models' reader calls them and
+reads tensor bytes only after both accepted the file, so it decides nothing about a header itself.
 """
+
+import json
 
 from rastai_formats import _native
 from rastai_formats._native import FormatsValidationError
 
 __all__ = [
     "FormatsValidationError",
+    "check_safetensors_header",
     "content_hash",
     "hash_bytes",
     "load_model_spec",
     "read_document",
+    "read_safetensors_header_length",
     "write_document",
 ]
 
@@ -56,3 +63,18 @@ def content_hash(document_json: str) -> str:
 def hash_bytes(data: bytes) -> str:
     """The BLAKE3 hash of some bytes, `blake3:<64 hex>`."""
     return _native.hash_bytes(data)
+
+
+def read_safetensors_header_length(length_prefix: bytes, file_length: int) -> int:
+    """The header length from the first 8 bytes of a safetensors file `file_length` bytes long. Raises
+    FormatsValidationError when the file is shorter than 8 bytes (RRS-E6001), the header passes the end of the file
+    (RRS-E6002) or the 100 MiB cap (RRS-E6003). Read the header bytes only after this returns."""
+    return _native.read_safetensors_header_length(length_prefix, file_length)
+
+
+def check_safetensors_header(header_bytes: bytes, data_length: int) -> dict:
+    """The strict check of a safetensors header: `header_bytes` is the JSON after the 8-byte length and `data_length`
+    the size of the data section. Returns the accepted header as plain data, `{"tensors": [{"name", "dtype", "shape",
+    "start", "end"}], "metadata": {str: str}, "data_start": int}`, the tensors in data-section order and their offsets
+    relative to the data section. Raises FormatsValidationError with the RRS-E60xx code of the first problem."""
+    return json.loads(_native.check_safetensors_header(header_bytes, data_length))

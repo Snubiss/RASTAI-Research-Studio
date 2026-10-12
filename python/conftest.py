@@ -6,6 +6,7 @@ rastai_models, the first package that can build a model.
 
 import importlib
 import os
+import warnings
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,9 @@ REPO_ROOT = PYTHON_FOLDER.parent
 FIXTURES_FOLDER = REPO_ROOT / "fixtures"
 # A workspace package's import package: python/<name>/<name>/__init__.py (python/CLAUDE.md).
 WORKSPACE_PACKAGE_INIT_PATTERN = "rastai*/rastai*/__init__.py"
+# torch warns when it is imported without numpy, which no Rastai code uses (python/pyproject.toml filters it during
+# the tests). Packages are imported here, before those filters apply, so the same warning is ignored here too.
+NUMPY_MISSING_WARNING = "Failed to initialize NumPy"
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -35,10 +39,12 @@ def import_workspace_packages() -> None:
     import error. That is on purpose: a broken package (for example a native wheel that wasn't built) should be
     the first thing a run reports, not a namespace-package mix-up in some other package's tests.
     """
-    for init_file in sorted(PYTHON_FOLDER.glob(WORKSPACE_PACKAGE_INIT_PATTERN)):
-        package_folder = init_file.parent
-        if package_folder.name == package_folder.parent.name:
-            importlib.import_module(package_folder.name)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=NUMPY_MISSING_WARNING, category=UserWarning)
+        for init_file in sorted(PYTHON_FOLDER.glob(WORKSPACE_PACKAGE_INIT_PATTERN)):
+            package_folder = init_file.parent
+            if package_folder.name == package_folder.parent.name:
+                importlib.import_module(package_folder.name)
 
 
 @pytest.fixture

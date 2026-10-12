@@ -662,9 +662,11 @@ crates/rastai-formats/
       writer.rs               stored-only streaming writer with fixed entry order and timestamps, so archives are
                               reproducible; ZIP64 records when a size, an offset or the entry count needs them
     safetensors/
+      mod.rs                  a list of pub mod lines
       dtypes.rs               dtype names and element sizes
-      reader.rs               strict reader (spike port): header checked fully before any tensor is read; the one header
-                              validator for Rust and Python (Python calls check_safetensors_header through the wheel)
+      header_check.rs         the one header validator for Rust and Python (spike port, M1-34): read_safetensors_header_length
+                              and check_safetensors_header; Python calls both through the wheel
+      reader.rs               strict reader over a ByteSource (M2-13): calls header_check.rs before any tensor is read
       writer.rs               layout planner: sorted names, header padded with spaces to 8 bytes, string metadata
     gguf/
       reader.rs               header-only GGUF v3 reader: key-values and tensor infos, no tensor bytes (node lease sizing)
@@ -950,14 +952,15 @@ Layer 4 is a separate call because only the caller knows the environment. The da
 ### 4.5 Byte formats: safetensors, GGUF, zip
 
 ```rust
-// safetensors/reader.rs (spike port, section 4.12)
-const HEADER_LENGTH_BYTES: u64 = 8;
-const MAX_HEADER_BYTES: u64 = 100 * 1024 * 1024;   // same cap as the reference implementation (spike)
+// safetensors/header_check.rs (spike port, section 4.12; M1-34) and reader.rs (M2-13)
+pub const HEADER_LENGTH_BYTES: u64 = 8;
+pub const MAX_HEADER_BYTES: u64 = 100 * 1024 * 1024;   // same cap as the reference implementation (spike)
 
 pub struct TensorEntry { pub name: String, pub dtype: SafetensorsDtype, pub shape: Vec<u64>, pub start: u64, pub end: u64 }
 pub struct SafetensorsHeader { pub entries: Vec<TensorEntry>, pub metadata: Vec<(String, String)>, pub data_start: u64 }
 
 pub fn read_safetensors_header(source: &dyn ByteSource) -> Result<SafetensorsHeader, Diagnostic>
+pub fn read_safetensors_header_length(length_prefix: &[u8], file_length: u64) -> Result<u64, Diagnostic>   // RRS-E6001-6003
 pub fn check_safetensors_header(header_bytes: &[u8], data_length: u64) -> Result<SafetensorsHeader, Diagnostic>
 pub fn read_tensor_bytes(source: &dyn ByteSource, header: &SafetensorsHeader, entry: &TensorEntry, buffer: &mut Vec<u8>) -> Result<(), Diagnostic>
 
@@ -1000,7 +1003,7 @@ pub fn inflate_chunk(stream: &mut InflateStream, input: &[u8], sink: &mut dyn By
 ```
 
 - **Strict safetensors contract (§23, spike):** no duplicate JSON keys; integers must be real integers; byte sizes use `checked_mul`; tensors tile the data section exactly; metadata maps strings to strings. One code per corpus class (contracts §10.3, `RRS-E6001`–`6017`).
-- **One owner of the header check** (contracts §2.4 rule 10). `rastai_models/io/safetensors_reader.py` calls `check_safetensors_header` through the wheel (4.7) and reads tensor bytes only after it accepts the header, so Python gets the same codes by construction. The corpus test runs through the wheel as well as in Rust (4.11).
+- **One owner of the header check** (contracts §2.4 rule 10). `rastai_models/io/safetensors_reader.py` calls `read_safetensors_header_length` and `check_safetensors_header` through the wheel (4.7) and reads tensor bytes only after it accepts the header, so Python gets the same codes by construction. The corpus test runs through the wheel as well as in Rust (4.11).
 - **GGUF** covers f32, f16, bf16 and Q8_0. K-quants are made by the pinned `llama-quantize` on the node (`layout/python.md` 5.3); the format writer never does them. The tensor side (names, metadata, vocabulary) is in `rastai_models/io/gguf_writer.py`, which calls these two functions through the wheel, so GGUF has one byte encoder.
 - **GGUF header reader** (`gguf/reader.rs`, step 3): reads the magic, version, key-values and tensor infos and stops at `data_start`; it never reads tensor bytes. The node sums `gguf_tensor_bytes` and reads the context length and KV-head keys to size a Fast model's lease. GGUF files are untrusted (downloads), so counts and string and array lengths are checked against `ImportLimits` before anything is allocated. Key-value types that `GgufValue` has no variant for (u8, i16, f64 and the like) are skipped by size, not refused. Codes are in contracts §10.3 (`RRS-E6501`–`6506`).
 - **Zip container code is in-house; DEFLATE is not** (owner decision 5). The central directory, ZIP64 records, limits, zip-slip checks and the stored writer are ours. Decompression is `miniz_oxide`, behind `zip/inflate.rs`, so the RFC 1951 decoder (about 400 lines of fiddly bit handling) isn't ours to fuzz and maintain. Reading supports stored and deflate (other tools write deflate: `.mcpb`, `.pt2`, exported projects from other machines). Writing is stored-only: replays are mostly safetensors, which barely compress, and stored archives are reproducible byte for byte. Deflate writing comes only if a measurement shows a size problem.
@@ -1063,6 +1066,9 @@ fn hash_bytes(data: &[u8]) -> String
 fn model_hash(weight_files: Vec<(String, String)>) -> String
 
 #[pyfunction]
+fn read_safetensors_header_length(length_prefix: &[u8], file_length: u64) -> PyResult<u64>  // before any header byte is read
+
+#[pyfunction]
 fn check_safetensors_header(header_bytes: &[u8], data_length: u64) -> PyResult<String>  // the one strict-contract check; Python
                                                                                        // reads tensor bytes only after it passes
 
@@ -1080,7 +1086,7 @@ fn write_zip_stored(destination_path: &str, entries: Vec<(String, String)>) -> P
 // exception: rastai_formats._native.FormatsValidationError(diagnostics_json)
 ```
 
-- **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, `check_safetensors_header` before every tensor read, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai_data` (`MysqlConnection` through the generated dataclass, validated by `read_document`), `rastai.load()` in notebooks.
+- **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, `read_safetensors_header_length` and `check_safetensors_header` before every tensor read, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai_data` (`MysqlConnection` through the generated dataclass, validated by `read_document`), `rastai.load()` in notebooks.
 - **Paths in the binding only.** `write_zip_stored` is the one function here that takes paths. The binding crate opens them; `rastai-formats` itself still only sees a `FileSource` and a `FileSink` (4.10).
 - Built by `just wheel` with maturin (§27 dev tooling) for CPython 3.12, `abi3` off: one wheel per platform in each `envs/<backend>/uv.lock`, by hash. Nothing installs at runtime. In development the cpu environment installs `python/rastai_formats` editable, built without build isolation by the maturin its lock pins; `just env-cpu` rebuilds the module on every sync.
 - The GIL is released (`py.detach`, pyo3 0.29's name for the older `allow_threads`) around anything that can take more than a millisecond (Q8_0 encoding, large documents).
@@ -1257,7 +1263,7 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 
 | Spike file | Goes to | Changes on the way |
 |---|---|---|
-| `spike/bakeoff/rust/src/safetensors.rs` | `src/safetensors/reader.rs` | `memmap2` and its `unsafe` block are dropped: the header is read with `read_at`, tensors are read on demand into the caller's buffer (contracts §2.5 bans `memmap2`; the daemon only reads headers and streams tensors). String errors become `Diagnostic`s with `RRS-E60xx` codes and a path naming the tensor. The serde duplicate-key visitor is replaced by the in-house JSON reader, which every document uses. `crc-fast` and the `read`/`validate` benchmark commands are dropped; the corpus test replaces `validate_command`. |
+| `spike/bakeoff/rust/src/safetensors.rs` | `src/safetensors/header_check.rs` (M1-34), `src/safetensors/reader.rs` (M2-13) | `memmap2` and its `unsafe` block are dropped: the header is read with `read_at`, tensors are read on demand into the caller's buffer (contracts §2.5 bans `memmap2`; the daemon only reads headers and streams tensors). String errors become `Diagnostic`s with `RRS-E60xx` codes and a path naming the tensor. The serde duplicate-key visitor is replaced by the in-house JSON reader, which every document uses. `crc-fast` and the `read`/`validate` benchmark commands are dropped; the corpus test replaces `validate_command`. |
 | `spike/src/rastai_spike/safetensors_writer.py` (layout rules only) | `src/safetensors/writer.rs` | Same layout: sorted names, header padded with spaces to 8 bytes, string-only metadata. The Python writer itself moves to `rastai_models/io/`. |
 | `spike/bakeoff/fixtures/safetensors/*`, `safetensors_expected.json` | `fixtures/safetensors/`, `expected.json` | Expected strings become codes. `shape_overflows_64_bits` must give `RRS-E6012` in Python too: the spike's Python reader (arbitrary-precision ints) reported a size mismatch instead of an overflow. |
 | Lesson from spike 07 | `json/reader.rs` | Header NaN and trailing garbage are syntax errors in every reader, so all three languages agree on what "valid JSON" means. |

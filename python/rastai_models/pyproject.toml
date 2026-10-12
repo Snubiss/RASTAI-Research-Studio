@@ -1,0 +1,25 @@
+# rastai_models: the Inspectable runtime (contracts 2.2; layout python.md section 2). M1-34 lands its safetensors
+# I/O: the reader, which reads tensor bytes only after the rastai_formats wheel accepted the header, and the writer.
+# The compiler and the TextCNN blocks join with M1-35.
+
+[project]
+name = "rastai-models"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+# torch is the foundation (§27) and carries no pin here: each environment in python/envs/ pins it, with its own
+# backend build. rastai-plugin joins with the first code that reads its catalog constants.
+dependencies = [
+    "torch",               # tensors from memory-mapped weight files, and the tensors the writer writes
+    "rastai-formats",      # the one safetensors header check (contracts 2.4 rule 10)
+]
+
+[tool.uv.sources]
+rastai-formats = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_models/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""

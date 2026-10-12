@@ -1,0 +1,134 @@
+{
+  "duplicate_tensor_names.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6006"
+  },
+  "empty_file.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6001"
+  },
+  "entry_not_object.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6007"
+  },
+  "gap_between_tensors.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6015"
+  },
+  "header_is_array.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6005"
+  },
+  "header_nan.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6004"
+  },
+  "header_not_json.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6004"
+  },
+  "header_not_utf8.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6004"
+  },
+  "header_trailing_garbage.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6004"
+  },
+  "length_over_limit.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6003"
+  },
+  "length_past_end_of_file.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6002"
+  },
+  "metadata_not_strings.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6017"
+  },
+  "offset_beyond_64_bits.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6011"
+  },
+  "offsets_float.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6010"
+  },
+  "offsets_past_end.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6011"
+  },
+  "offsets_reversed.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6011"
+  },
+  "offsets_wrong_length.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6010"
+  },
+  "overlapping_tensors.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6014"
+  },
+  "shape_bool.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6009"
+  },
+  "shape_float.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6009"
+  },
+  "shape_negative.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6009"
+  },
+  "shape_not_list.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6009"
+  },
+  "shape_overflows_64_bits.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6012"
+  },
+  "short_length_prefix.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6001"
+  },
+  "size_mismatch.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6013"
+  },
+  "trailing_bytes.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6016"
+  },
+  "unknown_dtype.safetensors": {
+    "accepted": false,
+    "code": "RRS-E6008"
+  },
+  "valid_empty_tensor.safetensors": {
+    "accepted": true,
+    "tensors": 2
+  },
+  "valid_metadata.safetensors": {
+    "accepted": true,
+    "tensors": 1
+  },
+  "valid_no_tensors.safetensors": {
+    "accepted": true,
+    "tensors": 0
+  },
+  "valid_padded_header.safetensors": {
+    "accepted": true,
+    "tensors": 1
+  },
+  "valid_scalar.safetensors": {
+    "accepted": true,
+    "tensors": 1
+  },
+  "valid_two_tensors.safetensors": {
+    "accepted": true,
+    "tensors": 2
+  }
+}
