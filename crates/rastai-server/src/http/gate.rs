@@ -270,7 +270,9 @@ fn allowed_without_origin(request: &RequestHead) -> bool {
 
 /// The owner token or a scoped token, each compared by hash. A scoped token's principal holds exactly the scopes
 /// it was created with; a revoked one is `RRS-C1006`, so its holder learns why rather than guessing at a typo.
-fn check_bearer(token: &str, auth: &AuthState) -> Result<Option<Principal>, Diagnostic> {
+/// `/mcp` calls it too (mcp_endpoint.rs): MCP runs as the bearer token on daemon.sock as well, where the gate itself
+/// admits the peer as the owner.
+pub(crate) fn check_bearer(token: &str, auth: &AuthState) -> Result<Option<Principal>, Diagnostic> {
     let token_hash = hash_bytes(token.as_bytes());
     if token_hash == auth.owner_token_hash {
         return Ok(Some(owner_principal()));

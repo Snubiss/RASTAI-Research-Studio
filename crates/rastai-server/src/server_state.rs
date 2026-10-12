@@ -2,8 +2,8 @@
 //! std locks that are never held across an `.await`.
 //!
 //! M1-26 brought the fields startup and sign-in need; M1-27 the command registry, the settings layers that sit above
-//! the files, the idempotency locks and the port; M1-32 the plugin host. The bus (M1-28), the node links and identity
-//! (M1-42, M1-47), the gateway and the rest join with the tasks that build them.
+//! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions. The bus (M1-28), the
+//! node links and identity (M1-42, M1-47), the gateway and the rest join with the tasks that build them.
 
 use std::sync::{Mutex, OnceLock, RwLock};
 
@@ -14,6 +14,7 @@ use rastai_formats::commands::{describe_arguments, describe_result};
 use rastai_formats::describe::json_schema::json_schema_for;
 use rastai_formats::describe::registry::describe_all_types;
 use rastai_formats::describe::types::TypeDescription;
+use rastai_mcp::server::session::McpSession;
 use rastai_proto::commands::v1::CommandDescriptor;
 use rastai_store::store::Store;
 use tokio::sync::watch;
@@ -38,6 +39,8 @@ pub struct Server {
     pub auth: AuthState,
     /// One lock per (principal, idempotency key) while a command with that key runs (commands/journal.rs).
     pub idempotency_locks: Mutex<Vec<IdempotencyKeyLock>>,
+    /// The open MCP sessions of `/mcp` (http/mcp_endpoint.rs), in memory only: a restart ends them all.
+    pub mcp_sessions: Mutex<Vec<McpSession>>,
     /// The loopback port, set once the listener is bound; `token.login_code.create` reports it.
     pub http_port: OnceLock<u16>,
     /// Set to true to stop the daemon (`request_shutdown`): the signal handler and `system.shutdown` do. The
@@ -62,6 +65,7 @@ pub fn build_server(
         plugins: RwLock::new(PluginHost::default()),
         auth,
         idempotency_locks: Mutex::new(Vec::new()),
+        mcp_sessions: Mutex::new(Vec::new()),
         http_port: OnceLock::new(),
         shutdown,
     }

@@ -85,7 +85,8 @@ fn content_type_of(headers: &HeaderMap) -> Option<&str> {
     headers.get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
 }
 
-fn experimental_apis_on(server: &Server) -> bool {
+/// Whether experimental commands are listed and run: `ListCommands` here, the MCP tool list in mcp_endpoint.rs.
+pub(crate) fn experimental_apis_on(server: &Server) -> bool {
     match server.settings.read() {
         Ok(settings) => setting_bool(&settings, EXPERIMENTAL_APIS_SETTING),
         Err(poisoned) => setting_bool(&poisoned.into_inner(), EXPERIMENTAL_APIS_SETTING),

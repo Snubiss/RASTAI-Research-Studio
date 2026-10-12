@@ -782,6 +782,7 @@ dependencies = [
  "rastai-core",
  "rastai-diag",
  "rastai-formats",
+ "rastai-mcp",
  "rastai-proto",
  "rastai-store",
  "rastai-transport",

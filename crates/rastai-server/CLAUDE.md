@@ -23,6 +23,10 @@ The daemon, and the composition root: the only crate that wires the others toget
   (layout 11.3); a change to it starts with a case in `fixtures/proto-golden/commands/connect_json/cases.json`, which
   `just test-js` checks against protobuf-es and `tests/connect_protocol.rs` against the codec. Its decoders read
   untrusted bodies, so the `connect_json` fuzz target covers them (ADR-0037).
+- **MCP runs as its bearer token.** `http/mcp_endpoint.rs` takes the principal from `Authorization: Bearer` through
+  the gate's `check_bearer`, on daemon.sock too, where the gate alone admits the peer as the owner: the `rastai mcp`
+  bridge comes in that way with a scoped token, and MCP never falls back to the owner. Every `tools/call` ends in
+  `execute_command`; `rastai-mcp` only turns messages into plain `McpStep`s.
 - **Fail closed.** A header the gate reads that is malformed or sent twice is refused, never guessed at. A path with
   `..`, `//`, `%` or `\` is never public. A non-loopback `daemon.listen` is used only as asked, with a warning.
 - **Secrets are kept as hashes.** Login codes, session ids, session keys and the owner token are compared by
