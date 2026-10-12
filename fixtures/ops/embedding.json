@@ -1,0 +1,28 @@
+{
+  "op": "embedding",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "textcnn",
+      "attributes": {
+        "vocab_size": 25000,
+        "embedding_size": 128
+      },
+      "input_shapes": [[64, 128]],
+      "output_shapes": [[64, 128, 128]],
+      "parameter_count": 3200000,
+      "flops": 0
+    },
+    {
+      "name": "three_axes_of_ids",
+      "attributes": {
+        "vocab_size": 10,
+        "embedding_size": 4
+      },
+      "input_shapes": [[2, 3, 5]],
+      "output_shapes": [[2, 3, 5, 4]],
+      "parameter_count": 40,
+      "flops": 0
+    }
+  ]
+}

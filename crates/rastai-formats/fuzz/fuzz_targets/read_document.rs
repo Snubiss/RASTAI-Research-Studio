@@ -1,8 +1,8 @@
 //! Fuzz target for `read_document` (contracts 12.5): arbitrary bytes, read once per known extension and once as a
 //! plain `.json` file, never panic, and every outcome keeps the promises callers rely on.
 //!
-//! `read_document` runs every layer for the step-1 document types, layer 3 included, once the bytes name one of
-//! them. The same bytes also go through `check_document` with a fuzz-only type that has every nested kind (Type,
+//! `read_document` runs every layer for every document type, layer 3 included (a ModelSpec's graph and shape checks
+//! too), once the bytes name one of them. The same bytes also go through `check_document` with a fuzz-only type that has every nested kind (Type,
 //! List, Map, Enum and a type that holds itself), so the layer-2 walk is fuzzed on deeper shapes than the real
 //! descriptions have, as tests/documents_corpus.rs tests it.
 

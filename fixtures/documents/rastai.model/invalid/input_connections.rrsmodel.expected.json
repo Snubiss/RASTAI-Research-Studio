@@ -1,0 +1,28 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "input_connections.rrsmodel:90:9#/graph/edges/4/to_input"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "input_connections.rrsmodel:95:9#/graph/edges/5/to_input"
+    },
+    {
+      "code": "RRS-E2007",
+      "path": "input_connections.rrsmodel:26:7#/graph/nodes/1"
+    },
+    {
+      "code": "RRS-E2007",
+      "path": "input_connections.rrsmodel:72:7#/graph/edges/1"
+    },
+    {
+      "code": "RRS-E2007",
+      "path": "input_connections.rrsmodel:46:7#/graph/nodes/3"
+    },
+    {
+      "code": "RRS-E2007",
+      "path": "input_connections.rrsmodel:54:7#/graph/nodes/4"
+    }
+  ]
+}

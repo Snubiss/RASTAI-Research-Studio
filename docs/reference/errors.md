@@ -155,6 +155,15 @@ Source: `catalog/errors/RRS-E.json`.
 - **In plain words:** A value in this file is written in a form Rastai can't use, such as a color that isn't six hex digits.
 - **Fix:** Rewrite the value in the form shown.
 
+<a id="rrs-e2007"></a>
+
+### RRS-E2007: Graph node input isn't connected exactly once
+
+- **Severity:** error
+- **Message:** Input {input_index} of {graph_node} has {connection_count} connections; it needs exactly one.
+- **In plain words:** A block in this design is missing its input, or has two things plugged into the same input.
+- **Fix:** Connect exactly one block, or one model input, to each input of the block.
+
 <a id="rrs-e3001"></a>
 
 ### RRS-E3001: File requires a plugin that isn't installed or enabled

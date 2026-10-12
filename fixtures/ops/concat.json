@@ -1,0 +1,44 @@
+{
+  "op": "concat",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "pooled_branches_on_the_last_axis",
+      "attributes": {},
+      "input_shapes": [
+        [2, 8],
+        [2, 8],
+        [2, 8]
+      ],
+      "output_shapes": [[2, 24]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "lengths_on_axis_1",
+      "attributes": {
+        "axis": 1
+      },
+      "input_shapes": [
+        [2, 3, 4],
+        [2, 5, 4]
+      ],
+      "output_shapes": [[2, 8, 4]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "negative_axis",
+      "attributes": {
+        "axis": -2
+      },
+      "input_shapes": [
+        [2, 3, 4],
+        [2, 1, 4]
+      ],
+      "output_shapes": [[2, 4, 4]],
+      "parameter_count": 0,
+      "flops": 0
+    }
+  ]
+}

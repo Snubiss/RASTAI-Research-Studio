@@ -593,7 +593,8 @@ crates/rastai-formats/
     header.rs                 SharedHeader (contracts §5.1) and its describe; header checks every document shares
     documents/
       mod.rs                  Document enum, the DocumentType rows (DOCUMENT_TYPES), type detection from extension and "type"
-      model.rs                ModelSpec, GraphNode, GraphEdge, BlockDefinition, InputRange, OutputHead, Objective, WeightsSource
+      model.rs                ModelSpec, ModelGraph, GraphNode, GraphEdge, InputRange, InputSpan, OutputHead, Objective,
+                              ModelDefaults, WeightsSource (M1-18); BlockDefinition joins with blocks (M2-01)
       model_ops.rs            the op vocabulary (contracts §5.3) and each op's attribute description
       harness.rs              Harness, HarnessTool, HarnessEnvironment, HarnessReward, HarnessTask
       data.rs                 DatasetSpec, DataSource (path, hf, url, blob, inline, mysql), Splits, DataChecks

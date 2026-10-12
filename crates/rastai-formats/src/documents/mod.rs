@@ -7,6 +7,8 @@
 //! `document_from_value` and `document_header` (crates/rastai-formats/CLAUDE.md).
 
 pub mod lock;
+pub mod model;
+pub mod model_ops;
 pub mod plugin_manifest;
 pub mod project;
 pub mod resume;
@@ -18,6 +20,9 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::documents::lock::{LOCK_FILE_NAME, LOCK_SCHEMA_VERSION, LOCK_TYPE_NAME, LockFile};
+use crate::documents::model::{
+    MODEL_FILE_EXTENSION, MODEL_SCHEMA_VERSION, MODEL_SPEC_NAME, MODEL_TYPE_NAME, ModelSpec,
+};
 use crate::documents::plugin_manifest::{
     PLUGIN_MANIFEST_NAME, PLUGIN_MANIFEST_SCHEMA_VERSION, PLUGIN_MANIFEST_TYPE_NAME, PluginManifest,
 };
@@ -91,6 +96,12 @@ pub const DOCUMENT_TYPES: &[DocumentType] = &[
         file_extensions: &[THEME_FILE_EXTENSION],
         description_name: THEME_DOCUMENT_NAME,
     },
+    DocumentType {
+        type_name: MODEL_TYPE_NAME,
+        schema_version: MODEL_SCHEMA_VERSION,
+        file_extensions: &[MODEL_FILE_EXTENSION],
+        description_name: MODEL_SPEC_NAME,
+    },
 ];
 
 /// A document that passed layers 1 and 2, as its typed struct. Each type's contract PR adds its variant; the
@@ -107,6 +118,7 @@ pub enum Document {
     Lock(LockFile),
     PluginManifest(PluginManifest),
     Theme(ThemeDocument),
+    Model(ModelSpec),
 }
 
 /// The shared header of any document.
@@ -119,6 +131,7 @@ pub fn document_header(document: &Document) -> &SharedHeader {
         Document::Lock(lock) => &lock.header,
         Document::PluginManifest(manifest) => &manifest.header,
         Document::Theme(theme) => &theme.header,
+        Document::Model(model) => &model.header,
     }
 }
 
@@ -134,6 +147,7 @@ pub fn document_from_value(type_name: &str, value: Value) -> Option<Result<Docum
         LOCK_TYPE_NAME => typed(value).map(Document::Lock),
         PLUGIN_MANIFEST_TYPE_NAME => typed(value).map(Document::PluginManifest),
         THEME_TYPE_NAME => typed(value).map(Document::Theme),
+        MODEL_TYPE_NAME => typed(value).map(Document::Model),
         _ => return None,
     };
     Some(document)

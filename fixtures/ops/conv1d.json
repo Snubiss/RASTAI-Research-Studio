@@ -1,0 +1,48 @@
+{
+  "op": "conv1d",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "textcnn_first_layer",
+      "attributes": {
+        "in_channels": 128,
+        "out_channels": 64,
+        "kernel_size": 3,
+        "padding": 1
+      },
+      "input_shapes": [[64, 128, 128]],
+      "output_shapes": [[64, 128, 64]],
+      "parameter_count": 24640,
+      "flops": 402653184
+    },
+    {
+      "name": "even_kernel_half_padding",
+      "attributes": {
+        "in_channels": 64,
+        "out_channels": 64,
+        "kernel_size": 4,
+        "padding": 2
+      },
+      "input_shapes": [[64, 128, 64]],
+      "output_shapes": [[64, 129, 64]],
+      "parameter_count": 16448,
+      "flops": 270532608
+    },
+    {
+      "name": "strided_dilated_without_bias",
+      "attributes": {
+        "in_channels": 3,
+        "out_channels": 5,
+        "kernel_size": 3,
+        "stride": 2,
+        "padding": 1,
+        "dilation": 2,
+        "bias": false
+      },
+      "input_shapes": [[2, 11, 3]],
+      "output_shapes": [[2, 5, 5]],
+      "parameter_count": 45,
+      "flops": 900
+    }
+  ]
+}

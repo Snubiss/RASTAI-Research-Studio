@@ -1,0 +1,281 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.model/1.json",
+  "type": "rastai.model",
+  "schema_version": 1,
+  "created_with": "rastai 0.1.0",
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2P",
+  "content_hash": "",
+  "derived_from": [],
+  "authors": [],
+  "license": "",
+  "source_url": "",
+  "requires": {},
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "embedding",
+        "op": "embedding",
+        "label": "Embedding",
+        "attributes": {
+          "embedding_size": 16,
+          "vocab_size": 1000
+        },
+        "train_mode": "freeze",
+        "observe": true
+      },
+      {
+        "node_id": "conv_1",
+        "op": "conv1d",
+        "label": "Conv 3",
+        "attributes": {
+          "in_channels": 16,
+          "kernel_size": 3,
+          "out_channels": 8
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_1",
+        "op": "activation",
+        "label": "ReLU",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "pool_1",
+        "op": "pool",
+        "label": "Max pool",
+        "attributes": {
+          "mode": "max"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_2",
+        "op": "conv1d",
+        "label": "Conv 4",
+        "attributes": {
+          "in_channels": 16,
+          "kernel_size": 4,
+          "out_channels": 8
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_2",
+        "op": "activation",
+        "label": "ReLU",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "pool_2",
+        "op": "pool",
+        "label": "Max pool",
+        "attributes": {
+          "mode": "max"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_3",
+        "op": "conv1d",
+        "label": "Conv 5",
+        "attributes": {
+          "in_channels": 16,
+          "kernel_size": 5,
+          "out_channels": 8
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_3",
+        "op": "activation",
+        "label": "ReLU",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "pool_3",
+        "op": "pool",
+        "label": "Max pool",
+        "attributes": {
+          "mode": "max"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "concat",
+        "op": "concat",
+        "label": "Concat",
+        "attributes": {},
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "hidden",
+        "op": "linear",
+        "label": "Hidden",
+        "attributes": {
+          "in_features": 24,
+          "out_features": 12
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "gelu",
+        "op": "activation",
+        "label": "GELU",
+        "attributes": {
+          "function": "gelu"
+        },
+        "train_mode": "train",
+        "observe": false
+      },
+      {
+        "node_id": "classifier",
+        "op": "classifier_head",
+        "label": "Classifier",
+        "attributes": {
+          "bias": false,
+          "class_count": 2,
+          "in_features": 12
+        },
+        "train_mode": "train",
+        "observe": true
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "embedding",
+        "to_node": "conv_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_1",
+        "to_node": "relu_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_1",
+        "to_node": "pool_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "pool_1",
+        "to_node": "concat",
+        "to_input": 0
+      },
+      {
+        "from_node": "embedding",
+        "to_node": "conv_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_2",
+        "to_node": "relu_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_2",
+        "to_node": "pool_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "pool_2",
+        "to_node": "concat",
+        "to_input": 1
+      },
+      {
+        "from_node": "embedding",
+        "to_node": "conv_3",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_3",
+        "to_node": "relu_3",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_3",
+        "to_node": "pool_3",
+        "to_input": 0
+      },
+      {
+        "from_node": "pool_3",
+        "to_node": "concat",
+        "to_input": 2
+      },
+      {
+        "from_node": "concat",
+        "to_node": "hidden",
+        "to_input": 0
+      },
+      {
+        "from_node": "hidden",
+        "to_node": "gelu",
+        "to_input": 0
+      },
+      {
+        "from_node": "gelu",
+        "to_node": "classifier",
+        "to_input": 0
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "tokens",
+      "range": {
+        "start": 0,
+        "end": 32
+      },
+      "encoder_node": "embedding"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "logits",
+      "graph_node": "classifier"
+    }
+  ],
+  "objective": {
+    "kind": "classification",
+    "settings": {
+      "label_smoothing": 0.1
+    }
+  },
+  "defaults": {
+    "dtype": "fp32",
+    "sequence_length": 32,
+    "batch_size": 4
+  },
+  "weights": [
+    {
+      "source": "ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N",
+      "family": "",
+      "name_mapping": {},
+      "prefix": "embedding."
+    }
+  ],
+  "placement": {
+    "classifier": 1,
+    "embedding": 0
+  }
+}

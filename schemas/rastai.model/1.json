@@ -1,0 +1,354 @@
+{
+  "$defs": {
+    "GraphEdge": {
+      "additionalProperties": false,
+      "description": "The output of one graph node feeding an input of another.",
+      "properties": {
+        "from_node": {
+          "description": "The graph node whose output it carries.",
+          "type": "string"
+        },
+        "to_input": {
+          "description": "Which input of to_node, from 0 (the default).",
+          "type": "integer"
+        },
+        "to_node": {
+          "description": "The graph node it feeds.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_node",
+        "to_node"
+      ],
+      "title": "GraphEdge",
+      "type": "object"
+    },
+    "GraphNode": {
+      "additionalProperties": false,
+      "description": "One graph node: an op and its attributes.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": {},
+          "description": "The op's attributes.",
+          "type": "object"
+        },
+        "label": {
+          "description": "Name shown on the canvas; empty means the node id.",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "Unique id in the graph.",
+          "type": "string"
+        },
+        "observe": {
+          "description": "Whether its outputs are observation points; true by default.",
+          "type": "boolean"
+        },
+        "op": {
+          "description": "An op, such as conv1d (contracts 5.3).",
+          "type": "string"
+        },
+        "train_mode": {
+          "description": "freeze, lora or train (the default).",
+          "enum": [
+            "freeze",
+            "lora",
+            "train"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "op"
+      ],
+      "title": "GraphNode",
+      "type": "object"
+    },
+    "InputRange": {
+      "additionalProperties": false,
+      "description": "One entry of the input map.",
+      "properties": {
+        "encoder_node": {
+          "description": "The graph node it feeds, as that node's input 0.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The input's name, such as tokens.",
+          "type": "string"
+        },
+        "range": {
+          "$ref": "#/$defs/InputSpan",
+          "description": "Its positions in the input sequence."
+        }
+      },
+      "required": [
+        "name",
+        "range",
+        "encoder_node"
+      ],
+      "title": "InputRange",
+      "type": "object"
+    },
+    "InputSpan": {
+      "additionalProperties": false,
+      "description": "Positions in the input sequence, start included, end left out.",
+      "properties": {
+        "end": {
+          "description": "One past the last position.",
+          "type": "integer"
+        },
+        "start": {
+          "description": "First position.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "InputSpan",
+      "type": "object"
+    },
+    "ModelDefaults": {
+      "additionalProperties": false,
+      "description": "The number format and the sizes a design's shapes are worked out with.",
+      "properties": {
+        "batch_size": {
+          "description": "Sequences in one batch.",
+          "type": "integer"
+        },
+        "dtype": {
+          "description": "bf16, fp16 or fp32.",
+          "enum": [
+            "bf16",
+            "fp16",
+            "fp32"
+          ],
+          "type": "string"
+        },
+        "sequence_length": {
+          "description": "Positions in one input sequence.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dtype",
+        "sequence_length",
+        "batch_size"
+      ],
+      "title": "ModelDefaults",
+      "type": "object"
+    },
+    "ModelGraph": {
+      "additionalProperties": false,
+      "description": "The graph of a design.",
+      "properties": {
+        "edges": {
+          "description": "Which output feeds which input.",
+          "items": {
+            "$ref": "#/$defs/GraphEdge"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "description": "Graph nodes.",
+          "items": {
+            "$ref": "#/$defs/GraphNode"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "title": "ModelGraph",
+      "type": "object"
+    },
+    "Objective": {
+      "additionalProperties": false,
+      "description": "What the model is trained to do.",
+      "properties": {
+        "kind": {
+          "description": "The objective, such as classification.",
+          "enum": [
+            "classification"
+          ],
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": {},
+          "description": "Its settings, checked by the recipe.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Objective",
+      "type": "object"
+    },
+    "OutputHead": {
+      "additionalProperties": false,
+      "description": "One head of the model.",
+      "properties": {
+        "graph_node": {
+          "description": "The graph node whose output it is.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The output's name, such as logits.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "graph_node"
+      ],
+      "title": "OutputHead",
+      "type": "object"
+    },
+    "WeightsSource": {
+      "additionalProperties": false,
+      "description": "Pretrained weights for the whole design or one part of it.",
+      "properties": {
+        "family": {
+          "description": "Family that maps its tensor names, such as llama.",
+          "type": "string"
+        },
+        "name_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Source tensor name to the design's, beyond the family's mapping.",
+          "type": "object"
+        },
+        "prefix": {
+          "description": "Put before every mapped name; empty for the whole design.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Model ref: hf:<org>/<name>@<revision>, blob:<hash> or ckpt:<checkpoint_id>.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "WeightsSource",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/rastai.model/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A model design (.rrsmodel): a graph of ops, its inputs, heads, objective and defaults.",
+  "properties": {
+    "$schema": {
+      "description": "URL of this document's JSON Schema.",
+      "type": "string"
+    },
+    "authors": {
+      "description": "Free-text author names.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "content_hash": {
+      "description": "blake3:<64 hex> of the canonical content.",
+      "type": "string"
+    },
+    "created_with": {
+      "description": "rastai <app version> that wrote the file.",
+      "type": "string"
+    },
+    "defaults": {
+      "$ref": "#/$defs/ModelDefaults",
+      "description": "Number format and the sizes shapes are worked out with."
+    },
+    "derived_from": {
+      "description": "<id>@<content_hash> of each parent (remix, import source).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "graph": {
+      "$ref": "#/$defs/ModelGraph",
+      "description": "Graph nodes and edges."
+    },
+    "id": {
+      "description": "Stable id, kept across edits.",
+      "type": "string"
+    },
+    "inputs": {
+      "description": "The input map: which input feeds which graph node.",
+      "items": {
+        "$ref": "#/$defs/InputRange"
+      },
+      "type": "array"
+    },
+    "license": {
+      "description": "SPDX license id.",
+      "type": "string"
+    },
+    "objective": {
+      "$ref": "#/$defs/Objective",
+      "description": "What the model is trained to do."
+    },
+    "outputs": {
+      "description": "The heads: graph nodes whose outputs are the model's.",
+      "items": {
+        "$ref": "#/$defs/OutputHead"
+      },
+      "type": "array"
+    },
+    "placement": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "Graph node id to GPU index, written by the layer placement planner.",
+      "type": "object"
+    },
+    "requires": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Plugins the document needs: plugin id to semver range.",
+      "type": "object"
+    },
+    "schema_version": {
+      "description": "Version of the type's schema, from 1.",
+      "type": "integer"
+    },
+    "source_url": {
+      "description": "Where the document came from, if anywhere.",
+      "type": "string"
+    },
+    "type": {
+      "description": "Document type, e.g. rastai.model.",
+      "type": "string"
+    },
+    "weights": {
+      "description": "Pretrained parts it starts from; empty to train from scratch.",
+      "items": {
+        "$ref": "#/$defs/WeightsSource"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "$schema",
+    "type",
+    "schema_version",
+    "id",
+    "graph",
+    "inputs",
+    "outputs",
+    "defaults"
+  ],
+  "title": "ModelSpec",
+  "type": "object"
+}

@@ -1,0 +1,49 @@
+{
+  "op": "pool",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "textcnn_global_max",
+      "attributes": {
+        "mode": "max"
+      },
+      "input_shapes": [[64, 130, 64]],
+      "output_shapes": [[64, 64]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "global_mean",
+      "attributes": {
+        "mode": "mean"
+      },
+      "input_shapes": [[2, 5, 3]],
+      "output_shapes": [[2, 3]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "window_mean_with_stride",
+      "attributes": {
+        "mode": "mean",
+        "kernel_size": 3,
+        "stride": 2
+      },
+      "input_shapes": [[2, 10, 4]],
+      "output_shapes": [[2, 4, 4]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "window_max_stride_defaults_to_window",
+      "attributes": {
+        "mode": "max",
+        "kernel_size": 2
+      },
+      "input_shapes": [[2, 7, 3]],
+      "output_shapes": [[2, 3, 3]],
+      "parameter_count": 0,
+      "flops": 0
+    }
+  ]
+}

@@ -3,6 +3,8 @@
 //! file must give exactly the codes and paths its `<name>.expected.json` lists, in order, all from one read, layer 3
 //! included. fixtures/documents/README.md describes the folders and the expected-file format.
 //!
+//! The built-in design templates (`templates/designs/`) must read with no diagnostic at all.
+//!
 //! The second half of this file runs layers 1 and 2 through `check_document` with a test type of its own, which has
 //! every kind of field, so the walk is tested apart from any real document's description.
 
@@ -14,8 +16,10 @@ use std::path::{Path, PathBuf};
 use rastai_diag::diagnostic::{Diagnostic, has_errors};
 use rastai_formats::byte_source::SliceSource;
 use rastai_formats::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, enum_of, field, list_of};
-use rastai_formats::documents::DocumentType;
+use rastai_formats::documents::model::ModelSpec;
+use rastai_formats::documents::{Document, DocumentType};
 use rastai_formats::header::{describe_shared_header, header_fields};
+use rastai_formats::json::pretty::pretty_json;
 use rastai_formats::json::reader::read_json;
 use rastai_formats::limits::ImportLimits;
 use rastai_formats::validate::{CheckedDocument, check_document, read_document};
@@ -184,6 +188,75 @@ fn a_blank_project_name_is_shown_as_a_word() {
         messages[0],
         "(blank) isn't a project name: it needs at least one letter, digit or other visible character."
     );
+}
+
+// The built-in design templates (templates/designs/, contracts 1): each reads with no diagnostic at all, as a
+// ModelSpec, and is written in the stable form, so saving an unchanged template changes nothing in git.
+
+const TEMPLATES_FOLDER: &str = "../../templates/designs";
+const TEXTCNN_TEMPLATE: &str = "textcnn.rrsmodel";
+
+fn template_files() -> Vec<PathBuf> {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join(TEMPLATES_FOLDER);
+    fixture_files(&folder)
+}
+
+fn read_template(path: &Path) -> (Vec<u8>, ModelSpec) {
+    let bytes = fs::read(path).unwrap();
+    let outcome = read_document(
+        &file_name_of(path),
+        &SliceSource { bytes: &bytes },
+        &ImportLimits::default(),
+    );
+    assert_eq!(codes_and_paths(&outcome.diagnostics), vec![], "{}", path.display());
+    let Some(Document::Model(model)) = outcome.document else {
+        panic!("{} is not a ModelSpec", path.display());
+    };
+    (bytes, model)
+}
+
+#[test]
+fn every_design_template_reads_with_no_diagnostics_in_the_stable_form() {
+    let files = template_files();
+    assert!(files.iter().any(|path| file_name_of(path) == TEXTCNN_TEMPLATE));
+    for path in files {
+        let (bytes, model) = read_template(&path);
+        assert_eq!(
+            pretty_json(&model).unwrap(),
+            bytes,
+            "{} isn't in the stable form",
+            path.display()
+        );
+    }
+}
+
+/// The owner's 5-layer TextCNN (AITestLab-1 `create_model.py`): five conv1d of 64 filters with kernels 3, 4, 5, 4, 3
+/// and padding kernel // 2, global max pooling, dropout 0.5 and 4 classes.
+#[test]
+fn the_textcnn_template_is_the_owners_five_layer_model() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(TEMPLATES_FOLDER)
+        .join(TEXTCNN_TEMPLATE);
+    let (_, model) = read_template(&path);
+    let convs: Vec<(u64, u64, u64)> = model
+        .graph
+        .nodes
+        .iter()
+        .filter(|node| node.op == "conv1d")
+        .map(|node| {
+            let size = |key: &str| node.attributes[key].as_u64().unwrap();
+            (size("out_channels"), size("kernel_size"), size("padding"))
+        })
+        .collect();
+    assert_eq!(convs, vec![(64, 3, 1), (64, 4, 2), (64, 5, 2), (64, 4, 2), (64, 3, 1)]);
+    let classifier = model
+        .graph
+        .nodes
+        .iter()
+        .find(|node| node.op == "classifier_head")
+        .unwrap();
+    assert_eq!(classifier.attributes["class_count"], 4);
+    assert_eq!(model.outputs[0].graph_node, classifier.node_id);
 }
 
 // A test document type with every kind of field, run through the same layers as read_document.

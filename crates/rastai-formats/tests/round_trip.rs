@@ -223,6 +223,7 @@ fn written(document: &Document) -> (Vec<u8>, Value) {
         Document::Lock(lock) => text_and_value(lock),
         Document::PluginManifest(manifest) => text_and_value(manifest),
         Document::Theme(theme) => text_and_value(theme),
+        Document::Model(model) => text_and_value(model),
     }
 }
 

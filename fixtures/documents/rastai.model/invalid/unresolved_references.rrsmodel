@@ -1,0 +1,95 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.model/1.json",
+  "type": "rastai.model",
+  "schema_version": 1,
+  "created_with": "rastai 0.1.0",
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2T",
+  "content_hash": "",
+  "derived_from": [],
+  "authors": [],
+  "license": "",
+  "source_url": "",
+  "requires": {},
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "embedding",
+        "op": "embedding",
+        "label": "",
+        "attributes": {
+          "embedding_size": 8,
+          "vocab_size": 100
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "embedding",
+        "op": "dropout",
+        "label": "",
+        "attributes": {
+          "probability": 0.1
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "mixer",
+        "op": "fourier_mix",
+        "label": "",
+        "attributes": {},
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "classifier",
+        "op": "classifier_head",
+        "label": "",
+        "attributes": {
+          "class_count": 2,
+          "in_features": 8
+        },
+        "train_mode": "train",
+        "observe": true
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "embeding",
+        "to_node": "classifier",
+        "to_input": 0
+      },
+      {
+        "from_node": "classifier",
+        "to_node": "softmax",
+        "to_input": 0
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "tokens",
+      "range": {
+        "start": 0,
+        "end": 16
+      },
+      "encoder_node": "tokens_in"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "logits",
+      "graph_node": "head"
+    }
+  ],
+  "defaults": {
+    "dtype": "fp32",
+    "sequence_length": 16,
+    "batch_size": 2
+  },
+  "weights": [],
+  "placement": {
+    "classifier": 0,
+    "decoder": 1
+  }
+}
