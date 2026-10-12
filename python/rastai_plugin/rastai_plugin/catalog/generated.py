@@ -3739,8 +3739,8 @@ CATALOG: tuple[CatalogEntry, ...] = (
     CatalogEntry(
         code=RRS_S0006,
         severity="error",
-        title="Database read failed",
-        message="A database read failed: {reason}.",
+        title="Saved data couldn't be read",
+        message="Couldn't read saved data: {reason}.",
         basic_text="Rastai couldn't read its saved data just now. Your data is not damaged.",
         fix_text="Try again in a moment. If it keeps failing, check the disk.",
         fix_command_id="",

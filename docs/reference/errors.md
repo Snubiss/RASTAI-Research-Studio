@@ -1119,10 +1119,10 @@ Source: `catalog/errors/RRS-S.json`.
 
 <a id="rrs-s0006"></a>
 
-### RRS-S0006: Database read failed
+### RRS-S0006: Saved data couldn't be read
 
 - **Severity:** error
-- **Message:** A database read failed: {reason}.
+- **Message:** Couldn't read saved data: {reason}.
 - **In plain words:** Rastai couldn't read its saved data just now. Your data is not damaged.
 - **Fix:** Try again in a moment. If it keeps failing, check the disk.
 
