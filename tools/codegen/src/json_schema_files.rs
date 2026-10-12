@@ -1,8 +1,12 @@
 //! The JSON Schema output (layout rust-control-plane.md 2.7 and 4.9):
 //! - `schemas/<type>/<version>.json`, one per document type,
 //! - `schemas/commands/rastai.command.<command_id>/1.json`, one per core command: the arguments and result as two
-//!   `$defs`, plus `x-rastai-stability` and `x-rastai-since-version` from the command's row,
+//!   `$defs`, plus `x-rastai-kind`, `x-rastai-stability` and `x-rastai-since-version` from the command's row,
+//! - `schemas/events/<event_type>.json`, one per core event type: its row and its payload's fields (contracts 12.6),
 //! - `schemas/index.json`, every schema id with its file and content hash.
+//!
+//! The command and event files are what `check-schema-diff` compares with the merge base: the kind, class and
+//! stability are in them so the check needs no Rust.
 //!
 //! The schemas themselves come from `rastai_formats::describe::json_schema`, the same code MCP tool lists and
 //! `ListCommands` use at run time, so a file here and a schema the daemon serves never differ. Files are written
@@ -21,19 +25,22 @@ use serde_json::{Map, Value, json};
 
 use crate::command_source::CommandDescription;
 use crate::error::{CodegenError, codegen_error};
+use crate::event_source::EventDescription;
 use crate::type_modules::DESCRIPTIONS_SOURCE_FILE;
 use crate::write_if_changed::{remove_unwritten_files, write_if_changed};
 
 const SCHEMAS_FOLDER: &str = "schemas";
 const INDEX_FILE: &str = "index.json";
 const COMMANDS_FOLDER: &str = "commands";
+const EVENTS_FOLDER: &str = "events";
 /// The `$id` of a file is this plus its path under schemas/ (contracts 14 row 8). Nothing serves it before Phase 2.
 const SCHEMA_URL_BASE: &str = "https://schemas.rastai.dev/";
 /// Bumped only if the shape of index.json itself changes.
 const INDEX_FORMAT_VERSION: u32 = 1;
-// The keywords a command schema adds to JSON Schema (contracts 12.6, 15.1).
+// The keywords a command schema adds to JSON Schema, which the event files share (contracts 12.6, 15.1).
 const STABILITY_KEYWORD: &str = "x-rastai-stability";
 const SINCE_VERSION_KEYWORD: &str = "x-rastai-since-version";
+const KIND_KEYWORD: &str = "x-rastai-kind";
 // The two `$defs` entries of a command schema (layout 2.7).
 const ARGUMENTS_DEFINITION: &str = "arguments";
 const RESULT_DEFINITION: &str = "result";
@@ -42,7 +49,8 @@ const DIALECT_KEY: &str = "$schema";
 /// Where each command's argument and result types are listed; a type that isn't described is fixed there.
 const COMMAND_TYPES_FILE: &str = "crates/rastai-formats/src/commands/mod.rs";
 
-/// One schema file: its schema id, its path under schemas/ (with `/` separators) and its contents.
+/// One schema file: its schema id, its path under schemas/ (with `/` separators) and its contents. An event file
+/// has no schema id (it describes a protobuf message, not JSON), so its `schema_id` is its event type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaFile {
     pub schema_id: String,
@@ -50,34 +58,38 @@ pub struct SchemaFile {
     pub schema: Value,
 }
 
-/// Writes every document and command schema and the index under `output_root`, and deletes the command schemas
-/// it no longer writes: `schemas/commands/` is this generator's alone. The rest of `schemas/` is not
-/// (`schemas/names.json` is rastai-names-codegen's), so a document schema it stops writing is deleted by hand;
-/// check-generated names it. Returns how many files changed or were deleted.
+/// Writes every document, command and event file and the index under `output_root`, and deletes the command and
+/// event files it no longer writes: `schemas/commands/` and `schemas/events/` are this generator's alone. The rest
+/// of `schemas/` is not (`schemas/names.json` is rastai-names-codegen's), so a document schema it stops writing is
+/// deleted by hand; check-generated names it. Returns how many files changed or were deleted.
 pub fn write_json_schema_files(
     output_root: &Path,
     document_types: &[DocumentType],
     all_types: &[TypeDescription],
     commands: &[CommandDescription],
+    events: &[EventDescription],
 ) -> Result<usize, CodegenError> {
     let mut files = document_schema_files(document_types, all_types)?;
     files.extend(command_schema_files(commands, all_types)?);
     files.sort_by(|left, right| left.schema_id.cmp(&right.schema_id));
+    let event_files = event_schema_files(events);
     let schemas_folder = output_root.join(SCHEMAS_FOLDER);
     let mut changed_count = 0;
     let mut written_paths = Vec::new();
-    for file in &files {
+    for file in files.iter().chain(&event_files) {
         let path = schemas_folder.join(&file.relative_path);
         if write_if_changed(&path, &pretty_text(&file.schema, &path)?)? {
             changed_count += 1;
         }
         written_paths.push(path);
     }
+    // Event files have no schema id, so the index (schema ids for the Phase 2 publish step) leaves them out.
     let index_path = schemas_folder.join(INDEX_FILE);
     if write_if_changed(&index_path, &pretty_text(&schema_index(&files), &index_path)?)? {
         changed_count += 1;
     }
     changed_count += remove_unwritten_files(&schemas_folder.join(COMMANDS_FOLDER), &written_paths)?;
+    changed_count += remove_unwritten_files(&schemas_folder.join(EVENTS_FOLDER), &written_paths)?;
     Ok(changed_count)
 }
 
@@ -138,6 +150,7 @@ fn command_schema_file(
         "$id": format!("{SCHEMA_URL_BASE}{relative_path}"),
         "title": command.command_id,
         "description": command.title,
+        KIND_KEYWORD: command.kind,
         STABILITY_KEYWORD: command.stability,
         SINCE_VERSION_KEYWORD: command.since_version,
         DEFINITIONS_KEY: Value::Object(definitions),
@@ -146,6 +159,43 @@ fn command_schema_file(
         schema_id,
         relative_path,
         schema,
+    })
+}
+
+/// One file per event type: `schemas/events/job.state_changed.json` holds the row of the core event table and the
+/// payload's fields (contracts 12.6). The fields are the payload message's own, in declaration order; a nested
+/// message is named by its full name and guarded on the wire by `buf breaking`.
+pub fn event_schema_files(events: &[EventDescription]) -> Vec<SchemaFile> {
+    let mut files = Vec::new();
+    for event in events {
+        files.push(SchemaFile {
+            schema_id: event.event_type.clone(),
+            relative_path: format!("{EVENTS_FOLDER}/{}.json", event.event_type),
+            schema: event_file_contents(event),
+        });
+    }
+    files
+}
+
+fn event_file_contents(event: &EventDescription) -> Value {
+    let mut fields = Vec::new();
+    for field in &event.fields {
+        fields.push(json!({
+            "name": field.name,
+            "number": field.number,
+            "type": field.type_name,
+            "repeated": field.repeated,
+            "optional": field.optional,
+        }));
+    }
+    json!({
+        "event_type": event.event_type,
+        "event_class": event.event_class,
+        "emitter": event.emitter,
+        "payload_type": event.payload_type,
+        STABILITY_KEYWORD: event.stability,
+        SINCE_VERSION_KEYWORD: event.since_version,
+        "fields": fields,
     })
 }
 
@@ -209,6 +259,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::descriptor_set::PayloadField;
     use rastai_formats::describe::types::{FieldKind, OPTIONAL, REQUIRED, field, list_of};
     use rastai_formats::header::{describe_shared_header, header_fields};
 
@@ -266,6 +317,33 @@ mod tests {
         }
     }
 
+    fn sample_event() -> EventDescription {
+        EventDescription {
+            event_type: "sample.changed".to_string(),
+            event_class: "durable".to_string(),
+            emitter: "daemon".to_string(),
+            payload_type: "rastai.events.v1.SampleChanged".to_string(),
+            stability: "preview".to_string(),
+            since_version: "0.1.0".to_string(),
+            fields: vec![
+                PayloadField {
+                    name: "sample_id".to_string(),
+                    number: 1,
+                    type_name: "string".to_string(),
+                    repeated: false,
+                    optional: false,
+                },
+                PayloadField {
+                    name: "tags".to_string(),
+                    number: 2,
+                    type_name: "string".to_string(),
+                    repeated: true,
+                    optional: false,
+                },
+            ],
+        }
+    }
+
     const SAMPLE_DOCUMENT_TYPE: DocumentType = DocumentType {
         type_name: "rastai.sample",
         schema_version: 1,
@@ -301,6 +379,7 @@ mod tests {
             "https://schemas.rastai.dev/commands/rastai.command.sample.run/1.json"
         );
         assert_eq!(schema["title"], "sample.run");
+        assert_eq!(schema[KIND_KEYWORD], "sync");
         assert_eq!(schema[STABILITY_KEYWORD], "preview");
         assert_eq!(schema[SINCE_VERSION_KEYWORD], "0.1.0");
         let definitions = schema["$defs"].as_object().unwrap();
@@ -313,6 +392,26 @@ mod tests {
         );
         assert!(definitions["arguments"].get("$schema").is_none());
         assert_eq!(definitions["result"]["required"], json!(["ok"]));
+    }
+
+    #[test]
+    fn an_event_file_has_its_row_and_its_payload_fields() {
+        let files = event_schema_files(&[sample_event()]);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "events/sample.changed.json");
+        let expected = json!({
+            "event_type": "sample.changed",
+            "event_class": "durable",
+            "emitter": "daemon",
+            "payload_type": "rastai.events.v1.SampleChanged",
+            "x-rastai-stability": "preview",
+            "x-rastai-since-version": "0.1.0",
+            "fields": [
+                {"name": "sample_id", "number": 1, "type": "string", "repeated": false, "optional": false},
+                {"name": "tags", "number": 2, "type": "string", "repeated": true, "optional": false}
+            ]
+        });
+        assert_eq!(files[0].schema, expected);
     }
 
     #[test]
@@ -351,9 +450,10 @@ mod tests {
             &[SAMPLE_DOCUMENT_TYPE],
             &sample_types(),
             &[sample_command()],
+            &[sample_event()],
         )
         .unwrap();
-        assert_eq!(changed, 3);
+        assert_eq!(changed, 4);
         let index_text = std::fs::read_to_string(output_root.join("schemas/index.json")).unwrap();
         assert!(index_text.ends_with("}\n"));
         assert!(output_root.join("schemas/rastai.sample/1.json").is_file());
@@ -362,14 +462,30 @@ mod tests {
                 .join("schemas/commands/rastai.command.sample.run/1.json")
                 .is_file()
         );
+        assert!(output_root.join("schemas/events/sample.changed.json").is_file());
+        // Event files have no schema id, so the index lists only the document and the command.
+        let index: Value = serde_json::from_str(&index_text).unwrap();
+        assert_eq!(index["schemas"].as_array().unwrap().len(), 2);
         let changed_again = write_json_schema_files(
             &output_root,
             &[SAMPLE_DOCUMENT_TYPE],
             &sample_types(),
             &[sample_command()],
+            &[sample_event()],
         )
         .unwrap();
         assert_eq!(changed_again, 0);
+        // An event type that is gone takes its file with it: the folder is this generator's alone.
+        let removed = write_json_schema_files(
+            &output_root,
+            &[SAMPLE_DOCUMENT_TYPE],
+            &sample_types(),
+            &[sample_command()],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(removed, 1);
+        assert!(!output_root.join("schemas/events/sample.changed.json").exists());
         std::fs::remove_dir_all(&output_root).unwrap();
     }
 }

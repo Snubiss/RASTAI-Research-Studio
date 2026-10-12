@@ -355,7 +355,7 @@ schemas/
   rastai.icon_set/1.json           M8 (icon-set plugins)
   commands/
     rastai.command.model.load/1.json      arguments and result of each core command (two `$defs`: arguments, result),
-                                          plus `x-rastai-stability` copied from the descriptor
+                                          plus `x-rastai-kind` and `x-rastai-stability` copied from the descriptor
     ...
   events/
     job.state_changed.json                one file per core event type: the table row (type, class, payload message,
@@ -1132,7 +1132,10 @@ tools/codegen/
     names_registry.rs         NameRegistry: one sorted list per kind (2.8), collected from the tables, catalog, store
                               migrations, the settings description, document descriptions and workspace manifests
     sql_names.rs              reads table and column names from the migration .sql files (CREATE TABLE, ALTER TABLE ADD COLUMN)
-    descriptor_set.rs         reads the payload fields of each event type from the `buf build` descriptor set
+    descriptor_set.rs         reads the payload fields of each event type from the `buf build` descriptor set (buf
+                              writes it as JSON, the protobuf JSON mapping, so there is no wire decoder)
+    event_source.rs           EventDescription rows for schemas/events/, from rastai_core::event_types::EVENT_TYPES,
+                              each with its payload's fields from descriptor_set.rs
     javascript_types.rs       packages/formats/src/generated/*.js: one JSDoc @typedef module per type (@property lines,
                               string-literal unions for enums, Proto fields as a plain object with a line naming the message)
     javascript_commands.rs    packages/client/src/generated/commands.js: one typed wrapper per core command,

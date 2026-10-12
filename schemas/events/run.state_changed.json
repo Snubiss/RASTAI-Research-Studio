@@ -1,0 +1,31 @@
+{
+  "emitter": "worker, chain driver",
+  "event_class": "durable",
+  "event_type": "run.state_changed",
+  "fields": [
+    {
+      "name": "reason",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "run_state",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.RunState"
+    },
+    {
+      "name": "eval_run_state",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.EvalRunState"
+    }
+  ],
+  "payload_type": "rastai.events.v1.RunStateChanged",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

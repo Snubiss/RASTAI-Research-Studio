@@ -126,6 +126,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Start training",
   "title": "train.start",
+  "x-rastai-kind": "job",
   "x-rastai-since-version": "0.1.0",
   "x-rastai-stability": "preview"
 }

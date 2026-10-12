@@ -75,8 +75,8 @@ fn kind_word(kind: CommandKind) -> &'static str {
     }
 }
 
-/// The stability as contracts 4.1 and the schema files write it.
-fn stability_word(stability: Stability) -> &'static str {
+/// The stability as contracts 4.1 and the schema files write it. The event files use it too.
+pub fn stability_word(stability: Stability) -> &'static str {
     match stability {
         Stability::Preview => "preview",
         Stability::Stable => "stable",

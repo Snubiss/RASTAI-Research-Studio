@@ -74,6 +74,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Cancel job",
   "title": "job.cancel",
+  "x-rastai-kind": "sync",
   "x-rastai-since-version": "0.1.0",
   "x-rastai-stability": "preview"
 }

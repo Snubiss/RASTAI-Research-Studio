@@ -1,0 +1,408 @@
+#!/usr/bin/env python3
+"""check-schema-diff: the generated command and event schemas against the merge base (contracts 12.6, ADR-0038,
+layout rust-control-plane.md 2.8).
+
+`buf breaking` can't see inside `arguments_json` and `result_json`, and doesn't know an event type's class or
+stability. Codegen writes both into schemas/commands/ and schemas/events/, and this check compares those folders in
+the working tree with the same folders at the merge base of HEAD and RASTAI_BASE_REF (default origin/main):
+
+- An added, changed or removed file needs a change to contracts.md in the same diff, on a line that names the
+  command id or event type, or its argument, result or payload type.
+- A `stable` or `deprecated` item may not break: a removed or renamed field, a changed field type, a newly required
+  field, a removed file (a removed or renamed command or event type), a changed command kind, event class or payload
+  type, or a move to `preview` all fail. A `preview` item may break, with the contracts change.
+
+The base side is read with `git show`, so the check needs no network, only the base branch's history. A merge base
+from before this check existed has no baseline to compare with; the check says so and passes.
+
+Standard library only, like every check here.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from repo_files import git_environment, parse_root_argument, report
+
+CHECK_NAME = "check-schema-diff"
+CONTRACTS_FILE = "docs/architecture/contracts.md"
+COMMANDS_FOLDER = "schemas/commands/"
+EVENTS_FOLDER = "schemas/events/"
+SCHEMA_FOLDERS = (COMMANDS_FOLDER, EVENTS_FOLDER)
+SCHEMA_SUFFIX = ".json"
+# The merge base has a baseline only if it already ran this check.
+THIS_CHECK_FILE = "tools/checks/check-schema-diff"
+BASE_REF_VARIABLE = "RASTAI_BASE_REF"
+DEFAULT_BASE_REF = "origin/main"
+
+# The keywords codegen writes into every command and event file (contracts 12.6).
+STABILITY_KEY = "x-rastai-stability"
+KIND_KEY = "x-rastai-kind"
+DEFINITIONS_KEY = "$defs"
+REFERENCE_PREFIX = "#/$defs/"
+# A command file's two parts (layout 2.7).
+COMMAND_PARTS = ("arguments", "result")
+# The fields of an event file's payload that make up a field's type on the wire.
+EVENT_FIELD_SHAPE_KEYS = ("number", "type", "repeated", "optional")
+
+# Items with these stabilities may not break (contracts 6.1: deprecated ones until they are retired).
+GUARDED_STABILITIES = ("stable", "deprecated")
+# Where a guarded item may move. Deprecating a stable item keeps its shape; a move to preview drops the promise.
+ALLOWED_STABILITY_MOVES = {
+    "stable": ("stable", "deprecated"),
+    "deprecated": ("deprecated", "stable"),
+}
+# Path markers of a nested field: a list's elements and a map's values.
+LIST_ELEMENT_MARK = "[]"
+MAP_VALUE_MARK = "{}"
+# A name counts as named on a line only as a whole: `job.get` isn't named by `job.get_all` or `xjob.get`.
+NAME_CHARACTER = r"[A-Za-z0-9_]"
+DIFF_HEADER_PREFIXES = ("+++", "---")
+DIFF_CHANGE_PREFIXES = ("+", "-")
+
+
+@dataclass(frozen=True)
+class SchemaItem:
+    """One command or event file, read and parsed."""
+
+    path: str  # relative to the repository root, with / separators
+    label: str  # how a message names it: command `job.get`, event type `job.state_changed`
+    names: list[str]  # the names a contracts line may use to register a change to it
+    stability: str
+    content: dict
+
+
+@dataclass(frozen=True)
+class FieldShape:
+    """One field of a command's arguments or result: its type and whether it is required."""
+
+    type_text: str
+    required: bool
+
+
+def main() -> int:
+    root = parse_root_argument("Diffs schemas/commands/ and schemas/events/ against the merge base.")
+    base_ref = os.environ.get(BASE_REF_VARIABLE) or DEFAULT_BASE_REF
+    merge_base = find_merge_base(root, base_ref)
+    if merge_base is None:
+        return report(CHECK_NAME, [no_merge_base_message(base_ref)], "")
+    if not base_has_file(root, merge_base, THIS_CHECK_FILE):
+        print(f"{CHECK_NAME}: the merge base {merge_base[:12]} predates this check, so it has no baseline yet")
+        return 0
+    problems = find_problems(
+        read_base_files(root, merge_base), read_head_files(root), read_contracts_changes(root, merge_base)
+    )
+    return report(CHECK_NAME, problems, f"every command and event schema change since {merge_base[:12]} is allowed")
+
+
+def no_merge_base_message(base_ref: str) -> str:
+    return (
+        f"can't find the merge base of HEAD and {base_ref}: fetch the base branch with its history "
+        f"(`git fetch origin`; CI checks out with fetch-depth: 0) or set {BASE_REF_VARIABLE} to the branch this "
+        "one merges into"
+    )
+
+
+# ---- Comparing the two sides ----
+
+
+def find_problems(base_files: dict[str, str], head_files: dict[str, str], contracts_lines: list[str]) -> list[str]:
+    """Every problem with the change from base_files to head_files ({path: text}), given the changed lines of
+    contracts.md."""
+    problems = []
+    for path in sorted(set(base_files) | set(head_files)):
+        base_text = base_files.get(path)
+        head_text = head_files.get(path)
+        if base_text == head_text:
+            continue
+        problems.extend(check_changed_file(path, base_text, head_text, contracts_lines))
+    return problems
+
+
+def check_changed_file(
+    path: str, base_text: str | None, head_text: str | None, contracts_lines: list[str]
+) -> list[str]:
+    """The problems of one added (no base_text), removed (no head_text) or changed file."""
+    base_item = parse_item(path, base_text) if base_text is not None else None
+    head_item = parse_item(path, head_text) if head_text is not None else None
+    if head_text is not None and head_item is None:
+        return [f"{path}: isn't a command or event file codegen writes; run `just codegen`"]
+    if base_item is not None and head_item is not None and base_item.content == head_item.content:
+        return []
+    problems = []
+    if not contracts_name_the_change(contracts_lines, base_item, head_item):
+        problems.append(missing_contracts_message(path, base_item, head_item))
+    if base_item is not None and base_item.stability in GUARDED_STABILITIES:
+        for breaking_change in find_breaking_changes(base_item, head_item):
+            problems.append(f"{path}: {base_item.label} is {base_item.stability}, so it can't break: {breaking_change}")
+    return problems
+
+
+def parse_item(path: str, text: str) -> SchemaItem | None:
+    """The command or event the file holds, or None when it isn't one (bad JSON, or not in a schema folder)."""
+    try:
+        content = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(content, dict):
+        return None
+    if path.startswith(COMMANDS_FOLDER):
+        return command_item(path, content)
+    if path.startswith(EVENTS_FOLDER):
+        return event_item(path, content)
+    return None
+
+
+def command_item(path: str, content: dict) -> SchemaItem:
+    # The command id is the schema's title; its two types are the titles of its two parts.
+    command_id = str(content.get("title", ""))
+    definitions = content.get(DEFINITIONS_KEY, {})
+    names = [command_id]
+    for part in COMMAND_PARTS:
+        type_name = definitions.get(part, {}).get("title")
+        if type_name:
+            names.append(type_name)
+    return SchemaItem(path, f"command `{command_id}`", names, str(content.get(STABILITY_KEY, "")), content)
+
+
+def event_item(path: str, content: dict) -> SchemaItem:
+    event_type = str(content.get("event_type", ""))
+    payload_type = str(content.get("payload_type", ""))
+    # Contracts writes a payload by its short name (`JobStateChanged`) as often as by its full one.
+    names = [event_type, payload_type, payload_type.rsplit(".", 1)[-1]]
+    return SchemaItem(path, f"event type `{event_type}`", names, str(content.get(STABILITY_KEY, "")), content)
+
+
+# ---- The contracts rule ----
+
+
+def contracts_name_the_change(
+    contracts_lines: list[str], base_item: SchemaItem | None, head_item: SchemaItem | None
+) -> bool:
+    for name in item_names(base_item, head_item):
+        pattern = name_pattern(name)
+        for line in contracts_lines:
+            if pattern.search(line):
+                return True
+    return False
+
+
+def item_names(base_item: SchemaItem | None, head_item: SchemaItem | None) -> list[str]:
+    """The names of both sides, so a rename may be registered under the old name or the new one."""
+    names = []
+    for item in (base_item, head_item):
+        if item is None:
+            continue
+        for name in item.names:
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+def name_pattern(name: str) -> re.Pattern:
+    # A dot after the name ends it only when no name character follows (`job.get.` at the end of a sentence).
+    return re.compile(rf"(?<!{NAME_CHARACTER})(?<!\.){re.escape(name)}(?!{NAME_CHARACTER})(?!\.{NAME_CHARACTER})")
+
+
+def missing_contracts_message(path: str, base_item: SchemaItem | None, head_item: SchemaItem | None) -> str:
+    if base_item is None:
+        what = "was added"
+    elif head_item is None:
+        what = "was removed"
+    else:
+        what = "changed"
+    names = ", ".join(f"`{name}`" for name in item_names(base_item, head_item))
+    return (
+        f"{path} {what}, but no changed line of {CONTRACTS_FILE} names {names}: "
+        "update contracts.md in the same change (contracts 12.6)"
+    )
+
+
+# ---- Breaking changes ----
+
+
+def find_breaking_changes(base_item: SchemaItem, head_item: SchemaItem | None) -> list[str]:
+    """What breaks between the two sides of a guarded item, one sentence each."""
+    if head_item is None:
+        return ["the file was removed (a removed or renamed command or event type)"]
+    changes = []
+    allowed_moves = ALLOWED_STABILITY_MOVES.get(base_item.stability, ())
+    if head_item.stability not in allowed_moves:
+        changes.append(f"its stability moved from `{base_item.stability}` to `{head_item.stability}`")
+    if base_item.path.startswith(COMMANDS_FOLDER):
+        changes.extend(command_breaking_changes(base_item.content, head_item.content))
+    else:
+        changes.extend(event_breaking_changes(base_item.content, head_item.content))
+    return changes
+
+
+def command_breaking_changes(base: dict, head: dict) -> list[str]:
+    changes = []
+    if base.get(KIND_KEY) != head.get(KIND_KEY):
+        changes.append(f"its kind changed from `{base.get(KIND_KEY)}` to `{head.get(KIND_KEY)}`")
+    changes.extend(field_breaking_changes(command_fields(base), command_fields(head)))
+    return changes
+
+
+def field_breaking_changes(base_fields: dict[str, FieldShape], head_fields: dict[str, FieldShape]) -> list[str]:
+    changes = []
+    for path, base_field in base_fields.items():
+        head_field = head_fields.get(path)
+        if head_field is None:
+            changes.append(f"the field `{path}` was removed or renamed")
+        elif head_field.type_text != base_field.type_text:
+            changes.append(f"the field `{path}` changed type from {base_field.type_text} to {head_field.type_text}")
+    for path, head_field in head_fields.items():
+        if is_newly_required(path, head_field, base_fields):
+            changes.append(f"the field `{path}` is newly required")
+    return changes
+
+
+def is_newly_required(path: str, head_field: FieldShape, base_fields: dict[str, FieldShape]) -> bool:
+    """A required field the base didn't require. A required field inside an object that is itself new isn't
+    counted: the new object is optional (or is reported itself)."""
+    if not head_field.required:
+        return False
+    base_field = base_fields.get(path)
+    if base_field is not None:
+        return not base_field.required
+    return parent_path(path) in base_fields
+
+
+def parent_path(path: str) -> str:
+    for mark in (LIST_ELEMENT_MARK, MAP_VALUE_MARK):
+        if path.endswith(mark):
+            return path.removesuffix(mark)
+    return path.rpartition(".")[0]
+
+
+def command_fields(content: dict) -> dict[str, FieldShape]:
+    """Every field of a command's arguments and result, by its path (`arguments.job_id`, `result.jobs[].state`),
+    with `$ref`s followed so a field of a shared type counts wherever it is used."""
+    definitions = content.get(DEFINITIONS_KEY, {})
+    fields = {}
+    for part in COMMAND_PARTS:
+        collect_fields(definitions.get(part, {}), definitions, part, True, fields, [])
+    return fields
+
+
+def collect_fields(
+    schema: dict, definitions: dict, path: str, required: bool, fields: dict[str, FieldShape], followed: list[str]
+) -> None:
+    """Adds the field at path, then the fields inside it. followed holds the types already entered on the way here,
+    so a type that contains itself is entered once."""
+    reference = schema.get("$ref", "")
+    if reference.startswith(REFERENCE_PREFIX):
+        type_name = reference.removeprefix(REFERENCE_PREFIX)
+        if type_name in followed:
+            fields[path] = FieldShape(f"a {type_name}", required)
+            return
+        followed = followed + [type_name]
+        schema = definitions.get(type_name, {})
+    fields[path] = FieldShape(type_text(schema), required)
+    required_names = schema.get("required", [])
+    for name, member in schema.get("properties", {}).items():
+        collect_fields(member, definitions, f"{path}.{name}", name in required_names, fields, followed)
+    if isinstance(schema.get("items"), dict):
+        collect_fields(schema["items"], definitions, path + LIST_ELEMENT_MARK, True, fields, followed)
+    if isinstance(schema.get("additionalProperties"), dict):
+        collect_fields(schema["additionalProperties"], definitions, path + MAP_VALUE_MARK, True, fields, followed)
+
+
+def type_text(schema: dict) -> str:
+    """A field's type in words. An enum's values are part of its type; a schema without `type` takes any JSON."""
+    text = json.dumps(schema.get("type", "any"))
+    if "enum" in schema:
+        text += " of " + json.dumps(sorted(str(value) for value in schema["enum"]))
+    return text
+
+
+def event_breaking_changes(base: dict, head: dict) -> list[str]:
+    changes = []
+    for key in ("event_class", "payload_type"):
+        if base.get(key) != head.get(key):
+            changes.append(f"its {key} changed from `{base.get(key)}` to `{head.get(key)}`")
+    head_fields = event_fields(head)
+    for name, base_shape in event_fields(base).items():
+        head_shape = head_fields.get(name)
+        if head_shape is None:
+            changes.append(f"the payload field `{name}` was removed or renamed")
+        elif head_shape != base_shape:
+            changes.append(f"the payload field `{name}` changed from {base_shape} to {head_shape}")
+    return changes
+
+
+def event_fields(content: dict) -> dict[str, str]:
+    """Each payload field's name with its number, type and flags in words."""
+    fields = {}
+    for field in content.get("fields", []):
+        shape = ", ".join(f"{key} {json.dumps(field.get(key))}" for key in EVENT_FIELD_SHAPE_KEYS)
+        fields[str(field.get("name"))] = shape
+    return fields
+
+
+# ---- Reading the two sides with git ----
+
+
+def find_merge_base(root: Path, base_ref: str) -> str | None:
+    result = git(root, ["merge-base", "HEAD", base_ref])
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def base_has_file(root: Path, merge_base: str, path: str) -> bool:
+    return git(root, ["cat-file", "-e", f"{merge_base}:{path}"]).returncode == 0
+
+
+def read_base_files(root: Path, merge_base: str) -> dict[str, str]:
+    """{path: text} of every schema file at the merge base."""
+    listing = git_output(root, ["ls-tree", "-r", "--name-only", merge_base, "--", *SCHEMA_FOLDERS])
+    files = {}
+    for path in listing.splitlines():
+        if path.endswith(SCHEMA_SUFFIX):
+            files[path] = git_output(root, ["show", f"{merge_base}:{path}"])
+    return files
+
+
+def read_head_files(root: Path) -> dict[str, str]:
+    """{path: text} of every schema file in the working tree, which is the PR's head in CI."""
+    files = {}
+    for folder in SCHEMA_FOLDERS:
+        for path in sorted((root / folder).rglob(f"*{SCHEMA_SUFFIX}")):
+            files[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
+    return files
+
+
+def read_contracts_changes(root: Path, merge_base: str) -> list[str]:
+    """The added and removed lines of contracts.md between the merge base and the working tree."""
+    diff = git_output(root, ["diff", "--unified=0", "--no-color", merge_base, "--", CONTRACTS_FILE])
+    lines = []
+    for line in diff.splitlines():
+        if line.startswith(DIFF_HEADER_PREFIXES):
+            continue
+        if line.startswith(DIFF_CHANGE_PREFIXES):
+            lines.append(line[1:])
+    return lines
+
+
+def git(root: Path, arguments: list[str]) -> subprocess.CompletedProcess:
+    command = ["git", "-C", str(root), *arguments]
+    return subprocess.run(command, capture_output=True, text=True, encoding="utf-8", env=git_environment())
+
+
+def git_output(root: Path, arguments: list[str]) -> str:
+    """git's output; a failure here (the merge base was found, so the repository is fine) stops the check."""
+    result = git(root, arguments)
+    if result.returncode != 0:
+        print(f"{CHECK_NAME}: git {' '.join(arguments)} failed: {result.stderr.strip()}")
+        sys.exit(2)
+    return result.stdout
+
+
+if __name__ == "__main__":
+    sys.exit(main())

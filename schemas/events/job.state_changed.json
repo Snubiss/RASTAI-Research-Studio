@@ -1,0 +1,52 @@
+{
+  "emitter": "node",
+  "event_class": "durable",
+  "event_type": "job.state_changed",
+  "fields": [
+    {
+      "name": "job_id",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "from_state",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.JobState"
+    },
+    {
+      "name": "to_state",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.JobState"
+    },
+    {
+      "name": "reason",
+      "number": 4,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "exit_code",
+      "number": 5,
+      "optional": true,
+      "repeated": false,
+      "type": "int32"
+    },
+    {
+      "name": "diagnostic",
+      "number": 6,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.Diagnostic"
+    }
+  ],
+  "payload_type": "rastai.events.v1.JobStateChanged",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

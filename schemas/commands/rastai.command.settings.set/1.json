@@ -64,6 +64,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Change a setting",
   "title": "settings.set",
+  "x-rastai-kind": "sync",
   "x-rastai-since-version": "0.1.0",
   "x-rastai-stability": "preview"
 }

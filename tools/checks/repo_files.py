@@ -22,6 +22,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 # Any character but a line break: blanking a span keeps its line breaks, so line numbers stay right.
 NOT_LINE_BREAK = re.compile(r"[^\n]")
 
+# Variables that tell git which repository to use. Git sets them for a hook or `git rebase -x` in a linked
+# worktree; left in place they would override `git -C`, so a check would read some other repository. The checks that
+# run git (check-dco, check-schema-diff) clear them with git_environment().
+REPOSITORY_LOCATION_VARIABLES = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+]
+
 # The characters that can start a Rust comment, string or char literal; any other character is plain code.
 RUST_SPAN_START_CHARACTERS = set("/\"'rbc")
 # A Rust char literal: 'a', '"', '\n', '\'', '\x7f', '\u{1F600}'. A quote that doesn't start one is a lifetime ('a).
@@ -229,6 +241,15 @@ def rust_string_end(text: str, position: int) -> int:
 def line_end(text: str, position: int) -> int:
     end = text.find("\n", position)
     return len(text) if end == -1 else end
+
+
+def git_environment() -> dict[str, str]:
+    """This process's environment without the repository variables, so git finds the repository from -C alone."""
+    environment = {}
+    for name, value in os.environ.items():
+        if name not in REPOSITORY_LOCATION_VARIABLES:
+            environment[name] = value
+    return environment
 
 
 def report(check_name: str, problems: list[str], passed_message: str) -> int:

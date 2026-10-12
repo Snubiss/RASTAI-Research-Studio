@@ -1,0 +1,52 @@
+{
+  "emitter": "worker, daemon",
+  "event_class": "durable",
+  "event_type": "artifact.created",
+  "fields": [
+    {
+      "name": "artifact_id",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "kind",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "content_hash",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "size_bytes",
+      "number": 4,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "home_node_id",
+      "number": 5,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "parents",
+      "number": 6,
+      "optional": false,
+      "repeated": true,
+      "type": "rastai.events.v1.ArtifactParent"
+    }
+  ],
+  "payload_type": "rastai.events.v1.ArtifactCreated",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

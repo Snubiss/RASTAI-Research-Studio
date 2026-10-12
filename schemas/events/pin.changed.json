@@ -1,0 +1,31 @@
+{
+  "emitter": "daemon",
+  "event_class": "durable",
+  "event_type": "pin.changed",
+  "fields": [
+    {
+      "name": "subject_kind",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "subject_id",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "pinned",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "bool"
+    }
+  ],
+  "payload_type": "rastai.events.v1.PinChanged",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

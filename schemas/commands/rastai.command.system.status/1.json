@@ -114,6 +114,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Show status",
   "title": "system.status",
+  "x-rastai-kind": "sync",
   "x-rastai-since-version": "0.1.0",
   "x-rastai-stability": "preview"
 }

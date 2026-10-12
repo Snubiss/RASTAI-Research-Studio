@@ -38,6 +38,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Create a login code",
   "title": "token.login_code.create",
+  "x-rastai-kind": "sync",
   "x-rastai-since-version": "0.1.0",
   "x-rastai-stability": "preview"
 }

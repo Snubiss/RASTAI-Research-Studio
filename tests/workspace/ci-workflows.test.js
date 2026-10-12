@@ -29,11 +29,13 @@ const PORTABLE_PYTHON_COMMAND = "just test-python-portable";
 const PURE_COMPUTE_PACKAGES = ["rastai_formats", "rastai_models", "rastai_data", "rastai_train"];
 
 // The `checks` job runs `just check`, whose codegen-check and proto-check need buf and the Rust protoc plugins, and
-// whose proto-check reads the merge base with origin/main, so it needs the history.
+// whose proto-check and check-schema-diff read the merge base with the pull request's base, so it needs the history
+// and names that base in RASTAI_BASE_REF.
 const CHECKS_JOB = "checks";
 const CHECKS_TOOLS = ["just", "uv", "node", "cargo-deny", "buf", "protoc-gen-prost", "protoc-gen-tonic"];
 const INSTALL_TOOLS_LINE = /^ *run: tools\/ci\/install-dev-tools (.*)$/;
 const FULL_HISTORY_LINE = "fetch-depth: 0";
+const BASE_REF_LINE = "RASTAI_BASE_REF: origin/${{ github.base_ref || 'main' }}";
 const PROTOC_PLUGIN_CACHE_LINES = ["~/.cargo/bin/protoc-gen-prost", "~/.cargo/bin/protoc-gen-tonic"];
 
 // A job id: a key indented by exactly two spaces. `jobs:` is the last top-level key of ci.yml, so after it every
@@ -325,11 +327,12 @@ test("test-python-portable runs the tests of every pure-compute package that exi
   }
 });
 
-test("the checks job installs every tool just check needs and fetches the history proto-check reads", () => {
+test("the checks job installs every tool just check needs and fetches the base branch the diffs read", () => {
   const jobLines = ciJobLines(CHECKS_JOB);
   expect(installedTools(jobLines)).toEqual(CHECKS_TOOLS);
   const trimmedLines = jobLines.map((line) => line.trim());
   expect(trimmedLines).toContain(FULL_HISTORY_LINE);
+  expect(trimmedLines).toContain(BASE_REF_LINE);
   for (const cacheLine of PROTOC_PLUGIN_CACHE_LINES) {
     expect(trimmedLines).toContain(cacheLine);
   }

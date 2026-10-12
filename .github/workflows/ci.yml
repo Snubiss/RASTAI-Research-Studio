@@ -40,7 +40,7 @@ defaults:
 
 jobs:
   # The gate every PR passes (contracts 12.6): format, lint, the JSDoc check, every test, wasm, cargo-deny and the
-  # repo checks, check-names among them. check-schema-diff joins `just check` with M1-58.
+  # repo checks, check-names and check-schema-diff among them.
   checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -48,8 +48,8 @@ jobs:
       - name: Check out the repository with its history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # proto-check runs `buf breaking` against the merge base of HEAD and origin/main, so it needs main's
-          # history, not only the merge commit.
+          # proto-check runs `buf breaking`, and check-schema-diff diffs schemas/commands/ and schemas/events/,
+          # against the merge base of HEAD and the base branch, so they need its history, not only the merge commit.
           fetch-depth: 0
       - name: Restore the protoc plugins
         # protoc-gen-prost and protoc-gen-tonic are built with cargo install, which takes minutes. ~/.cargo/bin is
@@ -98,6 +98,9 @@ jobs:
           restore-keys: pnpm-${{ runner.os }}-
       - name: just check
         run: just check
+        env:
+          # The branch the pull request merges into; a manual run has none and compares with main.
+          RASTAI_BASE_REF: origin/${{ github.base_ref || 'main' }}
 
   # Every commit of the pull request carries a Signed-off-by matching its author (plan 8.6). In-house, so no
   # GitHub App is needed. A manual run has no pull request, so this job is skipped; locally, `just check-dco` checks
