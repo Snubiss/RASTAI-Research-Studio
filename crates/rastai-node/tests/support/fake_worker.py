@@ -15,6 +15,8 @@ optional:
 - "exit_after_register": exit with this code right after registering.
 - "control": {"STOP": {"exit": 0}, "CANCEL": "ignore", ...}; a Control value not named is answered and ignored.
 - "on_sigterm", "on_sigint": {"exit": <code>} or "ignore" (defaults: exit 75 and exit 3, as the real worker).
+- "register_again_on_sigusr1": true to call Register once more, with the same token, at each SIGUSR1 (a worker
+  that reconnected to its node).
 
 Everything it sees goes to `fake-worker-record.jsonl` in the run folder, one JSON object per line, so the test can
 check what arrived and how: its process ids, its environment, Register's answer, each Control value and whether
@@ -64,6 +66,7 @@ class WorkerState:
         self.run_folder = run_folder
         self.exit_code = None
         self.exit_requested = threading.Event()
+        self.register_again = threading.Event()
         self.lock = threading.Lock()
 
     def request_exit(self, code: int) -> None:
@@ -128,6 +131,8 @@ def install_signal_handlers(state: WorkerState, script: dict) -> None:
     ]
     for number, name, answer in handled:
         signal.signal(number, signal_handler(state, name, answer))
+    if script.get("register_again_on_sigusr1", False):
+        signal.signal(signal.SIGUSR1, register_again_handler(state))
 
 
 def signal_handler(state: WorkerState, name: str, answer):
@@ -135,6 +140,15 @@ def signal_handler(state: WorkerState, name: str, answer):
         record(state, {"event": "signal", "name": name})
         if answer != IGNORE:
             state.request_exit(answer["exit"])
+
+    return handle
+
+
+def register_again_handler(state: WorkerState):
+    # The main loop calls Register: a gRPC call made inside a signal handler could interrupt one already running.
+    def handle(_number, _frame):
+        record(state, {"event": "signal", "name": "SIGUSR1"})
+        state.register_again.set()
 
     return handle
 
@@ -186,7 +200,9 @@ def main(argv: list[str]) -> int:
             state.request_exit(script["exit_after_register"])
     # Wait in short steps, so the signal handlers (which Python runs on the main thread) get their turn.
     while not state.exit_requested.wait(timeout=0.1):
-        pass
+        if state.register_again.is_set():
+            state.register_again.clear()
+            register(state, launch, own_token)
     server.stop(grace=EXIT_GRACE_SECONDS).wait()
     return state.exit_code
 

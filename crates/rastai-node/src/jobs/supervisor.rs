@@ -56,8 +56,8 @@ use crate::jobs::job_file::{JobFile, job_file_path, read_job_file, write_job_fil
 use crate::jobs::log_lines::{STDERR_LOG_FILE, read_log_tail};
 use crate::jobs::signals::{GroupSignal, ProcessIdentity, is_same_process, send_control, signal_process_group};
 use crate::jobs::spawn::{
-    SpawnedWorker, WorkerLaunch, WorkerVariableInputs, node_variables, prepare_job_socket_folder, spawn_worker,
-    worker_variables,
+    REDACTED_TOKEN, SpawnedWorker, WorkerLaunch, WorkerVariableInputs, node_variables, prepare_job_socket_folder,
+    spawn_worker, worker_variables,
 };
 use crate::node::{NodeState, current_hardware};
 use crate::permissions::{JobPermissions, job_permissions};
@@ -140,12 +140,23 @@ pub struct JobRecord {
     pub holds_run: bool,
 }
 
-/// The node's line to a registered worker.
-#[derive(Debug, Clone)]
+/// The node's line to a registered worker. Debug is hand-written: it never prints the token (spawn.rs,
+/// `REDACTED_TOKEN`).
+#[derive(Clone)]
 pub struct WorkerLink {
     /// The token's 64 hex characters, sent in the `rastai-job-token` metadata of every `WorkerService` call.
     pub job_token: String,
     pub channel: Channel,
+}
+
+impl std::fmt::Debug for WorkerLink {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkerLink")
+            .field("job_token", &REDACTED_TOKEN)
+            .field("channel", &self.channel)
+            .finish()
+    }
 }
 
 /// What `admit_job` decided.
@@ -248,7 +259,8 @@ pub async fn signal_job(state: &Arc<NodeState>, job_id: &str, signal: JobSignal)
 }
 
 /// `WorkerHostService.Register`: checks the token against the job's hash, connects to the job socket, calls
-/// `Hello`, and moves a starting job to `running` (platform flow 5.1). A token that doesn't match a starting job
+/// `Hello`, and moves a starting job to `running` (platform flow 5.1). A worker that registers again later (it
+/// reconnected) only gets its link replaced: its job keeps its state, so a paused job stays paused. A token that doesn't match a starting job
 /// means something else is on the socket: the job fails with `RRS-J2002` and its group is killed.
 // A refusal is one diagnostic, the response's own field; it is the rare path, so its size costs nothing in practice
 // (as in rastai-core's scopes.rs).
@@ -289,8 +301,7 @@ pub async fn register_worker(
         job_token: job_token.to_string(),
         channel,
     };
-    store_worker_link(state, job_id, link);
-    set_job_state(state, job_id, JobState::Running, "", None);
+    attach_worker(state, job_id, link);
     Ok(())
 }
 
@@ -1019,10 +1030,17 @@ fn record_process(state: &NodeState, job_id: &str, identity: &ProcessIdentity, s
     }
 }
 
-fn store_worker_link(state: &NodeState, job_id: &str, link: WorkerLink) {
+/// Stores the worker's link and moves a job that is still starting to `running`, under one hold of the table. The
+/// state is read under that same hold, not before the `Hello` call: a `PAUSE` that lands while a second `Register`
+/// waits on `Hello` must not be undone by it.
+fn attach_worker(state: &NodeState, job_id: &str, link: WorkerLink) {
     let mut table = lock_jobs(state);
-    if let Some(record) = find_record_mut(&mut table, job_id) {
-        record.worker = Some(link);
+    let Some(record) = find_record_mut(&mut table, job_id) else {
+        return;
+    };
+    record.worker = Some(link);
+    if record.info.state() == JobState::Starting {
+        record.info.state = JobState::Running as i32;
     }
 }
 
@@ -1338,6 +1356,53 @@ exec sleep 60
                 "the worker's child {child_pid} still runs"
             );
             tokio::time::sleep(POLL).await;
+        }
+    }
+
+    /// A link to a worker that is never dialed: a lazy channel connects only on its first call.
+    fn unconnected_link(job_token: &str) -> WorkerLink {
+        let channel = tonic::transport::Endpoint::from_static("http://localhost").connect_lazy();
+        WorkerLink {
+            job_token: job_token.to_string(),
+            channel,
+        }
+    }
+
+    fn set_state_in_table(state: &NodeState, job_id: &str, to: JobState) {
+        let mut table = lock_jobs(state);
+        find_record_mut(&mut table, job_id).unwrap().info.state = to as i32;
+    }
+
+    // A worker that registers again with the right token (it reconnected) gets its link replaced, but a paused job
+    // stays paused; only a starting job moves to running.
+    #[tokio::test]
+    async fn a_second_register_keeps_a_paused_job_paused() {
+        let (_folder, state) = test_state("register-paused");
+        let job_id = running_job(&state);
+        set_state_in_table(&state, &job_id, JobState::Paused);
+        attach_worker(&state, &job_id, unconnected_link(&"cd".repeat(32)));
+        assert_eq!(job_info(&state, &job_id).unwrap().state(), JobState::Paused);
+        let table = lock_jobs(&state);
+        let link = find_record(&table, &job_id).unwrap().worker.as_ref().unwrap();
+        assert_eq!(link.job_token, "cd".repeat(32), "the new link replaced the old one");
+        drop(table);
+
+        set_state_in_table(&state, &job_id, JobState::Starting);
+        attach_worker(&state, &job_id, unconnected_link(&"cd".repeat(32)));
+        assert_eq!(job_info(&state, &job_id).unwrap().state(), JobState::Running);
+    }
+
+    // The token lets whoever holds it act as the job's worker, so {:?} of the link, or of a record holding it, never
+    // prints it.
+    #[tokio::test]
+    async fn debug_never_prints_a_workers_token() {
+        let token = "ef".repeat(32);
+        let link = unconnected_link(&token);
+        let mut record = ended_record(1);
+        record.worker = Some(link.clone());
+        for text in [format!("{link:?}"), format!("{link:#?}"), format!("{record:?}")] {
+            assert!(!text.contains(&token), "{text}");
+            assert!(text.contains(REDACTED_TOKEN), "{text}");
         }
     }
 

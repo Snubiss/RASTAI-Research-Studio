@@ -1235,7 +1235,8 @@ pub async fn start_job(state: &Arc<NodeState>, spec: JobSpec) -> JobInfo;
 // None when delivered; else RRS-J0004 with the reason, or the worker's own ControlResponse.diagnostic.
 pub async fn signal_job(state: &Arc<NodeState>, job_id: &str, signal: JobSignal) -> Option<proto::Diagnostic>;
 pub fn list_jobs(state: &NodeState) -> Vec<JobInfo>;
-// WorkerHostService.Register: token against job_token_hash, Hello on the job socket, then running.
+// WorkerHostService.Register: token against job_token_hash, Hello on the job socket, then running (a starting job only;
+// a worker that registers again keeps its job's state and only replaces its link).
 pub async fn register_worker(state: &Arc<NodeState>, job_id: &str, job_token: &str, socket_path: &Path) -> Result<(), Diagnostic>;
 pub fn set_job_state(state: &NodeState, job_id: &str, to: JobState, reason: &str, diagnostic: Option<Diagnostic>) -> bool;
 
@@ -1351,7 +1352,7 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 3. Only now, with the run reserved, write `runs/<run_id>/job.json` atomically (write `job.json.tmp` with mode 0600, fsync, rename). Fields: the ones the worker reads (`layout/python.md` §7.3) plus the node's own: `job_id`, `run_id`, `kind`, `state`, `pid`, `process_group_id`, `process_start_ticks`, `boot_id` (from `/proc/sys/kernel/random/boot_id`), `job_token_hash`, `granted_leases[]`, `started_unix_ms`, and `final_state` (empty until the job ends). A `serve_fast` job adds `api_key` and `port` (section 7.8), which is why every `job.json` is 0600.
 4. Spawn (`spawn.rs`), then rewrite `job.json` with the pid, process group, start ticks and boot id.
 5. State `starting`. The worker must call `WorkerHostService.Register` within `WORKER_REGISTER_TIMEOUT_SECONDS` (60; contracts §9.1), or the job fails with `RRS-J0002` and its group is killed.
-6. On `Register`, the node connects to `jobs/<job_id>.sock`, calls `Hello`, and moves the job to `running`.
+6. On `Register`, the node connects to `jobs/<job_id>.sock`, calls `Hello`, and moves the job to `running`. A worker that registers again later (it reconnected) only replaces the node's link to it: its job keeps its state, so a paused job stays paused.
 
 **How `spawn.rs` launches a worker:**
 

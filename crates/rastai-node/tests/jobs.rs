@@ -1032,6 +1032,46 @@ exit "$(cat "$run_folder/exit-code")"
         kill_and_wait(&mut node, &spec.job_id).await;
     }
 
+    // A worker that registers again with the right token while its job is paused (it reconnected) gets through
+    // Register and Hello, and the job stays paused: only a starting job moves to running.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the cpu environment (just env-cpu); just test-node-jobs runs it"]
+    async fn a_second_register_leaves_a_paused_job_paused() {
+        let mut node = start_fake_worker_node(r#"{"register_again_on_sigusr1": true}"#, LONG_TIMEOUT).await;
+        let (spec, run_id) = running_fake_job(&mut node).await;
+        assert_eq!(signal(&mut node, &spec.job_id, JobSignal::Pause).await, None);
+        assert_eq!(list_job(&mut node, &spec.job_id).await.state(), JobState::Paused);
+        let pid = list_job(&mut node, &spec.job_id).await.pid;
+        let status = std::process::Command::new("kill")
+            .args(["-USR1", &pid.to_string()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let registered = wait_for_registrations(&node, &run_id, 2).await;
+        assert_eq!(registered[1]["diagnostic_code"], "", "the second Register was accepted");
+        let hellos = recorded_events(&fake_worker_record(&node, &run_id), "hello");
+        assert_eq!(hellos.len(), 2, "the node called Hello on the worker again");
+        assert_eq!(list_job(&mut node, &spec.job_id).await.state(), JobState::Paused);
+        kill_and_wait(&mut node, &spec.job_id).await;
+    }
+
+    /// Waits until the fake worker has recorded `count` answers to its Register calls, and returns them.
+    async fn wait_for_registrations(node: &JobNode, run_id: &str, count: usize) -> Vec<serde_json::Value> {
+        let started = Instant::now();
+        loop {
+            let registered = recorded_events(&fake_worker_record(node, run_id), "registered");
+            if registered.len() >= count {
+                return registered;
+            }
+            assert!(
+                started.elapsed() < WAIT_LIMIT,
+                "{} of {count} Register calls answered",
+                registered.len()
+            );
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the cpu environment (just env-cpu); just test-node-jobs runs it"]
     async fn terminate_reaches_a_running_worker_as_sigterm() {
