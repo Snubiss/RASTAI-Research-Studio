@@ -1,0 +1,11 @@
+# python/rastai_models: the Inspectable runtime
+
+Read the root `CLAUDE.md` and `python/CLAUDE.md` first. The layout is `docs/architecture/layout/python.md` §2.
+
+- **What is here (M1-34).** The safetensors I/O: `io/safetensors_reader.py` (`SafetensorsFile`) and `io/safetensors_writer.py` (`write_safetensors`), and `errors.py` (`ModelError`). The compiler and the TextCNN blocks join with M1-35; the rest of layout §2.1 lands in its build-order step (§2.9).
+- **Never parses a safetensors header** (contracts §2.4 rule 10). The reader hands the first 8 bytes to `rastai_formats.read_safetensors_header_length`, then the header bytes to `rastai_formats.check_safetensors_header`, and memory-maps the file only after both accepted it. `check-imports` fails if `io/safetensors_reader.py` imports `struct` or `json`. A new header rule goes into `crates/rastai-formats/src/safetensors/header_check.rs`, never here. `tests/test_safetensors_delegation.py` proves it: with the wheel's checks replaced by ones that refuse everything, every corpus file is refused and no tensor byte is read.
+- **One error class.** `ModelError(code, message)` with an `RRS-M` code from contracts §10.3. A file the wheel refused keeps the wheel's own `RRS-E60xx` code (`model_error_from_refusal`), so Rust and Python report a file the same way. A bug in calling code (a dtype safetensors can't hold, metadata that isn't str → str) raises `ValueError`.
+- **Writes are atomic.** The writer writes `<name>.partial`, syncs it, renames it over the real name and syncs the folder. A failed write leaves the old file, never a half-written one.
+- **Rules that join with their code** (layout §2): per-op shapes, parameter counts and FLOPs match `fixtures/ops/<op>.json`, the files Rust live stats match too (the compiler, M1-35); the parity suite, capture safety (`python/CLAUDE.md` rule 9) and the point-name convention arrive with the runtime (M2, M3).
+- **Corpus.** `fixtures/safetensors/` (33 files and `expected.json`) is shared with Rust (`crates/rastai-formats/tests/safetensors_corpus.rs`). It is written by `tools/fixtures/make_safetensors_corpus.py`; never edit a file by hand.
+- Tests are in `tests/test_<module>.py`, CPU only.

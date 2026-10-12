@@ -38,3 +38,10 @@ path = "fuzz_targets/read_document.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "safetensors_header"
+path = "fuzz_targets/safetensors_header.rs"
+test = false
+doc = false
+bench = false

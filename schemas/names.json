@@ -466,6 +466,7 @@
   "python_packages": [
     "rastai_data",
     "rastai_formats",
+    "rastai_models",
     "rastai_plugin",
     "rastai_proto",
     "rastai_worker"

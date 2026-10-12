@@ -15,6 +15,10 @@ and §15.1.
 - **Untrusted input is checked before allocating** (`ImportLimits`, ADR-0032 decision 8), never after.
 - **The JSON reader is in-house** (`src/json/reader.rs`); serde_json only holds the values and writes the pretty
   form. Every in-house parser of untrusted input has a fuzz target in `fuzz/` (ADR-0037).
+- **The safetensors header check lives only here** (`src/safetensors/header_check.rs`, contracts §2.4 rule 10):
+  `read_safetensors_header_length` and `check_safetensors_header`. Python's reader calls both through the wheel and
+  decides nothing itself, so a new rule goes here, with its code from contracts §10.3 and a new file in
+  `fixtures/safetensors/` (through `tools/fixtures/make_safetensors_corpus.py`).
 - **Content hashes are computed only here** (canonical JSON, then BLAKE3). JavaScript and Python call this code
   through WASM and the wheel and never hash documents themselves.
 - **One wrapper file per external crate:** `blake3` only in `src/hashing.rs`; `miniz_oxide` only in
@@ -34,5 +38,6 @@ and §15.1.
 ## Fuzzing
 
 `fuzz/` is a cargo-fuzz crate with its own workspace, built on the pinned nightly:
-`just fuzz rastai-formats json_reader 60` runs the reader target for a minute, and `read_document` the same way.
+`just fuzz rastai-formats json_reader 60` runs the reader target for a minute, and `read_document` and
+`safetensors_header` the same way.
 Nightly CI runs each target for 10 minutes (contracts §12.5).

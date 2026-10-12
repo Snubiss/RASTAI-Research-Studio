@@ -323,7 +323,7 @@ flowchart LR
 |---|---|---|---|
 | Traffic is read or changed | HTTPS through rustls only (`rastai-transport`); no in-house TLS | the HTTPS client tests (M2-14); adapters against a mock API over local TLS (M3-E08) | M2-14, M3-E08 |
 | An API key leaks | Read from the keychain per request, never written to logs, events, the journal or `.rrsproj` | secret fields redacted in the journal (M1-27); a missing key is `RRS-G2001` (M3-E08) | M1-27, M3-E08 |
-| A downloaded weight file is swapped or hostile | LFS files are checked against their SHA-256; weights are safetensors only, the header checked by `check_safetensors_header`; no pickle (`check-no-pickle`); the compat runtime passes `trust_remote_code=False` and `use_safetensors=True` | `downloads.rs` (M2-17); the 33-file safetensors corpus (M1-34); the compat runtime tests (M6-E12) | main (`check-no-pickle`), M1-34, M2-17, M6-E12 |
+| A downloaded weight file is swapped or hostile | LFS files are checked against their SHA-256; weights are safetensors only, the header checked by `read_safetensors_header_length` and `check_safetensors_header` before any tensor byte is read; no pickle (`check-no-pickle`); the compat runtime passes `trust_remote_code=False` and `use_safetensors=True` | `downloads.rs` (M2-17); the 33-file safetensors corpus (M1-34); the compat runtime tests (M6-E12) | main (`check-no-pickle`, M1-34), M2-17, M6-E12 |
 | A download leaks a gated-model token | The HF token comes from `GetSecret` (`hf_download`) for that job only and is never written down | `downloads.rs` (M2-17) | M2-17 |
 
 ### B13. Daemon ↔ archive (M11)
@@ -362,7 +362,7 @@ Every in-house parser of bytes that cross a boundary has a fuzz target, or a row
 | Connect JSON codec (`http/connect_json.rs`) | `rastai-server` | Connect JSON request bodies over HTTP (A1–A5) | `connect_json` | main (M1-26 part 2); no route reads a body with it until the `Execute` endpoints (M1-27) |
 | `parse_message` (JSON-RPC) | `rastai-mcp` | MCP clients (A5) | `jsonrpc_decode` | main (M1-29) |
 | In-house semver `parse_version` and `version_matches` (`semver.rs`) | `rastai-formats` | plugin versions, `engines.rastai` and `dependencies` in plugin manifests, the shared header's `requires` (A6, A10) | none yet: contracts §12.5 names no target for it, so its name goes there in a contract PR first. Today only unit tests cover it, and layer 4 (`check_environment`, on `main`) already reads `requires` ranges from documents but has no daemon caller yet | M1-32 (R20) |
-| `check_safetensors_header` | `rastai-formats` | weight files from model repos (A10) | `safetensors_header` | M1-34 |
+| `read_safetensors_header_length` and `check_safetensors_header` (`safetensors/header_check.rs`; Python calls both through the wheel) | `rastai-formats` | weight files from model repos (A10) | `safetensors_header` | main (M1-34) |
 | Zip container | `rastai-formats` | `.rrsproj`, `.rrsplugin` and other archives (A6, A10) | `zip_reader` | M2-22 |
 | DEFLATE (borrowed `miniz_oxide`, behind `inflate.rs`) | `rastai-formats` | compressed zip entries (A10) | `inflate` | M2-22 |
 | GGUF header | `rastai-formats` | GGUF files for the Fast runtime (A10) | `gguf_header` | M3-E01 |

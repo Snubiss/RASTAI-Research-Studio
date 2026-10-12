@@ -10,3 +10,6 @@
 
 # The event-log fixtures are frames of protobuf bytes (contracts 7.1), compared byte for byte: binary, no text diffs.
 fixtures/event-logs/*.log binary
+
+# The safetensors corpus (fixtures/safetensors/) is checked byte for byte by Rust and Python: binary, no text diffs.
+*.safetensors binary

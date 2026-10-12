@@ -14,6 +14,9 @@ python/rastai_formats/rastai_formats/_native.*
 
 # Weights and large artifacts never go in git (HF cache or the blob store hold them)
 *.safetensors
+# ...except the strict-contract corpus: 33 hand-built files of at most a few hundred bytes, test inputs that Rust and
+# Python both check byte for byte (contracts 12.5). tools/fixtures/make_safetensors_corpus.py writes them.
+!fixtures/safetensors/*.safetensors
 *.gguf
 *.onnx
 *.pt

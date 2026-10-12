@@ -6,6 +6,10 @@ A valid file must give no error and the content hash fixtures/documents/content_
 crates/rastai-formats/tests/round_trip.rs checks Rust against. A refused file raises FormatsValidationError carrying
 the same diagnostics as JSON.
 
+The safetensors corpus, fixtures/safetensors/, goes through the wheel's two header functions the way
+crates/rastai-formats/tests/safetensors_corpus.rs runs them in Rust: every file gives the verdict, tensor count and
+code of expected.json.
+
 Reading the expected files with the json module is fine here: they are test inputs, not documents the code accepts.
 """
 
@@ -17,11 +21,13 @@ import pytest
 import rastai_formats
 from rastai_formats import (
     FormatsValidationError,
+    check_safetensors_header,
     content_hash,
     generated,
     hash_bytes,
     load_model_spec,
     read_document,
+    read_safetensors_header_length,
     write_document,
 )
 
@@ -43,6 +49,9 @@ BAD_RESUME_FILE = DOCUMENTS_FOLDER / "rastai.resume" / "invalid" / "missing_data
 EMPTY_HASH = "blake3:af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
 ABC_HASH = "blake3:6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
 CODE_NEWER_VERSION = "RRS-E4001"
+SAFETENSORS_FOLDER = Path(__file__).resolve().parents[3] / "fixtures" / "safetensors"
+SAFETENSORS_EXPECTED = json.loads((SAFETENSORS_FOLDER / "expected.json").read_text(encoding="utf-8"))
+SAFETENSORS_LENGTH_BYTES = 8
 TYPE_POINTER_SUFFIX = "#/type"
 
 
@@ -225,3 +234,42 @@ def test_the_wrappers_call_the_native_module_each_time(monkeypatch: pytest.Monke
     # A test elsewhere (M1-34's safetensors delegation test) stands in for a native function the same way.
     monkeypatch.setattr(rastai_formats._native, "hash_bytes", lambda data: "stand-in")
     assert hash_bytes(b"abc") == "stand-in"
+
+
+def safetensors_verdict(data: bytes) -> dict:
+    """A whole safetensors file through the wheel: the length first, then the header and the data section's length."""
+    try:
+        header_length = read_safetensors_header_length(data[:SAFETENSORS_LENGTH_BYTES], len(data))
+        header_end = SAFETENSORS_LENGTH_BYTES + header_length
+        data_length = len(data) - header_end
+        header = check_safetensors_header(data[SAFETENSORS_LENGTH_BYTES:header_end], data_length)
+    except FormatsValidationError as error:
+        return {"accepted": False, "code": json.loads(error.args[0])[0]["code"]}
+    return {"accepted": True, "tensors": len(header["tensors"])}
+
+
+@pytest.mark.parametrize("file_name", sorted(SAFETENSORS_EXPECTED))
+def test_a_safetensors_file_gives_the_verdict_and_code_rust_gives(file_name: str) -> None:
+    data = (SAFETENSORS_FOLDER / file_name).read_bytes()
+    assert safetensors_verdict(data) == SAFETENSORS_EXPECTED[file_name]
+
+
+def test_an_accepted_safetensors_header_comes_back_as_plain_data() -> None:
+    data = (SAFETENSORS_FOLDER / "valid_two_tensors.safetensors").read_bytes()
+    header_length = read_safetensors_header_length(data[:SAFETENSORS_LENGTH_BYTES], len(data))
+    header_end = SAFETENSORS_LENGTH_BYTES + header_length
+    header = check_safetensors_header(data[SAFETENSORS_LENGTH_BYTES:header_end], len(data) - header_end)
+    assert header["data_start"] == header_end
+    assert header["metadata"] == {}
+    assert header["tensors"] == [
+        {"name": "a", "dtype": "F32", "shape": [2, 3], "start": 0, "end": 24},
+        {"name": "b", "dtype": "BF16", "shape": [4], "start": 24, "end": 32},
+    ]
+
+
+def test_a_refused_safetensors_header_raises_with_its_path() -> None:
+    header = b'{"a": {"dtype": "U8", "shape": [true], "data_offsets": [0, 1]}}'
+    with pytest.raises(FormatsValidationError) as error:
+        check_safetensors_header(header, 1)
+    diagnostic = raised_diagnostics(error)[0]
+    assert (diagnostic["code"], diagnostic["path"]) == ("RRS-E6009", "#/a/shape")

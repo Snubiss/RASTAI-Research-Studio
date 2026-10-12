@@ -3,7 +3,7 @@
 # environment builds it from source when it installs python/rastai_formats (python/rastai_formats/pyproject.toml).
 [package]
 name = "rastai-formats-python"
-description = "The Python build of rastai-formats: document validation, writing and content hashes for workers"
+description = "The Python build of rastai-formats: document validation, writing, content hashes and the safetensors header check for workers"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
