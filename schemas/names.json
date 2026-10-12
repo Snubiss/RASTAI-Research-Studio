@@ -55,6 +55,7 @@
     "rastai-formats",
     "rastai-mcp",
     "rastai-proto",
+    "rastai-server",
     "rastai-store",
     "rastai-transport"
   ],
