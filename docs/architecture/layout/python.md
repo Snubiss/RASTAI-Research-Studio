@@ -1382,7 +1382,7 @@ python/rastai_worker/
     arguments.py                argv modes: run, plugin, rank, check
     check.py                    check subcommand: print torch version, backend, CUDA or HIP version and visible devices
                                 as one JSON line; the node runs it with -I after uv sync (platform flow 1.3)
-    launch.py                   read job.json → WorkerLaunch; set cache env; register first-party contributions
+    launch.py                   the start order: control, job.json → WorkerLaunch, entry, event log, server, Register
     job_file.py                 WorkerLaunch dataclass and its reader
     worker_server.py            grpcio WorkerService on jobs/<job_id>.sock; handlers only enqueue or flip flags
     host_connection.py          WorkerHost client from rastai_plugin; Register with retry; reconnect backoff
@@ -1397,7 +1397,7 @@ python/rastai_worker/
     diagnostics.py              exception → Diagnostic dict; traceback to stderr.log; exit code choice
     exit_codes.py               EXIT_OK, EXIT_FAILED, EXIT_BAD_LAUNCH, EXIT_CANCELLED, EXIT_EVENT_LOG_UNWRITABLE,
                                 EXIT_EVENT_LOG_LOCKED, EXIT_PREEMPTED
-    dispatch.py                 JOB_ENTRIES: job kind → entry function (a plain dict)
+    dispatch.py                 JOB_ENTRIES: job kind → `<module>:<function>` entry name (a plain dict)
     distributed.py              start rank processes, init the process group from a FileStore in the run folder
     plugin_module.py            plugin mode: import the manifest's module, serve HandleCommand
     proto_convert.py            engine results ↔ wire messages (DecodedToken → TokenEvent, packet → LivePacket, ...)
@@ -1450,35 +1450,45 @@ def pause_for_full_disk(log: EventLogWriter, control: JobControl) -> None: ...
     # and run.state_changed paused, fsync, wait for RESUME, then recreate the reserve before training continues
 
 class LiveStream:
-    def put(self, event_type: str, payload: Message) -> None: ...
-    def read(self, after_index: int, timeout_seconds: float) -> list[tuple[int, str, Message]]: ...
+    def put(self, event_type: str, event: LiveEvent) -> None: ...
+    def read(self, after_index: int, timeout_seconds: float) -> list[tuple[int, str, LiveEvent]]: ...
+    def close(self) -> None: ...      # ends every WatchLive stream when the job exits
 
-JOB_ENTRIES: dict[str, Callable] = {
-    "serve_inspectable": serve_inspectable.run_job,
-    "train": train.run_job,
-    "gym": gym.run_job,
-    "data_import": data_import.run_job,
-    "data_check": data_check.run_job,
-    "compile": compile_design.run_job,
-    "export": export.run_job,
-    "doctor_selftest": doctor_selftest.run_job,
-    # "eval" and "lens" always carry JobSpec.entry and go through plugin_entry.run_job
+# <module>:<function>, the form of JobSpec.entry; a kind's module is imported only when a job of that kind starts,
+# so a job imports only its own engine, and a kind whose module hasn't landed yet is a bad launch (RRS-J2001).
+JOB_ENTRIES: dict[str, str] = {
+    "serve_inspectable": "rastai_worker.jobs.serve_inspectable:run_job",
+    "train": "rastai_worker.jobs.train:run_job",
+    "gym": "rastai_worker.jobs.gym:run_job",
+    "data_import": "rastai_worker.jobs.data_import:run_job",
+    "data_check": "rastai_worker.jobs.data_check:run_job",
+    "compile": "rastai_worker.jobs.compile_design:run_job",
+    "export": "rastai_worker.jobs.export:run_job",
+    "doctor_selftest": "rastai_worker.jobs.doctor_selftest:run_job",
+    # "eval" and "lens" always carry JobSpec.entry; "plugin_module" runs in plugin mode
 }
 ```
 
-`main` is thin:
+`main` is thin. The start order, as built (`launch.py`, which splits it into small functions):
 
 ```python
 def run_job_process(job_file: Path) -> int:
-    launch = read_job_file(job_file)
-    events = open_job_events(launch)               # flock, truncate a torn tail, write the reserve file
-    control = install_control(launch)              # Control calls, SIGTERM and SIGINT only set flags
+    control = install_control()                    # first: a SIGTERM during the start is a flag, not a dead process
+    launch = read_job_file(job_file)               # RRS-J2001 and exit 2 on a bad file
+    entry = find_job_entry(launch.job_spec)        # RRS-J2001 and exit 2 on a kind this worker can't run
+    job_token = job_token_from_environment(launch) # RASTAI_JOB_TOKEN; never in a file
+    log = EventLogWriter(launch.event_log_path, launch.run_id, launch.job_id)   # exit 5 on a held lock
+    live = LiveStream()
+    events = WorkerJobEvents(log, live, control, launch.job_id)
     # serve before Register: the node calls Hello as soon as Register arrives
-    start_worker_server(launch, control, events)
-    host = connect_to_host(launch)                 # WorkerHostService.Register with the job token
-    apply_vram_lease(launch)
-    return run_entry_with_diagnostics(launch, host, events, control)
+    server = start_worker_server(launch, control, live, job_token)
+    host = connect_to_host(launch, job_token)      # WorkerHostService.Register with the job token, with retry
+    HostWatcher(host).start()                      # registers again after a node restart
+    apply_vram_lease(launch)                       # M2
+    return run_entry_with_diagnostics(entry, launch, host, events, control)   # final records, fsync, exit code
 ```
+
+The final `run.state_changed` has one writer, `run_entry_with_diagnostics`: an entry emits metrics, checkpoints and artifacts, and the edge records how it ended (completed, with reason `stopped` after STOP; cancelled; preempted; or failed after a coded `diagnostic.reported`).
 
 ### 7.3 `job.json`: what the worker reads
 
@@ -1593,7 +1603,8 @@ sequenceDiagram
 | `tests/test_live_stream.py` | the oldest event is dropped at capacity; readers resume by index |
 | `tests/test_control.py` | SIGTERM sets only `preempt_requested`, SIGINT only `cancel_requested`; Control `STOP` sets `stop_requested`, never `preempt_requested`; the other Control values map to their flags |
 | `tests/test_job_file.py`, `test_dispatch.py` | every job kind has an entry; bad files exit 2 with RRS-J2xxx |
-| `tests/test_worker_server.py` | in-process grpcio over a temporary Unix socket: Hello, Control, WatchLive, HandleCommand |
+| `tests/test_worker_server.py` | in-process grpcio over a temporary Unix socket: Hello, Control, WatchLive (HandleCommand (M4)), each refused without the job token; the whole process against a fake node: Register with the token, then STOP exits 0 and SIGTERM 75 |
+| `tests/test_host_connection.py` | Register retried while the node is unreachable, never after a refusal; a replaced `worker-host.sock` registers again |
 | `tests/test_diagnostics.py` | OOM → RRS-H3xxx; package errors keep their code; unknown exceptions → `RRS-J1005` with the traceback in stderr.log only; an event log another process holds → exit 5 with RRS-J3006 in stderr.log and the log's bytes unchanged |
 | `tests/test_hardware_fingerprint.py` | all `HardwareFingerprint` fields filled on CPU |
 | `tests/crash/test_worker_kill9.py` | kill -9 mid-append and mid-checkpoint: the next job recovers the log and ignores `.partial` |

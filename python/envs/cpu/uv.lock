@@ -470,12 +470,14 @@ name = "rastai-worker"
 version = "0.1.0"
 source = { editable = "../../rastai_worker" }
 dependencies = [
+    { name = "grpcio" },
     { name = "rastai-plugin" },
     { name = "rastai-proto" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "grpcio", specifier = ">=1.84.0" },
     { name = "rastai-plugin", editable = "../../rastai_plugin" },
     { name = "rastai-proto", editable = "../../rastai_proto" },
 ]
