@@ -12,6 +12,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
+use rastai_core::paths::DataPaths;
 use rastai_core::principal::owner_principal;
 use rastai_core::scopes::Scope;
 use rastai_core::states::plugin_state_name;
@@ -34,13 +35,14 @@ use rastai_store::writer_thread::write_index;
 use serde_json::{Value, json};
 
 use common::{
-    ANY_FREE_PORT, execute_request, ok_result, owner_bearer, remove_test_folder, response_codes, run_command,
-    send_to_port, stop_test_daemon, test_paths, token_principal,
+    ANY_FREE_PORT, execute_request, ok_result, options_on_any_port, owner_bearer, remove_test_folder, response_codes,
+    run_command, send_to_port, stop_test_daemon, test_paths, token_principal,
 };
 
 const LIST_COMMANDS_PATH: &str = "/rastai.commands.v1.CommandService/ListCommands";
 const HEALTH_PATH: &str = "/api/health";
 const CONTRIBUTIONS_TYPE: &str = "PluginContributions";
+const MANIFEST_FILE_NAME: &str = "rastai-plugin.json";
 
 /// The fixture folders, each with its plugin id, the state it must end in and the codes of its diagnostics.
 const FIXTURES: &[(&str, &str, &str, &[&str])] = &[
@@ -110,6 +112,8 @@ struct NegotiationCase {
     /// Top-level fields replaced in the base manifest.
     changes: Value,
     enabled_first_party: &'static [&'static str],
+    /// First-party plugins the host knows but that aren't enabled.
+    disabled_first_party: &'static [&'static str],
     /// Enabled plugins and their versions.
     enabled_plugins: &'static [(&'static str, &'static str)],
     granted_permissions: &'static [&'static str],
@@ -123,6 +127,7 @@ fn case(name: &'static str, changes: Value, state: PluginState, codes: &'static 
         name,
         changes,
         enabled_first_party: &[],
+        disabled_first_party: &[],
         enabled_plugins: &[],
         granted_permissions: &["commands:[read]"],
         experimental_allowed: false,
@@ -245,6 +250,25 @@ fn experimental_and_first_party_cases() -> Vec<NegotiationCase> {
                 &[],
             )
         },
+        // Flows/platform.md 7.3: disabling Psychology disables lens plugins; enabling it again is the fix.
+        NegotiationCase {
+            disabled_first_party: &["psychology"],
+            ..case(
+                "a lens while Psychology is disabled",
+                json!({"requires_capabilities": ["psychology.lens@1"], "contributes": {"lenses": [{"lens_id": "x"}]}}),
+                PluginState::Disabled,
+                &["RRS-P1002"],
+            )
+        },
+        NegotiationCase {
+            disabled_first_party: &["psychology"],
+            ..case(
+                "a lens major Psychology never provides",
+                json!({"requires_capabilities": ["psychology.lens@9"], "contributes": {"lenses": [{"lens_id": "x"}]}}),
+                PluginState::Incompatible,
+                &["RRS-P1002"],
+            )
+        },
     ]
 }
 
@@ -294,7 +318,8 @@ fn negotiation_table() {
     for case in negotiation_cases() {
         let manifest = manifest_with(&case.changes);
         let first_party: Vec<String> = case.enabled_first_party.iter().map(|id| id.to_string()).collect();
-        let available = available_capabilities(&first_party);
+        let disabled: Vec<String> = case.disabled_first_party.iter().map(|id| id.to_string()).collect();
+        let available = available_capabilities(&first_party, &disabled);
         let enabled: Vec<_> = case
             .enabled_plugins
             .iter()
@@ -316,7 +341,7 @@ fn a_theme_is_refused_by_name_until_m8() {
         "requires_capabilities": ["ui.theme@1"],
         "contributes": {"themes": [{"theme_id": "a.b", "title": "B", "tokens_file": "b.theme.json"}]}
     }));
-    let result = negotiate_capabilities(&manifest, &available_capabilities(&[]), &[], &[]);
+    let result = negotiate_capabilities(&manifest, &available_capabilities(&[], &[]), &[], &[]);
     assert_eq!(result.missing_capabilities, ["ui.theme@1"]);
     let refusal = &negotiation_diagnostics(&manifest, &result, false)[0];
     assert!(refusal.message.contains("ui.theme@1"), "{}", refusal.message);
@@ -332,10 +357,12 @@ fn fixture_folder(name: &str) -> PathBuf {
 
 /// `--set plugins.dev_paths=[...]` with the named fixture folders.
 fn options_with_dev_plugins(names: &[&str]) -> DaemonOptions {
-    let folders: Vec<String> = names
-        .iter()
-        .map(|name| fixture_folder(name).display().to_string())
-        .collect();
+    let folders: Vec<PathBuf> = names.iter().map(|name| fixture_folder(name)).collect();
+    options_with_dev_folders(&folders)
+}
+
+fn options_with_dev_folders(folders: &[PathBuf]) -> DaemonOptions {
+    let folders: Vec<String> = folders.iter().map(|folder| folder.display().to_string()).collect();
     DaemonOptions {
         port: Some(ANY_FREE_PORT),
         set_flags: vec![format!("plugins.dev_paths={}", json!(folders))],
@@ -409,6 +436,8 @@ async fn each_fixture_ends_in_its_state_and_the_daemon_keeps_running() {
     // The failed plugin's first diagnostic is RRS-P0001; its manifest is listed as an empty object.
     let broken = find_listed(&plugins, "bad-manifest");
     assert_eq!(listed_codes(broken)[0], "RRS-P0001");
+    let refusal = broken["diagnostics"][0]["message"].as_str().unwrap();
+    assert!(refusal.ends_with('.') && !refusal.ends_with(".."), "{refusal}");
     assert_eq!(broken["manifest"], json!({}));
     // Nothing of a plugin that isn't enabled is registered; a command beyond the grant isn't either.
     for section in ["model", "fixture_outside", "fixture_theme", "fixture_lens"] {
@@ -567,6 +596,210 @@ async fn an_installed_plugin_loads_from_its_row_and_its_state_is_saved() {
     assert_eq!(saved.state, "enabled");
     assert_eq!(saved.content_hash, "blake3:00");
     stop_test_daemon(second).await;
+    remove_test_folder(&paths);
+}
+
+// ---- Plugins written for one test: dependency chains, a lost first-party capability, saved states ----
+
+/// A small plugin with one command, `<plugin_id>.run`; `changes` replaces top-level fields.
+fn small_manifest(plugin_id: &str, changes: Value) -> Value {
+    let mut manifest = json!({
+        "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+        "type": "rastai.plugin",
+        "schema_version": 1,
+        "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2N",
+        "plugin_id": plugin_id,
+        "display_name": plugin_id,
+        "version": "1.0.0",
+        "engines": {"rastai": ">=0.1"},
+        "requires_capabilities": ["commands@1"],
+        "contributes": {"commands": [run_command_contribution(plugin_id)]}
+    });
+    for (key, value) in changes.as_object().unwrap() {
+        manifest[key] = value.clone();
+    }
+    manifest
+}
+
+fn run_command_contribution(plugin_id: &str) -> Value {
+    json!({
+        "command_id": format!("{plugin_id}.run"),
+        "title": "Run",
+        "kind": "sync",
+        "arguments_type": "RunArgs",
+        "result_type": "RunResult"
+    })
+}
+
+/// Writes the manifest into `<test root>/dev-plugins/<plugin_id>/` and returns the folder.
+fn write_dev_plugin(paths: &DataPaths, manifest: &Value) -> PathBuf {
+    let plugin_id = manifest["plugin_id"].as_str().unwrap();
+    let folder = paths.data.parent().unwrap().join("dev-plugins").join(plugin_id);
+    write_manifest(&folder, manifest);
+    folder
+}
+
+fn write_manifest(folder: &Path, manifest: &Value) {
+    std::fs::create_dir_all(folder).unwrap();
+    std::fs::write(folder.join(MANIFEST_FILE_NAME), manifest.to_string()).unwrap();
+}
+
+async fn listed_state(running: &RunningDaemon, plugin_id: &str) -> (String, Vec<String>) {
+    let plugins = plugin_list(running).await;
+    let plugin = find_listed(&plugins, plugin_id);
+    (plugin["state"].as_str().unwrap().to_string(), listed_codes(plugin))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn disabling_the_end_of_a_dependency_chain_disables_the_whole_chain() {
+    let paths = test_paths("plugin-chain");
+    // acme_a needs acme_b, which needs acme_c. Listed first to last, so discovery's order is the wrong way round.
+    let folders = [
+        write_dev_plugin(
+            &paths,
+            &small_manifest("acme_a", json!({"dependencies": {"acme_b": "^1.0"}})),
+        ),
+        write_dev_plugin(
+            &paths,
+            &small_manifest("acme_b", json!({"dependencies": {"acme_c": "^1.0"}})),
+        ),
+        write_dev_plugin(&paths, &small_manifest("acme_c", json!({}))),
+    ];
+    let running = start_daemon(paths.clone(), &options_with_dev_folders(&folders))
+        .await
+        .unwrap();
+    for plugin_id in ["acme_a", "acme_b", "acme_c"] {
+        assert_eq!(listed_state(&running, plugin_id).await.0, "enabled", "{plugin_id}");
+    }
+
+    assert_eq!(disable_plugin(&running.server, "acme_c").await, PluginState::Disabled);
+    for plugin_id in ["acme_a", "acme_b"] {
+        let (state, codes) = listed_state(&running, plugin_id).await;
+        assert_eq!(
+            (state.as_str(), codes),
+            ("disabled", vec!["RRS-P3001".to_string()]),
+            "{plugin_id}"
+        );
+        assert!(
+            listed_command_ids(&running, &paths, plugin_id).await.is_empty(),
+            "{plugin_id}"
+        );
+    }
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dependency_cycle_names_the_dependency_held_back() {
+    let paths = test_paths("plugin-cycle");
+    let folders = [
+        write_dev_plugin(
+            &paths,
+            &small_manifest("acme_a", json!({"dependencies": {"acme_b": "*"}})),
+        ),
+        write_dev_plugin(
+            &paths,
+            &small_manifest("acme_b", json!({"dependencies": {"acme_a": "*"}})),
+        ),
+    ];
+    let running = start_daemon(paths.clone(), &options_with_dev_folders(&folders))
+        .await
+        .unwrap();
+    let plugins = plugin_list(&running).await;
+    let refusal = find_listed(&plugins, "acme_a")["diagnostics"][0].clone();
+    assert_eq!(refusal["code"], "RRS-P3001");
+    let message = refusal["message"].as_str().unwrap();
+    assert!(message.contains("The dependency acme_b of acme_a"), "{message}");
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn disabling_psychology_disables_a_lens_plugin_until_it_is_back() {
+    let paths = test_paths("plugin-lens");
+    let lens = small_manifest(
+        "acme_lens",
+        json!({
+            "requires_capabilities": ["commands@1", "psychology.lens@1"],
+            "contributes": {
+                "commands": [run_command_contribution("acme_lens")],
+                "lenses": [{"lens_id": "acme_lens.norms", "title": "Norms"}]
+            }
+        }),
+    );
+    let folders = [
+        write_dev_plugin(&paths, &lens),
+        write_dev_plugin(&paths, &small_manifest("psychology", json!({}))),
+    ];
+    let running = start_daemon(paths.clone(), &options_with_dev_folders(&folders))
+        .await
+        .unwrap();
+    assert_eq!(listed_state(&running, "acme_lens").await.0, "enabled");
+    assert_eq!(
+        listed_command_ids(&running, &paths, "acme_lens").await,
+        ["acme_lens.run"]
+    );
+
+    // Flows/platform.md 7.3: disabling Psychology disables lens plugins with RRS-P1002, and their contributions go.
+    disable_plugin(&running.server, "psychology").await;
+    let (state, codes) = listed_state(&running, "acme_lens").await;
+    assert_eq!((state.as_str(), codes), ("disabled", vec!["RRS-P1002".to_string()]));
+    assert!(listed_command_ids(&running, &paths, "acme_lens").await.is_empty());
+
+    // Disabled, not incompatible: once Psychology is back, the lens plugin loads again.
+    assert_eq!(load_plugin(&running.server, "psychology").await, PluginState::Enabled);
+    assert_eq!(load_plugin(&running.server, "acme_lens").await, PluginState::Enabled);
+    assert_eq!(
+        listed_command_ids(&running, &paths, "acme_lens").await,
+        ["acme_lens.run"]
+    );
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+fn saved_plugin_state(running: &RunningDaemon, plugin_id: &str) -> String {
+    let reader = open_index_reader(&running.server.store.index_readers).unwrap();
+    get_plugin(&reader, plugin_id).unwrap().unwrap().state
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plugin_the_host_disabled_loads_after_its_fix_and_a_restart() {
+    let paths = test_paths("plugin-host-decided");
+    let first = start_daemon(paths.clone(), &options_on_any_port()).await.unwrap();
+    let row = PluginRow {
+        plugin_id: "acme_stream".to_string(),
+        version: "1.0.0".to_string(),
+        state: plugin_state_name(PluginState::Installed).to_string(),
+        content_hash: "blake3:00".to_string(),
+        granted_permissions: Vec::new(),
+        source: "installed".to_string(),
+    };
+    write_index(&first.server.store.index, IndexWrite::UpsertPlugin(row))
+        .await
+        .unwrap();
+    stop_test_daemon(first).await;
+    let experimental = small_manifest(
+        "acme_stream",
+        json!({"requires_capabilities": ["commands@1", "data.source@1"]}),
+    );
+    write_manifest(&paths.data.join("plugins/acme_stream/1.0.0"), &experimental);
+
+    // With experimental APIs off, the host disables it; that is its decision, so the row isn't changed.
+    let second = start_daemon(paths.clone(), &options_on_any_port()).await.unwrap();
+    let (state, codes) = listed_state(&second, "acme_stream").await;
+    assert_eq!((state.as_str(), codes), ("disabled", vec!["RRS-P1003".to_string()]));
+    assert_eq!(saved_plugin_state(&second, "acme_stream"), "installed");
+    stop_test_daemon(second).await;
+
+    // The fix the catalog gives, then a restart: the plugin loads.
+    let with_flag = DaemonOptions {
+        set_flags: vec!["plugins.experimental_apis=true".to_string()],
+        ..options_on_any_port()
+    };
+    let third = start_daemon(paths.clone(), &with_flag).await.unwrap();
+    assert_eq!(listed_state(&third, "acme_stream").await.0, "enabled");
+    assert_eq!(saved_plugin_state(&third, "acme_stream"), "enabled");
+    stop_test_daemon(third).await;
     remove_test_folder(&paths);
 }
 
