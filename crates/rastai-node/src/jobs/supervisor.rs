@@ -1523,7 +1523,7 @@ exec sleep 60
     /// An environment folder whose `bin/python` is `script`.
     #[cfg(target_os = "linux")]
     fn stand_in_environment(folder: &Path, script: &str) -> PathBuf {
-        use crate::hardware::write_stand_in_tool;
+        use crate::test_support::write_stand_in_tool;
 
         let environment_folder = folder.join("env");
         std::fs::create_dir_all(environment_folder.join("bin")).unwrap();

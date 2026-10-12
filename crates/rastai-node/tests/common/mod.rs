@@ -233,6 +233,7 @@ pub fn write_tool(path: &Path, script: &str) {
 pub async fn wait_until_socket_released(socket_path: &Path) {
     let started = Instant::now();
     loop {
+        // A blocking connect is fine in this async test: a Unix-socket connect answers at once, accepted or refused.
         match UnixStream::connect(socket_path) {
             Err(error) if error.kind() == ErrorKind::ConnectionRefused => return,
             Err(error) if error.kind() == ErrorKind::NotFound => return,

@@ -181,3 +181,57 @@ fn log_hardware_notes(detected: &DetectedHardware) {
         log_diagnostic(note, &[]);
     }
 }
+
+#[cfg(all(test, unix))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use rastai_core::settings::{default_settings, node_settings, resolve_settings};
+
+    use crate::hardware::system_hardware_sources;
+    use crate::identity::load_or_create_identity;
+    use crate::jobs::supervisor::default_job_options;
+
+    /// A fresh folder, removed when the test ends, also when an assertion fails.
+    struct TestFolder {
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for TestFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn test_options(folder: &std::path::Path) -> NodeOptions {
+        NodeOptions {
+            mode: NodeMode::Embedded,
+            paths: DataPaths {
+                config: folder.join("config"),
+                data: folder.join("data"),
+                cache: folder.join("cache"),
+                state: folder.join("state"),
+                runtime: folder.join("run"),
+            },
+            settings: node_settings(&resolve_settings(&[default_settings()])),
+            hardware_sources: system_hardware_sources(),
+            jobs: default_job_options(Vec::new()),
+        }
+    }
+
+    // GetHardware and the first heartbeat may come before the telemetry loop's first tick, so the state carries free
+    // disk from the start. Detection gives none (it doesn't know the data folder): only build_node_state fills it.
+    #[test]
+    fn a_new_node_state_knows_the_free_disk_in_its_data_folder() {
+        let folder = TestFolder {
+            path: std::env::temp_dir().join(format!("rastai-node-state-{}", std::process::id())),
+        };
+        let _ = std::fs::remove_dir_all(&folder.path);
+        std::fs::create_dir_all(folder.path.join("data")).unwrap();
+        let identity = load_or_create_identity(&folder.path.join("node.key")).unwrap();
+        let state = build_node_state(test_options(&folder.path), identity, HardwareProfile::default());
+        let profile_free = current_hardware(&state).disk_free_bytes;
+        assert!(profile_free > 0, "no free disk in the profile of a new node");
+        assert_eq!(current_telemetry(&state).disk_free_bytes, profile_free);
+    }
+}

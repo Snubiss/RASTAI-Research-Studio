@@ -1163,6 +1163,7 @@ crates/rastai-node/
     gateway_host.rs          the node's Gateway, JobEventLogSink, job: model refs, TokenizeChat
     gym_tools.rs             MCP tool servers inside sandboxes through rastai-mcp's client; WorkerHostService ListTools, CallTool
     self_update.rs           UpdateNode: verify the release signature, swap the binary, restart; (L2) the watchdog and rollback
+    test_support.rs          unit tests only (#[cfg(test)]): helpers several modules' tests share, such as a stand-in tool
   tests/
     support/fake_worker.py        a tiny WorkerService for tests (stdlib, grpcio and rastai_proto), scripted by a JSON file;
                                   the tests that run it are #[ignore]d in a plain cargo test, and `just test-node-jobs` runs them

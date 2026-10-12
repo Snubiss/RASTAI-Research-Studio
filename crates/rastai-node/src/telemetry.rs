@@ -450,7 +450,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_stream_that_goes_silent_is_stopped() {
-        use crate::hardware::write_stand_in_tool;
+        use crate::test_support::write_stand_in_tool;
 
         let folder = TestFolder {
             path: std::env::temp_dir().join(format!("rnts-{}", std::process::id())),
