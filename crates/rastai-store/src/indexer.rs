@@ -27,14 +27,14 @@
 
 use rastai_core::ids::{IdPrefix, id_has_prefix};
 use rastai_core::states::{
-    eval_run_state_name, is_terminal_eval_run_state, job_state_name, node_state_name, plugin_state_name, run_state_name,
+    eval_run_state_name, is_terminal_eval_run_state, job_state_name, node_state_name, run_state_name,
 };
-use rastai_proto::common::v1::{EvalRunState, JobState, NodeState, PluginState, RunState};
+use rastai_proto::common::v1::{EvalRunState, JobState, NodeState, RunState};
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::run_state_changed::State;
 use rastai_proto::events::v1::{
     ArtifactCreated, CheckpointSaved, CommandFinished, DocumentChanged, EventRecord, JobStateChanged, NodeStateChanged,
-    PinChanged, PluginStateChanged, RunMetrics, RunStateChanged,
+    PinChanged, RunMetrics, RunStateChanged,
 };
 
 use crate::error::StoreError;
@@ -44,7 +44,7 @@ use crate::index::artifacts::{
 };
 use crate::index::documents::set_document_hash;
 use crate::index::journal::{FinishedCommand, record_command_finished};
-use crate::index::kept_tables::{set_node_state, set_plugin_state};
+use crate::index::kept_tables::set_node_state;
 use crate::index::log_cursors::{read_log_cursor_for_writing, set_log_cursor};
 use crate::index::runs::{
     JobStateUpdate, MetricValue, SavedCheckpoint, read_checkpoint_run_id, read_run_acked_sequence, replace_run_tags,
@@ -91,15 +91,18 @@ pub fn apply_event_record(transaction: &SqliteTransaction<'_>, record: &EventRec
         Payload::ArtifactCreated(artifact) => index_artifact(transaction, record, artifact),
         Payload::PinChanged(pin) => index_pin(transaction, pin),
         Payload::NodeStateChanged(change) => index_node_state(transaction, change),
-        Payload::PluginStateChanged(change) => index_plugin_state(transaction, change),
         Payload::DocumentChanged(change) => index_document(transaction, record, change),
         Payload::CommandFinished(finished) => index_command_finished(transaction, record, finished),
         // Live state comes from heartbeats, a diagnostic is shown, not stored, and plugin events are the plugin's.
+        // A plugin's `plugins.state` is the user's decision, written with `UpsertPlugin` when it is made; the
+        // record also carries the host's own outcomes (`incompatible`, a `disabled` for a missing capability), which
+        // are decided again at every start and must not be saved over that decision (layout 6.4, 12.1).
         Payload::JobProgress(_)
         | Payload::JobLogLine(_)
         | Payload::NodeHeartbeat(_)
         | Payload::DiagnosticReported(_)
-        | Payload::PluginEvent(_) => Ok(()),
+        | Payload::PluginEvent(_)
+        | Payload::PluginStateChanged(_) => Ok(()),
     }
 }
 
@@ -440,15 +443,6 @@ fn index_node_state(transaction: &SqliteTransaction<'_>, change: &NodeStateChang
     match NodeState::try_from(change.to_state) {
         Ok(state) if state != NodeState::Unspecified => {
             set_node_state(transaction, &change.node_id, node_state_name(state))
-        }
-        _ => Ok(()),
-    }
-}
-
-fn index_plugin_state(transaction: &SqliteTransaction<'_>, change: &PluginStateChanged) -> Result<(), StoreError> {
-    match PluginState::try_from(change.to_state) {
-        Ok(state) if state != PluginState::Unspecified => {
-            set_plugin_state(transaction, &change.plugin_id, plugin_state_name(state))
         }
         _ => Ok(()),
     }

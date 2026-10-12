@@ -461,8 +461,8 @@ fn the_same_daemon_batch_applied_twice_gives_the_same_rows() {
     remove_test_folder(&paths);
 }
 
-/// The rows `daemon_log_batch` makes: tags, pins, the node's and the plugin's state, the document's hash and the
-/// command's finish.
+/// The rows `daemon_log_batch` makes: tags, pins, the node's state, the document's hash and the command's finish. The
+/// plugin's row keeps its saved state: `plugins.state` is the user's decision, and the record may be the host's.
 fn assert_daemon_batch_rows(store: &Store) {
     assert_eq!(rows_of(store, "run_tags").len(), 2);
     // The pinned column: the last of checkpoints (contracts 8.2), the sixth of artifacts.
@@ -471,7 +471,7 @@ fn assert_daemon_batch_rows(store: &Store) {
     let reader = open_index_reader(&store.index_readers).unwrap();
     assert!(get_run(&reader, RUN_ID).unwrap().unwrap().pinned);
     assert_eq!(get_node(&reader, NODE_ID).unwrap().unwrap().state, "unreachable");
-    assert_eq!(get_plugin(&reader, PLUGIN_ID).unwrap().unwrap().state, "disabled");
+    assert_eq!(get_plugin(&reader, PLUGIN_ID).unwrap().unwrap().state, "enabled");
     let document = get_document(&reader, DOCUMENT_ID).unwrap().unwrap();
     assert_eq!(document.content_hash, CONTENT_HASH);
     assert_eq!(document.updated_unix_ms, RECORD_TIME_UNIX_MS + 7);

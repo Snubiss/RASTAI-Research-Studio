@@ -12,7 +12,7 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use rastai_core::paths::DataPaths;
+use rastai_core::paths::{DataPaths, daemon_events_log_path};
 use rastai_core::principal::owner_principal;
 use rastai_core::scopes::Scope;
 use rastai_core::states::plugin_state_name;
@@ -21,13 +21,17 @@ use rastai_formats::documents::plugin_manifest::PluginManifest;
 use rastai_formats::semver::parse_version;
 use rastai_proto::commands::v1::ExecuteRequest;
 use rastai_proto::common::v1::PluginState;
+use rastai_proto::events::v1::event_payload::Payload;
+use rastai_proto::events::v1::{BusEvent, PluginStateChanged};
 use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
+use rastai_server::events::bus::subscribe;
 use rastai_server::http::connect_json::list_commands_response_from_json;
 use rastai_server::plugin_host::capabilities::{
     FIRST_PARTY_CAPABILITIES, HOST_CAPABILITIES, available_capabilities, negotiate_capabilities,
     negotiation_diagnostics, state_after_negotiation,
 };
 use rastai_server::plugin_host::load::{disable_plugin, load_plugin};
+use rastai_store::event_log::reader::{FrameRead, open_event_log, read_next_frame};
 use rastai_store::index::kept_tables::{PluginRow, get_plugin};
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::writes::IndexWrite;
@@ -450,14 +454,21 @@ async fn each_fixture_ends_in_its_state_and_the_daemon_keeps_running() {
         listed_command_ids(&running, &paths, "fixture_reach").await,
         ["fixture_reach.peek"]
     );
-    // Every state change was recorded for the daemon log, with its reason.
-    let state_changes = running.server.plugins.read().unwrap().state_changes.clone();
+    // Every state change is in the daemon log, with its reason, and none is left waiting in the host.
+    let state_changes = logged_plugin_state_changes(&paths);
     let theme_change = state_changes
         .iter()
         .find(|change| change.plugin_id == "fixture_theme")
         .unwrap();
     assert_eq!(theme_change.to_state, PluginState::Incompatible as i32);
     assert_eq!(theme_change.diagnostic.as_ref().unwrap().code, "RRS-P1002");
+    for (_folder, plugin_id, _state, _codes) in FIXTURES {
+        assert!(
+            state_changes.iter().any(|change| change.plugin_id == *plugin_id),
+            "{plugin_id}"
+        );
+    }
+    assert!(running.server.plugins.read().unwrap().state_changes.is_empty());
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }
@@ -468,6 +479,7 @@ async fn a_dev_plugins_commands_come_and_go_with_its_state() {
     let running = start_daemon(paths.clone(), &options_with_dev_plugins(&["valid"]))
         .await
         .unwrap();
+    let mut live = subscribe(&running.server.bus);
     let mut listed = listed_command_ids(&running, &paths, "fixture_tools").await;
     listed.sort();
     assert_eq!(listed, ["fixture_tools.refresh", "fixture_tools.report.run"]);
@@ -491,8 +503,9 @@ async fn a_dev_plugins_commands_come_and_go_with_its_state() {
         PluginState::Enabled
     );
     assert_eq!(listed_command_ids(&running, &paths, "fixture_tools").await.len(), 2);
-    let state_changes = running.server.plugins.read().unwrap().state_changes.clone();
-    let moves: Vec<(i32, i32)> = state_changes
+    // Each move is in the daemon log in order; the two made after the start also reached the bus, as durable
+    // records of the daemon.
+    let moves: Vec<(i32, i32)> = logged_plugin_state_changes(&paths)
         .iter()
         .map(|change| (change.from_state, change.to_state))
         .collect();
@@ -502,6 +515,11 @@ async fn a_dev_plugins_commands_come_and_go_with_its_state() {
         (PluginState::Disabled as i32, PluginState::Enabled as i32),
     ];
     assert_eq!(moves, expected);
+    let published: Vec<(i32, i32)> = published_plugin_state_changes(&mut live)
+        .iter()
+        .map(|change| (change.from_state, change.to_state))
+        .collect();
+    assert_eq!(published, expected[1..]);
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }
@@ -596,7 +614,53 @@ async fn an_installed_plugin_loads_from_its_row_and_its_state_is_saved() {
     assert_eq!(saved.state, "enabled");
     assert_eq!(saved.content_hash, "blake3:00");
     stop_test_daemon(second).await;
+    assert_a_restart_logs_no_second_move(&paths).await;
     remove_test_folder(&paths);
+}
+
+/// A restart starts `fixture_tools` from its saved `enabled`: the load changes nothing, so the daemon log still has
+/// only the move of its first load.
+async fn assert_a_restart_logs_no_second_move(paths: &DataPaths) {
+    let restarted = start_daemon(paths.clone(), &options_on_any_port()).await.unwrap();
+    assert_eq!(listed_state(&restarted, "fixture_tools").await.0, "enabled");
+    let moves: Vec<(i32, i32)> = logged_plugin_state_changes(paths)
+        .iter()
+        .filter(|change| change.plugin_id == "fixture_tools")
+        .map(|change| (change.from_state, change.to_state))
+        .collect();
+    assert_eq!(moves, [(PluginState::Installed as i32, PluginState::Enabled as i32)]);
+    stop_test_daemon(restarted).await;
+}
+
+/// The `plugin.state_changed` records in `<data>/daemon/events.log`, in log order.
+fn logged_plugin_state_changes(paths: &DataPaths) -> Vec<PluginStateChanged> {
+    let mut reader = open_event_log(&daemon_events_log_path(paths)).unwrap();
+    let mut changes = Vec::new();
+    while let FrameRead::Record(record) = read_next_frame(&mut reader).unwrap() {
+        if let Some(change) = plugin_state_change_of(record.payload.and_then(|payload| payload.payload)) {
+            changes.push(change);
+        }
+    }
+    changes
+}
+
+/// The `plugin.state_changed` events the bus has published to `live` so far, from the daemon.
+fn published_plugin_state_changes(live: &mut tokio::sync::broadcast::Receiver<BusEvent>) -> Vec<PluginStateChanged> {
+    let mut changes = Vec::new();
+    while let Ok(event) = live.try_recv() {
+        assert_eq!(event.source, "daemon");
+        if let Some(change) = plugin_state_change_of(event.payload.and_then(|payload| payload.payload)) {
+            changes.push(change);
+        }
+    }
+    changes
+}
+
+fn plugin_state_change_of(payload: Option<Payload>) -> Option<PluginStateChanged> {
+    match payload {
+        Some(Payload::PluginStateChanged(change)) => Some(change),
+        _ => None,
+    }
 }
 
 // ---- Plugins written for one test: dependency chains, a lost first-party capability, saved states ----

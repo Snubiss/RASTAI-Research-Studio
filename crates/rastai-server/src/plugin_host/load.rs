@@ -33,7 +33,9 @@ use crate::plugin_host::capabilities::{
     state_after_negotiation,
 };
 use crate::plugin_host::contributions::{plugin_scopes, register_plugin_commands};
-use crate::plugin_host::lifecycle::{change_plugin_state, plugin_row, record_state_change, save_plugin_row};
+use crate::plugin_host::lifecycle::{
+    change_plugin_state, plugin_row, record_plugin_state_changes, record_state_change, save_plugin_row,
+};
 use crate::server_state::Server;
 
 const EXPERIMENTAL_APIS_SETTING: &str = "plugins.experimental_apis";
@@ -84,8 +86,8 @@ pub struct LoadedPlugin {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PluginHost {
     pub plugins: Vec<LoadedPlugin>,
-    /// `plugin.state_changed` records not yet in the daemon log. The bus and the daemon log (M1-28) record and publish
-    /// them; until then they are logged and kept here, newest last.
+    /// `plugin.state_changed` records made under this table's lock and not yet in the daemon log, newest last.
+    /// `record_plugin_state_changes` takes them once the lock is released (lifecycle.rs).
     pub state_changes: Vec<PluginStateChanged>,
 }
 
@@ -145,6 +147,7 @@ pub async fn load_plugin(server: &Server, plugin_id: &str) -> PluginState {
     if target_state == PluginState::Enabled {
         save_plugin_row(server, row).await;
     }
+    record_plugin_state_changes(server).await;
     current_state(server, plugin_id)
 }
 
@@ -162,6 +165,8 @@ pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState {
     unload_plugin(server, plugin_id).await;
     let row = apply_state(server, plugin_id, PluginState::Disabled, Vec::new());
     save_plugin_row(server, row).await;
+    // Before the re-check, so the log has this plugin's move ahead of the moves it causes.
+    record_plugin_state_changes(server).await;
     recheck_enabled_plugins(server).await;
     current_state(server, plugin_id)
 }
@@ -307,6 +312,7 @@ async fn refuse_dependency_cycle(server: &Server, plugin_id: &str, dependency_id
         &[("dependency", dependency_id), ("plugin_id", plugin_id)],
     );
     apply_state(server, plugin_id, PluginState::Disabled, vec![refusal]);
+    record_plugin_state_changes(server).await;
 }
 
 /// The state a load leads to, with its reasons: `failed` without a readable manifest, `incompatible` with layer-3
