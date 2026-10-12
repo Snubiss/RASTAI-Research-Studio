@@ -1051,13 +1051,16 @@ python/rastai_train/
   rastai_train/
     __init__.py
     errors.py                  TrainError with RRS-T codes
-    context.py                 build_training_context(): model, adapters, data, optimizer, devices, settings
-    loop.py                    train(): step loop, accumulation, clipping, metrics, checkpoint cadence, stop and preempt (preempt_at_step_boundary)
+    context.py                 build_training_context(): model, data and split, loader, optimizer, settings (adapters: M5);
+                               TrainingSettings, CheckpointPolicy, TrainingProgress
+    loop.py                    train(): step loop, accumulation, clipping, metrics, validation, checkpoint cadence, stop
+                               and preempt (preempt_at_step_boundary); TrainingOutcome
     optimizer.py               AdamW over trainable parameters; warmup + cosine schedule; state ↔ named tensors
     losses.py                  answer-only loss, chunked next-token loss, sequence log-probs, KL
     adaptation.py              apply full, lora or qlora per graph node; reference = adapters off
     anchors.py                 anchor examples: the base model's own answers to the anchor set; a node-local cache file plus an anchor_answers blob (ADR-0028)
-    checkpoints.py             step-N.partial → fsync → rename; keep last 3 + best + pinned; latest complete
+    checkpoints.py             step-N.partial → fsync → rename; keep last 3 + best + pinned; latest complete; the
+                               fallback past damaged checkpoints; checkpoint ids
     resume.py                  resume.json (rastai.resume/1), rng.safetensors, loader position, recipe state
     capability.py              recipe and adaptation availability per backend (the capability matrix)
     distributed.py             DDP and FSDP2 wrapping; full-state gather to rank 0 for checkpoints
@@ -1087,7 +1090,9 @@ ANCHORS_PER_EXAMPLE = 1.0             # spike: 40 facts + 40 anchors cut drift 8
 DPO_ANCHOR_LOSS_WEIGHT = 1.0          # weight of the anchor SFT term in a DPO step; a starting value, tuned by the drift test before L2
 LOSS_CHUNK_POSITIONS = 1024           # full-vocabulary logits for every position would cost gigabytes (spike)
 
-def build_training_context(arguments: TrainStartArgs, launch: WorkerLaunch, host: WorkerHost) -> TrainingContext: ...
+def build_training_context(arguments: TrainStartArgs, run_id: str, run_folder: Path, settings: TrainingSettings,
+                           device: str = "cpu") -> TrainingContext: ...
+    # plain values, not WorkerLaunch: rastai_train can't import rastai_worker; the train job reads them from job.json
 def train(context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl) -> TrainingOutcome: ...
 def optimizer_step(context: TrainingContext, loss: Tensor) -> float: ...   # backward, clip, step; also used by RL updates
 def preempt_at_step_boundary(context: TrainingContext, recipe: Recipe, events: JobEvents) -> TrainingOutcome: ...
@@ -1102,9 +1107,15 @@ def apply_adaptation(model: CompiledModel, mode: str, lora_rank: int, lora_alpha
 def build_anchor_examples(model: CompiledModel, anchor_prompts: list[dict], host: WorkerHost, model_ref: str, cache_folder: Path) -> list[TrainingExample]: ...
 def mix_anchors(examples: list[TrainingExample], anchors: list[TrainingExample], anchors_per_example: float, seed: int) -> list[TrainingExample]: ...
 
-def write_checkpoint(run_folder: Path, step: int, context: TrainingContext, recipe_state: dict, is_best: bool) -> Path: ...
+def write_checkpoint(run_folder: Path, step: int, context: TrainingContext, recipe_state: dict,
+                     validation_loss: float | None) -> Path: ...
+    # the validation loss goes into weights.safetensors' __metadata__, so a resumed run finds its best checkpoint again
 def find_latest_checkpoint(run_folder: Path) -> Path | None: ...
-def load_resume_state(checkpoint_folder: Path, context: TrainingContext) -> dict: ...
+def checkpoints_to_keep(steps: list[int], keep_last: int, best_step: int | None, pinned_steps: tuple[int, ...]) -> set[int]: ...
+def load_resume_state(checkpoint_folder: Path, context: TrainingContext) -> ResumePoint: ...
+    # weights, optimizer, loader and progress now; the recipe state and the RNG after recipe.prepare (the loop)
+def resume_from_latest_checkpoint(run_folder: Path, context: TrainingContext) -> ResumePoint: ...
+    # newest first, past damaged ones (RRS-T2002, listed in ResumePoint.damaged_checkpoints); none left: RRS-T2004
 
 def recipe_availability(hardware_profile: dict) -> dict[str, dict]: ...
 def export_checkpoint(checkpoint_folder: Path, base_model_folder: Path, formats: list[str], provenance: dict[str, str], output_folder: Path) -> list[Path]: ...
@@ -1183,6 +1194,7 @@ sequenceDiagram
   R->>L: checkpoint.resumed and run.state_changed to running
 ```
 
+- **As built in M1 (M1-38):** the loop emits `run.state_changed running`, `run.metrics` and `checkpoint.saved`; the worker's edge writes the final state. `train.preempted` and `checkpoint.resumed` are worker events from M5 (contracts 7.3), so until then the edge's `run.state_changed preempted` and exit 75 carry the preemption. A full disk at any checkpoint raises `RRS-T2001` with the `.partial` folder removed; the pause below joins with the train job (M1-46), which owns `pause_for_full_disk`.
 - **SIGTERM is not `STOP`** (contracts §4.4, plan §10 row 24). SIGTERM sets `preempt_requested`: checkpoint only if the last checkpoint's write time fits `training.checkpoint.preemption_budget_seconds` (25 s), append `train.preempted`, exit 75; the run is `preempted` and resumable. Control `STOP` (`train.stop`) sets `stop_requested`: a final checkpoint with no budget, the run `completed` with reason `stopped`, exit 0. The loop checks `preempt_requested` first, because only SIGTERM has a deadline.
 - **What is persisted where.** Weights, optimizer state and RNG go in the checkpoint folder as safetensors; step, epoch, samples seen, loader position and recipe state go in `resume.json` (`rastai.resume/1`, written through `rastai_formats`). Events go in the run's `events.log`. Nothing is in memory only.
 - **Visibility.** A checkpoint exists only after the rename. `checkpoint.saved` is emitted after the rename, so the daemon never indexes a half-written folder.
@@ -1206,9 +1218,9 @@ sequenceDiagram
 
 | Test | What it proves |
 |---|---|
-| `tests/test_loop.py` | tiny model: loss falls; `stop_requested` produces a final checkpoint and a `completed` run; `preempt_requested` produces `train.preempted` and `EXIT_PREEMPTED`, with a checkpoint only inside the budget; metrics emitted with steps |
-| `tests/test_resume.py` | CPU, deterministic mode: an interrupted-then-resumed run equals an uninterrupted one bit for bit |
-| `tests/test_checkpoints.py` | no `.partial` is ever returned; keep-last-3 + best + pinned policy |
+| `tests/test_loop.py` | TextCNN on `fixtures/datasets/textcnn_tiny.jsonl`: loss falls; `stop_requested` produces a final checkpoint (the edge then writes `completed`); `preempt_requested` produces a checkpoint only inside the budget (the edge then writes `preempted` and `EXIT_PREEMPTED`; `train.preempted` joins in M5); `cancel_requested` none; metrics emitted with steps; `checkpoint.saved` only after the rename; retention while training; three non-finite steps are `RRS-T3001` |
+| `tests/test_resume.py` | CPU, deterministic mode: an interrupted-then-resumed run equals an uninterrupted one bit for bit (every step's loss, weights, optimizer state, RNG), after SIGTERM, after a kill following a periodic checkpoint, and across an epoch boundary; checkpoint cadence doesn't change the training stream |
+| `tests/test_checkpoints.py` | no `.partial` is ever returned; a full disk leaves none; keep-last-3 + best + pinned policy; a damaged newer checkpoint is skipped; another run's is refused |
 | `tests/test_losses.py` | answer-only equals full cross-entropy restricted to targets; chunked equals unchunked |
 | `tests/test_optimizer.py` | AdamW state round-trips through named tensors |
 | `tests/test_anchors.py` | anchors are token IDs; cache hit on the second call; the `anchor_answers` blob and the cache file agree; mix ratio honored |

@@ -1,0 +1,30 @@
+# rastai_train: the trainer and its recipes (contracts 2.2; layout python.md section 5). M1-38 lands the loop, the
+# optimizer and schedule, checkpoints, the resume contract and the classification recipe (§31 step 1, TextCNN).
+
+[project]
+name = "rastai-train"
+version = "0.1.0"          # app, node and worker ship together under one version (§20)
+requires-python = "==3.12.*"
+# torch is the foundation (§27) and carries no pin here: each environment in python/envs/ pins it, with its own
+# backend build. rastai-lens and bitsandbytes join with the recipes and kernels that use them (layout section 5.9).
+dependencies = [
+    "torch",               # the optimizer, losses and random generator states
+    "rastai-models",       # compiled models and the safetensors reader and writer
+    "rastai-data",         # dataset readers, splits and the resumable loader
+    "rastai-formats",      # resume.json (rastai.resume/1) and file hashes, through the wheel
+    "rastai-plugin",       # Recipe, TrainingContext, JobEvents, JobControl and the catalog codes TrainError carries
+]
+
+[tool.uv.sources]
+rastai-models = { workspace = true }
+rastai-data = { workspace = true }
+rastai-formats = { workspace = true }
+rastai-plugin = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the import package is rastai_train/ next to this file, not under src/ (python/CLAUDE.md).
+module-root = ""

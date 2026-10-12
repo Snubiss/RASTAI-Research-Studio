@@ -62,9 +62,9 @@ cpu_python := if os() == "windows" { cpu_environment / "Scripts/python.exe" } el
 # so every machine runs them with the same interpreter.
 check_python := cpu_python
 # The test folders under python/ that test-python-portable runs on macOS and Windows: the cpu environment's smoke
-# test and the pure-compute packages' tests (plan 8.7). rastai_formats, rastai_models and rastai_data are here;
-# rastai_train joins as it lands (tests/workspace/ci-workflows.test.js fails until it does).
-portable_test_folders := "envs/tests rastai_formats/tests rastai_models/tests rastai_data/tests"
+# test and the pure-compute packages' tests (plan 8.7): rastai_formats, rastai_models, rastai_data and rastai_train
+# (tests/workspace/ci-workflows.test.js fails if one that exists is missing).
+portable_test_folders := "envs/tests rastai_formats/tests rastai_models/tests rastai_data/tests rastai_train/tests"
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 

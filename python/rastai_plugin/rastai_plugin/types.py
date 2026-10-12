@@ -2,23 +2,53 @@
 
 Only types that exist nowhere else live here: document types come from rastai_formats and wire types from
 rastai_proto, and neither is ever declared again. A type gets its fields with the task that first builds or reads
-it, so the ones nothing fills yet are empty: `TrainingContext` and `Batch` grow with the trainer (M1-38), and
-`EvalContext`, `EvalCase` and `ModelOutput` with the Evaluation plugin (M5).
+it, so the ones nothing fills yet are empty: `EvalContext`, `EvalCase` and `ModelOutput` grow with the Evaluation
+plugin (M5).
+
+Torch objects (the model, the optimizer) are typed Any here: only NodeType, Lens and Sampler may name torch in this
+package (layout frontend-and-plugins.md 11.3).
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
 @dataclass
 class TrainingContext:
     """What a recipe's prepare() gets from the trainer: the model, the data, the optimizer and the run's settings.
-    rastai_train builds it (build_training_context); its fields arrive with the trainer (M1-38)."""
+    rastai_train builds it (build_training_context) and its loop works on it, so a checkpoint can be written from it
+    alone."""
+
+    run_id: str
+    # The run's folder on the node (contracts 8.4); checkpoints go under its checkpoints/ folder.
+    run_folder: Path
+    # The rastai_models CompiledModel being trained, on `device`.
+    model: Any
+    # "cpu", or "cuda:<index>" for a GPU run.
+    device: str
+    # The torch optimizer over the model's trainable parameters (rastai_train/optimizer.py).
+    optimizer: Any
+    # The rastai_data BatchLoader over the training split. Its position goes into resume.json.
+    loader: Any
+    # The validation split's examples in file order; empty when the dataset has none.
+    validation_examples: list
+    # resume.json's dataloader{} names the data the loader reads by these two.
+    dataset_hash: str
+    split: str
+    # The run's settings as rastai_train reads them (TrainingSettings).
+    settings: Any
+    # Where the run stands: steps, samples seen, the last checkpoint (rastai_train's TrainingProgress).
+    progress: Any
 
 
-@dataclass
+@dataclass(frozen=True)
 class Batch:
-    """One batch from the run's loader, handed to Recipe.training_step. Its fields arrive with the trainer (M1-38)."""
+    """One batch from the run's loader, handed to Recipe.training_step."""
+
+    # The loader's examples in epoch order, as the recipe's data holds them (rows from a dataset file, or
+    # rastai_data example dataclasses). The recipe turns them into tensors.
+    examples: list
 
 
 @dataclass(frozen=True)

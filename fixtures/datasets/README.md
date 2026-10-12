@@ -17,5 +17,6 @@ Small datasets for the `rastai_data` tests and the TextCNN training tests (contr
 | `python/rastai_data/tests/test_reader_mutations.py` (`fuzz`) | seeded mutations of both files give rows or `DataError`, never another exception |
 | `python/rastai_data/tests/test_splits.py` | the split of every id is the same under two `PYTHONHASHSEED` values, and the split sizes follow the ratios |
 | `python/rastai_data/tests/test_word_vocabulary.py` | a vocabulary built from the texts |
+| `python/rastai_train/tests/test_loop.py`, `test_resume.py`, `test_checkpoints.py`, `test_optimizer.py` | TextCNN trains on `textcnn_tiny.jsonl`: the loss falls, and a resumed run equals an uninterrupted one bit for bit |
 
 **Changing them.** The files are frozen test inputs; the split and mutation tests depend on their exact bytes. A new dataset case is a new file here, added to this table.
