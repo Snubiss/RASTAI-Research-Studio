@@ -29,6 +29,7 @@ dev = [
     "pytest==9.1.1",       # test runner (dev tooling, §27)
     "ruff==0.16.9",        # lint and format (dev tooling, §27); settings in python/pyproject.toml
     "grpcio-tools==1.84.0",  # grpcio's protobuf and gRPC generators, which `just codegen` runs through buf
+    "maturin==1.15.0",     # builds rastai-formats' PyO3 module (dev tooling, §27): the editable install and `just wheel`
 ]
 
 [tool.uv]
@@ -42,6 +43,9 @@ package = false
 exclude-newer = "2026-09-27T00:00:00Z"
 # The one exception: torch 2.14.1 (published 2026-09-30) is the build the spike measured (ADR-0009, spike 05).
 exclude-newer-package = { torch = "2026-10-01T00:00:00Z" }
+# rastai-formats builds its PyO3 module with this environment's own maturin (the dev group above, locked by hash in
+# uv.lock) instead of one uv would fetch into a separate build environment.
+no-build-isolation-package = ["rastai-formats"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -51,7 +55,8 @@ explicit = true            # only the packages named in [tool.uv.sources] come f
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
 # Workspace packages resolve by path in development, editable so a fresh `just codegen` is seen without a resync
-# (python layout 11.2); releases install built wheels instead.
+# (python layout 11.2); releases install built wheels instead. rastai-formats' editable install builds its PyO3
+# module from crates/rastai-formats/bindings/python, which `just env-cpu` redoes on every sync.
 rastai-proto = { path = "../../rastai_proto", editable = true }
 rastai-formats = { path = "../../rastai_formats", editable = true }
 rastai-data = { path = "../../rastai_data", editable = true }

@@ -53,6 +53,7 @@
     "rastai-core",
     "rastai-diag",
     "rastai-formats",
+    "rastai-formats-python",
     "rastai-mcp",
     "rastai-node",
     "rastai-proto",

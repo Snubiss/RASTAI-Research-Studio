@@ -4,7 +4,7 @@
 //!
 //! The table is data, not a match, so the layer-2 code is the same for every type and a test can run it with a type
 //! of its own. A new type adds its module here, its row in `DOCUMENT_TYPES`, its `Document` variant and an arm in
-//! `document_from_value` and `document_header` (crates/rastai-formats/CLAUDE.md).
+//! `document_from_value`, `document_header` and `document_header_mut` (crates/rastai-formats/CLAUDE.md).
 
 pub mod lock;
 pub mod model;
@@ -16,6 +16,7 @@ pub mod run_record;
 pub mod settings;
 pub mod theme;
 
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -108,8 +109,10 @@ pub const DOCUMENT_TYPES: &[DocumentType] = &[
 /// `match` in `document_header` then fails to compile until the new variant is handled.
 // The variants differ in size (a theme holds 40 color roles), but a document is read once and handed on, never
 // kept in large numbers, so boxing each variant would only add a dereference at every use.
+// `untagged` writes a document as its own struct, with no variant name around it, so the JSON is the file's JSON.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
 pub enum Document {
     RunRecord(RunRecord),
     Resume(ResumeState),
@@ -132,6 +135,19 @@ pub fn document_header(document: &Document) -> &SharedHeader {
         Document::PluginManifest(manifest) => &manifest.header,
         Document::Theme(theme) => &theme.header,
         Document::Model(model) => &model.header,
+    }
+}
+
+/// The shared header of any document, to change. `write_document` fills `content_hash` through it.
+pub fn document_header_mut(document: &mut Document) -> &mut SharedHeader {
+    match document {
+        Document::RunRecord(run_record) => &mut run_record.header,
+        Document::Resume(resume) => &mut resume.header,
+        Document::Settings(settings) => &mut settings.header,
+        Document::Project(project) => &mut project.header,
+        Document::Lock(lock) => &mut lock.header,
+        Document::PluginManifest(manifest) => &mut manifest.header,
+        Document::Theme(theme) => &mut theme.header,
     }
 }
 

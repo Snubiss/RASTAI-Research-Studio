@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "hashes": {
+    "rastai.lock/valid/environment_only.lock": "blake3:15bc7177adb0fec30bb729bfcf8f4cfb7dafd2fae8380203f8f0fd549bcc1871",
+    "rastai.lock/valid/rastai.lock": "blake3:7a24a4045cc59fd42262778146cdd98565f60f0d11d95ef71ffe9a27b3447ba5",
+    "rastai.plugin/valid/rastai-plugin.json": "blake3:440550d9f71d53fe632df6d9a6df676da5db0b26524d8d9495ee78c33755f463",
+    "rastai.project/valid/project.json": "blake3:597074355304f748520bc2c4e8b4986416e019a439347691efff807c5e817e7f",
+    "rastai.project/valid/remote_node.json": "blake3:7d6a8488ded8faf388e2dad0a6bc34bfd5f63341eb82b202f381fae314dea3bc",
+    "rastai.resume/valid/resume.json": "blake3:0d027e7c434a342d1ead29784bd8b3297dfd34de0113b0b57f1d7dedde1afaec",
+    "rastai.run_record/valid/teach_chain.json": "blake3:3ad05f6aa8d132de70c7a7ec47d0adaf67ba1bb45fee4ff61643f2f03840ff69",
+    "rastai.run_record/valid/train_run.json": "blake3:61f6a8742de89713216a18a37ac3247c6413710cb832b684912a7854eba4ee2a",
+    "rastai.settings/valid/empty_layer.json": "blake3:4ca89f6f16297c4206164f90cd0713f872a76462bfa5b43c0a64f28ec8504bb0",
+    "rastai.settings/valid/user_settings.json": "blake3:a2065c65a88f2d187007cda28e28ea1aed25d654b04e47d3a1944610b35196bd",
+    "rastai.theme/valid/every_role.theme.json": "blake3:68bfc4afe98721bf1f7048bca0a227a92f51fb6bb0c0a467228eb5a321780e97",
+    "rastai.theme/valid/night.theme.json": "blake3:de79ce5ff11222694df1eae654fc5a2b8351062faaee8733a3c987a1d107ba7e"
+  }
+}

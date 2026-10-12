@@ -9,7 +9,8 @@
 #   cargo install --locked cargo-fuzz@0.13.2       (only for `just fuzz`)
 #   rustup toolchain install nightly-2026-09-27 --profile minimal   (only for `just fuzz`)
 # cargo install checks each crate against the checksum in the crates.io index.
-# The Rust toolchain is pinned in rust-toolchain.toml; rustup installs it on first use. Fuzzing needs nightly
+# The Rust toolchain is pinned in rust-toolchain.toml; rustup installs it on first use. Building the workspace also needs
+# a python3 on PATH (any 3.x): pyo3's build script asks it how to build rastai-formats-python (.cargo/config.toml). Fuzzing needs nightly
 # (cargo-fuzz builds with sanitizer flags), so its toolchain is pinned here instead: fuzz_toolchain below.
 #
 # Python and JavaScript tools, also for your user only:
@@ -113,9 +114,13 @@ lint: env-cpu
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one
 # online run it works offline from the uv cache.
+# --reinstall-package rebuilds rastai-formats' PyO3 module on every sync, so a Rust change is always in the module
+# Python imports. uv would otherwise reuse its cached build, which knows nothing of the Rust sources and can't put
+# back a module `git clean` removed. With nothing changed the rebuild is a cargo no-op (about 0.3 s).
 # Sync the cpu environment from python/envs/cpu/uv.lock into .dev/envs/cpu.
 env-cpu:
-    UV_PROJECT_ENVIRONMENT="{{cpu_environment}}" uv sync --frozen --project python/envs/cpu
+    UV_PROJECT_ENVIRONMENT="{{cpu_environment}}" uv sync --frozen --reinstall-package rastai-formats \
+        --project python/envs/cpu
 
 # --frozen-lockfile installs exactly the lock and fails instead of changing it.
 # Install the JavaScript dev tools (typescript checker, vitest, prettier) from pnpm-lock.yaml into node_modules/.
@@ -152,6 +157,14 @@ test-js: env-js
 # Type-check the JSDoc in every .js and .jsx file.
 check-js: env-js
     pnpm exec tsc --noEmit -p jsconfig.json
+
+# maturin is the cpu environment's own (its dev group pins it in uv.lock), the same build backend that builds the
+# editable install. --interpreter makes it a CPython 3.12 wheel for this platform (layout 4.7: abi3 off), and
+# --locked builds against the checked-in Cargo.lock. The wheel lands in python/rastai_formats/dist/ (git-ignored).
+# Build the rastai-formats wheel (python/rastai_formats with its PyO3 module) in release mode.
+wheel: env-cpu
+    cd python/rastai_formats && "{{cpu_environment}}/bin/maturin" build --release --locked \
+        --interpreter "{{cpu_python}}" --out dist
 
 # Licenses, advisories, sources, bans and single-owner wrappers (deny.toml).
 deny:

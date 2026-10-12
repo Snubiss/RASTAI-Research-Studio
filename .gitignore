@@ -8,6 +8,9 @@ build/
 .venv/
 __pycache__/
 *.pyc
+# rastai_formats' PyO3 module, which maturin builds into the package folder for the editable install (just env-cpu):
+# _native.cpython-312-x86_64-linux-gnu.so, or _native.cp312-win_amd64.pyd on Windows.
+python/rastai_formats/rastai_formats/_native.*
 
 # Weights and large artifacts never go in git (HF cache or the blob store hold them)
 *.safetensors

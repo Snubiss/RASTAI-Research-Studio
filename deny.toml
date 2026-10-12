@@ -29,7 +29,12 @@ allow = [
   "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
-exceptions = []
+exceptions = [
+  # target-lexicon is a build dependency of pyo3-build-config (the rastai-formats wheel, M1-19): it runs at compile
+  # time to name the target platform and links into no binary. The LLVM exception only widens Apache-2.0, the same
+  # license the Python allowlist accepts for torch (deps/allowlist-python.json).
+  { crate = "target-lexicon", allow = ["Apache-2.0 WITH LLVM-exception"] },
+]
 # The list is the policy, not a picture of today's crates, so a license nobody uses yet is fine.
 unused-allowed-license = "allow"
 
@@ -83,7 +88,8 @@ deny = [
   # their system calls through it (M1-41). tokio's `signal` feature, which the daemon's SIGTERM and SIGINT handling
   # needs, installs its handlers through signal-hook-registry and reads errno through errno (M1-26). tokio's
   # `process` feature, which rastai-node runs nvidia-smi and rocm-smi with (M1-42), reaps children through the same
-  # signal-hook-registry (SIGCHLD).
+  # signal-hook-registry (SIGCHLD). pyo3 and pyo3-ffi, under the rastai-formats wheel (M1-19), declare the C types of
+  # Python's API with it.
   { crate = "libc", wrappers = [
     "rastai-store",
     "cpufeatures",
@@ -94,6 +100,8 @@ deny = [
     "hyper-util",
     "signal-hook-registry",
     "errno",
+    "pyo3",
+    "pyo3-ffi",
   ], reason = "rastai-store (disk_space.rs, ADR-0033); the system calls of blake3, tokio and hyper-util underneath" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },

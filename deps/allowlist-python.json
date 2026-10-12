@@ -75,6 +75,12 @@
       "license": "Apache-2.0",
       "reason": "grpcio's protobuf and gRPC generators, which buf runs for python/rastai_proto in `just codegen` (spec §27 dev tooling: buf with the protobuf and grpcio plugins, layout rust-node-gateway-proto.md 3.4); dev group only, never on a user's machine"
     },
+    "maturin": {
+      "version": "1.15.0",
+      "category": "dev",
+      "license": "MIT OR Apache-2.0",
+      "reason": "builds rastai-formats' PyO3 module: the editable install in the cpu environment and `just wheel` (spec §27 dev tooling; layout rust-control-plane.md 4.7); dev group only, never on a user's machine"
+    },
     "anyio": { "version": "4.15.1", "category": "transitive", "license": "MIT", "brought_by": ["httpx"] },
     "certifi": {
       "version": "2026.7.22",

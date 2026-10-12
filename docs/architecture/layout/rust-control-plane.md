@@ -99,6 +99,7 @@ RASTAI/
                              [workspace.metadata.rastai.allowlist] (the §27 crate table, 2.4)
   Cargo.lock                 checked in; CI builds with --locked
   rust-toolchain.toml        pinned stable toolchain (1.99, the spike's), components rustfmt + clippy, wasm32 target
+  .cargo/config.toml         [env] PYO3_BUILD_EXTENSION_MODULE = "1": cargo builds the wheel's module without libpython (4.7)
   rustfmt.toml               max_width = 120, edition = "2024" (matches the spike's line length)
   clippy.toml                too-many-lines-threshold = 60, too-many-arguments-threshold = 6, cognitive-complexity-threshold = 15
   deny.toml                  cargo-deny: licenses, advisories, sources, bans, single-owner wrappers (2.4)
@@ -269,7 +270,7 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 | `just codegen` | `buf generate` (proto doc; protobuf-es with target `js+dts`), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen`, then `--bin rastai-names-codegen` (last: it reads the catalog, the tables and the migrations) | after any catalog, document or command change |
 | `just codegen-check [base]` | `tools/checks/check-generated`, then `cargo test -p rastai-codegen -- --ignored` with `RASTAI_BASE_REF=<base>` (default `origin/main`): the catalog's merge-base check and the outputs check (4.9), which need git history and both environments | CI |
 | `just wasm` | `cargo build -p rastai-diag --target wasm32-unknown-unknown` (M1, section 3.4); from M4 also `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir packages/formats/src/wasm/` | `just check`; `packages/formats` build, the viewer |
-| `just wheel` | `maturin build --release -m crates/rastai-formats/bindings/python/Cargo.toml` into `python/rastai_formats/dist/` | the uv environments |
+| `just wheel` | `maturin build --release --locked` in `python/rastai_formats/` (its `pyproject.toml` names the binding crate), with the cpu environment's maturin and Python 3.12, into `python/rastai_formats/dist/` | the uv environments |
 | `just deny` | `cargo deny check` | CI |
 | `just check-deps` | `tools/checks/check-deps` | CI |
 | `just check-names` | `tools/checks/check-names` (2.8) | CI, and in `just check` (M1) |
@@ -1081,7 +1082,7 @@ fn write_zip_stored(destination_path: &str, entries: Vec<(String, String)>) -> P
 
 - **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, `check_safetensors_header` before every tensor read, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai_data` (`MysqlConnection` through the generated dataclass, validated by `read_document`), `rastai.load()` in notebooks.
 - **Paths in the binding only.** `write_zip_stored` is the one function here that takes paths. The binding crate opens them; `rastai-formats` itself still only sees a `FileSource` and a `FileSink` (4.10).
-- Built by `just wheel` with maturin (§27 dev tooling) for CPython 3.12, `abi3` off: one wheel per platform in each `envs/<backend>/uv.lock`, by hash. Nothing installs at runtime.
+- Built by `just wheel` with maturin (§27 dev tooling) for CPython 3.12, `abi3` off: one wheel per platform in each `envs/<backend>/uv.lock`, by hash. Nothing installs at runtime. In development the cpu environment installs `python/rastai_formats` editable, built without build isolation by the maturin its lock pins; `just env-cpu` rebuilds the module on every sync.
 - The GIL is released (`py.allow_threads`) around anything that can take more than a millisecond (Q8_0 encoding, large documents).
 
 ### 4.8 Dependencies
