@@ -6,7 +6,8 @@ layout rust-control-plane.md 2.8).
 stability. Codegen writes both into schemas/commands/ and schemas/events/, and this check compares those folders in
 the working tree with the same folders at the merge base of HEAD and RASTAI_BASE_REF (default origin/main):
 
-- An added, changed or removed file needs a change to contracts.md in the same diff, on a line that names the
+- An added, changed or removed file needs a contracts change in the same diff: a changed line of contracts.md or of
+  any file under docs/architecture/contracts-changes/ (where each task's change entry lives, PROC-02) that names the
   command id or event type, or its argument, result or payload type.
 - A `stable` or `deprecated` item may not break: a removed or renamed field, a changed field type, a newly required
   field, a removed file (a removed or renamed command or event type), a changed command kind, event class or payload
@@ -30,6 +31,8 @@ from repo_files import git_environment, parse_root_argument, report
 
 CHECK_NAME = "check-schema-diff"
 CONTRACTS_FILE = "docs/architecture/contracts.md"
+# Each task's contracts change entry is its own file here (PROC-02), so a change is often registered only here.
+CONTRACTS_CHANGES_FOLDER = "docs/architecture/contracts-changes/"
 COMMANDS_FOLDER = "schemas/commands/"
 EVENTS_FOLDER = "schemas/events/"
 SCHEMA_FOLDERS = (COMMANDS_FOLDER, EVENTS_FOLDER)
@@ -53,7 +56,8 @@ PROTO_MESSAGE_PATTERN = re.compile(r"Protobuf JSON of ([A-Za-z0-9_]+(?:\.[A-Za-z
 
 # Items with these stabilities may not break (contracts 6.1: deprecated ones until they are retired).
 GUARDED_STABILITIES = ("stable", "deprecated")
-# Where a guarded item may move. Deprecating a stable item keeps its shape; a move to preview drops the promise.
+# Where a guarded item may move. Deprecating a stable item keeps its shape, and so does taking a deprecation back
+# (deprecated to stable, which only restores the promise); a move to preview drops the promise.
 ALLOWED_STABILITY_MOVES = {
     "stable": ("stable", "deprecated"),
     "deprecated": ("deprecated", "stable"),
@@ -63,7 +67,9 @@ LIST_ELEMENT_MARK = "[]"
 MAP_VALUE_MARK = "{}"
 # A name counts as named on a line only as a whole: `job.get` isn't named by `job.get_all` or `xjob.get`.
 NAME_CHARACTER = r"[A-Za-z0-9_]"
-# A diff's hunks start at the first line with this prefix; the `---` and `+++` file headers come before it.
+# In a diff of several files each file starts with this line, then its `---` and `+++` headers, then its hunks, the
+# first of which starts with DIFF_HUNK_PREFIX.
+DIFF_FILE_PREFIX = "diff --git "
 DIFF_HUNK_PREFIX = "@@"
 DIFF_CHANGE_PREFIXES = ("+", "-")
 
@@ -112,7 +118,7 @@ def no_merge_base_message(base_ref: str) -> str:
 
 def find_problems(base_files: dict[str, str], head_files: dict[str, str], contracts_lines: list[str]) -> list[str]:
     """Every problem with the change from base_files to head_files ({path: text}), given the changed lines of
-    contracts.md."""
+    contracts.md and contracts-changes/."""
     problems = []
     for path in sorted(set(base_files) | set(head_files)):
         base_text = base_files.get(path)
@@ -217,8 +223,8 @@ def missing_contracts_message(path: str, base_item: SchemaItem | None, head_item
         what = "changed"
     names = ", ".join(f"`{name}`" for name in item_names(base_item, head_item))
     return (
-        f"{path} {what}, but no changed line of {CONTRACTS_FILE} names {names}: "
-        "update contracts.md in the same change (contracts 12.6)"
+        f"{path} {what}, but no changed line of {CONTRACTS_FILE} or {CONTRACTS_CHANGES_FOLDER} names {names}: "
+        "add the contracts change in the same change, in the task's contracts-changes file (contracts 12.6)"
     )
 
 
@@ -391,19 +397,35 @@ def read_head_files(root: Path) -> dict[str, str]:
 
 
 def read_contracts_changes(root: Path, merge_base: str) -> list[str]:
-    """The added and removed lines of contracts.md between the merge base and the working tree."""
-    diff = git_output(root, ["diff", "--unified=0", "--no-color", merge_base, "--", CONTRACTS_FILE])
-    return changed_lines(diff)
+    """The added and removed lines of contracts.md and of every file under contracts-changes/ between the merge base
+    and the working tree, with every line of a contracts-changes file not yet added to git."""
+    diff = git_output(
+        root, ["diff", "--unified=0", "--no-color", merge_base, "--", CONTRACTS_FILE, CONTRACTS_CHANGES_FOLDER]
+    )
+    return changed_lines(diff) + untracked_contracts_lines(root)
+
+
+def untracked_contracts_lines(root: Path) -> list[str]:
+    """Every line of the contracts-changes files git doesn't track yet. `git diff` leaves them out, and a new task's
+    entry is a new file, so before `git add` it would not count."""
+    listing = git_output(root, ["ls-files", "--others", "--exclude-standard", "-z", "--", CONTRACTS_CHANGES_FOLDER])
+    lines = []
+    for path in listing.split("\0"):
+        if path:
+            lines.extend((root / path).read_text(encoding="utf-8").splitlines())
+    return lines
 
 
 def changed_lines(diff: str) -> list[str]:
-    """The added and removed lines of a one-file diff, without their + or -. The file headers (`--- a/...`,
-    `+++ b/...`) come before the first hunk, so only lines after it count: a removed line that starts with `--` is
-    still a change."""
+    """The added and removed lines of a diff of one or more files, without their + or -. Each file's headers
+    (`--- a/...`, `+++ b/...`) come before its first hunk, so only lines after a hunk header and before the next
+    file count: a removed line that starts with `--` is still a change."""
     lines = []
     in_hunks = False
     for line in diff.splitlines():
-        if line.startswith(DIFF_HUNK_PREFIX):
+        if line.startswith(DIFF_FILE_PREFIX):
+            in_hunks = False
+        elif line.startswith(DIFF_HUNK_PREFIX):
             in_hunks = True
         elif in_hunks and line.startswith(DIFF_CHANGE_PREFIXES):
             lines.append(line[1:])
