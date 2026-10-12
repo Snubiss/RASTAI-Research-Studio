@@ -2664,7 +2664,9 @@ python/rastai_plugin/
                                the manifest (RRS-P0103); never installs a package (a missing one is RRS-P3001)
     errors.py                  PluginError(code, message)
     catalog/
-      __init__.py              the lookup find_catalog_entry (M1-37); plugin catalogs join the generated tables
+      __init__.py              the lookup find_catalog_entry (M1-37); first-party plugin catalogs join the generated
+                               tables; third-party PLG- codes live in rastai-diag's RuntimeCatalog (M8), so the
+                               lookup returns None for them
       generated.py             generated error-code constants (RRS_M4001, ...) and entries, from rastai-catalog-codegen
     types.py                   plain dataclasses shared by extension points (TrainingContext, Batch, StepResult,
                                EvalCase, EvalContext, ModelOutput, MetricResult, ...)

@@ -43,10 +43,17 @@ def python_module_name(manifest: PluginManifest) -> str:
 def import_plugin_module(plugin_id: str, module_name: str) -> ModuleType:
     try:
         return importlib.import_module(module_name)
-    except ImportError as error:
+    except ModuleNotFoundError as error:
         # The module itself, or a package it imports, isn't installed in this environment.
         missing = error.name or module_name
         raise PluginError(RRS_P3001, f"{missing}, needed by the plugin {plugin_id}, isn't installed") from error
+    except ImportError as error:
+        # Every module was found, but a name the plugin imports from one of them isn't there. The node installs the
+        # exact versions the plugin's lock names, so the package is the one the author chose: the name is the
+        # plugin's own mistake (a typo, or code written against another version), which is P4001's "report it to
+        # the plugin's author", not P3001's "install the dependency".
+        reason = f"{module_name} can't be imported: {error}"
+        raise PluginError(RRS_P4001, f"the plugin module of {plugin_id} crashed: {reason}") from error
     except Exception as error:
         # Any other failure while the module's top level runs is the module crashing on import.
         reason = f"importing {module_name} raised {type(error).__name__}: {error}"

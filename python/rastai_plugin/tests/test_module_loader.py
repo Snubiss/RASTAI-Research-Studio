@@ -65,6 +65,14 @@ import rastai_test_package_that_is_not_installed
 def register(registry):
     pass
 """
+# The package is installed but the name isn't in it: a typo in the plugin, not a missing package.
+MISSING_NAME_MODULE = """
+from os import name_that_does_not_exist_in_os
+
+
+def register(registry):
+    pass
+"""
 
 
 def manifest_document(module_name: str, contributes: dict) -> dict:
@@ -184,6 +192,15 @@ def test_a_missing_dependency_of_the_module_is_p3001(plugin_folder: Path) -> Non
     assert "rastai_test_package_that_is_not_installed" in caught.value.message
 
 
+def test_a_name_missing_from_an_installed_package_is_p4001_not_p3001(plugin_folder: Path) -> None:
+    with pytest.raises(PluginError) as caught:
+        load_written_plugin(plugin_folder, "loader_fixture_missing_name", MISSING_NAME_MODULE, matching_contributions())
+    assert caught.value.code == RRS_P4001
+    assert "loader_fixture_missing_name can't be imported" in caught.value.message
+    assert "name_that_does_not_exist_in_os" in caught.value.message
+    assert "isn't installed" not in caught.value.message
+
+
 def test_a_module_that_crashes_on_import_is_p4001(plugin_folder: Path) -> None:
     with pytest.raises(PluginError) as caught:
         load_written_plugin(plugin_folder, "loader_fixture_crash", CRASHING_IMPORT_MODULE, matching_contributions())
@@ -232,3 +249,12 @@ def test_manifest_ids_are_sorted_and_an_entry_without_its_id_is_p0001(tmp_path: 
         manifest_ids(read_manifest(manifest_path), "metrics")
     assert caught.value.code == RRS_P0001
     assert "metric_id" in caught.value.message
+
+
+def test_a_repeated_manifest_id_is_p0001_even_when_register_matches(plugin_folder: Path) -> None:
+    contributes = matching_contributions()
+    contributes["metrics"].append({"metric_id": "word_count.words", "title": "Words again"})
+    with pytest.raises(PluginError) as caught:
+        load_written_plugin(plugin_folder, "loader_fixture_repeated_id", MATCHING_MODULE, contributes)
+    assert caught.value.code == RRS_P0001
+    assert "contributes.metrics[1] repeats the metric_id word_count.words" in caught.value.message

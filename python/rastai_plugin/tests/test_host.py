@@ -100,6 +100,26 @@ def test_register_sends_the_job_its_socket_and_the_token(fake_node, socket_folde
     assert service.calls == [{"job_id": JOB_ID, "job_socket_path": job_socket_path, "token": JOB_TOKEN}]
 
 
+def test_the_channel_names_localhost_as_its_authority(
+    fake_node, socket_folder: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # grpcio would send the socket path as :authority, which the real node (tonic) refuses. The fake grpcio server
+    # accepts any authority, so this checks that the option reaches the channel. The check against the real server
+    # waits for M1-43, the first task in which the node serves WorkerHostService.
+    channel_options = []
+    real_insecure_channel = grpc.insecure_channel
+
+    def recording_insecure_channel(target, options=None):
+        channel_options.append(options)
+        return real_insecure_channel(target, options=options)
+
+    monkeypatch.setattr(grpc, "insecure_channel", recording_insecure_channel)
+    service, socket_path = fake_node
+    WorkerHost(socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN).register()
+    assert channel_options == [[("grpc.default_authority", "localhost")]]
+    assert len(service.calls) == 1
+
+
 def test_register_again_on_reattach_is_a_second_call(fake_node, socket_folder: Path) -> None:
     service, socket_path = fake_node
     host = WorkerHost(socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN)
