@@ -1,0 +1,8 @@
+# Cargo settings for every build in this repository (layout: rust-control-plane.md section 2.1).
+
+[env]
+# rastai-formats-python is a Python extension module: the Python that loads it supplies the interpreter's symbols, so
+# it must not link libpython. pyo3 0.29 reads this variable in place of its deprecated `extension-module` feature,
+# and maturin sets it too. Without it a plain `cargo build` or `cargo test --workspace` would need the shared libpython
+# of whatever python3 is on PATH, which many machines and CI runners don't have.
+PYO3_BUILD_EXTENSION_MODULE = "1"

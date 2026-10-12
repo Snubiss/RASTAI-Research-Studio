@@ -23,9 +23,11 @@ and §15.1.
 - **A document type is written in four places, all in its own contract PR:** the struct (with
   `#[serde(flatten)] pub header: SharedHeader`) and its `describe_<file>_types()` (the document's fields start with
   `header_fields()`; its parts follow) in `src/documents/<type>.rs`; its row in `DOCUMENT_TYPES`, its `Document`
-  variant and its arms in `document_from_value` and `document_header` (`src/documents/mod.rs`) and in `check_meaning`
-  (`src/validate/meaning/mod.rs`); its descriptions in `describe_all_types()` (`src/describe/registry.rs`); and its
-  fixtures in `fixtures/documents/<type>/` with a `tests/describe_matches_struct.rs` case for it and every part.
+  variant and its arms in `document_from_value`, `document_header` and `document_header_mut`
+  (`src/documents/mod.rs`) and in `check_meaning` (`src/validate/meaning/mod.rs`); its descriptions in
+  `describe_all_types()` (`src/describe/registry.rs`); its fixtures in `fixtures/documents/<type>/` with a
+  `tests/describe_matches_struct.rs` case for it and every part; and each valid fixture's content hash in
+  `fixtures/documents/content_hashes.json`, which Rust and the wheel are both checked against.
 - **`src/lib.rs` and `src/json/mod.rs` are lists of `pub mod` lines** (contracts §12.2). Unit tests sit at the
   bottom of the file they test.
 

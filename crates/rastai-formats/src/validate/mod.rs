@@ -1,6 +1,7 @@
 //! `read_document`, the one entry point for untrusted document bytes (layout 4.3, 4.4): layer 1 (syntax), the
 //! migration chain, layer 2 (structure), then the typed document and layer 3 (meaning), with every diagnostic
-//! collected in one pass. Layer 4 (environment) is a separate call, `check_environment`.
+//! collected in one pass. Layer 4 (environment) is a separate call, `check_environment`. Its way back out is
+//! `write_document`, which fills the content hash and writes the stable pretty form.
 //!
 //! | Layer | Codes | Blocks loading? |
 //! |---|---|---|
@@ -21,8 +22,11 @@ use crate::byte_source::ByteSource;
 use crate::describe::registry::describe_all_types;
 use crate::describe::structure_check::StructureCheck;
 use crate::describe::types::TypeDescription;
-use crate::documents::{DOCUMENT_TYPES, Document, DocumentType, document_from_value};
+use crate::documents::{DOCUMENT_TYPES, Document, DocumentType, document_from_value, document_header_mut};
+use crate::error::FormatsError;
+use crate::hashing::content_hash_of_value;
 use crate::json::positions::PositionMap;
+use crate::json::pretty::pretty_json;
 use crate::limits::ImportLimits;
 use crate::migrate::chain_table::MIGRATION_STEPS;
 use crate::migrate::{MigrationInput, MigrationResult, migrate_to_current};
@@ -96,6 +100,25 @@ pub fn read_document(file_name: &str, source: &dyn ByteSource, limits: &ImportLi
         read_only: checked.read_only,
         migrated_from_version: checked.migrated_from_version,
     }
+}
+
+/// A typed document as the bytes of its file: its content hash filled in, then the stable pretty form (two-space
+/// indent, fields in the struct's order). Writing the result and reading it back gives the same document and hash.
+pub fn write_document(document: &Document) -> Result<Vec<u8>, FormatsError> {
+    let mut hashed = document.clone();
+    document_header_mut(&mut hashed).content_hash = document_content_hash(document)?;
+    // The struct, not a JSON value, is written: a value's keys come out sorted, the struct's in description order.
+    pretty_json(&hashed)
+}
+
+/// A typed document's content hash (contracts 5.1): BLAKE3 of the canonical JSON of the whole document, its own
+/// `content_hash` left out. Fields the file left to their defaults count with their default values, so a file and
+/// the same file written back by `write_document` have one hash.
+pub fn document_content_hash(document: &Document) -> Result<String, FormatsError> {
+    let value = serde_json::to_value(document).map_err(|error| FormatsError::NotSerializable {
+        reason: error.to_string(),
+    })?;
+    Ok(content_hash_of_value(&value))
 }
 
 /// The typed struct for a value layers 1 and 2 passed, built with serde; None when no type matched.

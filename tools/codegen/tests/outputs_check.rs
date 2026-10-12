@@ -224,6 +224,10 @@ const FORMATS_INDEX_FILE: &str = "packages/formats/src/index.js";
 const PYTHON_PACKAGE_INIT_FILE: &str = "python/rastai_formats/rastai_formats/__init__.py";
 /// Where the Python import package's parent is, inside a tree laid out like the repository.
 const PYTHON_PACKAGE_PARENT: &str = "python/rastai_formats";
+/// The import package's folder. The hand-written __init__.py imports the PyO3 module beside it (M1-19), which
+/// `just env-cpu` builds there as `_native.<platform tag>.so` (`.pyd` on Windows), so the tree gets a copy too.
+const PYTHON_PACKAGE_FOLDER: &str = "python/rastai_formats/rastai_formats";
+const NATIVE_MODULE_PREFIX: &str = "_native.";
 
 /// Stand-ins for @rastai/client's hand-written typedefs (contracts 12.4), which M1-50 writes; the wrappers name them.
 const COMMAND_EXECUTOR_STUB: &str = r#"/** @typedef {import("./types.js").ExecuteOutcome} ExecuteOutcome */
@@ -488,6 +492,7 @@ fn write_formats_tree(folder: &Path) {
     for hand_written in [FORMATS_INDEX_FILE, PYTHON_PACKAGE_INIT_FILE] {
         fs::copy(repo_root.join(hand_written), folder.join(hand_written)).unwrap();
     }
+    copy_native_module(&repo_root, folder);
     fs::write(
         folder.join("packages/client/src/command-executor.js"),
         COMMAND_EXECUTOR_STUB,
@@ -495,6 +500,24 @@ fn write_formats_tree(folder: &Path) {
     .unwrap();
     fs::write(folder.join("packages/client/src/types.js"), CLIENT_TYPES_STUB).unwrap();
     fs::write(folder.join("package.json"), r#"{ "type": "module" }"#).unwrap();
+}
+
+/// Copies the built PyO3 module from the repository's package folder into the tree's. Without one the package can't
+/// be imported at all, so a missing module fails here with the fix rather than as an ImportError later.
+fn copy_native_module(repo_root: &Path, folder: &Path) {
+    let mut copied = 0;
+    for entry in fs::read_dir(repo_root.join(PYTHON_PACKAGE_FOLDER)).unwrap() {
+        let file_name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        if file_name.starts_with(NATIVE_MODULE_PREFIX) {
+            let relative = Path::new(PYTHON_PACKAGE_FOLDER).join(&file_name);
+            fs::copy(repo_root.join(&relative), folder.join(&relative)).unwrap();
+            copied += 1;
+        }
+    }
+    assert!(
+        copied > 0,
+        "{PYTHON_PACKAGE_FOLDER} has no built {NATIVE_MODULE_PREFIX}* module; {IGNORE_REASON}"
+    );
 }
 
 fn formats_consumer() -> String {

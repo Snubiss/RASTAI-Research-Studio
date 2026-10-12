@@ -1,0 +1,31 @@
+# rastai-formats for Python (layout: rust-control-plane.md section 4.7; contracts 2.1). It builds the native module
+# `rastai_formats._native`, which python/rastai_formats wraps. `just wheel` builds the wheel with maturin, and the cpu
+# environment builds it from source when it installs python/rastai_formats (python/rastai_formats/pyproject.toml).
+[package]
+name = "rastai-formats-python"
+description = "The Python build of rastai-formats: document validation, writing and content hashes for workers"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lib]
+# Python imports the module as rastai_formats._native, so the library and its init function carry that last part.
+name = "_native"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+# Its tests are Python's (python/rastai_formats/tests/): the functions only make sense as Python sees them, and every
+# rule they apply is rastai-formats' own, tested there. A Rust test binary would also need libpython to link.
+test = false
+doctest = false
+
+[dependencies]
+rastai-diag = { path = "../../../rastai-diag" }
+rastai-formats = { path = "../.." }
+serde_json = { workspace = true }
+# Only src/lib.rs imports it (contracts 2.5; deny.toml names this crate its one owner).
+pyo3 = { workspace = true }
+
+[lints]
+workspace = true

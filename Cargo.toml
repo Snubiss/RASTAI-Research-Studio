@@ -12,6 +12,7 @@ members = [
   "crates/rastai-diag",
   "crates/rastai-proto",
   "crates/rastai-formats",
+  "crates/rastai-formats/bindings/python",
   "crates/rastai-core",
   "crates/rastai-store",
   "crates/rastai-transport",
@@ -69,9 +70,14 @@ libc = "=0.2.190"
 # three months old when this was pinned. Default features: `fast` (precomputed tables) and `zeroize` (the secret key
 # is wiped from memory when it is dropped).
 ed25519-dalek = "=3.0.0"
+# The rastai-formats wheel, only in crates/rastai-formats/bindings/python/src/lib.rs (M1-19). 0.29.2 was two months
+# old when this was pinned (0.29.3 was eleven days old). Default features only (`macros`): no `abi3` (layout 4.7: one
+# wheel per platform for CPython 3.12) and no `extension-module`, which pyo3 0.29 deprecates in favor of the
+# PYO3_BUILD_EXTENSION_MODULE variable that maturin sets.
+pyo3 = "=0.29.2"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
 # rustls, tokio-rustls, webpki-roots, tower,
-# miniz_oxide, tokenizers, minijinja, keyring, wasm-bindgen, pyo3, tauri, tauri-build,
+# miniz_oxide, tokenizers, minijinja, keyring, wasm-bindgen, tauri, tauri-build,
 # tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 
 [workspace.lints.rust]

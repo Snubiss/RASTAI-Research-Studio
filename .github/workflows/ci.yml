@@ -156,7 +156,8 @@ jobs:
       - *cargo-cache
       - *test-rust
 
-  # Every Python test on Linux, posix_only ones included: python/ and the repo checks' tests.
+  # Every Python test on Linux, posix_only ones included: python/ and the repo checks' tests. The cpu environment
+  # builds rastai_formats' PyO3 module with cargo (M1-19), hence the cargo cache in the Python jobs.
   test-python:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -164,6 +165,7 @@ jobs:
       - *checkout
       - *install-just-uv
       - *uv-cache
+      - *cargo-cache
       - name: just test-python
         run: just test-python
 
@@ -175,6 +177,7 @@ jobs:
       - *checkout
       - *install-just-uv
       - *uv-cache
+      - *cargo-cache
       - &test-python-portable
         name: just test-python-portable
         run: just test-python-portable
@@ -186,6 +189,7 @@ jobs:
       - *checkout
       - *install-just-uv
       - *uv-cache
+      - *cargo-cache
       - *test-python-portable
 
   test-js:

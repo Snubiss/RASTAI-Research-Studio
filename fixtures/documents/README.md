@@ -11,6 +11,7 @@ Golden files for `rastai-formats`' `read_document` (contracts §12.5, ADR-0032).
 | `<type>/v<n>/` | Files at an old schema version, for the migration test (`tests/migrations.rs`, once a type has a v2). |
 | `any/invalid/` | Cases every document shares whatever its type: syntax errors, import limits, the shared header, an unknown `type`. Their `type` names no real type, so they keep their verdict as types are added. |
 | `import/invalid/` | Imports that must be refused (`.pt2` with pickle, oversized configs). |
+| `content_hashes.json` | The content hash (contracts §5.1) of every file in a `valid/` folder, keyed by its path below this folder: `{"format_version": 1, "hashes": {"rastai.theme/valid/night.theme.json": "blake3:..."}}`. `crates/rastai-formats/tests/round_trip.rs` and the wheel's `python/rastai_formats/tests/test_parity.py` both check against it, so Rust and Python give the same hashes. A new valid file adds its line; the Rust test's failure message prints every hash. |
 
 ## Cases
 

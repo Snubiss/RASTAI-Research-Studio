@@ -3,7 +3,9 @@
 //! The first half writes seeded random headers from an in-house generator (no property-testing crate) and reads
 //! them through `check_document` with a test type whose description is the shared header alone. The second half
 //! takes every valid file of the document corpus through `read_document`: the typed document, written with the
-//! stable writer and read again, is equal, writes the same bytes and has the same content hash.
+//! stable writer and read again, is equal, writes the same bytes and has the same content hash. `write_document`
+//! fills that hash in, and every valid file's hash equals `fixtures/documents/content_hashes.json`, the golden list
+//! the wheel's parity test (python/rastai_formats/tests/test_parity.py) checks too.
 
 #![allow(clippy::unwrap_used)]
 
@@ -13,13 +15,14 @@ use std::path::{Path, PathBuf};
 
 use rastai_formats::byte_source::SliceSource;
 use rastai_formats::describe::registry::describe_all_types;
-use rastai_formats::documents::{Document, DocumentType};
+use rastai_formats::documents::{Document, DocumentType, document_header, document_header_mut};
 use rastai_formats::error::FormatsError;
 use rastai_formats::hashing::content_hash_of_value;
 use rastai_formats::header::{SHARED_HEADER_TYPE_NAME, SharedHeader};
 use rastai_formats::json::pretty::pretty_json;
+use rastai_formats::json::reader::read_json;
 use rastai_formats::limits::ImportLimits;
-use rastai_formats::validate::{CheckedDocument, check_document, read_document};
+use rastai_formats::validate::{CheckedDocument, check_document, document_content_hash, read_document, write_document};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -43,6 +46,9 @@ const VALID_FOLDER: &str = "valid";
 /// stored hash of every theme (contracts 5.1).
 const NIGHT_THEME_FILE: &str = "rastai.theme/valid/night.theme.json";
 const GOLDEN_NIGHT_THEME_HASH: &str = "blake3:de79ce5ff11222694df1eae654fc5a2b8351062faaee8733a3c987a1d107ba7e";
+/// `{"format_version": 1, "hashes": {"<type folder>/valid/<file>": "blake3:..."}}`: one entry per valid corpus file.
+const CONTENT_HASHES_FILE: &str = "content_hashes.json";
+const CONTENT_HASHES_KEY: &str = "hashes";
 // Text pieces that stress the writer and the reader: quotes, escapes, a pointer separator, non-ASCII and an
 // astral-plane character (a surrogate pair in JSON escapes).
 const TEXT_PIECES: &[&str] = &[
@@ -260,4 +266,71 @@ fn a_theme_hash_is_stable_across_runs_and_machines() {
     let theme = read_typed("night.theme.json", &fs::read(path).unwrap());
     let (_, value) = written(&theme);
     assert_eq!(content_hash_of_value(&value), GOLDEN_NIGHT_THEME_HASH);
+}
+
+#[test]
+fn write_document_fills_the_content_hash_and_reads_back_the_same_document() {
+    for path in valid_corpus_files() {
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let first = read_typed(&file_name, &fs::read(&path).unwrap());
+        let hash = document_content_hash(&first).unwrap();
+        let written = write_document(&first).unwrap();
+        let second = read_typed(&file_name, &written);
+        assert_eq!(document_header(&second).content_hash, hash, "{file_name}");
+        // Only the hash changed, and writing it in didn't change the hash.
+        assert_eq!(written, written_text_with_hash(&first, &hash), "{file_name}");
+        assert_eq!(document_content_hash(&second).unwrap(), hash, "{file_name}");
+        assert_eq!(
+            write_document(&second).unwrap(),
+            written,
+            "{file_name}: writing again changes the bytes"
+        );
+    }
+}
+
+/// The stable pretty text of a document with `content_hash` set by hand, to compare `write_document` against.
+fn written_text_with_hash(document: &Document, hash: &str) -> Vec<u8> {
+    let mut hashed = document.clone();
+    document_header_mut(&mut hashed).content_hash = hash.to_string();
+    written(&hashed).0
+}
+
+/// The golden hashes, keyed by the file's path below fixtures/documents/ with `/` separators.
+fn golden_content_hashes() -> BTreeMap<String, String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(CORPUS_FOLDER)
+        .join(CONTENT_HASHES_FILE);
+    let parsed = read_json(&fs::read(path).unwrap(), &ImportLimits::default()).unwrap();
+    let hashes = parsed.value[CONTENT_HASHES_KEY].as_object().unwrap();
+    hashes
+        .iter()
+        .map(|(file, hash)| (file.clone(), hash.as_str().unwrap().to_string()))
+        .collect()
+}
+
+/// A corpus file's key in content_hashes.json: `rastai.theme/valid/night.theme.json`.
+fn corpus_key(path: &Path) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(CORPUS_FOLDER);
+    let relative = path.strip_prefix(&root).unwrap();
+    let parts: Vec<String> = relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    parts.join("/")
+}
+
+#[test]
+fn every_valid_corpus_hash_equals_the_golden_list() {
+    let golden = golden_content_hashes();
+    let mut actual = BTreeMap::new();
+    for path in valid_corpus_files() {
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let document = read_typed(&file_name, &fs::read(&path).unwrap());
+        actual.insert(corpus_key(&path), document_content_hash(&document).unwrap());
+    }
+    // One message with every line, so a new valid file's entry can be copied from it.
+    assert_eq!(
+        actual, golden,
+        "fixtures/documents/{CONTENT_HASHES_FILE} must list exactly the valid corpus files with these hashes"
+    );
 }
