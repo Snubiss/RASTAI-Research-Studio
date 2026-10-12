@@ -521,4 +521,24 @@ mod tests {
         assert_eq!(carried.code, "RRS-S2002");
         assert!(carried.message.contains("byte 77"), "{}", carried.message);
     }
+
+    #[test]
+    fn an_unreadable_log_is_reported_as_saved_data_not_a_database() {
+        // RRS-S0006 is the store's one read code: databases, event logs and blobs. A user whose run log can't be
+        // read must not be told a database failed.
+        let error = StoreError::EventLogReadFailed {
+            path: PathBuf::from("/data/runs/run_a/events.log"),
+            reason: "permission denied".to_string(),
+        };
+        let report = read_error_diagnostic(&error);
+        assert_eq!(report.code, "RRS-S0006");
+        assert_eq!(
+            report.message,
+            "Couldn't read saved data: the event log /data/runs/run_a/events.log can't be read: permission denied."
+        );
+        let Some(entry) = rastai_diag::catalog::find_entry("RRS-S0006") else {
+            panic!("RRS-S0006 is not in the catalog");
+        };
+        assert_eq!(entry.title, "Saved data couldn't be read");
+    }
 }

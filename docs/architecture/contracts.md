@@ -2078,7 +2078,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-S0003` | error | `rastai.db` integrity check failed (fix: `rastai storage rebuild-index`) |
 | `RRS-S0004` | error | Data directory not writable |
 | `RRS-S0005` | error | `vault.db` integrity check failed; chat is off until it is recovered (fix: `storage.vault.recover`, L2) |
-| `RRS-S0006` | error | Database read failed (an I/O error, or the database stayed busy past the timeout; SQLite's reason is attached; a damaged file is `RRS-S0003` or `RRS-S0005`; also an event log that can't be opened or read, with the operating system's reason, 7.1, and a blob or a file being stored that can't be read, 8.4) |
+| `RRS-S0006` | error | Saved data couldn't be read (a database: an I/O error, or the database stayed busy past the timeout; SQLite's reason is attached; a damaged file is `RRS-S0003` or `RRS-S0005`; also an event log that can't be opened or read, with the operating system's reason, 7.1, and a blob or a file being stored that can't be read, 8.4) |
 | `RRS-S0007` | error | The runtime folder or its `daemon.lock` isn't private to this user (a symbolic link, another user's, or open to group or others); refused before anything is written (fix: remove it, or set `XDG_RUNTIME_DIR`) |
 | `RRS-S1001` | error | Blob hash mismatch; quarantined |
 | `RRS-S1002` | error | Referenced blob missing |
