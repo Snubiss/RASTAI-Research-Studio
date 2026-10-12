@@ -119,6 +119,8 @@ RASTAI/
       check-no-pickle        greps Python for `pickle` and `torch.load` (contracts §12.3)
       check-colors           (frontend doc) color literals in canvas, viz, sections and plugin UIs (contracts §5.6)
       check-no-typescript    (frontend doc) any .ts, .tsx or .d.ts outside generated folders (ADR-0036)
+      check-fuzz-locks       runs `cargo metadata --locked` on every crates/*/fuzz workspace; fails on a stale
+                             fuzz Cargo.lock (contracts §12.5)
       check-dco              (CI) Signed-off-by on every commit
       check-names            (M1) schemas/names.json against contracts §15 and the tables of §2.1-2.3, §5.2, §6, §7, §8, §10 and §11, both ways (2.8)
       check-schema-diff      (M1) schemas/commands/ and schemas/events/ against the base branch: contracts update required,
@@ -260,13 +262,13 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 
 | Recipe | Runs | Used by |
 |---|---|---|
-| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29); the pre-push hook before every push, and the verifier on a fresh clone of the PR head (plan 3.6) |
+| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus `check-fuzz-locks`, the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29); the pre-push hook before every push, and the verifier on a fresh clone of the PR head (plan 3.6) |
 | `just install-hooks` | `git config core.hooksPath tools/hooks` (this clone's config, never `--global`), so git runs `tools/hooks/pre-push` | dev: once per clone |
 | `just build` | `cargo build --workspace --locked` | dev |
 | `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`; MySQL tests skip themselves without a server) | CI on Linux, macOS, Windows runners (CPU) |
 | `just test-crash` | `cargo test -p rastai-crash-tests -- --test-threads=1` | CI on Linux |
 | `just test-archive` | `rastai-archive` tests and crash rows 20–24 against the MySQL 8.4 and 9.7, MariaDB and MinIO containers (section 14.9) | CI job `mysql-archive` (M11-E07) |
-| `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (the targets of contracts §12.5) | nightly CI, 10 minutes per target |
+| `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (the targets of contracts §12.5), against that folder's checked-in `Cargo.lock`, which `check-fuzz-locks` keeps current | nightly CI, 10 minutes per target |
 | `just codegen` | `buf generate` (proto doc; protobuf-es with target `js+dts`), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen`, then `--bin rastai-names-codegen` (last: it reads the catalog, the tables and the migrations) | after any catalog, document or command change |
 | `just codegen-check [base]` | `tools/checks/check-generated`, then `cargo test -p rastai-codegen -- --ignored` with `RASTAI_BASE_REF=<base>` (default `origin/main`): the catalog's merge-base check and the outputs check (4.9), which need git history and both environments | CI |
 | `just wasm` | `cargo build -p rastai-diag --target wasm32-unknown-unknown` (M1, section 3.4); from M4 also `cargo build -p rastai-formats-wasm --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir packages/formats/src/wasm/` | `just check`; `packages/formats` build, the viewer |

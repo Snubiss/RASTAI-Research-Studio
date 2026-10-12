@@ -72,8 +72,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
 check: fmt-check lint check-js test-rust test-node-jobs test-python test-js wasm deny proto-check \
-    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check check-names \
-    check-schema-diff
+    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript check-fuzz-locks \
+    codegen-check check-names check-schema-diff
 
 # core.hooksPath goes in this clone's own git config (never --global), so other repositories keep their hooks.
 # A relative path is read from the top of each working tree, so every worktree of this clone runs its own copy.
@@ -203,7 +203,7 @@ fuzz crate target seconds="60":
         exit 1
     fi
     # cargo-fuzz finds the fuzz/ folder from the crate's root. fuzz/Cargo.lock is checked in, so the targets build
-    # against the same dependency versions every night.
+    # against the same dependency versions every night; `check-fuzz-locks` keeps it current, so a run never rewrites it.
     cd "crates/{{crate}}"
     cargo +{{fuzz_toolchain}} fuzz run "{{target}}" -- -max_total_time="{{seconds}}"
 
@@ -233,6 +233,13 @@ check-colors: env-cpu
 # No .ts, .tsx or .d.ts file outside the generated folders (ADR-0036).
 check-no-typescript: env-cpu
     "{{check_python}}" tools/checks/check-no-typescript
+
+# The root workspace's --locked builds never read the fuzz workspaces' own locks, so without this a dependency change
+# leaves them stale and the next `just fuzz` rewrites them. cargo resolves each one; the first run on a new machine
+# may fetch the registry index, like `build`.
+# Every crates/*/fuzz/Cargo.lock matches its manifests: cargo resolves each fuzz workspace with --locked.
+check-fuzz-locks: env-cpu
+    "{{check_python}}" tools/checks/check-fuzz-locks
 
 # It reads the checked-in schemas/names.json, which codegen-check keeps current; run `just codegen` after changing a
 # name in code. The rules and the places it reads in contracts.md are contracts 12.6.
