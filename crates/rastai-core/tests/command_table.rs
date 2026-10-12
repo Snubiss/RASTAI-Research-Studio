@@ -1,7 +1,8 @@
 //! The core command table (layout rust-control-plane.md 5.5, 10.1): every row of `COMMANDS` is well formed — an
 //! id of the contract form in a core area, no duplicates, a fixed scope, a known kind and section, a semver
 //! `since_version`, and `preview` stability until Phase 2 picks the stable subset. Retired ids are never reused.
-//! No argument field takes a global CLI flag (layout 9.4), and the table holds the skeleton's commands (M1-22).
+//! No argument field takes a global CLI flag (layout 9.4), the table holds the skeleton's commands (M1-22), and no
+//! skeleton command that changes something holds `read`.
 //!
 //! `row_problems` and `flag_collisions` hold the checks, so the same functions run over the table and over sample
 //! bad rows and fields, which proves each check catches what it should.
@@ -51,6 +52,19 @@ const SKELETON_COMMAND_IDS: &[&str] = &[
     "plugin.list",
     "node.list",
     "node.status",
+];
+
+/// The skeleton's commands that change something. The row scope is the line between changing and read-only commands:
+/// a `read` command is never journaled, still runs during an update's maintenance window, and every read-only token
+/// reaches it (flows/platform.md 3.1, 9.2), so none of these may hold `read`.
+const CHANGING_COMMAND_IDS: &[&str] = &[
+    "system.shutdown",
+    "job.cancel",
+    "train.start",
+    "settings.set",
+    "token.login_code.create",
+    "token.create",
+    "token.revoke",
 ];
 
 const GOOD_ROW: CommandRow = CommandRow {
@@ -207,6 +221,21 @@ fn the_checks_catch_each_bad_field() {
 fn the_skeleton_commands_are_registered() {
     let registered: Vec<&str> = COMMANDS.iter().map(|row| row.command_id).collect();
     assert_eq!(registered, SKELETON_COMMAND_IDS);
+}
+
+#[test]
+fn no_changing_command_holds_read() {
+    for command_id in CHANGING_COMMAND_IDS {
+        let row = COMMANDS.iter().find(|row| row.command_id == *command_id).unwrap();
+        assert_ne!(row.scope, Scope::Read, "{command_id} changes something but holds read");
+    }
+}
+
+// Contracts 6.4: a training job is M1's only job kind, so cancelling one takes `training`.
+#[test]
+fn job_cancel_holds_training() {
+    let row = COMMANDS.iter().find(|row| row.command_id == "job.cancel").unwrap();
+    assert_eq!(row.scope, Scope::Training);
 }
 
 #[test]

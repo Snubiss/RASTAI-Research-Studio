@@ -31,7 +31,8 @@ pub struct FieldDescription {
     /// A required field must be present. An optional one may be left out; it is never `null`.
     pub required: bool,
     pub doc: String,
-    /// A credential passed once: the command journal writes it as `"<redacted>"` (contracts 5.1).
+    /// A credential passed or shown once: the command journal writes it as `"<redacted>"`, in the arguments or the
+    /// result (contracts 5.1).
     pub secret: bool,
     /// Conversation or user-written text: the journal redacts it too, so the archive never holds it (contracts 5.1).
     pub content: bool,

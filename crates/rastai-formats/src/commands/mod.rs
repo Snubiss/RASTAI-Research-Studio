@@ -183,7 +183,8 @@ pub(crate) fn positional(position: u32, description: FieldDescription) -> FieldD
     }
 }
 
-/// The same field, written as `"<redacted>"` in the command journal (contracts 5.1): a credential shown once.
+/// The same field, written as `"<redacted>"` in the command journal, in the arguments or the result (contracts 5.1):
+/// a credential passed or shown once.
 pub(crate) fn secret(description: FieldDescription) -> FieldDescription {
     FieldDescription {
         secret: true,
