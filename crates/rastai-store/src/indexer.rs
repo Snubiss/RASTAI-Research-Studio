@@ -12,8 +12,11 @@
 //!
 //! A run's log is untrusted (contracts 7.1): the job writes it (worker and plugin code), and a remote run's log is
 //! mirrored from another machine. So `apply_run_events` checks every record before it writes a row: the record must
-//! name the log's run, its payload must be one a run's log may carry (`run_log_may_carry`), and it may not take over
-//! another run's checkpoint or rewrite an existing artifact. A record that breaks a rule is refused with `RRS-S2004`:
+//! name the log's run, its payload must be one a run's log may carry (`run_log_may_carry`), and it may not reach a
+//! row outside its run: a checkpoint or artifact id must be one of its kind (so it can't name a run, a message or an
+//! id of the other kind), a checkpoint id may not be another run's, an existing artifact may only be repeated exactly
+//! (every column, its home copy and its lineage rows already there), and a parent's relation must be one whose child
+//! is an artifact (`RUN_LOG_PARENT_RELATIONS`). A record that breaks a rule is refused with `RRS-S2004`:
 //! nothing of its batch is applied, the ack stays before it, and the log counts as damaged there, as at a corrupt
 //! frame. The daemon's own log is the daemon's, so its records are applied as they are.
 //!
@@ -22,6 +25,7 @@
 //! Event types that have no payload message yet (`transfer.finished`, `download.finished`, `lineage.linked`,
 //! `run.deleted`, the `archive.*` records) get their rows with the contract PR that adds the payload.
 
+use rastai_core::ids::{IdPrefix, id_has_prefix};
 use rastai_core::states::{
     eval_run_state_name, is_terminal_eval_run_state, job_state_name, node_state_name, plugin_state_name, run_state_name,
 };
@@ -35,7 +39,8 @@ use rastai_proto::events::v1::{
 
 use crate::error::StoreError;
 use crate::index::artifacts::{
-    CreatedArtifact, artifact_differs, insert_lineage, set_artifact_pinned, upsert_artifact,
+    CreatedArtifact, StoredArtifact, compare_stored_artifact, has_artifact_copy, has_lineage, insert_lineage,
+    set_artifact_pinned, upsert_artifact,
 };
 use crate::index::documents::set_document_hash;
 use crate::index::journal::{FinishedCommand, record_command_finished};
@@ -50,6 +55,19 @@ use crate::sqlite::SqliteTransaction;
 
 // The lineage relation of a checkpoint to its run (contracts 8.2: "checkpoint_of: from checkpoint.saved").
 const CHECKPOINT_OF_RELATION: &str = "checkpoint_of";
+// The relations an `artifact.created` in a run's log may give a parent: those of contracts 8.2 whose child can be an
+// artifact. `checkpoint_of` comes only from `checkpoint.saved`; `branch_of` and `trained_on` name a message or a run,
+// which the daemon links with `lineage.linked`. A parent may be another run's checkpoint (an eval or a diff reads
+// one), since the row's child is always the record's own new artifact.
+const RUN_LOG_PARENT_RELATIONS: &[&str] = &[
+    "pair_from",
+    "dataset_of",
+    "diff_of",
+    "replay_of",
+    "analysis_of",
+    "evaluated_by",
+    "exported_as",
+];
 // pin.changed names what it pins by one of these (contracts 7.3).
 const PIN_SUBJECT_RUN: &str = "run";
 const PIN_SUBJECT_CHECKPOINT: &str = "checkpoint";
@@ -140,8 +158,8 @@ fn records_after(records: &[EventRecord], acked_sequence: u64) -> Vec<&EventReco
 }
 
 /// Refuses, with `RRS-S2004`, a record that run `run_id`'s log may not carry: one that names another run, one whose
-/// payload only the daemon's log carries, a checkpoint id another run owns, or an artifact that exists with other
-/// contents. Each would let the job change rows outside its own run.
+/// payload only the daemon's log carries, or a checkpoint or artifact that would reach rows outside the run. Each
+/// would let the job change rows outside its own run.
 fn check_run_log_record(
     transaction: &SqliteTransaction<'_>,
     run_id: &str,
@@ -162,8 +180,8 @@ fn check_run_log_record(
         return Err(refused_record(run_id, record, reason));
     }
     match payload {
-        Payload::CheckpointSaved(checkpoint) => check_checkpoint_owner(transaction, run_id, record, checkpoint),
-        Payload::ArtifactCreated(artifact) => check_artifact_unchanged(transaction, run_id, record, artifact),
+        Payload::CheckpointSaved(checkpoint) => check_checkpoint(transaction, run_id, record, checkpoint),
+        Payload::ArtifactCreated(artifact) => check_artifact(transaction, run_id, record, artifact),
         _ => Ok(()),
     }
 }
@@ -193,13 +211,18 @@ fn run_log_may_carry(payload: &Payload) -> bool {
     }
 }
 
-/// A checkpoint id the index already has for another run is refused: the upsert would move it to this run.
-fn check_checkpoint_owner(
+/// A checkpoint id must be a `ckpt_` id, so its `checkpoint_of` row can't land on a run, an artifact or any other
+/// subject, and one the index already has for another run is refused: the upsert would move it to this run.
+fn check_checkpoint(
     transaction: &SqliteTransaction<'_>,
     run_id: &str,
     record: &EventRecord,
     checkpoint: &CheckpointSaved,
 ) -> Result<(), StoreError> {
+    if !id_has_prefix(&checkpoint.checkpoint_id, IdPrefix::Checkpoint) {
+        let reason = format!("{:?} is not a checkpoint id", checkpoint.checkpoint_id);
+        return Err(refused_record(run_id, record, reason));
+    }
     match read_checkpoint_run_id(transaction, &checkpoint.checkpoint_id)? {
         Some(owner) if owner != run_id => {
             let reason = format!("checkpoint {:?} belongs to run {owner:?}", checkpoint.checkpoint_id);
@@ -209,20 +232,59 @@ fn check_checkpoint_owner(
     }
 }
 
-/// An artifact the index already has with other contents is refused: the upsert would rewrite what another run, or
-/// the daemon, made.
-fn check_artifact_unchanged(
+/// An artifact id must be an `art_` id and each parent's relation one of `RUN_LOG_PARENT_RELATIONS`. A new artifact
+/// is the run's own, so its row and its lineage rows (whose child is that artifact) stay inside the run. An existing
+/// one may have been made by another run or the daemon, so it is accepted only when the record would change nothing.
+fn check_artifact(
     transaction: &SqliteTransaction<'_>,
     run_id: &str,
     record: &EventRecord,
     artifact: &ArtifactCreated,
 ) -> Result<(), StoreError> {
+    if !id_has_prefix(&artifact.artifact_id, IdPrefix::Artifact) {
+        let reason = format!("{:?} is not an artifact id", artifact.artifact_id);
+        return Err(refused_record(run_id, record, reason));
+    }
+    for parent in &artifact.parents {
+        if !RUN_LOG_PARENT_RELATIONS.contains(&parent.relation.as_str()) {
+            let reason = format!(
+                "parent {:?} of artifact {:?} has the relation {:?}, which a run's log may not give",
+                parent.id, artifact.artifact_id, parent.relation
+            );
+            return Err(refused_record(run_id, record, reason));
+        }
+    }
     let created = created_artifact(record, artifact);
-    if artifact_differs(transaction, &created)? {
-        let reason = format!("artifact {:?} already exists with other contents", artifact.artifact_id);
+    let unchanged = match compare_stored_artifact(transaction, &created)? {
+        StoredArtifact::Missing => return Ok(()),
+        StoredArtifact::Same => artifact_rows_already_written(transaction, artifact)?,
+        StoredArtifact::Different => false,
+    };
+    if !unchanged {
+        let reason = format!(
+            "artifact {:?} already exists and the record would change it",
+            artifact.artifact_id
+        );
         return Err(refused_record(run_id, record, reason));
     }
     Ok(())
+}
+
+/// Whether the home copy and every parent's lineage row of an existing artifact are already recorded, so applying
+/// its record again adds no row.
+fn artifact_rows_already_written(
+    transaction: &SqliteTransaction<'_>,
+    artifact: &ArtifactCreated,
+) -> Result<bool, StoreError> {
+    if !has_artifact_copy(transaction, &artifact.artifact_id, &artifact.home_node_id)? {
+        return Ok(false);
+    }
+    for parent in &artifact.parents {
+        if !has_lineage(transaction, &parent.id, &artifact.artifact_id, &parent.relation)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn refused_record(run_id: &str, record: &EventRecord, reason: String) -> StoreError {
