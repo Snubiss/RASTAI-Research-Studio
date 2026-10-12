@@ -204,7 +204,9 @@ async fn detect_nvidia(sources: &HardwareSources, devices: &[DisplayDevice]) -> 
     }
 }
 
-/// nvidia-smi's GPU query, one GPU per line; None when any line isn't six well-formed fields.
+/// nvidia-smi's GPU query, one GPU per line; None when any line isn't six well-formed fields, which the caller
+/// reports as RRS-H0002. A memory size too large to count in bytes is malformed too: only a garbled answer prints it,
+/// and an unchecked multiplication would panic in a debug build and wrap in a release one.
 fn parse_nvidia_gpus(text: &str) -> Option<(Vec<GpuInfo>, Vec<GpuAddress>)> {
     let mut gpus = Vec::new();
     let mut addresses = Vec::new();
@@ -215,11 +217,12 @@ fn parse_nvidia_gpus(text: &str) -> Option<(Vec<GpuInfo>, Vec<GpuAddress>)> {
         }
         let index: u32 = fields[0].parse().ok()?;
         let memory_mib: u64 = fields[4].parse().ok()?;
+        let vram_bytes = memory_mib.checked_mul(BYTES_PER_MIB)?;
         gpus.push(GpuInfo {
             index,
             name: fields[2].to_string(),
             architecture: nvidia_architecture(fields[5])?,
-            vram_bytes: memory_mib * BYTES_PER_MIB,
+            vram_bytes,
             vendor: NVIDIA_VENDOR.to_string(),
             driver_version: fields[3].to_string(),
         });
@@ -504,7 +507,8 @@ fn read_memory_total(proc_root: &Path) -> u64 {
     memory_info_bytes(&text, "MemTotal").unwrap_or(0)
 }
 
-/// A `Key:   12345 kB` line of /proc/meminfo, in bytes.
+/// A `Key:   12345 kB` line of /proc/meminfo, in bytes. A size too large for bytes in a u64 reads as missing, so
+/// the memory loop can't be ended by a panic.
 pub(crate) fn memory_info_bytes(text: &str, key: &str) -> Option<u64> {
     text.lines().find_map(|line| {
         let (name, rest) = line.split_once(':')?;
@@ -512,7 +516,7 @@ pub(crate) fn memory_info_bytes(text: &str, key: &str) -> Option<u64> {
             return None;
         }
         let kib: u64 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
-        Some(kib * BYTES_PER_KIB)
+        kib.checked_mul(BYTES_PER_KIB)
     })
 }
 
@@ -566,6 +570,18 @@ mod tests {
         assert!(parse_nvidia_gpus(&one_bad_line).is_none());
     }
 
+    // u64::MAX MiB can't be counted in bytes: the answer is garbled (RRS-H0002), not a panic or a wrapped size.
+    #[test]
+    fn an_overflowing_memory_size_is_a_garbled_answer() {
+        let too_large = u64::MAX / BYTES_PER_MIB + 1;
+        let overflowing_line = format!("{RECORDED_GPUS}2, 00000000:02:00.0, GPU, 1, {too_large}, 8.6\n");
+        assert!(parse_nvidia_gpus(&overflowing_line).is_none());
+        let largest = u64::MAX / BYTES_PER_MIB;
+        let largest_line = format!("2, 00000000:02:00.0, GPU, 1, {largest}, 8.6\n");
+        let (gpus, _) = parse_nvidia_gpus(&largest_line).unwrap();
+        assert_eq!(gpus[0].vram_bytes, largest * BYTES_PER_MIB);
+    }
+
     #[test]
     fn the_recorded_kfd_nodes_give_one_gfx1036_gpu() {
         assert_eq!(parse_kfd_gpu(RECORDED_KFD_CPU_NODE), None);
@@ -603,5 +619,7 @@ mod tests {
         assert_eq!(memory_info_bytes(text, "MemTotal"), Some(64674240 * 1024));
         assert_eq!(memory_info_bytes(text, "MemAvailable"), Some(1024 * 1024));
         assert_eq!(memory_info_bytes(text, "SwapTotal"), None);
+        let overflowing = format!("MemTotal: {} kB\n", u64::MAX);
+        assert_eq!(memory_info_bytes(&overflowing, "MemTotal"), None);
     }
 }

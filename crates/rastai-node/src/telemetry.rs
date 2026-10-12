@@ -8,9 +8,14 @@
 //! again after READER_RESTART_SECONDS. The node computes on one backend and NVIDIA wins on a box with both
 //! (flows/platform.md 1.2), so only that vendor's GPUs are sampled; their indexes then never collide.
 //!
-//! Every tool row is matched to a profile GPU by its PCI bus id, found at detection (`GpuAddress`), never by the
-//! tool's own numbering: rocm-smi's `cardN` follows the DRM order, which need not be the kfd order the profile's AMD
-//! indexes follow.
+//! The nvidia-smi stream keys its rows by nvidia-smi's own `index`, which is safe because detection took the
+//! profile's NVIDIA indexes from the same field of the same tool. Every other tool row is matched to a profile GPU by
+//! its PCI bus id, found at detection (`GpuAddress`), never by the tool's own numbering: the per-process query names
+//! no index, and rocm-smi's `cardN` follows the DRM order, which need not be the kfd order the profile's AMD indexes
+//! follow.
+//!
+//! Memory comes in MiB and is turned into bytes with a checked multiplication: an absurd value from a tool is a
+//! garbled row and is skipped, never a panic that would end the reader.
 //!
 //! Free disk joins `NodeTelemetry` and the profile through `rastai_store::free_bytes` once M1-25 lands it; until
 //! then `disk_free_bytes` is 0, which reads as "unknown".
@@ -114,19 +119,19 @@ pub(crate) fn start_telemetry(
 }
 
 /// One line of nvidia-smi's telemetry query. Fields a GPU doesn't report (`[N/A]`, `[Not Supported]`) read as 0;
-/// the index and memory must parse, else the line is skipped.
+/// the index and memory must parse and the memory must fit in bytes, else the line is skipped.
 fn parse_nvidia_telemetry_line(line: &str) -> Option<GpuTelemetry> {
     let fields: Vec<&str> = line.split(',').map(str::trim).collect();
     if fields.len() != NVIDIA_TELEMETRY_FIELDS {
         return None;
     }
-    let memory_used_mib: u64 = fields[2].parse().ok()?;
-    let memory_total_mib: u64 = fields[3].parse().ok()?;
+    let vram_used_bytes = mib_to_bytes(fields[2])?;
+    let vram_total_bytes = mib_to_bytes(fields[3])?;
     Some(GpuTelemetry {
         gpu_index: fields[0].parse().ok()?,
         utilization_percent: fields[1].parse().unwrap_or(0),
-        vram_used_bytes: memory_used_mib * BYTES_PER_MIB,
-        vram_total_bytes: memory_total_mib * BYTES_PER_MIB,
+        vram_used_bytes,
+        vram_total_bytes,
         temperature_celsius: fields[4].parse().unwrap_or(0.0),
         power_watts: fields[5].parse().unwrap_or(0.0),
         processes: Vec::new(),
@@ -143,14 +148,20 @@ fn parse_nvidia_processes(text: &str, gpus: &[GpuAddress]) -> Vec<(u32, ProcessV
                 return None;
             }
             let gpu = gpus.iter().find(|gpu| gpu.bus_id.eq_ignore_ascii_case(fields[1]))?;
-            let used_mib: u64 = fields[2].parse().ok()?;
             let process = ProcessVram {
                 pid: fields[0].parse().ok()?,
-                vram_bytes: used_mib * BYTES_PER_MIB,
+                vram_bytes: mib_to_bytes(fields[2])?,
             };
             Some((gpu.index, process))
         })
         .collect()
+}
+
+/// A MiB count printed by a tool, in bytes. None when it isn't a number or is too large for bytes in a u64, which
+/// only a garbled answer prints.
+fn mib_to_bytes(text: &str) -> Option<u64> {
+    let mib: u64 = text.parse().ok()?;
+    mib.checked_mul(BYTES_PER_MIB)
 }
 
 /// rocm-smi's telemetry JSON, one object per card. Each card is matched to its GPU by its `PCI Bus` (`--showbus`)
@@ -467,6 +478,29 @@ mod tests {
         assert_eq!(sample.power_watts, 0.0);
         assert!(parse_nvidia_telemetry_line("0, 1, lots, 200, 1, 1").is_none());
         assert!(parse_nvidia_telemetry_line("No devices were found").is_none());
+    }
+
+    // u64::MAX MiB can't be counted in bytes: the line is garbled and skipped, and the reader keeps going.
+    #[test]
+    fn an_overflowing_memory_value_skips_the_line() {
+        let too_large = u64::MAX / BYTES_PER_MIB + 1;
+        let used_overflows = format!("0, 22, {too_large}, 16303, 45, 120.5");
+        let total_overflows = format!("0, 22, 11881, {too_large}, 45, 120.5");
+        assert!(parse_nvidia_telemetry_line(&used_overflows).is_none());
+        assert!(parse_nvidia_telemetry_line(&total_overflows).is_none());
+        let largest = u64::MAX / BYTES_PER_MIB;
+        let sample = parse_nvidia_telemetry_line(&format!("0, 22, {largest}, {largest}, 45, 120.5")).unwrap();
+        assert_eq!(sample.vram_total_bytes, largest * BYTES_PER_MIB);
+    }
+
+    #[test]
+    fn an_overflowing_process_row_is_skipped_and_the_rest_kept() {
+        let too_large = u64::MAX / BYTES_PER_MIB + 1;
+        let text = format!("100, 00000000:01:00.0, {too_large}\n200, 00000000:0D:00.0, 10\n");
+        let rows = parse_nvidia_processes(&text, &recorded_addresses());
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1.pid, 200);
+        assert_eq!(rows[0].1.vram_bytes, 10 * BYTES_PER_MIB);
     }
 
     #[test]
