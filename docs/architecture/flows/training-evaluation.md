@@ -537,10 +537,11 @@ sequenceDiagram
 PARTIAL_SUFFIX = ".partial"
 
 
-def write_checkpoint(run_folder: Path, step: int, context: TrainingContext, recipe_state: dict, is_best: bool) -> Path:
+def write_checkpoint(run_folder: Path, step: int, context: TrainingContext, recipe_state: dict,
+                     validation_loss: float | None) -> Path:
     final_folder = checkpoint_folder(run_folder, step)
     partial_folder = final_folder.with_name(final_folder.name + PARTIAL_SUFFIX)
-    write_weights(partial_folder, context.model)              # adapter tensors only for LoRA runs
+    write_weights(partial_folder, context.model, validation_loss)  # adapter tensors only for LoRA runs; the loss in metadata
     write_optimizer_state(partial_folder, context.optimizer)  # keyed by parameter name, never by index
     write_rng_state(partial_folder)                           # torch CPU and each CUDA device, as byte tensors
     write_resume_json(partial_folder, context, recipe_state)  # rastai.resume/1 through rastai_formats

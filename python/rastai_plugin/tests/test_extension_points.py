@@ -2,6 +2,7 @@
 job_events.py): required methods raise, optional ones have safe defaults."""
 
 import dataclasses
+from pathlib import Path
 
 import pytest
 
@@ -26,13 +27,35 @@ class ConstantMetric(Metric):
         return MetricResult(score=1.0)
 
 
+def empty_training_context() -> TrainingContext:
+    return TrainingContext(
+        run_id="run_01JA2B3C4D5E6F7G8H9J0K1M2N",
+        run_folder=Path("runs/run_01JA2B3C4D5E6F7G8H9J0K1M2N"),
+        model=None,
+        device="cpu",
+        optimizer=None,
+        loader=None,
+        validation_examples=[],
+        dataset_hash="",
+        split="train",
+        settings=None,
+        progress=None,
+    )
+
+
 def test_recipe_defaults_let_a_stateless_recipe_write_only_training_step() -> None:
     recipe = Recipe()
-    recipe.prepare(TrainingContext())
+    recipe.prepare(empty_training_context())
     assert recipe.resume_state() == {}
     recipe.restore_state({})
     with pytest.raises(NotImplementedError, match="training_step"):
-        recipe.training_step(Batch())
+        recipe.training_step(Batch(examples=[]))
+
+
+def test_a_batch_is_frozen() -> None:
+    batch = Batch(examples=[{"text": "rain", "label": "weather"}])
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        batch.examples = []
 
 
 def test_metric_score_must_be_written_and_prepare_is_optional() -> None:

@@ -471,6 +471,7 @@
     "rastai_models",
     "rastai_plugin",
     "rastai_proto",
+    "rastai_train",
     "rastai_worker"
   ],
   "settings_keys": [
