@@ -1,12 +1,21 @@
-# rastai_plugin: the Python plugin SDK (contracts 2.2; layout frontend-and-plugins.md 11). M1-12 lands the package
-# skeleton and its generated catalog (rastai_plugin/catalog/generated.py, written by `just codegen`); M1-37 fills in
-# the registry, the base classes, the module loader and the host client, and adds their dependencies here.
+# rastai_plugin: the Python plugin SDK (contracts 2.2; layout frontend-and-plugins.md 11). The registry, the
+# extension-point base classes, the job-side types, the module loader, the host client and the generated catalog
+# (rastai_plugin/catalog/generated.py, written by `just codegen`).
 
 [project]
 name = "rastai-plugin"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
 requires-python = "==3.12.*"
-dependencies = []
+# The environments (python/envs/) pin the exact grpcio; the workspace packages come from their folders.
+dependencies = [
+    "rastai-proto",        # the WorkerHostService stub and its messages (host.py only)
+    "rastai-formats",      # the manifest, read and validated through the wheel (manifest.py)
+    "grpcio>=1.84.0",      # the WorkerHostService client (host.py only; contracts 2.5)
+]
+
+[tool.uv.sources]
+rastai-proto = { workspace = true }
+rastai-formats = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14"]

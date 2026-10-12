@@ -12,7 +12,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import TextIO
 
-from rastai_data.errors import RRS_D1001, RRS_D3001, DataError
+from rastai_plugin.catalog.generated import RRS_D1001, RRS_D3001
+
+from rastai_data.errors import DataError
 
 # Delimiters tried when sniffing, in order of preference when two fit equally well (an empty file gets the first).
 CANDIDATE_DELIMITERS = (",", "\t", ";", "|")

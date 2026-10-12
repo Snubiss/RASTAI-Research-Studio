@@ -94,7 +94,13 @@ PYTHON_LIBRARY_FILES = {
     "transformers": ["rastai_models/compat/transformers_runtime.py"],
     "tokenizers": ["rastai_data/tokenization.py"],
     "bitsandbytes": ["rastai_train/kernels/four_bit_linear.py"],
-    "grpc": ["rastai_worker/worker_server.py", "rastai_plugin/host.py", "rastai_proto/*"],
+    # rastai_plugin's host test serves a fake WorkerHostService, so it needs grpcio's server (contracts 2.5).
+    "grpc": [
+        "rastai_worker/worker_server.py",
+        "rastai_plugin/host.py",
+        "rastai_plugin/tests/test_host.py",
+        "rastai_proto/*",
+    ],
     "google.protobuf": [
         "rastai_proto/*",
         "rastai_worker/event_payloads.py",

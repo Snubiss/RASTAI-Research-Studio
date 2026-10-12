@@ -12,7 +12,9 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
 
-from rastai_data.errors import RRS_D1001, RRS_D3001, DataError
+from rastai_plugin.catalog.generated import RRS_D1001, RRS_D3001
+
+from rastai_data.errors import DataError
 
 # A file with no newline would otherwise be read into memory whole as one line. 16 MiB is far above any row of
 # training text and still small next to a job's memory.

@@ -6,9 +6,14 @@
 name = "rastai-data"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
 requires-python = "==3.12.*"
-# None yet. tokenizers, pyarrow, torchvision and PyMySQL join with the files that wrap them (layout section 4.8),
-# and rastai-formats and rastai-plugin with the code that first calls them.
-dependencies = []
+# tokenizers, pyarrow, torchvision and PyMySQL join with the files that wrap them (layout section 4.8), and
+# rastai-formats with the code that first calls it.
+dependencies = [
+    "rastai-plugin",       # rastai_plugin.catalog: the error codes DataError carries
+]
+
+[tool.uv.sources]
+rastai-plugin = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14"]

@@ -8,7 +8,7 @@ test checks the checked-in module itself.
 import dataclasses
 
 import pytest
-from rastai_plugin.catalog import generated
+from rastai_plugin.catalog import find_catalog_entry, generated
 
 # Contracts 10, "Entry fields", in the catalog JSON's order; and the term fields of layout rust-control-plane.md 2.6.
 CATALOG_ENTRY_FIELDS = [
@@ -52,3 +52,13 @@ def test_every_code_has_its_constant_and_a_known_severity() -> None:
     for entry in generated.CATALOG:
         assert getattr(generated, entry.code.replace("-", "_")) == entry.code
         assert entry.severity in SEVERITIES
+
+
+def test_find_catalog_entry_returns_the_entry_or_none() -> None:
+    entry = find_catalog_entry(generated.RRS_P0103)
+    assert entry is not None
+    assert entry.code == "RRS-P0103"
+    assert "{difference}" in entry.message
+    assert find_catalog_entry("PLG-acme_tools-0001") is None
+    for catalog_entry in generated.CATALOG:
+        assert find_catalog_entry(catalog_entry.code) is catalog_entry

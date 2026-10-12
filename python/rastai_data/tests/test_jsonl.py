@@ -1,9 +1,10 @@
 """readers/jsonl.py: rows from JSON Lines, and DataError with the right code for every bad file."""
 
 import pytest
-from rastai_data.errors import RRS_D1001, RRS_D3001, DataError
+from rastai_data.errors import DataError
 from rastai_data.readers import jsonl
 from rastai_data.readers.jsonl import read_jsonl_rows
+from rastai_plugin.catalog.generated import RRS_D1001, RRS_D3001
 
 FIXTURE_ROW_COUNT = 2000
 FIXTURE_LABELS = {"weather", "sports", "cooking", "music"}

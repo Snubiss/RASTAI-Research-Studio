@@ -1,10 +1,11 @@
 """readers/csv_reader.py: rows from CSV with delimiter and header sniffing, and DataError for every bad file."""
 
 import pytest
-from rastai_data.errors import RRS_D1001, RRS_D3001, DataError
+from rastai_data.errors import DataError
 from rastai_data.readers import csv_reader
 from rastai_data.readers.csv_reader import read_csv_rows
 from rastai_data.readers.jsonl import read_jsonl_rows
+from rastai_plugin.catalog.generated import RRS_D1001, RRS_D3001
 
 FIXTURE_ROW_COUNT = 200
 
