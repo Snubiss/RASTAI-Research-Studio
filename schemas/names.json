@@ -54,6 +54,7 @@
     "rastai-diag",
     "rastai-formats",
     "rastai-mcp",
+    "rastai-node",
     "rastai-proto",
     "rastai-server",
     "rastai-store",
