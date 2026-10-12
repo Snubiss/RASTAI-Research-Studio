@@ -203,6 +203,9 @@ def test_control_refuses_what_isnt_a_control_value(served_job: ServedJob, action
     response = control(served_job, action)
     assert response.diagnostic.code == RRS_J0004
     assert response.diagnostic.severity == SEVERITY_ERROR
+    # The catalog message names the job: "Signal {signal} wasn't delivered to job {job_id}: {reason}."
+    assert f"wasn't delivered to job {JOB_ID}: " in response.diagnostic.message
+    assert "{" not in response.diagnostic.message
     assert asdict(served_job.control) == asdict(JobControl())
 
 

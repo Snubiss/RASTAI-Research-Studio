@@ -33,6 +33,8 @@ RESUME = "RESUME"
 CHECKPOINT_NOW = "CHECKPOINT_NOW"
 STEP = "STEP"
 CONTROL_ACTIONS = (CANCEL, STOP, PAUSE, RESUME, CHECKPOINT_NOW, STEP)
+# RRS-J0004's {reason} for a value that isn't one of the six above.
+NOT_A_CONTROL_VALUE_REASON = "it isn't a Control value"
 # How often a paused job looks at its flags again. RESUME takes effect within this time.
 PAUSE_POLL_SECONDS = 0.1
 # Guards `step_budget`, which a STEP increments on a gRPC thread (see the top of this file).
@@ -63,9 +65,9 @@ def cancel_handler(control: JobControl):
     return handle
 
 
-def apply_control_action(control: JobControl, action: str) -> None:
-    """Sets the flag of one Control value (its JobSignal name without the prefix). Anything that isn't one of the
-    six Control values is refused with RRS-J0004 and changes nothing."""
+def apply_control_action(control: JobControl, action: str, job_id: str) -> None:
+    """Sets the flag of one Control value (its JobSignal name without the prefix) on job `job_id`. Anything that
+    isn't one of the six Control values is refused with RRS-J0004 and changes nothing."""
     if action == CANCEL:
         control.cancel_requested = True
     elif action == STOP:
@@ -84,7 +86,13 @@ def apply_control_action(control: JobControl, action: str) -> None:
             control.step_budget = (control.step_budget or 0) + 1
         control.paused = False
     else:
-        raise WorkerError(RRS_J0004, f"Signal {action} wasn't delivered to the job: it isn't a Control value")
+        raise undelivered_signal_error(action, job_id, NOT_A_CONTROL_VALUE_REASON)
+
+
+def undelivered_signal_error(action: str, job_id: str, reason: str) -> WorkerError:
+    """RRS-J0004 with every value its catalog message names: the signal, the job and the reason, as the node writes
+    its own (rastai-node's `not_delivered`)."""
+    return WorkerError(RRS_J0004, f"Signal {action} wasn't delivered to job {job_id}: {reason}.")
 
 
 def job_is_ending(control: JobControl) -> bool:

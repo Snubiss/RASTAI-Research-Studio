@@ -67,7 +67,7 @@ class WorkerServer(worker_service_pb2_grpc.WorkerServiceServicer):
     def Control(self, request, context):  # noqa: N802
         self.check_token(context)
         try:
-            apply_control_action(self.control, control_action_name(request.action))
+            apply_control_action(self.control, control_action_name(request.action), self.worker_info.job_id)
         except WorkerError as error:
             diagnostic = diagnostic_from_error(error, self.worker_info.job_id)
             return worker_service_pb2.ControlResponse(diagnostic=diagnostic_message(diagnostic))
