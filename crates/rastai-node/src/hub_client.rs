@@ -24,7 +24,7 @@ use crate::node::NodeState;
 
 /// How long one hub call may take. A daemon that doesn't answer in this time has missed the beat; the next tick
 /// tries again, so a hung daemon never holds the heartbeat loop.
-const HUB_CALL_TIMEOUT: Duration = Duration::from_secs(5);
+const HUB_CALL_TIMEOUT_SECONDS: u64 = 5;
 
 /// The node's channel to the daemon's `NodeHubService`, and the socket it was opened on.
 #[derive(Debug, Clone)]
@@ -42,11 +42,11 @@ pub async fn send_heartbeat(state: &NodeState, request: HeartbeatRequest) -> Res
     };
     let channel = hub_channel(state, &session.hub_socket_path).await?;
     let mut client = NodeHubServiceClient::new(channel);
-    let answered = tokio::time::timeout(HUB_CALL_TIMEOUT, client.heartbeat(request)).await;
+    let answered = tokio::time::timeout(hub_call_timeout(), client.heartbeat(request)).await;
     let failure = match answered {
         Ok(Ok(_)) => return Ok(()),
         Ok(Err(status)) => format!("the Heartbeat call failed: {}", status.message()),
-        Err(_) => format!("the daemon didn't answer the Heartbeat within {HUB_CALL_TIMEOUT:?}"),
+        Err(_) => format!("the daemon didn't answer the Heartbeat within {HUB_CALL_TIMEOUT_SECONDS} seconds"),
     };
     forget_hub_connection(state);
     Err(failure)
@@ -58,7 +58,7 @@ async fn hub_channel(state: &NodeState, hub_socket_path: &str) -> Result<Channel
         return Ok(channel);
     }
     let connecting = connect_grpc_channel(Path::new(hub_socket_path));
-    let channel = match tokio::time::timeout(HUB_CALL_TIMEOUT, connecting).await {
+    let channel = match tokio::time::timeout(hub_call_timeout(), connecting).await {
         Ok(Ok(channel)) => channel,
         Ok(Err(error)) => return Err(format!("the hub socket {hub_socket_path} can't be reached: {error:?}")),
         Err(_) => return Err(format!("the hub socket {hub_socket_path} didn't answer")),
@@ -68,6 +68,10 @@ async fn hub_channel(state: &NodeState, hub_socket_path: &str) -> Result<Channel
         channel: channel.clone(),
     });
     Ok(channel)
+}
+
+fn hub_call_timeout() -> Duration {
+    Duration::from_secs(HUB_CALL_TIMEOUT_SECONDS)
 }
 
 fn kept_channel(state: &NodeState, hub_socket_path: &str) -> Option<Channel> {

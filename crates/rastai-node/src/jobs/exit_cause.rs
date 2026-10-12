@@ -8,9 +8,15 @@
 //!
 //! A job a restarted node reattached isn't the node's child, so its end comes with no exit code. `classify_vanished`
 //! decides it from the rest (platform flow 2.3; layout 7.4, the last row of "Exit causes"): the node's own kill if it
-//! sent one, `RRS-J3006` if the worker's last words in `stderr.log` are that refusal (exit 5: the log's frames are
-//! another writer's, so nothing is read from it), else the job's last `run.state_changed` in the run's log, else
-//! `RRS-J3002`.
+//! sent one; `RRS-J3006` if the job could have been refused the run's log and the last words in `stderr.log` are that
+//! refusal (exit 5); else the job's last `run.state_changed` in the run's log; else `RRS-J3002`.
+//!
+//! `stderr.log` is the run's, appended to by every job of the run, and a reattached job's own part of it has no
+//! recorded start. So a `RRS-J3006` line there may be an earlier job's. It is read as this job's only when this job
+//! can't have opened the log: the worker opens the log (and is refused it) before it registers, and a refused worker
+//! writes nothing to it. A job that registered, or that has any record of its own in the log, opened it, so its end
+//! comes from those records. A run state under this job's id is this job's own: a worker opens the log only with a
+//! job token, and one without this job's token is refused at `Register`, before its entry writes any run state.
 
 use std::path::{Path, PathBuf};
 
@@ -101,6 +107,8 @@ pub struct RunLogFacts {
     /// The state of this job's last `run.state_changed`, for a job whose exit code nobody saw.
     pub last_run_state: Option<State>,
     pub last_diagnostic: Option<Diagnostic>,
+    /// The log holds at least one record of this job, so its worker opened the log: it wasn't refused it (exit 5).
+    pub wrote_any_record: bool,
 }
 
 /// The last lines of a job's `stderr.log`.
@@ -135,10 +143,12 @@ pub struct ExitFacts {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VanishedFacts {
     pub job_id: String,
+    /// The worker registered with this node after the restart. It had opened the run's log first, so it wasn't
+    /// refused it (exit 5).
+    pub registered: bool,
     pub node_kill: Option<NodeKill>,
     /// Why the node refused the worker at its new `Register` (`RRS-J2003`: it was sent TERMINATE).
     pub start_refusal: Option<Diagnostic>,
-    /// Left empty when `stderr` shows the `RRS-J3006` refusal: the log is then another writer's.
     pub run_log: RunLogFacts,
     pub stderr: StderrTail,
     pub event_log_path: String,
@@ -168,7 +178,7 @@ pub fn classify_vanished(facts: &VanishedFacts) -> JobOutcome {
     if let Some(kill) = facts.node_kill {
         return outcome_of_node_kill(&facts.job_id, kill);
     }
-    if stderr_shows_event_log_locked(&facts.stderr) {
+    if could_have_been_refused_the_log(facts) && stderr_shows_event_log_locked(&facts.stderr) {
         let path = &facts.event_log_path;
         return failed(diagnostic_at("RRS-J3006", &[("path", path)], &facts.stderr.path));
     }
@@ -186,10 +196,16 @@ pub fn classify_vanished(facts: &VanishedFacts) -> JobOutcome {
     }
 }
 
-/// Whether the worker's last line in `stderr.log` is the `RRS-J3006` refusal it prints before exit 5. Such a job
-/// wrote nothing to the run's log: its frames are another writer's, even under this job's id (a copy started by hand
-/// from the same `job.json`), so they are never read as this job's outcome.
-pub fn stderr_shows_event_log_locked(stderr: &StderrTail) -> bool {
+/// Whether a reattached job may be one whose worker was refused the run's log (exit 5). The worker opens the log
+/// before it registers and writes nothing to it when refused, so a job that registered, or left a record of its own
+/// in the log, wasn't. Only such a job's `stderr.log` is read for the refusal: the file is the run's, and a `RRS-J3006`
+/// line in it may be an earlier job's.
+fn could_have_been_refused_the_log(facts: &VanishedFacts) -> bool {
+    !facts.registered && !facts.run_log.wrote_any_record
+}
+
+/// Whether the last line in `stderr.log` is the `RRS-J3006` refusal the worker prints before exit 5.
+fn stderr_shows_event_log_locked(stderr: &StderrTail) -> bool {
     let last = stderr.lines.iter().rev().find(|line| !line.trim().is_empty());
     last.is_some_and(|line| line.trim_start().starts_with(EVENT_LOG_LOCKED_LINE_START))
 }
@@ -234,6 +250,7 @@ pub fn read_run_log_facts(event_log_path: &Path, job_id: &str) -> RunLogFacts {
         if record.job_id != job_id {
             continue;
         }
+        facts.wrote_any_record = true;
         let payload = record.payload.and_then(|payload| payload.payload);
         match (record.event_type.as_str(), payload) {
             (RUN_STATE_CHANGED, Some(Payload::RunStateChanged(change))) => {
@@ -616,6 +633,7 @@ mod tests {
                 completed: true,
                 last_run_state: Some(State::RunState(RunState::Completed as i32)),
                 last_diagnostic: Some(logged_diagnostic()),
+                wrote_any_record: true,
             },
             ..facts(ProcessExit::Code(5))
         };
@@ -654,13 +672,16 @@ mod tests {
         assert_eq!(parse_oom_kill_count("low 0\n"), None);
     }
 
+    /// A job that left `last_run_state` in the log, and so a record of its own when it left one.
     fn vanished(last_run_state: Option<State>) -> VanishedFacts {
         VanishedFacts {
             job_id: JOB.to_string(),
+            registered: false,
             node_kill: None,
             start_refusal: None,
             run_log: RunLogFacts {
                 last_run_state,
+                wrote_any_record: last_run_state.is_some(),
                 ..RunLogFacts::default()
             },
             stderr: StderrTail {
@@ -719,30 +740,53 @@ mod tests {
         assert_eq!(gone.path, STDERR_PATH, "RRS-J3002 points at the stderr tail");
     }
 
-    // The exit-5 edge (#199): a job whose stderr.log ends with the RRS-J3006 refusal never takes the running copy's
-    // records as its own, even a completed one under its own id.
+    fn stderr_ending_with(last_lines: &[&str]) -> StderrTail {
+        StderrTail {
+            path: STDERR_PATH.to_string(),
+            lines: last_lines.iter().map(|line| line.to_string()).collect(),
+        }
+    }
+
+    // The exit-5 edge (#199): a job that left nothing in the log and never registered, whose stderr.log ends with the
+    // RRS-J3006 refusal, fails with RRS-J3006. stderr.log is the run's, so the same last line doesn't count for a job
+    // that opened the log (a record of its own, or a Register): that line is an earlier job's.
     #[test]
-    fn a_vanished_job_whose_stderr_ends_with_j3006_takes_nothing_from_the_log() {
+    fn only_a_job_that_never_opened_the_log_takes_the_j3006_line_as_its_own() {
+        let refusal_line = "RRS-J3006: Another process is writing the event log runs/run_test/events.log.";
         let refused = VanishedFacts {
-            stderr: StderrTail {
-                path: STDERR_PATH.to_string(),
-                lines: vec![
-                    "RRS-J3006: Another process is writing the event log runs/run_test/events.log.".to_string(),
-                    String::new(),
-                ],
-            },
-            ..vanished(run_state(RunState::Completed))
+            stderr: stderr_ending_with(&[refusal_line, ""]),
+            ..vanished(None)
         };
         let outcome = classify_vanished(&refused);
         assert_eq!((outcome.state, code_of(&outcome)), (JobState::Failed, "RRS-J3006"));
-        let earlier_line = VanishedFacts {
-            stderr: StderrTail {
-                path: STDERR_PATH.to_string(),
-                lines: vec!["RRS-J3006: an earlier copy".to_string(), "step 9".to_string()],
-            },
+
+        let completed_after_an_earlier_refusal = VanishedFacts {
+            stderr: stderr_ending_with(&[refusal_line]),
             ..vanished(run_state(RunState::Completed))
         };
-        assert_eq!(classify_vanished(&earlier_line).state, JobState::Succeeded);
+        assert_eq!(
+            classify_vanished(&completed_after_an_earlier_refusal).state,
+            JobState::Succeeded
+        );
+        let only_metrics = VanishedFacts {
+            run_log: RunLogFacts {
+                wrote_any_record: true,
+                ..RunLogFacts::default()
+            },
+            ..refused.clone()
+        };
+        assert_eq!(code_of(&classify_vanished(&only_metrics)), "RRS-J3002");
+        let registered = VanishedFacts {
+            registered: true,
+            ..refused.clone()
+        };
+        assert_eq!(code_of(&classify_vanished(&registered)), "RRS-J3002");
+
+        let refusal_not_last = VanishedFacts {
+            stderr: stderr_ending_with(&["RRS-J3006: an earlier copy", "step 9"]),
+            ..vanished(None)
+        };
+        assert_eq!(code_of(&classify_vanished(&refusal_not_last)), "RRS-J3002");
     }
 
     // The node's own kill decides first: no re-Register in time is RRS-J3003, a KILL is cancelled with RRS-J1003.
