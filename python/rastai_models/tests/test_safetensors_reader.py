@@ -119,6 +119,19 @@ def test_a_loaded_tensor_is_a_copy_that_outlives_the_file() -> None:
     assert torch.equal(loaded, torch.ones((2, 3)))
 
 
+def test_a_load_that_fails_raises_its_own_error_and_the_file_still_closes() -> None:
+    # A device string torch can't parse fails inside .to(), after the tensor points into the mapping, as a missing GPU
+    # or an out-of-memory would. The view must be released anyway, or close() raises BufferError over the real error.
+    with pytest.raises(RuntimeError) as error:
+        with SafetensorsFile(CORPUS_FOLDER / "valid_two_tensors.safetensors") as reader:
+            mapping = reader._mapping
+            reader.load("a", device="no-such-device")
+    assert not isinstance(error.value, BufferError)
+    assert "no-such-device" in str(error.value)
+    assert reader._mapping is None
+    assert mapping.closed
+
+
 def test_a_file_that_shrinks_after_its_header_was_checked_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

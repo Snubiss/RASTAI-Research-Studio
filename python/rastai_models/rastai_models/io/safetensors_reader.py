@@ -77,13 +77,17 @@ class SafetensorsFile:
             return torch.empty(shape, dtype=target_dtype, device=device)
 
         view = memoryview(self._mapping)[self._data_start + tensor["start"] : self._data_start + tensor["end"]]
-        mapped_tensor = torch.frombuffer(view, dtype=file_dtype).reshape(shape)
-        # .to() copies, even when device and dtype already match (copy=True), so nothing points into the mapping.
-        loaded = mapped_tensor.to(device=device, dtype=target_dtype, copy=True)
-        # Drop every reference into the mapping, so close() can unmap it.
-        del mapped_tensor
-        view.release()
-        return loaded
+        mapped_tensor = None
+        try:
+            mapped_tensor = torch.frombuffer(view, dtype=file_dtype).reshape(shape)
+            # .to() copies, even when device and dtype already match (copy=True), so nothing points into the mapping.
+            return mapped_tensor.to(device=device, dtype=target_dtype, copy=True)
+        finally:
+            # Drop every reference into the mapping, so close() can unmap it. This runs when .to() fails too (a
+            # device the machine lacks, out of memory): otherwise the traceback keeps the view alive, close() raises
+            # BufferError and that hides the real error.
+            mapped_tensor = None
+            view.release()
 
     def close(self) -> None:
         if self._mapping is not None:
