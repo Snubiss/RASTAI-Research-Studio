@@ -415,6 +415,7 @@ version = "0.1.0"
 source = { editable = "../../rastai_models" }
 dependencies = [
     { name = "rastai-formats" },
+    { name = "rastai-plugin" },
     { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
@@ -422,6 +423,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "rastai-formats", editable = "../../rastai_formats" },
+    { name = "rastai-plugin", editable = "../../rastai_plugin" },
     { name = "torch" },
 ]
 

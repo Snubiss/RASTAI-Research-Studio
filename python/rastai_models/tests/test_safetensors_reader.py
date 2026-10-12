@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import torch
 from rastai_models.io import safetensors_reader
+from rastai_plugin.catalog.generated import RRS_E6011
 
 from rastai_models import ModelError, SafetensorsFile
 
@@ -83,7 +84,7 @@ def test_every_file_gives_the_verdict_and_code_rust_gives(file_name: str) -> Non
 def test_the_two_named_edge_cases_keep_their_codes_in_python() -> None:
     # The spike's Python reader called the wrapping shape a size mismatch; with one check it is an overflow.
     assert verdict_of(CORPUS_FOLDER / "shape_overflows_64_bits.safetensors")["code"] == "RRS-E6012"
-    assert verdict_of(CORPUS_FOLDER / "offset_beyond_64_bits.safetensors")["code"] == "RRS-E6011"
+    assert verdict_of(CORPUS_FOLDER / "offset_beyond_64_bits.safetensors")["code"] == RRS_E6011
 
 
 def test_valid_corpus_files_give_their_tensors() -> None:
@@ -134,7 +135,7 @@ def test_a_file_that_shrinks_after_its_header_was_checked_is_refused(
     monkeypatch.setattr(safetensors_reader, "read_checked_header", check_then_truncate)
     with pytest.raises(ModelError) as error:
         SafetensorsFile(path)
-    assert error.value.code == "RRS-E6011"
+    assert error.value.code == RRS_E6011
     assert str(path) in error.value.message
 
 

@@ -29,7 +29,8 @@ def write_safetensors(
     path: str | Path, tensors: dict[str, torch.Tensor], metadata: dict[str, str] | None = None
 ) -> None:
     """Writes `tensors` (any device, any layout) and `metadata` to `path` atomically. A dtype safetensors can't hold,
-    a tensor named `__metadata__` or metadata that isn't str → str is a bug in the caller: ValueError."""
+    a tensor named `__metadata__`, metadata that isn't str → str or a string with no UTF-8 form is a bug in the
+    caller: ValueError."""
     path = Path(path)
     cpu_tensors = {name: tensor.detach().to("cpu").contiguous() for name, tensor in sorted(tensors.items())}
     header = build_header(cpu_tensors, metadata or {})
@@ -50,6 +51,7 @@ def build_header(tensors: dict[str, torch.Tensor], metadata: dict[str, str]) -> 
     for name, tensor in tensors.items():
         if name == METADATA_KEY:
             raise ValueError(f"a tensor can't be named {METADATA_KEY}: the header keeps that key for metadata")
+        check_utf8(name, "tensor name")
         if tensor.dtype not in DTYPE_NAMES:
             raise ValueError(f"{name}: dtype {tensor.dtype} can't be written to safetensors")
         size = tensor.numel() * tensor.element_size()
@@ -71,6 +73,17 @@ def check_metadata(metadata: dict[str, str]) -> None:
     for key, value in metadata.items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise ValueError(f"safetensors metadata maps strings to strings, not {key!r}: {value!r}")
+        check_utf8(key, "metadata key")
+        check_utf8(value, "metadata value")
+
+
+def check_utf8(text: str, what: str) -> None:
+    """A Python string can hold a lone surrogate, which has no UTF-8 form. json.dumps would still write it, as a
+    `\\ud800` escape, and the wheel refuses that header, so the writer would make a file its own reader can't open."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(f"the {what} {text!r} isn't valid UTF-8 (it holds a lone surrogate)") from None
 
 
 def write_file(path: Path, header: bytes, tensors: dict[str, torch.Tensor]) -> None:
