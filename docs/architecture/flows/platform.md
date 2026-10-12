@@ -952,6 +952,7 @@ sequenceDiagram
   end
   SRV->>ND: StartJob with the JobSpec
   ND->>ND: admission, environment ready and disk free, else stays queued with RRS-H2006 or RRS-S3001
+  ND->>ND: the run has no live job, else failed with RRS-J3006 and nothing written
   ND->>ND: write job.json with job_token_hash and granted_leases, mode 0600
   ND->>W: spawn python -m rastai_worker run with setsid
   ND->>ND: add pid, boot id, start time and process group to job.json
@@ -970,6 +971,7 @@ sequenceDiagram
 - **Scheduling** (in `rastai-server`): first in, first out per node. A job waiting for GPU memory doesn't block CPU-only jobs. Queued jobs are rows, so they survive a daemon restart.
 - **Spawn** (in `rastai-node`): `setsid` gives the worker its own process group. stdout and stderr go to `runs/<run_id>/stdout.log` and `stderr.log`. The environment gets `RASTAI_JOB_TOKEN`, `RASTAI_RUN_ID`, and `CUDA_VISIBLE_DEVICES` or `HIP_VISIBLE_DEVICES` set to the leased GPUs, plus `CUDA_DEVICE_ORDER=PCI_BUS_ID` so CUDA's GPU numbering matches nvidia-smi's (CUDA's default order is fastest first). The rest of the environment is cleared, and `HF_HUB_OFFLINE=1`, `UV_OFFLINE=1` and `PIP_NO_INDEX=1` are set, so a job can never download or install packages (§13, §27); `HSA_OVERRIDE_GFX_VERSION` is removed (1.2). Plugin jobs without a network permission start in a new user and network namespace (`unshare`) so only the job socket works; where user namespaces are unavailable, 7.3 decides (contracts 8.8). The full table is in layout/rust-node-gateway-proto.md 7.4.
 - **Start failures:** the spawn itself fails (missing interpreter, exec error) → `RRS-J0001` with the OS error; no `Register` within 60 s → the group is killed and the job fails with `RRS-J0002`; wrong token → `RRS-J2002` and the group is killed (something else is on the socket); a worker protocol the node doesn't speak → `RRS-J2003`; a bad launch the worker itself reports (unreadable job file, exit 2) → `RRS-J2001`.
+- **A second job on a live run** (a relaunch racing a running copy): before it writes `job.json`, the node checks that the run has no live job, in its job table or as a `job.json` with no `final_state` whose pid, boot id and start ticks are alive (2.3). If it has one, the new job fails with `RRS-J3006` and nothing is spawned or written into the run folder. The worker's `flock` on `events.log` is the backstop for a writer the node doesn't know is alive: the worker that can't take it writes nothing to the log, prints the diagnostic to `stderr.log` and exits 5 (5.4). Either way the running copy keeps going: no signal reaches it, its leases and `job.json` stay, and the run's state stays the one it writes.
 - **Memory:** the worker calls `torch.cuda.set_per_process_memory_fraction(lease_bytes / device_total_bytes)`. Going past it raises an out-of-memory error inside that job (5.4) instead of hurting another job.
 - The daemon starts tailing at sequence 0 as soon as the job exists, so nothing is missed.
 
@@ -1000,9 +1002,9 @@ stateDiagram-v2
   [*] --> queued
   queued --> starting : resources and lease granted
   queued --> cancelled : job.cancel before start
-  queued --> failed : StartJob refused, can never fit
+  queued --> failed : StartJob refused, can never fit or the run has a live job
   starting --> running : Register and Hello done
-  starting --> failed : spawn error, environment gone or no Register in 60 s
+  starting --> failed : spawn error, environment gone, exit 5 or no Register in 60 s
   running --> paused : PAUSE
   paused --> running : RESUME
   running --> stopping : STOP, CANCEL or TERMINATE
@@ -1026,7 +1028,7 @@ stateDiagram-v2
 - **Added to contracts §9.1:**
   - `queued → cancelled`: `job.cancel` before the job starts (no process, so no signal);
   - `paused → stopping`: a paused worker still answers `Control`;
-  - `queued → failed`: the node refuses `StartJob` for a job that could never fit, for example `RRS-R1009` (more sandboxes than `compute.sandbox_cap`, remote flows B2). A job that only has to wait stays `queued`. An environment that isn't ready is a wait, not a refusal: the job stays `queued` with `RRS-H2006` (1.3), and an environment that vanishes after admission takes `starting → failed`;
+  - `queued → failed`: the node refuses `StartJob` for a job that could never fit, for example `RRS-R1009` (more sandboxes than `compute.sandbox_cap`, remote flows B2). A job that only has to wait stays `queued`. An environment that isn't ready is a wait, not a refusal: the job stays `queued` with `RRS-H2006` (1.3), and an environment that vanishes after admission takes `starting → failed`. A run that already has a live job is refused too, with `RRS-J3006` (5.1);
   - `lost → succeeded`, `lost → cancelled` and the "failed during the drop" case of `lost → failed`: a job that ended while its node was out of reach. The daemon takes the terminal state the node recorded from `ListJobs` and the final record in the replayed log (2.3, remote flows C6 and open question 10).
 
   Every other transition is contracts §9.1 drawn as a chart. `KILL` is drawn from `running` and `stopping`; the same holds for `starting` and `paused` ("any live state", contracts §9.1).
@@ -1147,6 +1149,7 @@ sequenceDiagram
 | 2 | `EXIT_BAD_LAUNCH` | bad job file, missing environment or worker protocol mismatch | `failed`, `RRS-J2001` |
 | 3 | `EXIT_CANCELLED` | `CANCEL` honored | `cancelled` |
 | 4 | `EXIT_EVENT_LOG_UNWRITABLE` | the event log can't be appended even after the reserve was freed (6.2) | `failed`, `RRS-S3002` |
+| 5 | `EXIT_EVENT_LOG_LOCKED` | another process holds the event log's `flock`; the worker wrote nothing to the log, printed the diagnostic to `stderr.log` and exited before `Register` (5.1) | `failed`, `RRS-J3006`, with the stderr tail; the run and its log are left to the running copy |
 | 75 | `EXIT_PREEMPTED` | checkpoint written after SIGTERM; relaunch to resume (`EX_TEMPFAIL`) | `cancelled`, reason `preempted` |
 
 A worker that never calls `Register` has no exit code to give: the node decides that case itself (`RRS-J0002` after 60 s, 5.1).
@@ -1177,12 +1180,14 @@ flowchart TD
   X -->|"2"| BL["failed, RRS-J2001 with stderr tail"]
   X -->|"3"| CN["cancelled"]
   X -->|"4"| DF["failed, RRS-S3002"]
+  X -->|"5"| LK["failed, RRS-J3006 with stderr tail<br/>no outcome read from the run's log"]
   X -->|"75"| PR["cancelled, reason preempted<br/>run preempted, resume offered"]
   X -->|"other"| OT["failed, RRS-J1004 with stderr tail"]
 ```
 
 - The codes are the node layout's exit table (layout/rust-node-gateway-proto.md 7.4). The node reads the kernel's OOM-kill counter (`oom_kill` in the cgroup's `memory.events`) at spawn and at exit; only a rise gives `RRS-J1002`, with the RAM numbers from the last heartbeat. Any other signal is named as it is (`RRS-J1001`), so the message never claims a cause it can't see.
 - **Added to the node layout's table:** exit 0 without a final `completed` record, exit 1 without a logged diagnostic, and unknown exit codes give `RRS-J1004`. Without this check the run would stay `running` in the index forever.
+- **Exit 5 reads nothing from the log.** The frames in it are the running copy's, so its final record, or its last diagnostic, is never this job's outcome, and the daemon writes no run state for this job.
 - There is no exit code for "could not register": a worker that never registers is failed by the node with `RRS-J0002` (5.1) before any exit matters.
 
 ```rust

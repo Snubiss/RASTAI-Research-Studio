@@ -2038,7 +2038,7 @@ Source: `catalog/errors/RRS-J.json`.
 ### RRS-J3006: Another worker is already writing this run's event log
 
 - **Severity:** error
-- **Message:** Another process is writing the event log {path}, so this worker stopped before writing to it.
+- **Message:** Another process is writing the event log {path}, so this job stopped before writing to it.
 - **In plain words:** This task is already running, so Rastai didn't start a second copy of it.
 - **Fix:** Wait for the running copy to finish, or cancel it, then try again.
 

@@ -1846,7 +1846,7 @@ pub const CATALOG: &[CatalogEntry] = &[
         code: "RRS-J3006",
         severity: Severity::Error,
         title: "Another worker is already writing this run's event log",
-        message: "Another process is writing the event log {path}, so this worker stopped before writing to it.",
+        message: "Another process is writing the event log {path}, so this job stopped before writing to it.",
         basic_text: "This task is already running, so Rastai didn't start a second copy of it.",
         fix_text: "Wait for the running copy to finish, or cancel it, then try again.",
         fix_command_id: "",
