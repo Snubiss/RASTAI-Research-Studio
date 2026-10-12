@@ -120,7 +120,7 @@ def test_a_full_disk_pauses_the_run_until_resume(tmp_path: Path, monkeypatch: py
     assert paused_records[0].payload.diagnostic_reported.diagnostic.code == RRS_S3002
     assert paused_records[1].payload.run_state_changed.run_state == RUN_STATE_PAUSED
     assert emitter.is_alive()
-    apply_control_action(control, "RESUME")
+    apply_control_action(control, "RESUME", JOB_ID)
     emitter.join(timeout=WAIT_SECONDS)
     assert not emitter.is_alive()
     # Resumed: the reserve is back, the run is running again, and the metrics that failed are written.
@@ -150,11 +150,11 @@ def test_a_resume_before_space_is_freed_keeps_the_run_paused(tmp_path: Path, mon
     emitter = threading.Thread(target=events.emit_durable, args=("run.metrics", METRICS), daemon=True)
     emitter.start()
     wait_until(lambda: control.paused)
-    apply_control_action(control, "RESUME")
+    apply_control_action(control, "RESUME", JOB_ID)
     # The reserve can't come back yet, so the job pauses itself again and keeps waiting.
     wait_until(lambda: len(reserve_attempts) == 1 and control.paused)
     assert emitter.is_alive()
-    apply_control_action(control, "RESUME")
+    apply_control_action(control, "RESUME", JOB_ID)
     emitter.join(timeout=WAIT_SECONDS)
     assert not emitter.is_alive()
     assert len(reserve_attempts) == 2
@@ -302,7 +302,7 @@ def refuse_to_pause(log, control) -> None:
 
 def cancel_once_paused(control: JobControl) -> None:
     wait_until(lambda: control.paused)
-    apply_control_action(control, "CANCEL")
+    apply_control_action(control, "CANCEL", JOB_ID)
 
 
 def test_when_the_pause_records_fail_too_the_exit_code_is_4(

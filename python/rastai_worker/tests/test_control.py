@@ -4,6 +4,7 @@ KILL are refused as Control values.
 """
 
 import os
+import re
 import signal
 import threading
 import time
@@ -11,6 +12,7 @@ from collections.abc import Iterator
 from dataclasses import asdict
 
 import pytest
+from rastai_plugin.catalog import find_catalog_entry
 from rastai_plugin.catalog.generated import RRS_J0004
 from rastai_worker.control import apply_control_action, install_control, job_is_ending, wait_for_resume
 from rastai_worker.errors import WorkerError
@@ -19,6 +21,9 @@ from rastai_plugin import JobControl
 
 pytestmark = pytest.mark.posix_only
 
+JOB_ID = "job_01JA2B3C4D5E6F7G8H9J0K1M2N"
+# A catalog placeholder, as rastai-diag's fill_placeholders reads one: `{snake_case}`.
+CATALOG_PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]*)\}")
 # How long a signal sent to this process may take to reach its Python handler.
 SIGNAL_WAIT_SECONDS = 2.0
 SIGNAL_POLL_SECONDS = 0.01
@@ -78,21 +83,21 @@ def test_sighup_is_ignored(control: JobControl) -> None:
 )
 def test_each_control_value_sets_its_own_flag(action: str, flag_name: str, value: object) -> None:
     control = JobControl()
-    apply_control_action(control, action)
+    apply_control_action(control, action, JOB_ID)
     assert asdict(control) == only_set(flag_name, value)
 
 
 def test_resume_clears_pause_and_step_budget() -> None:
     control = JobControl(paused=True, step_budget=2)
-    apply_control_action(control, "RESUME")
+    apply_control_action(control, "RESUME", JOB_ID)
     assert asdict(control) == asdict(JobControl())
 
 
 def test_step_runs_one_more_step_each_time() -> None:
     control = JobControl(paused=True)
-    apply_control_action(control, "STEP")
+    apply_control_action(control, "STEP", JOB_ID)
     assert (control.paused, control.step_budget) == (False, 1)
-    apply_control_action(control, "STEP")
+    apply_control_action(control, "STEP", JOB_ID)
     assert control.step_budget == 2
 
 
@@ -118,7 +123,7 @@ class SlowStepBudget:
 def test_steps_sent_at_once_all_count() -> None:
     control = SlowStepBudget()
     senders = [
-        threading.Thread(target=apply_control_action, args=(control, "STEP"), daemon=True)
+        threading.Thread(target=apply_control_action, args=(control, "STEP", JOB_ID), daemon=True)
         for _ in range(CONCURRENT_STEPS)
     ]
     for sender in senders:
@@ -133,9 +138,24 @@ def test_steps_sent_at_once_all_count() -> None:
 def test_os_signals_and_unknown_values_are_refused(action: str) -> None:
     control = JobControl()
     with pytest.raises(WorkerError) as raised:
-        apply_control_action(control, action)
+        apply_control_action(control, action, JOB_ID)
     assert raised.value.code == RRS_J0004
     assert asdict(control) == asdict(JobControl())
+    values = {"signal": action, "job_id": JOB_ID, "reason": "it isn't a Control value"}
+    assert raised.value.message == filled_catalog_message(RRS_J0004, values)
+
+
+def filled_catalog_message(code: str, values: dict) -> str:
+    """The catalog message of `code` with `values` put in, after checking that they are exactly the placeholders its
+    message and fix name (the Python side of codegen's call_site_placeholders_match_their_entries)."""
+    entry = find_catalog_entry(code)
+    assert entry is not None
+    placeholders = set(CATALOG_PLACEHOLDER.findall(entry.message)) | set(CATALOG_PLACEHOLDER.findall(entry.fix_text))
+    assert placeholders == set(values)
+    message = entry.message
+    for name, value in values.items():
+        message = message.replace("{" + name + "}", value)
+    return message
 
 
 def test_a_job_is_ending_after_stop_cancel_or_sigterm_only() -> None:
@@ -151,6 +171,6 @@ def test_a_paused_job_waits_for_resume_or_its_end() -> None:
         waiter.start()
         time.sleep(0.2)
         assert waiter.is_alive()
-        apply_control_action(control, action)
+        apply_control_action(control, action, JOB_ID)
         waiter.join(timeout=SIGNAL_WAIT_SECONDS)
         assert not waiter.is_alive()
