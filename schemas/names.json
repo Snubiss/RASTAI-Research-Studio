@@ -62,6 +62,7 @@
   ],
   "document_schema_ids": [
     "rastai.lock/1",
+    "rastai.model/1",
     "rastai.plugin/1",
     "rastai.project/1",
     "rastai.resume/1",
@@ -132,6 +133,7 @@
     "RRS-E2004",
     "RRS-E2005",
     "RRS-E2006",
+    "RRS-E2007",
     "RRS-E3001",
     "RRS-E3002",
     "RRS-E3003",

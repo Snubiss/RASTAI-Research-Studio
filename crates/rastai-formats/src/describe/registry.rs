@@ -8,6 +8,8 @@
 use crate::commands::describe_command_types;
 use crate::describe::types::TypeDescription;
 use crate::documents::lock::describe_lock_types;
+use crate::documents::model::describe_model_types;
+use crate::documents::model_ops::describe_model_op_types;
 use crate::documents::plugin_manifest::describe_plugin_manifest_types;
 use crate::documents::project::describe_project_types;
 use crate::documents::resume::describe_resume_types;
@@ -27,6 +29,8 @@ pub fn describe_all_types() -> Vec<TypeDescription> {
     all_types.extend(describe_lock_types());
     all_types.extend(describe_plugin_manifest_types());
     all_types.extend(describe_theme_types());
+    all_types.extend(describe_model_types());
+    all_types.extend(describe_model_op_types());
     all_types.extend(describe_command_types());
     all_types
 }

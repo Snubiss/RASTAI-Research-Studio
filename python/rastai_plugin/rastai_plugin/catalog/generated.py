@@ -95,6 +95,7 @@ RRS_E2003 = "RRS-E2003"
 RRS_E2004 = "RRS-E2004"
 RRS_E2005 = "RRS-E2005"
 RRS_E2006 = "RRS-E2006"
+RRS_E2007 = "RRS-E2007"
 RRS_E3001 = "RRS-E3001"
 RRS_E3002 = "RRS-E3002"
 RRS_E3003 = "RRS-E3003"
@@ -1080,6 +1081,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Rewrite the value in the form shown.",
         fix_command_id="",
         docs_anchor="rrs-e2006",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_E2007,
+        severity="error",
+        title="Graph node input isn't connected exactly once",
+        message="Input {input_index} of {graph_node} has {connection_count} connections; it needs exactly one.",
+        basic_text="A block in this design is missing its input, or has two things plugged into the same input.",
+        fix_text="Connect exactly one block, or one model input, to each input of the block.",
+        fix_command_id="",
+        docs_anchor="rrs-e2007",
         retired=False,
     ),
     CatalogEntry(

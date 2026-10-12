@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2002",
+      "path": "broken_edge.rrsmodel:184:7#/graph/edges/2"
+    }
+  ]
+}

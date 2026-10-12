@@ -710,6 +710,17 @@ export const CATALOG = [
     retired: false,
   },
   {
+    code: "RRS-E2007",
+    severity: "error",
+    title: "Graph node input isn't connected exactly once",
+    message: "Input {input_index} of {graph_node} has {connection_count} connections; it needs exactly one.",
+    basic_text: "A block in this design is missing its input, or has two things plugged into the same input.",
+    fix_text: "Connect exactly one block, or one model input, to each input of the block.",
+    fix_command_id: "",
+    docs_anchor: "rrs-e2007",
+    retired: false,
+  },
+  {
     code: "RRS-E3001",
     severity: "warning",
     title: "File requires a plugin that isn't installed or enabled",

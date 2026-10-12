@@ -1,0 +1,36 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:21:11#/graph/nodes/0/attributes/vocab_size"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:33:11#/graph/nodes/1/attributes/out_channels"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:30:9#/graph/nodes/1/attributes/kernel_size"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:32:11#/graph/nodes/1/attributes/kernal_size"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:43:11#/graph/nodes/2/attributes/mode"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:53:11#/graph/nodes/3/attributes/probability"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:63:11#/graph/nodes/4/attributes/in_features"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_attributes.rrsmodel:74:11#/graph/nodes/5/attributes/class_count"
+    }
+  ]
+}

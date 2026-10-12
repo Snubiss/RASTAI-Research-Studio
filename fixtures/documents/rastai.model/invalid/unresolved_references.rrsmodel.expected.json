@@ -1,0 +1,36 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2005",
+      "path": "unresolved_references.rrsmodel:27:9#/graph/nodes/1/node_id"
+    },
+    {
+      "code": "RRS-E2001",
+      "path": "unresolved_references.rrsmodel:38:9#/graph/nodes/2/op"
+    },
+    {
+      "code": "RRS-E2001",
+      "path": "unresolved_references.rrsmodel:58:9#/graph/edges/0/from_node"
+    },
+    {
+      "code": "RRS-E2001",
+      "path": "unresolved_references.rrsmodel:64:9#/graph/edges/1/to_node"
+    },
+    {
+      "code": "RRS-E2001",
+      "path": "unresolved_references.rrsmodel:76:7#/inputs/0/encoder_node"
+    },
+    {
+      "code": "RRS-E2007",
+      "path": "unresolved_references.rrsmodel:15:7#/graph/nodes/0"
+    },
+    {
+      "code": "RRS-E2001",
+      "path": "unresolved_references.rrsmodel:82:7#/outputs/0/graph_node"
+    },
+    {
+      "code": "RRS-E2001",
+      "path": "unresolved_references.rrsmodel:93:5#/placement/decoder"
+    }
+  ]
+}

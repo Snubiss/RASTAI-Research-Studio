@@ -4,6 +4,8 @@
 //!
 //! One arm per document type. A type with no meaning rules yet has an empty arm, so a new type can't be forgotten.
 
+pub mod model_graph;
+pub mod model_shapes;
 pub mod plugin_manifest;
 pub mod project;
 pub mod theme;
@@ -12,6 +14,7 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic_at};
 
 use crate::documents::Document;
 use crate::json::positions::{PositionMap, diagnostic_path};
+use crate::validate::meaning::model_graph::check_model;
 use crate::validate::meaning::plugin_manifest::check_plugin_manifest;
 use crate::validate::meaning::project::check_project;
 use crate::validate::meaning::theme::check_theme;
@@ -32,6 +35,7 @@ pub fn check_meaning(document: &Document, source: &MeaningSource) -> Vec<Diagnos
         Document::PluginManifest(manifest) => check_plugin_manifest(manifest, source),
         Document::Project(project) => check_project(project, source),
         Document::Theme(theme) => check_theme(theme, source),
+        Document::Model(model) => check_model(model, source),
         // Rastai writes these itself; their values have no rules beyond their structure yet.
         Document::RunRecord(_) | Document::Resume(_) | Document::Settings(_) | Document::Lock(_) => Vec::new(),
     }

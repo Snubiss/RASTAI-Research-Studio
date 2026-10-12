@@ -20,6 +20,7 @@ export * from "./command-token-login-code-create.js";
 export * from "./command-token-revoke.js";
 export * from "./command-train-start.js";
 export * from "./lock.js";
+export * from "./model.js";
 export * from "./plugin.js";
 export * from "./project.js";
 export * from "./resume.js";

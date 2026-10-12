@@ -87,6 +87,11 @@
       "schema_id": "rastai.lock/1"
     },
     {
+      "content_hash": "blake3:aa87b67d6dd2310c294fd9da4f7d571c25474a24d15aadab5fc24b641d99d8b7",
+      "file": "rastai.model/1.json",
+      "schema_id": "rastai.model/1"
+    },
+    {
       "content_hash": "blake3:84017b1a37a975a8901e69b2fd661ad83a1c6ffd9c81666d48d0cdd26f96ece9",
       "file": "rastai.plugin/1.json",
       "schema_id": "rastai.plugin/1"

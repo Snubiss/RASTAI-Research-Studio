@@ -6,7 +6,7 @@ Golden files for `rastai-formats`' `read_document` (contracts §12.5, ADR-0032).
 
 | Folder | Holds |
 |---|---|
-| `<type>/valid/` | Files of one document type (the folder is the full type name, e.g. `rastai.theme`) that must read with no error. Warnings and info are allowed. The step-1 types are here from M1-17: `rastai.run_record`, `rastai.resume`, `rastai.settings`, `rastai.project`, `rastai.lock`, `rastai.plugin` and `rastai.theme`. |
+| `<type>/valid/` | Files of one document type (the folder is the full type name, e.g. `rastai.theme`) that must read with no error. Warnings and info are allowed. The step-1 types are here from M1-17: `rastai.run_record`, `rastai.resume`, `rastai.settings`, `rastai.project`, `rastai.lock`, `rastai.plugin` and `rastai.theme`; `rastai.model` from M1-18 (the TextCNN template itself is `templates/designs/textcnn.rrsmodel`, which `tests/documents_corpus.rs` reads too). |
 | `<type>/invalid/` | Files of that type that must fail, each with its expected diagnostics. |
 | `<type>/v<n>/` | Files at an old schema version, for the migration test (`tests/migrations.rs`, once a type has a v2). |
 | `any/invalid/` | Cases every document shares whatever its type: syntax errors, import limits, the shared header, an unknown `type`. Their `type` names no real type, so they keep their verdict as types are added. |

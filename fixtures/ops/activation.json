@@ -1,0 +1,56 @@
+{
+  "op": "activation",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "textcnn_relu",
+      "attributes": {
+        "function": "relu"
+      },
+      "input_shapes": [[64, 128, 64]],
+      "output_shapes": [[64, 128, 64]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "gelu",
+      "attributes": {
+        "function": "gelu"
+      },
+      "input_shapes": [[2, 3]],
+      "output_shapes": [[2, 3]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "silu",
+      "attributes": {
+        "function": "silu"
+      },
+      "input_shapes": [[2, 3]],
+      "output_shapes": [[2, 3]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "tanh",
+      "attributes": {
+        "function": "tanh"
+      },
+      "input_shapes": [[2, 3]],
+      "output_shapes": [[2, 3]],
+      "parameter_count": 0,
+      "flops": 0
+    },
+    {
+      "name": "sigmoid",
+      "attributes": {
+        "function": "sigmoid"
+      },
+      "input_shapes": [[2, 3]],
+      "output_shapes": [[2, 3]],
+      "parameter_count": 0,
+      "flops": 0
+    }
+  ]
+}

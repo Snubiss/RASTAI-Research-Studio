@@ -1,0 +1,270 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.model/1.json",
+  "type": "rastai.model",
+  "schema_version": 1,
+  "created_with": "rastai 0.1.0",
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0TEXTC",
+  "content_hash": "",
+  "derived_from": [],
+  "authors": [
+    "Rastai Research Studio"
+  ],
+  "license": "Apache-2.0",
+  "source_url": "",
+  "requires": {},
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "embedding",
+        "op": "embedding",
+        "label": "Embedding",
+        "attributes": {
+          "embedding_size": 128,
+          "vocab_size": 25000
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_1",
+        "op": "conv1d",
+        "label": "Conv 1 (kernel 3)",
+        "attributes": {
+          "in_channels": 128,
+          "kernel_size": 3,
+          "out_channels": 64,
+          "padding": 1
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_1",
+        "op": "activation",
+        "label": "ReLU 1",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_2",
+        "op": "conv1d",
+        "label": "Conv 2 (kernel 4)",
+        "attributes": {
+          "in_channels": 64,
+          "kernel_size": 4,
+          "out_channels": 64,
+          "padding": 2
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_2",
+        "op": "activation",
+        "label": "ReLU 2",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_3",
+        "op": "conv1d",
+        "label": "Conv 3 (kernel 5)",
+        "attributes": {
+          "in_channels": 64,
+          "kernel_size": 5,
+          "out_channels": 64,
+          "padding": 2
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_3",
+        "op": "activation",
+        "label": "ReLU 3",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_4",
+        "op": "conv1d",
+        "label": "Conv 4 (kernel 4)",
+        "attributes": {
+          "in_channels": 64,
+          "kernel_size": 4,
+          "out_channels": 64,
+          "padding": 2
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_4",
+        "op": "activation",
+        "label": "ReLU 4",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "conv_5",
+        "op": "conv1d",
+        "label": "Conv 5 (kernel 3)",
+        "attributes": {
+          "in_channels": 64,
+          "kernel_size": 3,
+          "out_channels": 64,
+          "padding": 1
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "relu_5",
+        "op": "activation",
+        "label": "ReLU 5",
+        "attributes": {
+          "function": "relu"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "pool",
+        "op": "pool",
+        "label": "Global max pool",
+        "attributes": {
+          "mode": "max"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "dropout",
+        "op": "dropout",
+        "label": "Dropout",
+        "attributes": {
+          "probability": 0.5
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "classifier",
+        "op": "classifier_head",
+        "label": "Classifier",
+        "attributes": {
+          "class_count": 4,
+          "in_features": 64
+        },
+        "train_mode": "train",
+        "observe": true
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "embedding",
+        "to_node": "conv_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_1",
+        "to_node": "relu_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_1",
+        "to_node": "conv_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_2",
+        "to_node": "relu_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_2",
+        "to_node": "conv_3",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_3",
+        "to_node": "relu_3",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_3",
+        "to_node": "conv_4",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_4",
+        "to_node": "relu_4",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_4",
+        "to_node": "conv_5",
+        "to_input": 0
+      },
+      {
+        "from_node": "conv_5",
+        "to_node": "relu_5",
+        "to_input": 0
+      },
+      {
+        "from_node": "relu_5",
+        "to_node": "pool",
+        "to_input": 0
+      },
+      {
+        "from_node": "pool",
+        "to_node": "dropout",
+        "to_input": 0
+      },
+      {
+        "from_node": "dropout",
+        "to_node": "classifier",
+        "to_input": 0
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "tokens",
+      "range": {
+        "start": 0,
+        "end": 128
+      },
+      "encoder_node": "embedding"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "logits",
+      "graph_node": "classifier"
+    }
+  ],
+  "objective": {
+    "kind": "classification",
+    "settings": {}
+  },
+  "defaults": {
+    "dtype": "fp32",
+    "sequence_length": 128,
+    "batch_size": 64
+  },
+  "weights": [],
+  "placement": {}
+}

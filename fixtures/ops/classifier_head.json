@@ -1,0 +1,29 @@
+{
+  "op": "classifier_head",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "textcnn",
+      "attributes": {
+        "in_features": 64,
+        "class_count": 4
+      },
+      "input_shapes": [[64, 64]],
+      "output_shapes": [[64, 4]],
+      "parameter_count": 260,
+      "flops": 32768
+    },
+    {
+      "name": "without_bias",
+      "attributes": {
+        "in_features": 12,
+        "class_count": 2,
+        "bias": false
+      },
+      "input_shapes": [[4, 12]],
+      "output_shapes": [[4, 2]],
+      "parameter_count": 24,
+      "flops": 192
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "bad_values.rrsmodel:43:7#/inputs/0/range"
+    },
+    {
+      "code": "RRS-E2005",
+      "path": "bad_values.rrsmodel:50:7#/inputs/1/name"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_values.rrsmodel:51:7#/inputs/1/range"
+    },
+    {
+      "code": "RRS-E2005",
+      "path": "bad_values.rrsmodel:64:7#/outputs/1/name"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_values.rrsmodel:71:5#/defaults/batch_size"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "bad_values.rrsmodel:75:7#/weights/0/source"
+    }
+  ]
+}

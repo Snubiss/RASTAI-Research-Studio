@@ -32,6 +32,14 @@ use rastai_formats::commands::train::{TrainStartArgs, TrainStartResult, Training
 use rastai_formats::describe::registry::{describe_all_types, find_description};
 use rastai_formats::describe::structure_check::{StructureCheck, find_mismatches};
 use rastai_formats::documents::lock::{LockEnvironment, LockFile, LockedModel, LockedPlugin};
+use rastai_formats::documents::model::{
+    GraphEdge, GraphNode, InputRange, InputSpan, ModelDefaults, ModelDtype, ModelGraph, ModelSpec, Objective,
+    ObjectiveKind, OutputHead, TrainMode, WeightsSource,
+};
+use rastai_formats::documents::model_ops::{
+    ActivationAttributes, ActivationFunction, ClassifierHeadAttributes, ConcatAttributes, Conv1dAttributes,
+    DropoutAttributes, EmbeddingAttributes, LinearAttributes, PoolAttributes, PoolMode,
+};
 use rastai_formats::documents::plugin_manifest::{
     CommandContribution, EventHandlerContribution, PanelContribution, PanelPlacement, PluginCommandKind,
     PluginContributions, PluginEngines, PluginManifest, PluginProvider, PluginPython, PluginUi, PluginUiKind,
@@ -753,6 +761,116 @@ fn every_color_role_is_set_in_the_filled_theme() {
     assert_eq!(written.as_object().unwrap().len(), COLOR_ROLES.len());
 }
 
+// ModelSpec: every optional part set, and every op attributes type with its optional attributes set.
+
+fn filled_model() -> ModelSpec {
+    let mut attributes = BTreeMap::new();
+    attributes.insert(text("embedding_size"), json!(128));
+    let mut placement = BTreeMap::new();
+    placement.insert(text("embedding"), 0);
+    ModelSpec {
+        header: header_of_type("rastai.model"),
+        graph: ModelGraph {
+            nodes: vec![GraphNode {
+                node_id: text("embedding"),
+                op: text("embedding"),
+                label: text("Embedding"),
+                attributes,
+                train_mode: TrainMode::Freeze,
+                observe: false,
+            }],
+            edges: vec![GraphEdge {
+                from_node: text("embedding"),
+                to_node: text("concat"),
+                to_input: 1,
+            }],
+        },
+        inputs: vec![InputRange {
+            name: text("tokens"),
+            range: InputSpan { start: 0, end: 128 },
+            encoder_node: text("embedding"),
+        }],
+        outputs: vec![OutputHead {
+            name: text("logits"),
+            graph_node: text("classifier"),
+        }],
+        objective: Some(Objective {
+            kind: ObjectiveKind::Classification,
+            settings: json_map(json!({"label_smoothing": 0.1})),
+        }),
+        defaults: ModelDefaults {
+            dtype: ModelDtype::Bf16,
+            sequence_length: 128,
+            batch_size: 64,
+        },
+        weights: vec![WeightsSource {
+            source: text("hf:google/gemma-3-1b-it@main"),
+            family: text("gemma3"),
+            name_mapping: map_of(&[("model.embed_tokens.weight", "embedding.weight")]),
+            prefix: text("encoder."),
+        }],
+        placement,
+    }
+}
+
+#[test]
+fn the_model_spec_and_its_parts_match_their_descriptions() {
+    let model = filled_model();
+    assert_description_matches(&model, "ModelSpec");
+    assert_description_matches(&model.graph, "ModelGraph");
+    assert_description_matches(&model.graph.nodes[0], "GraphNode");
+    assert_description_matches(&model.graph.edges[0], "GraphEdge");
+    assert_description_matches(&model.inputs[0], "InputRange");
+    assert_description_matches(&model.inputs[0].range, "InputSpan");
+    assert_description_matches(&model.outputs[0], "OutputHead");
+    assert_description_matches(model.objective.as_ref().unwrap(), "Objective");
+    assert_description_matches(&model.defaults, "ModelDefaults");
+    assert_description_matches(&model.weights[0], "WeightsSource");
+}
+
+#[test]
+fn every_op_attributes_type_matches_its_description() {
+    let embedding = EmbeddingAttributes {
+        vocab_size: 25000,
+        embedding_size: 128,
+    };
+    assert_description_matches(&embedding, "EmbeddingAttributes");
+    let conv = Conv1dAttributes {
+        in_channels: 128,
+        out_channels: 64,
+        kernel_size: 4,
+        stride: 2,
+        padding: 2,
+        dilation: 3,
+        bias: false,
+    };
+    assert_description_matches(&conv, "Conv1dAttributes");
+    let pool = PoolAttributes {
+        mode: PoolMode::Mean,
+        kernel_size: Some(3),
+        stride: Some(2),
+    };
+    assert_description_matches(&pool, "PoolAttributes");
+    let linear = LinearAttributes {
+        in_features: 64,
+        out_features: 32,
+        bias: false,
+    };
+    assert_description_matches(&linear, "LinearAttributes");
+    assert_description_matches(&DropoutAttributes { probability: 0.5 }, "DropoutAttributes");
+    let activation = ActivationAttributes {
+        function: ActivationFunction::Gelu,
+    };
+    assert_description_matches(&activation, "ActivationAttributes");
+    assert_description_matches(&ConcatAttributes { axis: -2 }, "ConcatAttributes");
+    let head = ClassifierHeadAttributes {
+        in_features: 64,
+        class_count: 4,
+        bias: false,
+    };
+    assert_description_matches(&head, "ClassifierHeadAttributes");
+}
+
 // Every registered document type is covered above.
 
 #[test]
@@ -765,6 +883,7 @@ fn every_document_type_has_a_case_here() {
         "LockFile",
         "PluginManifest",
         "ThemeDocument",
+        "ModelSpec",
     ];
     let registered: Vec<&str> = DOCUMENT_TYPES
         .iter()
@@ -1068,6 +1187,17 @@ fn fields_left_out_when_empty_still_match() {
         jobs: Vec::new(),
     };
     assert_empty_fields_left_out(&without_telemetry, "NodeStatusResult", &["telemetry"]);
+    let without_objective = ModelSpec {
+        objective: None,
+        ..filled_model()
+    };
+    assert_empty_fields_left_out(&without_objective, "ModelSpec", &["objective"]);
+    let global_pool = PoolAttributes {
+        mode: PoolMode::Max,
+        kernel_size: None,
+        stride: None,
+    };
+    assert_empty_fields_left_out(&global_pool, "PoolAttributes", &["kernel_size", "stride"]);
 }
 
 fn assert_empty_fields_left_out<T: Serialize + DeserializeOwned + PartialEq + Debug>(

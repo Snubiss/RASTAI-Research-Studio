@@ -4,7 +4,8 @@
 //! byte access. M1-15 adds type descriptions, the shared header, the migration chain and `read_document` with
 //! validation layers 1 and 2 (and layer 4's `check_environment`). M1-24 adds `crc32`, the one CRC-32 table, for
 //! event-log frames now and zip entries later. M1-17 adds the step-1 document types and layer 3 (`validate/meaning/`).
-//! M1-22 adds `commands`, the argument and result types of the first core commands.
+//! M1-22 adds `commands`, the argument and result types of the first core commands. M1-18 adds the ModelSpec
+//! (`rastai.model/1`) with the TextCNN ops and their shape inference.
 //!
 //! This file is a list of `pub mod` lines (contracts 12.2).
 
