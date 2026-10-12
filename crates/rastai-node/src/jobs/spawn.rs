@@ -95,7 +95,9 @@ pub struct WorkerLaunch {
 pub struct SpawnedWorker {
     pub child: Child,
     pub identity: ProcessIdentity,
-    /// `stderr.log`'s length before this worker wrote to it: where its own output starts (log_lines.rs).
+    /// `stdout.log`'s and `stderr.log`'s lengths before this worker wrote to them: where its own output starts
+    /// (log_lines.rs).
+    pub stdout_start_offset: u64,
     pub stderr_start_offset: u64,
 }
 
@@ -215,6 +217,7 @@ pub async fn spawn_worker(launch: &WorkerLaunch) -> Result<SpawnedWorker, String
     }
     let stdout = open_log_file(&launch.run_folder.join(STDOUT_LOG_FILE))?;
     let stderr = open_log_file(&launch.run_folder.join(STDERR_LOG_FILE))?;
+    let stdout_start_offset = log_file_length(&stdout);
     let stderr_start_offset = log_file_length(&stderr);
     let mut command = worker_command(&python, launch);
     command
@@ -238,6 +241,7 @@ pub async fn spawn_worker(launch: &WorkerLaunch) -> Result<SpawnedWorker, String
         Ok(identity) => Ok(SpawnedWorker {
             child,
             identity,
+            stdout_start_offset,
             stderr_start_offset,
         }),
         Err(reason) => {

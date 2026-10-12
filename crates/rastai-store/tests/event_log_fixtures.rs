@@ -18,7 +18,7 @@ use rastai_proto::events::v1::run_state_changed::State;
 use rastai_proto::events::v1::{CheckpointSaved, EventPayload, EventRecord, RunMetrics, RunStateChanged};
 use rastai_store::error::StoreError;
 use rastai_store::event_log::frame::{EVENT_LOG_HEADER, FRAME_HEADER_BYTES, encode_frame};
-use rastai_store::event_log::reader::{FrameRead, open_event_log, read_next_frame, reader_offset};
+use rastai_store::event_log::reader::{FrameRead, open_event_log, open_event_log_at, read_next_frame, reader_offset};
 use rastai_store::event_log::writer::{
     SyncPolicy, append_event, create_event_log, open_event_log_for_append, sync_event_log, truncated_tail_bytes,
 };
@@ -289,6 +289,52 @@ fn a_sequence_gap_is_rrs_s2003() {
     assert_eq!(error.code(), "RRS-S2003");
     // The reader stays in front of the record that broke the sequence.
     assert_eq!(offset, frame_ends(&good_records())[1]);
+}
+
+// A tailer that resumes at a position an earlier read reached gets the records from there on, with their sequence
+// still checked, and the same verdict at the end (node layout 7.5).
+#[test]
+fn a_reader_opened_at_a_frame_reads_on_from_there() {
+    let ends = frame_ends(&good_records());
+    let mut reader = open_event_log_at(&fixture_path(GOOD_LOG), ends[1], 3).unwrap();
+    assert_eq!(
+        read_next_frame(&mut reader),
+        Ok(FrameRead::Record(good_records()[2].clone()))
+    );
+    assert_eq!(
+        read_next_frame(&mut reader),
+        Ok(FrameRead::Record(good_records()[3].clone()))
+    );
+    assert_eq!(read_next_frame(&mut reader), Ok(FrameRead::EndOfFile));
+
+    let mut torn = open_event_log_at(&fixture_path(TORN_TAIL_LOG), ends[1], 3).unwrap();
+    assert_eq!(
+        read_next_frame(&mut torn),
+        Ok(FrameRead::Record(good_records()[2].clone()))
+    );
+    assert_eq!(
+        read_next_frame(&mut torn),
+        Ok(FrameRead::Incomplete { valid_bytes: ends[2] })
+    );
+
+    // A position whose sequence doesn't match the frame there is a gap, never a silent skip.
+    let mut wrong_sequence = open_event_log_at(&fixture_path(GOOD_LOG), ends[1], 5).unwrap();
+    assert!(matches!(
+        read_next_frame(&mut wrong_sequence),
+        Err(StoreError::EventSequenceGap {
+            expected_sequence: 5,
+            found_sequence: 3,
+            ..
+        })
+    ));
+
+    // An offset inside the file header starts at the beginning, header check included.
+    let (records, _, _) = read_until_not_a_record(&fixture_path(GOOD_LOG));
+    let mut from_start = open_event_log_at(&fixture_path(GOOD_LOG), 0, 1).unwrap();
+    assert_eq!(
+        read_next_frame(&mut from_start),
+        Ok(FrameRead::Record(records[0].clone()))
+    );
 }
 
 // ---- The writer ----

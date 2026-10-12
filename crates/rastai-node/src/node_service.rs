@@ -2,8 +2,8 @@
 //! (layout: rust-node-gateway-proto.md section 7.1). A refusal comes back as a `Diagnostic` in the response with
 //! gRPC status OK, because the call itself ran (contracts 4).
 //!
-//! The event RPCs answer UNIMPLEMENTED until their task lands: WatchRunEvents and WatchLive with M1-44. Nothing
-//! calls them before then.
+//! The two streams run on a task of their own each, feeding a small channel that tonic drains: `WatchRunEvents`
+//! (run_events.rs) and `WatchLive` (live.rs). When the daemon drops a stream, the channel closes and its task ends.
 
 use std::sync::Arc;
 
@@ -13,14 +13,21 @@ use rastai_proto::node::v1::{
     GetHardwareRequest, GetHardwareResponse, HandshakeRequest, HandshakeResponse, JobInfo, JobSpec, ListJobsRequest,
     ListJobsResponse, LiveEvent, SignalJobRequest, SignalJobResponse, WatchLiveRequest, WatchRunEventsRequest,
 };
-use tonic::codegen::tokio_stream;
+use tokio::sync::mpsc;
+use tonic::codegen::BoxStream;
+use tonic::codegen::tokio_stream::StreamExt;
+use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::handshake::answer_handshake;
 use crate::jobs::supervisor::{list_jobs, signal_job, start_job};
+use crate::live::watch_live;
 use crate::node::{NodeState, current_hardware, current_telemetry};
+use crate::run_events::watch_run_events;
 
-const STREAMS_ARRIVE_WITH: &str = "run events and live streams arrive with M1-44";
+/// How many records or events a stream holds before its task waits for the daemon to read. The file is the buffer for
+/// records, and the live queues for events, so this only smooths the hand-over.
+const STREAM_CHANNEL_CAPACITY: usize = 64;
 
 /// The NodeService server's handle on the node's state.
 pub(crate) struct NodeServiceHandler {
@@ -65,18 +72,29 @@ impl NodeService for NodeServiceHandler {
         Ok(Response::new(ListJobsResponse { jobs }))
     }
 
-    type WatchRunEventsStream = tokio_stream::Empty<Result<EventRecord, Status>>;
+    type WatchRunEventsStream = BoxStream<EventRecord>;
 
     async fn watch_run_events(
         &self,
-        _request: Request<WatchRunEventsRequest>,
+        request: Request<WatchRunEventsRequest>,
     ) -> Result<Response<Self::WatchRunEventsStream>, Status> {
-        Err(Status::unimplemented(STREAMS_ARRIVE_WITH))
+        let message = request.into_inner();
+        let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
+        let state = Arc::clone(&self.state);
+        tokio::spawn(async move {
+            watch_run_events(&state, &message.run_id, message.after_sequence, sender).await;
+        });
+        Ok(Response::new(Box::pin(ReceiverStream::new(receiver).map(Ok))))
     }
 
-    type WatchLiveStream = tokio_stream::Empty<Result<LiveEvent, Status>>;
+    type WatchLiveStream = BoxStream<LiveEvent>;
 
     async fn watch_live(&self, _request: Request<WatchLiveRequest>) -> Result<Response<Self::WatchLiveStream>, Status> {
-        Err(Status::unimplemented(STREAMS_ARRIVE_WITH))
+        let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
+        let state = Arc::clone(&self.state);
+        tokio::spawn(async move {
+            watch_live(&state.live, sender).await;
+        });
+        Ok(Response::new(Box::pin(ReceiverStream::new(receiver).map(Ok))))
     }
 }

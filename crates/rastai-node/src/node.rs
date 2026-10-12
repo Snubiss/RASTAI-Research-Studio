@@ -21,7 +21,9 @@ use crate::handshake::HandshakeTable;
 use crate::hardware::{DetectedHardware, HardwareSources, detect_hardware};
 use crate::identity::{NodeIdentity, load_or_create_identity, public_key_bytes};
 use crate::jobs::supervisor::{JobOptions, JobTable};
+use crate::live::LiveHub;
 use crate::node_service::NodeServiceHandler;
+use crate::run_events::RunEventPositions;
 use crate::telemetry::start_telemetry;
 use crate::worker_host_service::serve_worker_host;
 
@@ -54,6 +56,10 @@ pub struct NodeState {
     pub telemetry: Mutex<NodeTelemetry>,
     pub handshakes: Mutex<HandshakeTable>,
     pub jobs: Mutex<JobTable>,
+    /// Where the node has read each run's event log, so a watch that resumes needn't read it all again (run_events.rs).
+    pub run_events: Mutex<RunEventPositions>,
+    /// The ephemeral events waiting for WatchLive; it locks inside (live.rs).
+    pub live: LiveHub,
     /// Fixed for the node's life, so it needs no lock.
     pub job_options: JobOptions,
 }
@@ -93,6 +99,8 @@ pub(crate) fn build_node_state(options: NodeOptions, identity: NodeIdentity, har
         telemetry: Mutex::new(telemetry),
         handshakes: Mutex::new(HandshakeTable::default()),
         jobs: Mutex::new(JobTable::default()),
+        run_events: Mutex::new(RunEventPositions::default()),
+        live: LiveHub::default(),
         job_options: options.jobs,
     }
 }

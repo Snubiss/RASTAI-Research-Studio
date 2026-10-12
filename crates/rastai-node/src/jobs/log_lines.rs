@@ -6,20 +6,29 @@
 //!   causes). The logs are appended to across relaunches of a run, so it reads only after the length the log had
 //!   when the job was spawned: a job that wrote nothing never shows the previous job's last words as its own.
 //! - `read_new_log_lines` and `log_line_event`: the complete lines written since an offset, as `job.log_line`
-//!   events (ephemeral, contracts 7.3). The loop that follows a running job's logs every `TAIL_POLL_MS` and hands
-//!   the events to `WatchLive` joins with the live queues (`live.rs`, M1-44).
+//!   events (ephemeral, contracts 7.3).
+//! - `follow_job_logs`: a running job's two logs, read every `TAIL_POLL_MS` from where its own output starts, each new
+//!   line put on the job's live queue for `WatchLive` (live.rs). After the job has ended it reads until nothing is
+//!   left, so the last lines go out too, then closes the job's live queue.
 //!
 //! The files are the job's output, so they are read as untrusted bytes: invalid UTF-8 is replaced, not refused, and
 //! a line longer than `MAX_LOG_LINE_BYTES` is cut into pieces of that size, so one huge line can't hold the reader.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use rastai_core::time::now_unix_ms;
 use rastai_proto::events::v1::{JobLogLine, LogStream};
 use rastai_proto::node::v1::LiveEvent;
 use rastai_proto::node::v1::live_event::Payload;
+
+use crate::jobs::supervisor::job_has_ended;
+use crate::live::{LiveHub, close_live_subject, publish_live_event};
+use crate::node::NodeState;
+use crate::run_events::TAIL_POLL_MS;
 
 /// The file names in the run folder (contracts 8.4).
 pub const STDOUT_LOG_FILE: &str = "stdout.log";
@@ -38,6 +47,72 @@ const MAX_READ_BYTES: u64 = 1024 * 1024;
 pub struct NewLogLines {
     pub lines: Vec<String>,
     pub next_offset: u64,
+}
+
+/// A job's two logs and where the follower reads next in each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobLogs {
+    pub(crate) stdout_path: PathBuf,
+    pub(crate) stderr_path: PathBuf,
+    pub(crate) stdout_offset: u64,
+    pub(crate) stderr_offset: u64,
+}
+
+/// Follows a job's logs onto its live queue until the job has ended and every line it wrote has been put there; then
+/// closes the queue. Whether the job has ended is read before each read, so the read after the end gets its last
+/// lines.
+pub(crate) async fn follow_job_logs(state: Arc<NodeState>, job_id: String, logs: JobLogs) {
+    let mut logs = logs;
+    loop {
+        let ended = job_has_ended(&state, &job_id);
+        let before = (logs.stdout_offset, logs.stderr_offset);
+        let Some(read) = read_job_logs_in_background(logs).await else {
+            break;
+        };
+        logs = read.logs;
+        publish_lines(&state.live, &job_id, LogStream::Stdout, read.stdout_lines);
+        publish_lines(&state.live, &job_id, LogStream::Stderr, read.stderr_lines);
+        let read_nothing = before == (logs.stdout_offset, logs.stderr_offset);
+        if ended && read_nothing {
+            break;
+        }
+        if !ended {
+            tokio::time::sleep(Duration::from_millis(TAIL_POLL_MS)).await;
+        }
+    }
+    close_live_subject(&state.live, &job_id);
+}
+
+/// What one read of both logs found, and where the next one starts.
+struct JobLogsRead {
+    logs: JobLogs,
+    stdout_lines: Vec<String>,
+    stderr_lines: Vec<String>,
+}
+
+/// Reads the new lines of both logs on a blocking thread. None when that thread failed.
+async fn read_job_logs_in_background(logs: JobLogs) -> Option<JobLogsRead> {
+    let joined = tokio::task::spawn_blocking(move || {
+        let stdout = read_new_log_lines(&logs.stdout_path, logs.stdout_offset);
+        let stderr = read_new_log_lines(&logs.stderr_path, logs.stderr_offset);
+        JobLogsRead {
+            logs: JobLogs {
+                stdout_offset: stdout.next_offset,
+                stderr_offset: stderr.next_offset,
+                ..logs
+            },
+            stdout_lines: stdout.lines,
+            stderr_lines: stderr.lines,
+        }
+    })
+    .await;
+    joined.ok()
+}
+
+fn publish_lines(hub: &LiveHub, job_id: &str, stream: LogStream, lines: Vec<String>) {
+    for line in lines {
+        publish_live_event(hub, log_line_event(job_id, stream, line));
+    }
 }
 
 /// The last `max_lines` lines of the log at `path` that come after `job_start_offset` (the log's length when the
@@ -133,6 +208,7 @@ fn line_text(bytes: &[u8]) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::live::{live_subject_ids, take_live_event};
 
     struct TestFile {
         path: std::path::PathBuf,
@@ -141,6 +217,17 @@ mod tests {
     impl Drop for TestFile {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    /// A folder removed when the test ends, also when an assertion fails.
+    struct TestFolder {
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for TestFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
         }
     }
 
@@ -208,6 +295,85 @@ mod tests {
         assert_eq!(read.lines[1], "x".repeat(10));
         assert!(read.lines[2].ends_with("ok"));
         assert_eq!(read.next_offset, bytes.len() as u64);
+    }
+
+    /// A node state whose folders live under `folder`, with no hardware and no environments.
+    fn test_state(folder: &Path) -> NodeState {
+        use rastai_core::paths::DataPaths;
+        use rastai_core::settings::{default_settings, node_settings, resolve_settings};
+        use rastai_proto::common::v1::HardwareProfile;
+
+        use crate::hardware::system_hardware_sources;
+        use crate::identity::load_or_create_identity;
+        use crate::jobs::supervisor::default_job_options;
+        use crate::node::{NodeMode, NodeOptions, build_node_state};
+
+        let options = NodeOptions {
+            mode: NodeMode::Embedded,
+            paths: DataPaths {
+                config: folder.join("config"),
+                data: folder.join("data"),
+                cache: folder.join("cache"),
+                state: folder.join("state"),
+                runtime: folder.join("run"),
+            },
+            settings: node_settings(&resolve_settings(&[default_settings()])),
+            hardware_sources: system_hardware_sources(),
+            jobs: default_job_options(Vec::new()),
+        };
+        let identity = load_or_create_identity(&folder.join("node.key")).unwrap();
+        build_node_state(options, identity, HardwareProfile::default())
+    }
+
+    /// The stream and text of every `job.log_line` waiting on the hub, in the order a stream takes them.
+    fn take_log_lines(hub: &LiveHub) -> Vec<(i32, String)> {
+        let mut lines = Vec::new();
+        while let Some(event) = take_live_event(hub) {
+            if let Some(Payload::JobLogLine(line)) = event.payload {
+                lines.push((line.stream, line.text));
+            }
+        }
+        lines
+    }
+
+    // A job that has ended still has its last lines sent (a crash's traceback is usually the last thing it wrote),
+    // and only then is its queue closed. The table doesn't hold this job, so it has ended from the first look.
+    #[tokio::test]
+    async fn an_ended_job_has_its_last_lines_sent_then_its_queue_closed() {
+        let stdout = test_file("ended-stdout", b"step 1\nstep 2\n");
+        let stderr = test_file(
+            "ended-stderr",
+            b"Traceback (most recent call last):\nValueError: boom\n",
+        );
+        let folder = TestFolder {
+            path: std::env::temp_dir().join(format!("rastai-log-lines-{}-ended-state", std::process::id())),
+        };
+        std::fs::create_dir_all(&folder.path).unwrap();
+        let state = Arc::new(test_state(&folder.path));
+        let logs = JobLogs {
+            stdout_path: stdout.path.clone(),
+            stderr_path: stderr.path.clone(),
+            stdout_offset: 0,
+            stderr_offset: 0,
+        };
+        let followed = follow_job_logs(Arc::clone(&state), "job_ended".to_string(), logs);
+        tokio::time::timeout(Duration::from_secs(10), followed).await.unwrap();
+        // The queue is closed while its last lines wait, so a later event for the job is dropped.
+        publish_live_event(
+            &state.live,
+            log_line_event("job_ended", LogStream::Stdout, "late".to_string()),
+        );
+        let expected = vec![
+            (LogStream::Stdout as i32, "step 1".to_string()),
+            (LogStream::Stdout as i32, "step 2".to_string()),
+            (
+                LogStream::Stderr as i32,
+                "Traceback (most recent call last):".to_string(),
+            ),
+            (LogStream::Stderr as i32, "ValueError: boom".to_string()),
+        ];
+        assert_eq!(take_log_lines(&state.live), expected);
+        assert!(live_subject_ids(&state.live).is_empty());
     }
 
     #[test]

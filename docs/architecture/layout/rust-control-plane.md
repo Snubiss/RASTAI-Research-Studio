@@ -1637,7 +1637,8 @@ crates/rastai-store/
       frame.rs                EVENT_LOG_HEADER, encode_frame(), decode_frame_header(); checksums through
                               rastai_formats::crc32 (the one CRC-32 table, contracts §7.1)
       writer.rs               EventLogWriter: create, open for append (truncates a torn tail), append, raw append, sync
-      reader.rs               EventLogReader, open_event_log(), read_next_frame() -> FrameRead (flows/platform.md 6.1)
+      reader.rs               EventLogReader, open_event_log(), open_event_log_at(), read_next_frame() -> FrameRead
+                              (flows/platform.md 6.1)
     indexer.rs                apply_event_record(): one EventRecord to its rastai.db rows, inside the writer's transaction;
                               the one indexing path for live, rebuilt and restored records;
                               vault_writes_for_records(): the vault.db rows a batch carries (gateway.request_logged)
@@ -1821,6 +1822,9 @@ pub fn decode_frame_body(body: &[u8]) -> Option<EventRecord>   // None: not an E
 // event_log/reader.rs
 pub enum FrameRead { Record(EventRecord), EndOfFile, Incomplete { valid_bytes: u64 }, Corrupt { offset: u64 } }
 pub fn open_event_log(path: &Path) -> Result<EventLogReader, StoreError>
+/// Reads on from a frame an earlier reader of the same file reached (its reader_offset after record next_sequence - 1),
+/// so the node's tail resumes without reading the log again (node layout 7.5). An offset inside the header opens at the start.
+pub fn open_event_log_at(path: &Path, offset: u64, next_sequence: u64) -> Result<EventLogReader, StoreError>
 pub fn read_next_frame(reader: &mut EventLogReader) -> Result<FrameRead, StoreError>  // a sequence gap is Err (RRS-S2003)
 pub fn reader_offset(reader: &EventLogReader) -> u64             // where the whole frames read so far end
 /// (M11) The archive copies frames verbatim (contracts §7.1): the decoded record plus its exact body bytes and CRC,
@@ -2472,6 +2476,8 @@ pub async fn record_daemon_event(server: &Server, record: EventRecord) -> Result
 
 // indexing/run_tail.rs
 pub async fn tail_run(server: Arc<Server>, run_id: String, node_id: String)    // one task per open run
+// A record with sequence 0 is the node's report, never a log record (contracts 4.4, node layout 7.5): it is the stream's
+// last, is neither mirrored, indexed nor acknowledged, and marks the run's index incomplete (RRS-S2002, RRS-S2003, RRS-S0006).
 pub fn start_run_tails(server: &Arc<Server>, node_id: &str)                      // after (re)connect, for every open run
 
 // scheduler/queue.rs: the job is the generated JobSpec (contracts §2.4 rule 3); no second job struct

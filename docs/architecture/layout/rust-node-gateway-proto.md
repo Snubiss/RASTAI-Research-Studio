@@ -1171,7 +1171,9 @@ crates/rastai-node/
     jobs.rs                       start, signals, cancel grace, process-group kill, exit causes
     reattach.rs                   node restart mid-run: reattach, no lost events, PID reuse refused (start ticks, process group,
                                   boot id); llama-server re-adopted
-    run_events.rs                 good, torn-tail and corrupt-middle logs from fixtures/event-logs/
+    run_events.rs                 good, torn-tail, corrupt-middle and sequence-gap logs from fixtures/event-logs/; resume after any
+                                  sequence; a live writer followed through a torn frame; a node restart loses and repeats nothing;
+                                  a job's lines over WatchLive; a full live queue drops its oldest event
     hf_upload.rs                  upload to a local fake Hub, cut mid-upload, resume skips finished files; 403 refused
     leases.rs                     grant, deny, reclaim with grace, pinned never reclaimed, foreign VRAM counted; a pinned
                                   request with may_reclaim_evictable false is denied and its job stays queued; unset reads as true
@@ -1240,8 +1242,14 @@ pub fn list_jobs(state: &NodeState) -> Vec<JobInfo>;
 pub async fn register_worker(state: &Arc<NodeState>, job_id: &str, job_token: &str, socket_path: &Path) -> Result<(), Diagnostic>;
 pub fn set_job_state(state: &NodeState, job_id: &str, to: JobState, reason: &str, diagnostic: Option<Diagnostic>) -> bool;
 
-// run_events.rs
-pub async fn watch_run_events(state: &NodeState, run_id: &str, after_sequence: u64, sender: mpsc::Sender<EventRecord>) -> Result<(), NodeError>;
+// run_events.rs: never an error; what is wrong with the log is the node's report at the end of the stream (7.5)
+pub async fn watch_run_events(state: &Arc<NodeState>, run_id: &str, after_sequence: u64, sender: mpsc::Sender<EventRecord>);
+
+// live.rs: one bounded queue per subject (the event's job), taken in turn
+pub fn publish_live_event(hub: &LiveHub, event: LiveEvent);              // drops the subject's oldest when full
+pub fn close_live_subject(hub: &LiveHub, subject_id: &str);              // after the subject's last event
+pub fn take_live_event(hub: &LiveHub) -> Option<LiveEvent>;
+pub async fn watch_live(hub: &LiveHub, sender: mpsc::Sender<LiveEvent>); // until the daemon closes the stream
 
 // environments.rs
 pub fn pick_environment_id(hardware: &HardwareProfile) -> EnvironmentChoice;           // id plus the reason shown to the user
@@ -1454,12 +1462,13 @@ sequenceDiagram
   N-->>D: stream closes after the final state is sent
 ```
 
-- **Positions** (`RunEventPositions`, in memory): per run, the byte offset of every 1,000th sequence and of the last frame read. On a reconnect the node seeks to the nearest offset at or before `after_sequence` and skips forward by frame length without decoding bodies. After a node restart the table is empty, so the first watch scans from the 8-byte header the same way.
+- **Positions** (`RunEventPositions`, in memory): per run, the byte offset of the frame after every 1,000th sequence and of the last frame read. On a reconnect the node opens the log at the nearest position at or before the first record it needs (`rastai_store`'s `open_event_log_at`) and reads on through `read_next_frame`, dropping the records at or before `after_sequence`. Those frames are checked like any other (checksum, sequence) rather than skipped by length: one parser path, and at most 999 frames between a position and the record wanted. After a node restart the table is empty, so the first watch reads from the 8-byte header the same way. A position past the end of the file (the log was replaced) is forgotten.
+- **Writer alive** means a job in the `JobTable` holds the run, or the run's `job.json` has no `final_state` and names a process that is still the one it recorded (a job from before a node restart, until reattach). It is read before each read, never after, so the read after the writer is seen gone gets its last frame. The stream then ends.
 - **Polling:** the node checks the file size every `TAIL_POLL_MS = 50` while the job is alive. A 50 ms poll on a few files costs nothing and needs no inotify dependency.
 - **The node keeps no acks.** The daemon stores `runs.acked_sequence` after indexing (contracts §7.1). If the daemon dies before indexing, it asks again from its last ack and receives the same records; indexing is idempotent by `(run_id, sequence)`.
 - **Torn tail:** while the job is alive, an incomplete frame means the writer is mid-write, so the node waits. Once the job is dead it means the writer died mid-write: the node stops there and never modifies the file. A relaunched worker truncates the torn tail itself before appending (`layout/python.md`).
-- **Corruption:** a bad checksum before the last frame stops the stream with `RRS-S2002` in a `diagnostic.reported` sent to the daemon. The daemon marks the run's index as incomplete; nothing is guessed.
-- **Ephemeral events** never touch the file. They flow through `WatchLive` (`live.rs`): one bounded queue per subject (`LIVE_QUEUE_CAPACITY = 4096`), dropping the oldest item when a slow daemon falls behind.
+- **Corruption:** a bad checksum before the last frame stops the stream with `RRS-S2002` in a `diagnostic.reported` sent to the daemon. The daemon marks the run's index as incomplete; nothing is guessed. A sequence gap (`RRS-S2003`) and a log that can't be read (`RRS-S0006`) end the stream the same way. The report is the stream's last record: `run_id` and `subject_id` are the run's, `job_id` is empty, and `sequence` is `NODE_REPORT_SEQUENCE` (0), which no log record has, so the daemon can't index or acknowledge it as one (contracts 4.4). The records before the damage are sent first. A torn tail of a dead writer isn't damage: the stream just ends, and the node logs `RRS-S2001`. A `run_id` that isn't a run id (it would become a folder name) is refused the same way, with `RRS-C0002`, and nothing is read.
+- **Ephemeral events** never touch the file. They flow through `WatchLive` (`live.rs`): one bounded queue per subject (`LIVE_QUEUE_CAPACITY = 4096`), dropping the oldest item when a slow daemon falls behind. The subject is the event's job; the stream takes the subjects in turn, so one busy job can't hold back another. Today the node's own `job.log_line` events feed it: `log_lines.rs` follows each running job's `stdout.log` and `stderr.log` every `TAIL_POLL_MS` from where the job's own output starts, reads them to the end once the job has ended, and then closes the job's queue. The worker's `WatchLive` (progress, later tokens and live packets) joins the same queues when the worker serves it.
 - **Node-originated durable state** (job, lease, model and sandbox states) isn't in any event log (contracts §7.3). The node sends a heartbeat at once on any such change, coalesced to one per 100 ms, besides the regular 5 s beat. The daemon turns the differences into `job.state_changed`, `lease.state_changed`, `model.state_changed` and `sandbox.state_changed`.
 
 ### 7.6 uv environments
@@ -1824,6 +1833,7 @@ Numbers only; titles are in contracts 10.3. A file may raise a code only if it i
 | `rastai-node` identity, handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N0006`, `N0007`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `RRS-H0001`, `H0002`, `RRS-S3001` |
 | `rastai-node` environments, leases | `RRS-H2001` to `H2006`, `RRS-H3001`, `H3004` to `H3007`, `RRS-H4002` |
 | `rastai-node` jobs and reattach | `RRS-J0001`, `J0002`, `J0004`, `J1001` to `J1004`, `J2001` to `J2003`, `J3002`, `J3003`, `J3006`, `RRS-S2002`, `RRS-S3002`, `RRS-N0004` (a job kind or environment the node can't provide, 7.4 step 1) |
+| `rastai-node` `run_events.rs` (the node's report at the end of a damaged or refused stream, 7.5) | `RRS-C0002` (a `run_id` that isn't one), `RRS-S0006`, `RRS-S2001` (logged only), `RRS-S2002`, `RRS-S2003` |
 | `rastai-node` Fast runtime | `RRS-G1003`, `G1004`, `G3002`, `G3003`, `G3005`, `G3007`, `G3008` |
 | `rastai-node` plugin modules | `RRS-P2001`, `RRS-P2005` |
 | `rastai-node` self-update | `RRS-N4001` to `N4004`; `RRS-N4005` (L2) |
