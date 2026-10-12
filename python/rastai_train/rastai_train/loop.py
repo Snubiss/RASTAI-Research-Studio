@@ -37,6 +37,7 @@ from rastai_train.checkpoints import (
     remove_unkept_checkpoints,
     write_checkpoint,
 )
+from rastai_train.context import TrainingProgress
 from rastai_train.errors import TrainError
 from rastai_train.optimizer import learning_rate_at, set_learning_rate
 from rastai_train.resume import restore_rng_state, rng_state_tensors
@@ -255,6 +256,7 @@ def save_checkpoint_and_report(
     progress.last_checkpoint_seconds = time.monotonic() - write_started
     progress.last_checkpoint_time = time.monotonic()
     progress.last_checkpoint_step = progress.step
+    forget_skipped_step(progress, progress.step)
     if is_best:
         progress.best_step = progress.step
         progress.best_validation_loss = validation_loss
@@ -263,8 +265,19 @@ def save_checkpoint_and_report(
         events.emit_durable(RUN_METRICS, {"step": progress.step, "values": {VALIDATION_LOSS: validation_loss}})
     policy = context.settings.checkpoint
     keep_last = policy.checkpoint_settings.keep_last
-    remove_unkept_checkpoints(context.run_folder, keep_last, progress.best_step, policy.pinned_steps)
+    remove_unkept_checkpoints(
+        context.run_folder, keep_last, progress.best_step, policy.pinned_steps, progress.skipped_checkpoint_steps
+    )
     return folder
+
+
+def forget_skipped_step(progress: TrainingProgress, step: int) -> None:
+    """The new checkpoint replaced the folder a resume skipped at this step, so it counts again."""
+    remaining = []
+    for skipped_step in progress.skipped_checkpoint_steps:
+        if skipped_step != step:
+            remaining.append(skipped_step)
+    progress.skipped_checkpoint_steps = tuple(remaining)
 
 
 def report_checkpoint(events: JobEvents, context: TrainingContext, folder: Path, is_best: bool) -> None:
@@ -330,4 +343,6 @@ def save_checkpoint_if_new(
 
 
 def outcome(context: TrainingContext, reason: str) -> TrainingOutcome:
-    return TrainingOutcome(reason, context.progress.step, find_latest_checkpoint(context.run_folder))
+    """The run's newest checkpoint is the newest it wrote or resumed from, never a newer one the resume skipped."""
+    latest = find_latest_checkpoint(context.run_folder, context.progress.skipped_checkpoint_steps)
+    return TrainingOutcome(reason, context.progress.step, latest)
