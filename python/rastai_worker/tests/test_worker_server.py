@@ -282,6 +282,12 @@ class WorkerProcess:
     def stderr(self) -> str:
         return self.stderr_path.read_text(encoding="utf-8")
 
+    def kill_if_running(self) -> None:
+        """SIGKILL to the worker's group when a failed test left it running, so no worker outlives the run."""
+        if self.process.poll() is None:
+            os.killpg(self.process.pid, signal.SIGKILL)
+            self.process.wait(timeout=PROCESS_TIMEOUT_SECONDS)
+
 
 @pytest.fixture
 def entries_folder(tmp_path: Path) -> Path:
@@ -291,11 +297,26 @@ def entries_folder(tmp_path: Path) -> Path:
     return folder
 
 
+@pytest.fixture
+def started_workers() -> Iterator[list[WorkerProcess]]:
+    """The workers a test started; any still running when the test ends is killed."""
+    workers = []
+    yield workers
+    for worker in workers:
+        worker.kill_if_running()
+
+
 def start_worker(
-    socket_folder: Path, tmp_path: Path, entries_folder: Path, job_token: str = JOB_TOKEN
+    socket_folder: Path,
+    tmp_path: Path,
+    entries_folder: Path,
+    started_workers: list[WorkerProcess],
+    job_token: str = JOB_TOKEN,
 ) -> WorkerProcess:
     launch = write_launch(socket_folder, tmp_path / "run", "JOB_KIND_EVAL", f"{ENTRY_MODULE_NAME}:run_job")
-    return WorkerProcess(launch, entries_folder, job_token)
+    worker = WorkerProcess(launch, entries_folder, job_token)
+    started_workers.append(worker)
+    return worker
 
 
 def wait_for_registration(node: FakeNode, worker: WorkerProcess) -> None:
@@ -332,9 +353,13 @@ def hello_watch_and_end(worker: WorkerProcess, end_the_job) -> None:
 
 
 def test_the_job_process_serves_registers_and_stops(
-    socket_folder: Path, tmp_path: Path, fake_node: FakeNode, entries_folder: Path
+    socket_folder: Path,
+    tmp_path: Path,
+    fake_node: FakeNode,
+    entries_folder: Path,
+    started_workers: list[WorkerProcess],
 ) -> None:
-    worker = start_worker(socket_folder, tmp_path, entries_folder)
+    worker = start_worker(socket_folder, tmp_path, entries_folder, started_workers)
     wait_for_registration(fake_node, worker)
     assert fake_node.registrations[0] == (JOB_ID, str(socket_folder / "job.sock"), JOB_TOKEN)
 
@@ -356,9 +381,13 @@ def test_the_job_process_serves_registers_and_stops(
 
 
 def test_sigterm_ends_the_job_process_preempted(
-    socket_folder: Path, tmp_path: Path, fake_node: FakeNode, entries_folder: Path
+    socket_folder: Path,
+    tmp_path: Path,
+    fake_node: FakeNode,
+    entries_folder: Path,
+    started_workers: list[WorkerProcess],
 ) -> None:
-    worker = start_worker(socket_folder, tmp_path, entries_folder)
+    worker = start_worker(socket_folder, tmp_path, entries_folder, started_workers)
     wait_for_registration(fake_node, worker)
     hello_watch_and_end(worker, lambda _stub: os.killpg(worker.process.pid, signal.SIGTERM))
     assert worker.wait() == EXIT_PREEMPTED, worker.stderr()
@@ -367,9 +396,13 @@ def test_sigterm_ends_the_job_process_preempted(
 
 
 def test_a_refused_registration_is_a_bad_launch(
-    socket_folder: Path, tmp_path: Path, fake_node: FakeNode, entries_folder: Path
+    socket_folder: Path,
+    tmp_path: Path,
+    fake_node: FakeNode,
+    entries_folder: Path,
+    started_workers: list[WorkerProcess],
 ) -> None:
-    worker = start_worker(socket_folder, tmp_path, entries_folder, job_token=OTHER_TOKEN)
+    worker = start_worker(socket_folder, tmp_path, entries_folder, started_workers, job_token=OTHER_TOKEN)
     assert worker.wait() == EXIT_BAD_LAUNCH
     assert len(fake_node.registrations) == 1
     assert worker.stderr().strip().splitlines()[-1].startswith(f"{RRS_J2002}: ")
