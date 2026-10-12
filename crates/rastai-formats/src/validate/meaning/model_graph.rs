@@ -14,7 +14,10 @@
 //! - then, only when none of the above found an error, the shapes along the graph (validate/meaning/model_shapes.rs):
 //!   a shape an op can't take is `RRS-E2002` at the edge that carries it.
 //!
-//! The loop search walks the graph with its own stack, never the call stack, so a deep graph can't overflow it.
+//! The loop search leaves out every `rnn` graph node and the edges at it, then looks for a loop in what is left: a
+//! loop there is exactly a loop with no `rnn` on it. Searching the whole graph and dropping loops through an `rnn`
+//! would miss a loop that shares its closing edge with one through an `rnn`. It walks with its own stack, never the
+//! call stack, so a deep graph can't overflow it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -55,6 +58,7 @@ const MAX_LOOP_NODES_SHOWN: usize = 8;
 
 const FOUND_MISSING: &str = "(missing)";
 const EXPECTED_SIZE: &str = "a whole number of 0 or more that fits in 64 bits";
+const EXPECTED_SIGNED: &str = "a whole number from -9223372036854775808 to 9223372036854775807";
 const EXPECTED_POSITIVE: &str = "a whole number of 1 or more";
 const EXPECTED_WEIGHTS_SOURCE: &str = "a model ref: hf:<org>/<name>@<revision>, blob:<hash> or ckpt:<checkpoint_id>";
 
@@ -228,16 +232,37 @@ fn out_of_range_diagnostic(
     attributes_pointer: &str,
     source: &MeaningSource,
 ) -> Diagnostic {
-    let refused = attributes.iter().find(|(name, value)| {
-        let signed = op == MANY_INPUTS_OP && name.as_str() == SIGNED_ATTRIBUTE;
-        value.is_number() && if signed { !value.is_i64() } else { !value.is_u64() }
-    });
-    let (pointer, found) = match refused {
-        Some((name, value)) => (join_pointer(attributes_pointer, name), value.to_string()),
-        None => (attributes_pointer.to_string(), String::new()),
+    let refused = attributes
+        .iter()
+        .find(|(name, value)| !fits_attribute(value, is_signed_attribute(op, name)));
+    let (pointer, found, expected) = match refused {
+        Some((name, value)) => (
+            join_pointer(attributes_pointer, name),
+            value.to_string(),
+            expected_integer_text(is_signed_attribute(op, name)),
+        ),
+        None => (attributes_pointer.to_string(), String::new(), EXPECTED_SIZE),
     };
-    let values = [("found", shown_value(&found)), ("expected", EXPECTED_SIZE)];
+    let values = [("found", shown_value(&found)), ("expected", expected)];
     meaning_diagnostic(CODE_VALUE_FORM, &values, source, &pointer)
+}
+
+/// Whether an attribute may be below 0: only concat's axis, which counts back from the last axis.
+fn is_signed_attribute(op: &str, name: &str) -> bool {
+    op == MANY_INPUTS_OP && name == SIGNED_ATTRIBUTE
+}
+
+/// Whether serde can read a value as the attribute's integer. A value that isn't a number is never what serde
+/// refused here, since layer 2's walk has already checked every attribute's kind.
+fn fits_attribute(value: &Value, signed: bool) -> bool {
+    if !value.is_number() {
+        return true;
+    }
+    if signed { value.is_i64() } else { value.is_u64() }
+}
+
+fn expected_integer_text(signed: bool) -> &'static str {
+    if signed { EXPECTED_SIGNED } else { EXPECTED_SIZE }
 }
 
 /// Both ends of every edge name a graph node. Returns the node indexes of each edge's ends, None for an edge with an
@@ -461,15 +486,11 @@ fn connection_pointer(connection: InputSource) -> String {
 }
 
 /// `RRS-E2003` at each edge that closes a loop with no `rnn` graph node on it. A depth-first search with its own
-/// stack: an edge to a node still on the current path closes a loop through the path's nodes from there.
+/// stack over the graph without its `rnn` nodes: an edge to a node still on the current path closes a loop through
+/// the path's nodes from there. Every loop with no `rnn` has at least one such edge, so each one is reported.
 fn check_loops(model: &ModelSpec, edge_ends: &[Option<(usize, usize)>], source: &MeaningSource) -> Vec<Diagnostic> {
     let nodes = &model.graph.nodes;
-    let mut outgoing: Vec<Vec<(usize, usize)>> = vec![Vec::new(); nodes.len()];
-    for (edge_index, ends) in edge_ends.iter().enumerate() {
-        if let Some((from_index, to_index)) = ends {
-            outgoing[*from_index].push((edge_index, *to_index));
-        }
-    }
+    let outgoing = outgoing_edges_without_recurrence(model, edge_ends);
     let mut marks = vec![NOT_VISITED; nodes.len()];
     let mut diagnostics = Vec::new();
     for start in 0..nodes.len() {
@@ -492,11 +513,31 @@ fn check_loops(model: &ModelSpec, edge_ends: &[Option<(usize, usize)>], source: 
                 path.push((next, 0));
             } else if marks[next] == ON_PATH {
                 let loop_nodes = loop_from(&path, next);
-                diagnostics.extend(loop_diagnostic(model, &loop_nodes, edge_index, source));
+                diagnostics.push(loop_diagnostic(model, &loop_nodes, edge_index, source));
             }
         }
     }
     diagnostics
+}
+
+/// Each node's outgoing edges as (edge index, node it goes to), leaving out every edge that starts or ends at an
+/// `rnn` graph node, since a loop through an `rnn` is recurrence and not an error.
+fn outgoing_edges_without_recurrence(
+    model: &ModelSpec,
+    edge_ends: &[Option<(usize, usize)>],
+) -> Vec<Vec<(usize, usize)>> {
+    let nodes = &model.graph.nodes;
+    let mut outgoing: Vec<Vec<(usize, usize)>> = vec![Vec::new(); nodes.len()];
+    for (edge_index, ends) in edge_ends.iter().enumerate() {
+        let Some((from_index, to_index)) = *ends else {
+            continue;
+        };
+        let touches_recurrence = nodes[from_index].op == RECURRENT_OP || nodes[to_index].op == RECURRENT_OP;
+        if !touches_recurrence {
+            outgoing[from_index].push((edge_index, to_index));
+        }
+    }
+    outgoing
 }
 
 /// The nodes of the current path from `first` to its end: the loop an edge back to `first` closes.
@@ -505,17 +546,9 @@ fn loop_from(path: &[(usize, usize)], first: usize) -> Vec<usize> {
     path[start..].iter().map(|(node, _)| *node).collect()
 }
 
-/// `RRS-E2003` for a loop, unless an `rnn` graph node on it makes it recurrence.
-fn loop_diagnostic(
-    model: &ModelSpec,
-    loop_nodes: &[usize],
-    edge_index: usize,
-    source: &MeaningSource,
-) -> Option<Diagnostic> {
+/// `RRS-E2003` for a loop with no `rnn` on it, at the edge that closes it.
+fn loop_diagnostic(model: &ModelSpec, loop_nodes: &[usize], edge_index: usize, source: &MeaningSource) -> Diagnostic {
     let nodes = &model.graph.nodes;
-    if loop_nodes.iter().any(|&index| nodes[index].op == RECURRENT_OP) {
-        return None;
-    }
     let mut names: Vec<&str> = loop_nodes
         .iter()
         .take(MAX_LOOP_NODES_SHOWN)
@@ -529,7 +562,7 @@ fn loop_diagnostic(
     let graph_nodes = names.join(", ");
     let values = [("graph_nodes", graph_nodes.as_str())];
     let pointer = format!("{EDGES_POINTER}/{edge_index}");
-    Some(meaning_diagnostic(CODE_CYCLE, &values, source, &pointer))
+    meaning_diagnostic(CODE_CYCLE, &values, source, &pointer)
 }
 
 /// Each head names a graph node, under a name no other head has.
@@ -611,6 +644,29 @@ mod tests {
         let path = [(4, 1), (2, 1), (7, 0), (9, 1)];
         assert_eq!(loop_from(&path, 7), vec![7, 9]);
         assert_eq!(loop_from(&path, 4), vec![4, 2, 7, 9]);
+    }
+
+    #[test]
+    fn only_concats_axis_may_be_below_zero() {
+        assert!(is_signed_attribute("concat", "axis"));
+        assert!(!is_signed_attribute("conv1d", "axis"));
+        assert!(!is_signed_attribute("concat", "kernel_size"));
+    }
+
+    #[test]
+    fn a_signed_attribute_takes_numbers_below_zero_and_a_size_takes_numbers_past_the_signed_range() {
+        let below_zero = Value::from(-1);
+        let past_signed = Value::from(10_000_000_000_000_000_000u64);
+        assert!(fits_attribute(&below_zero, true) && !fits_attribute(&below_zero, false));
+        assert!(fits_attribute(&past_signed, false) && !fits_attribute(&past_signed, true));
+        assert!(fits_attribute(&Value::from("text"), false));
+    }
+
+    #[test]
+    fn a_refused_signed_attribute_is_not_described_as_a_size() {
+        assert_eq!(expected_integer_text(true), EXPECTED_SIGNED);
+        assert_eq!(expected_integer_text(false), EXPECTED_SIZE);
+        assert!(!EXPECTED_SIGNED.contains("0 or more"));
     }
 
     #[test]

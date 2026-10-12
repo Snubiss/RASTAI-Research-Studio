@@ -2,9 +2,9 @@
 //! plain `.json` file, never panic, and every outcome keeps the promises callers rely on.
 //!
 //! `read_document` runs every layer for every document type, layer 3 included (a ModelSpec's graph and shape checks
-//! too), once the bytes name one of them. The same bytes also go through `check_document` with a fuzz-only type that has every nested kind (Type,
-//! List, Map, Enum and a type that holds itself), so the layer-2 walk is fuzzed on deeper shapes than the real
-//! descriptions have, as tests/documents_corpus.rs tests it.
+//! too), once the bytes name one of them. The same bytes also go through `check_document` with a fuzz-only type that
+//! has every nested kind (Type, List, Map, Enum and a type that holds itself), so the layer-2 walk is fuzzed on deeper
+//! shapes than the real descriptions have, as tests/documents_corpus.rs tests it.
 
 #![no_main]
 

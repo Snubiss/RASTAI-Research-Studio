@@ -1,0 +1,117 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.model/1.json",
+  "type": "rastai.model",
+  "schema_version": 1,
+  "created_with": "rastai 0.1.0",
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2Y",
+  "content_hash": "",
+  "derived_from": [],
+  "authors": [],
+  "license": "",
+  "source_url": "",
+  "requires": {},
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "embedding",
+        "op": "embedding",
+        "label": "",
+        "attributes": {
+          "embedding_size": 8,
+          "vocab_size": 100
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "merge",
+        "op": "residual_add",
+        "label": "",
+        "attributes": {},
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "rnn",
+        "op": "rnn",
+        "label": "",
+        "attributes": {
+          "variant": "gru"
+        },
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "attention",
+        "op": "attention",
+        "label": "",
+        "attributes": {},
+        "train_mode": "train",
+        "observe": true
+      },
+      {
+        "node_id": "join",
+        "op": "residual_add",
+        "label": "",
+        "attributes": {},
+        "train_mode": "train",
+        "observe": true
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "embedding",
+        "to_node": "merge",
+        "to_input": 0
+      },
+      {
+        "from_node": "merge",
+        "to_node": "rnn",
+        "to_input": 0
+      },
+      {
+        "from_node": "merge",
+        "to_node": "attention",
+        "to_input": 0
+      },
+      {
+        "from_node": "attention",
+        "to_node": "join",
+        "to_input": 0
+      },
+      {
+        "from_node": "rnn",
+        "to_node": "join",
+        "to_input": 1
+      },
+      {
+        "from_node": "join",
+        "to_node": "merge",
+        "to_input": 1
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "tokens",
+      "range": {
+        "start": 0,
+        "end": 16
+      },
+      "encoder_node": "embedding"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "vectors",
+      "graph_node": "join"
+    }
+  ],
+  "defaults": {
+    "dtype": "fp32",
+    "sequence_length": 16,
+    "batch_size": 2
+  },
+  "weights": [],
+  "placement": {}
+}
