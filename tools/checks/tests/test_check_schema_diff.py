@@ -20,6 +20,8 @@ CHECK = "check-schema-diff"
 CHECKS_FOLDER = Path(__file__).resolve().parent.parent
 REPO_ROOT = CHECKS_FOLDER.parent.parent
 CONTRACTS_FILE = "docs/architecture/contracts.md"
+# A task's contracts change entry, in its own file (PROC-02).
+CHANGE_ENTRY_FILE = "docs/architecture/contracts-changes/M1-99.md"
 COMMAND_PATH = "schemas/commands/rastai.command.sample.get/1.json"
 OTHER_COMMAND_PATH = "schemas/commands/rastai.command.sample.list/1.json"
 EVENT_PATH = "schemas/events/sample.changed.json"
@@ -199,8 +201,9 @@ def test_a_schema_change_without_a_contracts_change_fails(tmp_path):
     result = run_schema_diff(repository)
     assert result.returncode == 1
     assert (
-        f"check-schema-diff: {COMMAND_PATH} changed, but no changed line of {CONTRACTS_FILE} names `sample.get`, "
-        "`SampleGetArgs`, `SampleGetResult`: update contracts.md in the same change (contracts 12.6)"
+        f"check-schema-diff: {COMMAND_PATH} changed, but no changed line of {CONTRACTS_FILE} or "
+        "docs/architecture/contracts-changes/ names `sample.get`, `SampleGetArgs`, `SampleGetResult`: add the "
+        "contracts change in the same change, in the task's contracts-changes file (contracts 12.6)"
     ) in result.stdout
 
 
@@ -268,6 +271,60 @@ def test_only_the_file_headers_before_the_first_hunk_are_skipped(load_check):
         "+- `job.list` too\n"
     )
     assert check.changed_lines(diff) == ["-- `job.get` was here", "++ `job.get` is here", "- `job.list` too"]
+
+
+def test_a_naming_line_only_in_a_contracts_changes_file_passes(tmp_path):
+    head = command_file(stability="preview", argument_fields={"sample_id": {"type": "string"}})
+    repository = changed_command_repository(tmp_path, command_file(stability="preview"), head)
+    write_files(repository, {CHANGE_ENTRY_FILE: "- **M1-99:** `sample.get` takes only a sample id.\n"})
+    # Not yet added to git: every line of the new file counts.
+    result = run_schema_diff(repository)
+    assert result.returncode == 0, result.stdout
+    # Committed: it counts through the diff against the merge base.
+    git(repository, "add", "--all")
+    git(repository, "commit", "--quiet", "-m", "Change sample.get")
+    result = run_schema_diff(repository)
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_changed_line_of_an_existing_contracts_changes_file_counts(tmp_path):
+    entry = "- **M1-99:** `sample.list` lands.\n"
+    base_files = {COMMAND_PATH: command_file(stability="preview"), CHANGE_ENTRY_FILE: entry}
+    repository = new_repository(tmp_path, base_files)
+    head = command_file(stability="preview", argument_fields={"sample_id": {"type": "string"}})
+    write_files(repository, {COMMAND_PATH: head, CHANGE_ENTRY_FILE: entry + "- **M1-99:** `sample.get` too.\n"})
+    result = run_schema_diff(repository)
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_change_no_contracts_file_names_fails(tmp_path):
+    head = command_file(stability="preview", argument_fields={"sample_id": {"type": "string"}})
+    repository = changed_command_repository(tmp_path, command_file(stability="preview"), head)
+    write_files(repository, {CHANGE_ENTRY_FILE: "- **M1-99:** `sample.list` lands.\n"})
+    add_contracts_line(repository, "- `sample.get_all` changed.\n")
+    git(repository, "add", "--all")
+    git(repository, "commit", "--quiet", "-m", "Change sample.get")
+    result = run_schema_diff(repository)
+    assert result.returncode == 1
+    assert f"{COMMAND_PATH} changed, but no changed line of" in result.stdout
+
+
+def test_each_file_of_a_several_file_diff_skips_its_own_headers(load_check):
+    check = load_check(CHECK)
+    diff = (
+        "diff --git a/docs/architecture/contracts.md b/docs/architecture/contracts.md\n"
+        "--- a/docs/architecture/contracts.md\n"
+        "+++ b/docs/architecture/contracts.md\n"
+        "@@ -3 +3 @@ intro\n"
+        "+- `job.get` is here\n"
+        "diff --git a/docs/architecture/contracts-changes/M1-99.md b/docs/architecture/contracts-changes/M1-99.md\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/docs/architecture/contracts-changes/M1-99.md\n"
+        "@@ -0,0 +1 @@\n"
+        "+- **M1-99:** `job.list` too\n"
+    )
+    assert check.changed_lines(diff) == ["- `job.get` is here", "- **M1-99:** `job.list` too"]
 
 
 def test_committed_changes_are_compared_like_working_tree_ones(tmp_path):
@@ -390,6 +447,25 @@ def test_deprecating_a_stable_command_passes_with_the_contracts_change(tmp_path)
     assert result.returncode == 0, result.stdout
 
 
+def test_taking_back_a_deprecation_passes_with_the_contracts_change(tmp_path):
+    head = command_file(stability="stable")
+    repository = changed_command_repository(
+        tmp_path, command_file(stability="deprecated"), head, COMMAND_CONTRACTS_LINE
+    )
+    result = run_schema_diff(repository)
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_change_from_deprecated_to_preview_fails(tmp_path):
+    head = command_file(stability="preview")
+    repository = changed_command_repository(
+        tmp_path, command_file(stability="deprecated"), head, COMMAND_CONTRACTS_LINE
+    )
+    result = run_schema_diff(repository)
+    assert result.returncode == 1
+    assert "its stability moved from `deprecated` to `preview`" in result.stdout
+
+
 def test_a_removed_or_renamed_stable_command_fails(tmp_path):
     repository = new_repository(tmp_path, {COMMAND_PATH: command_file()})
     (repository / COMMAND_PATH).unlink()
@@ -486,7 +562,7 @@ def test_a_base_without_schemas_events_reports_the_event_files_as_added(tmp_path
     write_files(repository, {EVENT_PATH: event_file()})
     result = run_schema_diff(repository)
     assert result.returncode == 1
-    assert f"{EVENT_PATH} was added, but no changed line of {CONTRACTS_FILE} names `sample.changed`" in result.stdout
+    assert f"{EVENT_PATH} was added, but no changed line of {CONTRACTS_FILE} or" in result.stdout
     add_contracts_line(repository, EVENT_CONTRACTS_LINE)
     result = run_schema_diff(repository)
     assert result.returncode == 0, result.stdout
