@@ -17,6 +17,8 @@ from rastai_plugin.registry import REGISTRY_KINDS, PluginRegistry
 
 # The module convention (layout frontend-and-plugins.md 11.2): a plugin module defines register(registry).
 REGISTER_FUNCTION_NAME = "register"
+# python.module is an absolute dotted module name: names joined by dots, nothing relative and no path.
+MODULE_NAME_SEPARATOR = "."
 
 
 def load_plugin_module(manifest: PluginManifest) -> PluginRegistry:
@@ -41,6 +43,7 @@ def python_module_name(manifest: PluginManifest) -> str:
 
 
 def import_plugin_module(plugin_id: str, module_name: str) -> ModuleType:
+    check_module_name(plugin_id, module_name)
     try:
         return importlib.import_module(module_name)
     except ModuleNotFoundError as error:
@@ -58,6 +61,15 @@ def import_plugin_module(plugin_id: str, module_name: str) -> ModuleType:
         # Any other failure while the module's top level runs is the module crashing on import.
         reason = f"importing {module_name} raised {type(error).__name__}: {error}"
         raise PluginError(RRS_P4001, f"the plugin module of {plugin_id} crashed: {reason}") from error
+
+
+def check_module_name(plugin_id: str, module_name: str) -> None:
+    """A python.module that isn't an absolute dotted name ('.foo', '../../x', '') is the manifest's mistake (RRS-P0001).
+    Handed to importlib, it would fail with a TypeError or a ValueError that reads as the module crashing (P4001)."""
+    for part in module_name.split(MODULE_NAME_SEPARATOR):
+        if not part.isidentifier():
+            reason = f"python.module {module_name!r} isn't an absolute dotted Python module name"
+            raise PluginError(RRS_P0001, f"the manifest of {plugin_id} is invalid: {reason}")
 
 
 def call_register(plugin_id: str, module: ModuleType, registry: PluginRegistry) -> None:

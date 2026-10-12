@@ -31,11 +31,16 @@ ID_FIELD_BY_KIND = {
     "data_sources": "data_source_id",
 }
 ERROR_SEVERITY = "error"
+# The `type` of a plugin manifest. The wheel names a document's type by its `type` field, and a `.json` file name
+# doesn't pin one, so a valid document of another type (a rastai.project saved as rastai-plugin.json) passes the
+# wheel and is refused here. Same value as rastai-formats' PLUGIN_MANIFEST_TYPE_NAME.
+PLUGIN_MANIFEST_TYPE_NAME = "rastai.plugin"
 
 
 def read_manifest(path: Path) -> PluginManifest:
     """The manifest at `path`, validated by the wheel. A file that can't be read is RRS-P0001; a file the wheel
-    refuses raises its first error with the wheel's own code (RRS-E1003 for an unknown field, for example)."""
+    refuses raises its first error with the wheel's own code (RRS-E1003 for an unknown field, for example); a valid
+    document of another type is RRS-P0001."""
     try:
         data = path.read_bytes()
     except OSError as error:
@@ -44,7 +49,16 @@ def read_manifest(path: Path) -> PluginManifest:
     raise_first_error(answer["diagnostics"])
     if not answer["document_json"]:
         raise PluginError(RRS_P0001, f"the manifest {path} was refused without a diagnostic")
-    return plugin_manifest_from_json(json.loads(answer["document_json"]))
+    document = json.loads(answer["document_json"])
+    check_document_type(path, document)
+    return plugin_manifest_from_json(document)
+
+
+def check_document_type(path: Path, document: dict) -> None:
+    document_type = document.get("type")
+    if document_type != PLUGIN_MANIFEST_TYPE_NAME:
+        reason = f"it is a {document_type} document, not a {PLUGIN_MANIFEST_TYPE_NAME} manifest"
+        raise PluginError(RRS_P0001, f"the manifest {path} is invalid: {reason}")
 
 
 def raise_first_error(diagnostics: list[dict]) -> None:
