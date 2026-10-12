@@ -31,4 +31,13 @@
  * @property {number} time_estimate_seconds Estimated time to finish.
  */
 
+/**
+ * What the daemon hands a train job in JobSpec.arguments_json: what to train and how.
+ * @typedef {object} TrainJobArgs
+ * @property {TrainStartArgs} start_arguments The train.start arguments the run was started with.
+ * @property {TrainingPlan} plan How the daemon decided to train.
+ * @property {number} max_steps Optimizer steps in the whole run; the learning-rate schedule ends here.
+ * @property {number} seed The run's seed: weights, dropout, the split and the shuffle.
+ */
+
 export {};

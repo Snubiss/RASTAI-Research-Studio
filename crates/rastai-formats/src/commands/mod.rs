@@ -148,6 +148,7 @@ const COMMAND_PART_TYPES: &[fn() -> TypeDescription] = &[
     settings::describe_setting_key_source,
     token::describe_token_summary,
     train::describe_training_plan,
+    train::describe_train_job_args,
 ];
 
 /// `rastai.command.model.load/1`: the schema id every type of one command shares.
