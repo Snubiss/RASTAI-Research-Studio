@@ -126,6 +126,9 @@ class TrainingProgress:
     best_validation_loss: float | None = None
     # Steps in a row whose gradients weren't finite; three stop the run (RRS-T3001).
     non_finite_steps_in_a_row: int = 0
+    # True while the current step's checkpoint is started and not yet written. A write a full disk refused leaves it
+    # up, so the loop writes that checkpoint again before the next step when the paused run goes on.
+    checkpoint_unwritten: bool = False
     # Set by load_resume_state: what the loop restores after recipe.prepare, before the first batch.
     resume_point: ResumePoint | None = None
     # Steps of newer checkpoints the resume couldn't load and fell back past. They stay on disk for inspection, and
