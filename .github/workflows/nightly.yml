@@ -46,6 +46,7 @@ jobs:
           - { crate: rastai-store, target: event_frame }
           - { crate: rastai-mcp, target: jsonrpc_decode }
           - { crate: rastai-server, target: request_gate }
+          - { crate: rastai-server, target: connect_json }
     name: fuzz ${{ matrix.crate }} ${{ matrix.target }}
     steps:
       - name: Check out the repository

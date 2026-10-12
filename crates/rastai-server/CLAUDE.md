@@ -12,6 +12,10 @@ The daemon, and the composition root: the only crate that wires the others toget
 - **The gate runs first, on every path.** `http/router.rs` puts `check_request_gate` in front of every route and the
   fallback; a new route is added inside `build_router`, never beside it. The gate is one plain function over a
   `RequestHead`; header parsing is `read_request_head`, and the `request_gate` fuzz target covers both (ADR-0037).
+- **Connect JSON is protobuf-es's.** `http/connect_json.rs` writes, accepts and refuses exactly what protobuf-es does
+  (layout 11.3); a change to it starts with a case in `fixtures/proto-golden/commands/connect_json/cases.json`, which
+  `just test-js` checks against protobuf-es and `tests/connect_protocol.rs` against the codec. Its decoders read
+  untrusted bodies, so the `connect_json` fuzz target covers them (ADR-0037).
 - **Fail closed.** A header the gate reads that is malformed or sent twice is refused, never guessed at. A path with
   `..`, `//`, `%` or `\` is never public. A non-loopback `daemon.listen` is used only as asked, with a warning.
 - **Secrets are kept as hashes.** Login codes, session ids, session keys and the owner token are compared by

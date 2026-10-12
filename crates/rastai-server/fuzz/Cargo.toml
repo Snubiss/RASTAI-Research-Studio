@@ -1,8 +1,8 @@
 # The cargo-fuzz crate for rastai-server (contracts 12.5, ADR-0037): one target per in-house parser of untrusted
-# input. Every request head on the daemon's port comes from whatever process or web page reached it, so the header
-# reading in front of the request gate has one (`request_gate`); the hand-written Connect JSON decoder adds
-# `connect_json` with M1-26 part 2. It is its own workspace (the root Cargo.toml excludes this folder) because it
-# builds only on the nightly toolchain `just fuzz` pins. Run the target with: just fuzz rastai-server request_gate 60
+# input. Every request head and body on the daemon's port comes from whatever process or web page reached it, so the
+# header reading in front of the request gate has one (`request_gate`), and so do the hand-written Connect JSON
+# decoders (`connect_json`). It is its own workspace (the root Cargo.toml excludes this folder) because it builds
+# only on the nightly toolchain `just fuzz` pins. Run a target with: just fuzz rastai-server connect_json 60
 [package]
 name = "rastai-server-fuzz"
 version = "0.0.0"
@@ -23,6 +23,10 @@ path = ".."
 [dependencies.rastai-formats]
 path = "../../rastai-formats"
 
+# For `Diagnostic`: connect_json checks the code of every refusal.
+[dependencies.rastai-diag]
+path = "../../rastai-diag"
+
 # An independent workspace for the fuzz targets.
 [workspace]
 members = ["."]
@@ -30,6 +34,13 @@ members = ["."]
 [[bin]]
 name = "request_gate"
 path = "fuzz_targets/request_gate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_json"
+path = "fuzz_targets/connect_json.rs"
 test = false
 doc = false
 bench = false

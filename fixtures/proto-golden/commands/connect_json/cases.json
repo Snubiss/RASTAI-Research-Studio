@@ -1,0 +1,468 @@
+{
+  "encode": [
+    {
+      "message": "ExecuteRequest",
+      "binary": "../ExecuteRequest.binpb",
+      "json": "{\"command_id\":\"model.load\",\"arguments_json\":\"{\\\"model_ref\\\":\\\"hf:google/gemma-3-1b-it@main\\\",\\\"runtime\\\":\\\"inspectable\\\"}\",\"project_id\":\"prj_01JA2B3C4D5E6F7G8H9J0K1M2N\",\"idempotency_key\":\"cli-5f0c2a9e-load\",\"dry_run\":true,\"acting_plugin_id\":\"psychology\"}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "binary": "../ExecuteResponse.binpb",
+      "json": "{\"ok\":true,\"result_json\":\"{\\\"model_ref\\\":\\\"hf:google/gemma-3-1b-it@main\\\",\\\"lease_id\\\":\\\"lease_01JA2B3C4D5E6F7G8H9J0K1M2P\\\"}\",\"job_id\":\"job_01JA2B3C4D5E6F7G8H9J0K1M2Q\",\"diagnostics\":[{\"code\":\"RRS-H3001\",\"severity\":\"SEVERITY_WARNING\",\"message\":\"Not enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.\",\"path\":\"models/tiny.rrsmodel:12:5#/nodes/3/placement\",\"fix_text\":\"Unload the chat model, then try again.\",\"fix_command_id\":\"model.unload\",\"fix_arguments_json\":\"{\\\"model_ref\\\":\\\"hf:org/tiny-chat\\\"}\"}],\"journal_id\":\"jrn_01JA2B3C4D5E6F7G8H9J0K1M2R\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "binary": "../../common/Diagnostic.binpb",
+      "json": "{\"code\":\"RRS-H3001\",\"severity\":\"SEVERITY_ERROR\",\"message\":\"Not enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.\",\"path\":\"models/tiny.rrsmodel:12:5#/nodes/3/placement\",\"fix_text\":\"Unload the chat model, then try again.\",\"fix_command_id\":\"model.unload\",\"fix_arguments_json\":\"{\\\"model_ref\\\":\\\"hf:org/tiny-chat\\\"}\"}"
+    },
+    {
+      "message": "ListCommandsRequest",
+      "binary": "../ListCommandsRequest.binpb",
+      "json": "{\"section\":\"inference\"}"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "binary": "../ListCommandsResponse.binpb",
+      "json": "{\"commands\":[{\"command_id\":\"eval.test\",\"title\":\"Run tests\",\"summary\":\"Run an evaluation suite against a model or checkpoint.\",\"section\":\"eval\",\"scope\":\"eval\",\"undoable\":true,\"kind\":\"COMMAND_KIND_JOB\",\"stability\":\"STABILITY_PREVIEW\",\"arguments_type\":\"EvalTestArgs\",\"result_type\":\"EvalTestResult\",\"arguments_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"baseline_model\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"result_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"eval_run_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"default_shortcut\":\"Mod+Shift+T\",\"basic\":true,\"plugin_id\":\"eval\",\"experimental\":true,\"since_version\":\"0.1.0\"}]}"
+    },
+    {
+      "message": "CommandDescriptor",
+      "binary": "../CommandDescriptor.binpb",
+      "json": "{\"command_id\":\"psychology.replay.open\",\"title\":\"Open replay\",\"summary\":\"Recompute a conversation's full view from its token IDs.\",\"section\":\"psychology\",\"scope\":\"psychology\",\"undoable\":true,\"kind\":\"COMMAND_KIND_JOB\",\"stability\":\"STABILITY_PREVIEW\",\"arguments_type\":\"PsychologyReplayOpenArgs\",\"result_type\":\"PsychologyReplayOpenResult\",\"arguments_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"message_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"result_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"replay_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"default_shortcut\":\"Mod+Shift+R\",\"basic\":true,\"plugin_id\":\"psychology\",\"experimental\":true,\"since_version\":\"0.1.0\"}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "binary": "ExecuteRequest.empty.binpb",
+      "json": "{}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "binary": "ExecuteResponse.refused.binpb",
+      "json": "{\"diagnostics\":[{\"code\":\"RRS-C0002\",\"severity\":\"SEVERITY_ERROR\",\"message\":\"Invalid arguments: got a number; expected a string.\",\"path\":\"#/model_ref\"},{\"code\":\"PLG-acme-0001\",\"message\":\"No severity set.\"},{\"code\":\"RRS-C0010\",\"severity\":7,\"message\":\"A severity this build doesn't know.\"}],\"journal_id\":\"jrn_01JA2B3C4D5E6F7G8H9J0K1M2S\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "binary": "Diagnostic.escapes.binpb",
+      "json": "{\"code\":\"RRS-E0001\",\"severity\":\"SEVERITY_INFO\",\"message\":\"quote \\\" backslash \\\\ slash / newline \\n tab \\t return \\r backspace \\b form feed \\f NUL \\u0000 unit separator \\u001f DEL  é — 😀 line separator   </script>\",\"path\":\"notes#2.json:3:4#/a~1b/~0c\",\"fix_arguments_json\":\"{\\\"text\\\":\\\"line one\\\\nline two\\\"}\"}"
+    },
+    {
+      "message": "ListCommandsRequest",
+      "binary": "ListCommandsRequest.empty.binpb",
+      "json": "{}"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "binary": "ListCommandsResponse.empty.binpb",
+      "json": "{}"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "binary": "ListCommandsResponse.two_commands.binpb",
+      "json": "{\"commands\":[{\"command_id\":\"model.load\",\"title\":\"Load model\",\"section\":\"inference\",\"scope\":\"inference.manage\",\"kind\":\"COMMAND_KIND_SYNC\",\"stability\":\"STABILITY_PREVIEW\",\"since_version\":\"0.1.0\"},{\"command_id\":\"system.status\"}]}"
+    },
+    {
+      "message": "CommandDescriptor",
+      "binary": "CommandDescriptor.unknown_enums.binpb",
+      "json": "{\"command_id\":\"future.thing\",\"kind\":9,\"stability\":-1,\"basic\":true}"
+    },
+    {
+      "message": "CommandDescriptor",
+      "binary": "CommandDescriptor.unspecified_enums.binpb",
+      "json": "{\"command_id\":\"core.legacy\",\"experimental\":true}"
+    }
+  ],
+  "decode": [
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"commandId\":\"model.load\",\"argumentsJson\":\"{\\\"model_ref\\\":\\\"hf:google/gemma-3-1b-it@main\\\",\\\"runtime\\\":\\\"inspectable\\\"}\",\"projectId\":\"prj_01JA2B3C4D5E6F7G8H9J0K1M2N\",\"idempotencyKey\":\"cli-5f0c2a9e-load\",\"dryRun\":true,\"actingPluginId\":\"psychology\"}",
+      "json": "{\"command_id\":\"model.load\",\"arguments_json\":\"{\\\"model_ref\\\":\\\"hf:google/gemma-3-1b-it@main\\\",\\\"runtime\\\":\\\"inspectable\\\"}\",\"project_id\":\"prj_01JA2B3C4D5E6F7G8H9J0K1M2N\",\"idempotency_key\":\"cli-5f0c2a9e-load\",\"dry_run\":true,\"acting_plugin_id\":\"psychology\"}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"ok\":true,\"resultJson\":\"{\\\"model_ref\\\":\\\"hf:google/gemma-3-1b-it@main\\\",\\\"lease_id\\\":\\\"lease_01JA2B3C4D5E6F7G8H9J0K1M2P\\\"}\",\"jobId\":\"job_01JA2B3C4D5E6F7G8H9J0K1M2Q\",\"diagnostics\":[{\"code\":\"RRS-H3001\",\"severity\":\"SEVERITY_WARNING\",\"message\":\"Not enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.\",\"path\":\"models/tiny.rrsmodel:12:5#/nodes/3/placement\",\"fixText\":\"Unload the chat model, then try again.\",\"fixCommandId\":\"model.unload\",\"fixArgumentsJson\":\"{\\\"model_ref\\\":\\\"hf:org/tiny-chat\\\"}\"}],\"journalId\":\"jrn_01JA2B3C4D5E6F7G8H9J0K1M2R\"}",
+      "json": "{\"ok\":true,\"result_json\":\"{\\\"model_ref\\\":\\\"hf:google/gemma-3-1b-it@main\\\",\\\"lease_id\\\":\\\"lease_01JA2B3C4D5E6F7G8H9J0K1M2P\\\"}\",\"job_id\":\"job_01JA2B3C4D5E6F7G8H9J0K1M2Q\",\"diagnostics\":[{\"code\":\"RRS-H3001\",\"severity\":\"SEVERITY_WARNING\",\"message\":\"Not enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.\",\"path\":\"models/tiny.rrsmodel:12:5#/nodes/3/placement\",\"fix_text\":\"Unload the chat model, then try again.\",\"fix_command_id\":\"model.unload\",\"fix_arguments_json\":\"{\\\"model_ref\\\":\\\"hf:org/tiny-chat\\\"}\"}],\"journal_id\":\"jrn_01JA2B3C4D5E6F7G8H9J0K1M2R\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"code\":\"RRS-H3001\",\"severity\":\"SEVERITY_ERROR\",\"message\":\"Not enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.\",\"path\":\"models/tiny.rrsmodel:12:5#/nodes/3/placement\",\"fixText\":\"Unload the chat model, then try again.\",\"fixCommandId\":\"model.unload\",\"fixArgumentsJson\":\"{\\\"model_ref\\\":\\\"hf:org/tiny-chat\\\"}\"}",
+      "json": "{\"code\":\"RRS-H3001\",\"severity\":\"SEVERITY_ERROR\",\"message\":\"Not enough free VRAM on GPU 0: 6.5 GiB needed, 2.25 GiB free — chat holds the rest.\",\"path\":\"models/tiny.rrsmodel:12:5#/nodes/3/placement\",\"fix_text\":\"Unload the chat model, then try again.\",\"fix_command_id\":\"model.unload\",\"fix_arguments_json\":\"{\\\"model_ref\\\":\\\"hf:org/tiny-chat\\\"}\"}"
+    },
+    {
+      "message": "ListCommandsRequest",
+      "input": "{\"section\":\"inference\"}",
+      "json": "{\"section\":\"inference\"}"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "input": "{\"commands\":[{\"commandId\":\"eval.test\",\"title\":\"Run tests\",\"summary\":\"Run an evaluation suite against a model or checkpoint.\",\"section\":\"eval\",\"scope\":\"eval\",\"undoable\":true,\"kind\":\"COMMAND_KIND_JOB\",\"stability\":\"STABILITY_PREVIEW\",\"argumentsType\":\"EvalTestArgs\",\"resultType\":\"EvalTestResult\",\"argumentsSchemaJson\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"baseline_model\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"resultSchemaJson\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"eval_run_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"defaultShortcut\":\"Mod+Shift+T\",\"basic\":true,\"pluginId\":\"eval\",\"experimental\":true,\"sinceVersion\":\"0.1.0\"}]}",
+      "json": "{\"commands\":[{\"command_id\":\"eval.test\",\"title\":\"Run tests\",\"summary\":\"Run an evaluation suite against a model or checkpoint.\",\"section\":\"eval\",\"scope\":\"eval\",\"undoable\":true,\"kind\":\"COMMAND_KIND_JOB\",\"stability\":\"STABILITY_PREVIEW\",\"arguments_type\":\"EvalTestArgs\",\"result_type\":\"EvalTestResult\",\"arguments_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"baseline_model\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"result_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"eval_run_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"default_shortcut\":\"Mod+Shift+T\",\"basic\":true,\"plugin_id\":\"eval\",\"experimental\":true,\"since_version\":\"0.1.0\"}]}"
+    },
+    {
+      "message": "CommandDescriptor",
+      "input": "{\"commandId\":\"psychology.replay.open\",\"title\":\"Open replay\",\"summary\":\"Recompute a conversation's full view from its token IDs.\",\"section\":\"psychology\",\"scope\":\"psychology\",\"undoable\":true,\"kind\":\"COMMAND_KIND_JOB\",\"stability\":\"STABILITY_PREVIEW\",\"argumentsType\":\"PsychologyReplayOpenArgs\",\"resultType\":\"PsychologyReplayOpenResult\",\"argumentsSchemaJson\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"message_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"resultSchemaJson\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"replay_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"defaultShortcut\":\"Mod+Shift+R\",\"basic\":true,\"pluginId\":\"psychology\",\"experimental\":true,\"sinceVersion\":\"0.1.0\"}",
+      "json": "{\"command_id\":\"psychology.replay.open\",\"title\":\"Open replay\",\"summary\":\"Recompute a conversation's full view from its token IDs.\",\"section\":\"psychology\",\"scope\":\"psychology\",\"undoable\":true,\"kind\":\"COMMAND_KIND_JOB\",\"stability\":\"STABILITY_PREVIEW\",\"arguments_type\":\"PsychologyReplayOpenArgs\",\"result_type\":\"PsychologyReplayOpenResult\",\"arguments_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"message_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"result_schema_json\":\"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\\\"replay_id\\\":{\\\"type\\\":\\\"string\\\"}}}\",\"default_shortcut\":\"Mod+Shift+R\",\"basic\":true,\"plugin_id\":\"psychology\",\"experimental\":true,\"since_version\":\"0.1.0\"}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"commandId\":\"model.load\",\"arguments_json\":\"{}\",\"dryRun\":true,\"acting_plugin_id\":\"psychology\"}",
+      "json": "{\"command_id\":\"model.load\",\"arguments_json\":\"{}\",\"dry_run\":true,\"acting_plugin_id\":\"psychology\"}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":null,\"arguments_json\":null,\"project_id\":null,\"idempotency_key\":null,\"dry_run\":null,\"acting_plugin_id\":null}",
+      "json": "{}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"\",\"dry_run\":false}",
+      "json": "{}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": " \n {\n  \"command_id\" : \"system.status\"\n }\n ",
+      "json": "{\"command_id\":\"system.status\"}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command\\u005fid\":\"system.status\"}",
+      "json": "{\"command_id\":\"system.status\"}"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"caf\\u00e9 \\ud83d\\ude00\"}",
+      "json": "{\"command_id\":\"café 😀\"}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"ok\":true,\"diagnostics\":null}",
+      "json": "{\"ok\":true}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"ok\":true,\"diagnostics\":[]}",
+      "json": "{\"ok\":true}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"diagnostics\":[{}]}",
+      "json": "{\"diagnostics\":[{}]}"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"resultJson\":\"{}\",\"jobId\":\"job_1\",\"journalId\":\"jrn_1\",\"diagnostics\":[{\"fixCommandId\":\"model.unload\",\"fix_text\":\"Unload it.\"}]}",
+      "json": "{\"result_json\":\"{}\",\"job_id\":\"job_1\",\"diagnostics\":[{\"fix_text\":\"Unload it.\",\"fix_command_id\":\"model.unload\"}],\"journal_id\":\"jrn_1\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":2}",
+      "json": "{\"severity\":\"SEVERITY_WARNING\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":0}",
+      "json": "{}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":\"SEVERITY_UNSPECIFIED\"}",
+      "json": "{}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":null}",
+      "json": "{}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":7}",
+      "json": "{\"severity\":7}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":-2147483648}",
+      "json": "{\"severity\":-2147483648}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":2147483647}",
+      "json": "{\"severity\":2147483647}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":1.0}",
+      "json": "{\"severity\":\"SEVERITY_ERROR\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":3e0}",
+      "json": "{\"severity\":\"SEVERITY_INFO\"}"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":-0}",
+      "json": "{}"
+    },
+    {
+      "message": "ListCommandsRequest",
+      "input": "{}",
+      "json": "{}"
+    },
+    {
+      "message": "ListCommandsRequest",
+      "input": "{\"section\":\"inference\"}",
+      "json": "{\"section\":\"inference\"}"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "input": "{\"commands\":[{\"commandId\":\"a\",\"kind\":\"COMMAND_KIND_STREAM\",\"stability\":3,\"sinceVersion\":\"0.2.0\"}]}",
+      "json": "{\"commands\":[{\"command_id\":\"a\",\"kind\":\"COMMAND_KIND_STREAM\",\"stability\":\"STABILITY_DEPRECATED\",\"since_version\":\"0.2.0\"}]}"
+    },
+    {
+      "message": "CommandDescriptor",
+      "input": "{\"argumentsType\":\"A\",\"resultType\":\"B\",\"argumentsSchemaJson\":\"{}\",\"resultSchemaJson\":\"{}\",\"defaultShortcut\":\"Mod+K\",\"pluginId\":\"p\",\"experimental\":true,\"undoable\":true,\"basic\":false}",
+      "json": "{\"undoable\":true,\"arguments_type\":\"A\",\"result_type\":\"B\",\"arguments_schema_json\":\"{}\",\"result_schema_json\":\"{}\",\"default_shortcut\":\"Mod+K\",\"plugin_id\":\"p\",\"experimental\":true}"
+    }
+  ],
+  "refuse": [
+    {
+      "message": "ExecuteRequest",
+      "input": "",
+      "code": "RRS-E0001",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{",
+      "code": "RRS-E0001",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"a\",}",
+      "code": "RRS-E0001",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"a\"} {}",
+      "code": "RRS-E0001",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "[]",
+      "code": "RRS-E1002",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "null",
+      "code": "RRS-E1002",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "\"model.load\"",
+      "code": "RRS-E1002",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "1",
+      "code": "RRS-E1002",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":1}",
+      "code": "RRS-E1002",
+      "path": "#/command_id"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":[\"a\"]}",
+      "code": "RRS-E1002",
+      "path": "#/command_id"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"dry_run\":\"true\"}",
+      "code": "RRS-E1002",
+      "path": "#/dry_run"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"dry_run\":1}",
+      "code": "RRS-E1002",
+      "path": "#/dry_run"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"model_ref\":\"x\"}",
+      "code": "RRS-E1003",
+      "path": "#/model_ref"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"ok\":true}",
+      "code": "RRS-E1003",
+      "path": "#/ok"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"Command_id\":\"x\"}",
+      "code": "RRS-E1003",
+      "path": "#/Command_id"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"commandID\":\"x\"}",
+      "code": "RRS-E1003",
+      "path": "#/commandID"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"a\",\"command_id\":\"b\"}",
+      "code": "RRS-E0003",
+      "path": "#/command_id"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"a\",\"commandId\":\"b\"}",
+      "code": "RRS-E0003",
+      "path": "#/command_id"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"dryRun\":null,\"dry_run\":true}",
+      "code": "RRS-E0003",
+      "path": "#/dry_run"
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":\"\\ud800\"}",
+      "code": "RRS-E0001",
+      "path": ""
+    },
+    {
+      "message": "ExecuteRequest",
+      "input": "{\"command_id\":NaN}",
+      "code": "RRS-E0004",
+      "path": ""
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"diagnostics\":{}}",
+      "code": "RRS-E1002",
+      "path": "#/diagnostics"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"diagnostics\":[null]}",
+      "code": "RRS-E1002",
+      "path": "#/diagnostics/0"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"diagnostics\":[1]}",
+      "code": "RRS-E1002",
+      "path": "#/diagnostics/0"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"diagnostics\":[{},{\"bad\":1}]}",
+      "code": "RRS-E1003",
+      "path": "#/diagnostics/1/bad"
+    },
+    {
+      "message": "ExecuteResponse",
+      "input": "{\"diagnostics\":[{\"severity\":\"SEVERITY_FATAL\"}]}",
+      "code": "RRS-E1004",
+      "path": "#/diagnostics/0/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":\"SEVERITY_FATAL\"}",
+      "code": "RRS-E1004",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":\"severity_error\"}",
+      "code": "RRS-E1004",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":\"2\"}",
+      "code": "RRS-E1004",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":2147483648}",
+      "code": "RRS-E1004",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":-2147483649}",
+      "code": "RRS-E1004",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":1.5}",
+      "code": "RRS-E1002",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":true}",
+      "code": "RRS-E1002",
+      "path": "#/severity"
+    },
+    {
+      "message": "Diagnostic",
+      "input": "{\"severity\":{}}",
+      "code": "RRS-E1002",
+      "path": "#/severity"
+    },
+    {
+      "message": "ListCommandsRequest",
+      "input": "{\"section\":false}",
+      "code": "RRS-E1002",
+      "path": "#/section"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "input": "{\"commands\":\"model.load\"}",
+      "code": "RRS-E1002",
+      "path": "#/commands"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "input": "{\"commands\":[{\"kind\":\"COMMAND_KIND_NOPE\"}]}",
+      "code": "RRS-E1004",
+      "path": "#/commands/0/kind"
+    },
+    {
+      "message": "ListCommandsResponse",
+      "input": "{\"commands\":[{\"stability\":\"COMMAND_KIND_SYNC\"}]}",
+      "code": "RRS-E1004",
+      "path": "#/commands/0/stability"
+    },
+    {
+      "message": "CommandDescriptor",
+      "input": "{\"basic\":\"yes\"}",
+      "code": "RRS-E1002",
+      "path": "#/basic"
+    },
+    {
+      "message": "CommandDescriptor",
+      "input": "{\"title\":\"a\",\"title\":\"a\"}",
+      "code": "RRS-E0003",
+      "path": "#/title"
+    }
+  ]
+}
