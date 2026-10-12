@@ -92,9 +92,9 @@ test-rust:
 # These tests run tests/support/fake_worker.py, a WorkerService in the cpu environment's Python (grpcio and
 # rastai_proto), which a plain `cargo test` on a CI runner doesn't have, so they are #[ignore]d there (layout
 # rust-node-gateway-proto.md 7.12). They need Linux: the node signals process groups and reads /proc.
-# rastai-node's job tests that go through Register, Hello and Control, with the cpu environment.
+# rastai-node's job and reattach tests that go through Register, Hello and Control, with the cpu environment.
 test-node-jobs: env-cpu
-    cargo test --locked -p rastai-node --test jobs -- --ignored
+    cargo test --locked -p rastai-node --test jobs --test reattach -- --ignored
 
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
 # tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml and

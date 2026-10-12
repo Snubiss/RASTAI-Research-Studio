@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::Path;
 
-use rastai_core::proto_json::{hardware_profile_to_json, job_spec_to_json};
+use rastai_core::proto_json::{hardware_profile_to_json, job_spec_from_json, job_spec_to_json};
 use rastai_proto::common::v1::{GpuInfo, HardwareProfile, LeaseClass, ResourceRequest};
 use rastai_proto::node::v1::{JobKind, JobSpec};
 use serde_json::{Value, json};
@@ -80,6 +80,43 @@ fn golden_hardware_profile() -> HardwareProfile {
 #[test]
 fn the_job_spec_golden_writes_its_json_golden() {
     assert_eq!(job_spec_to_json(&golden_job_spec()), golden_json(JOB_SPEC_GOLDEN));
+}
+
+// A restarted node reads job.json's job_spec back (M1-45): the golden decodes to the golden message, and a spec
+// written by job_spec_to_json reads back the same.
+#[test]
+fn the_job_spec_json_golden_reads_back_as_its_message() {
+    assert_eq!(job_spec_from_json(&golden_json(JOB_SPEC_GOLDEN)), Ok(golden_job_spec()));
+    let unset = JobSpec {
+        resources: Some(ResourceRequest::default()),
+        kind: 99,
+        ..JobSpec::default()
+    };
+    assert_eq!(job_spec_from_json(&job_spec_to_json(&unset)), Ok(unset));
+}
+
+// The mapping lets a writer put a 64-bit integer as a number and an enum as its number; a field of another type
+// reads as its default, and a value that isn't an object is no JobSpec.
+#[test]
+fn the_decode_takes_what_the_mapping_allows_and_defaults_the_rest() {
+    let written = json!({
+        "job_id": "job_a",
+        "kind": 4,
+        "resources": { "vram_bytes": 1024, "lease_class": "LEASE_CLASS_PINNED", "cpu_count": "8" },
+        "network_hosts": "not a list",
+        "plugin_id": 7
+    });
+    let spec = job_spec_from_json(&written).unwrap();
+    assert_eq!(spec.job_id, "job_a");
+    assert_eq!(spec.kind, 4);
+    let resources = spec.resources.unwrap();
+    assert_eq!(resources.vram_bytes, 1024);
+    assert_eq!(resources.lease_class, LeaseClass::Pinned as i32);
+    assert_eq!(resources.cpu_count, 8);
+    assert!(spec.network_hosts.is_empty());
+    assert_eq!(spec.plugin_id, "");
+    assert!(job_spec_from_json(&json!([1, 2])).is_err());
+    assert_eq!(job_spec_from_json(&json!({})), Ok(JobSpec::default()));
 }
 
 #[test]

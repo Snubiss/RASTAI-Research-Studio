@@ -7,7 +7,8 @@
 //! - A watch resumes after any `after_sequence`, also deep in a long log, where it starts from a kept position.
 //! - A live writer keeps the stream open through a torn tail until the frame is whole; once the writer is gone the
 //!   stream ends. "Live" is either a job in the node's table or a `job.json` whose process is alive (a job from
-//!   before a node restart). The tests use this test process as that writer, through its own `job.json`.
+//!   before a node restart). The tests write the log themselves, and a stand-in process that leads its own process
+//!   group, as a worker does, is the writer the `job.json` names.
 //! - A node restart loses and repeats nothing: the new node streams exactly the records after the daemon's ack.
 //! - A job's stdout and stderr lines arrive over `WatchLive`, and a full live queue drops its oldest event.
 //!
@@ -22,7 +23,9 @@ mod on_linux {
     use std::collections::BTreeMap;
     use std::fs;
     use std::io::Write;
+    use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
+    use std::process::{Child, Command};
     use std::time::{Duration, Instant};
 
     use rastai_core::ids::{IdPrefix, new_id};
@@ -121,6 +124,7 @@ exec sleep 60
         options.jobs = JobOptions {
             worker_register_timeout: WAIT_LIMIT * 2,
             stop_grace: WAIT_LIMIT,
+            host_reconnect_timeout: WAIT_LIMIT * 2,
             environments: vec![JobEnvironment {
                 environment_id: ENVIRONMENT_ID.to_string(),
                 folder: environment_folder,
@@ -187,29 +191,38 @@ exec sleep 60
 
     // ---- This test process as the run's writer ----
 
-    /// Marks this test process as the run's live writer, as a job from before a node restart is.
-    fn become_live_writer(paths: &DataPaths, run_id: &str) {
-        let me = read_process_identity(std::process::id()).unwrap();
+    /// The run's live writer, as a job from before a node restart is: a stand-in process leading its own group, named
+    /// by the run's `job.json`. It is killed and reaped when the test ends it or drops it.
+    struct LiveWriter {
+        process: Child,
+    }
+
+    impl Drop for LiveWriter {
+        fn drop(&mut self) {
+            let _ = self.process.kill();
+            let _ = self.process.wait();
+        }
+    }
+
+    fn become_live_writer(paths: &DataPaths, run_id: &str) -> LiveWriter {
+        let process = Command::new("sleep").arg("600").process_group(0).spawn().unwrap();
+        let identity = read_process_identity(process.id()).unwrap();
         let job_file = JobFile {
             job_id: new_id(IdPrefix::Job).unwrap(),
             run_id: run_id.to_string(),
-            pid: me.pid,
-            process_group_id: me.process_group_id,
-            process_start_ticks: me.start_ticks,
-            boot_id: me.boot_id,
+            pid: identity.pid,
+            process_group_id: identity.process_group_id,
+            process_start_ticks: identity.start_ticks,
+            boot_id: identity.boot_id,
             ..JobFile::default()
         };
         write_job_file(&run_dir(paths, run_id), &job_file).unwrap();
+        LiveWriter { process }
     }
 
-    /// The writer has ended: its job.json gets its final state.
-    fn end_live_writer(paths: &DataPaths, run_id: &str) {
-        let job_file = JobFile {
-            run_id: run_id.to_string(),
-            final_state: "succeeded".to_string(),
-            ..JobFile::default()
-        };
-        write_job_file(&run_dir(paths, run_id), &job_file).unwrap();
+    /// The writer has ended: its process is gone.
+    fn end_live_writer(writer: LiveWriter) {
+        drop(writer);
     }
 
     // ---- Watching ----
@@ -369,7 +382,7 @@ exec sleep 60
         let run_id = new_id(IdPrefix::Run).unwrap();
         // The log doesn't exist yet: a live writer is waited for.
         fs::create_dir_all(run_dir(&node.paths, &run_id)).unwrap();
-        become_live_writer(&node.paths, &run_id);
+        let live_writer = become_live_writer(&node.paths, &run_id);
         let mut stream = watch(&mut node, &run_id, 0).await;
         assert!(stays_quiet(&mut stream).await);
 
@@ -391,7 +404,7 @@ exec sleep 60
         assert_eq!(next_record(&mut stream).await.unwrap(), third);
 
         // The writer is gone: the stream ends after its last record.
-        end_live_writer(&node.paths, &run_id);
+        end_live_writer(live_writer);
         assert_eq!(read_to_end(&mut stream).await, Vec::<EventRecord>::new());
     }
 
@@ -449,7 +462,7 @@ exec sleep 60
         let mut node = start_test_node(TALKING_WORKER).await;
         let run_id = new_id(IdPrefix::Run).unwrap();
         let mut writer = new_run_log(&node.paths, &run_id);
-        become_live_writer(&node.paths, &run_id);
+        let live_writer = become_live_writer(&node.paths, &run_id);
         append_metrics(&mut writer, &run_id, 1, 1500);
         let mut stream = watch(&mut node, &run_id, 0).await;
         let acknowledged = take_records(&mut stream, 1000).await;
@@ -467,7 +480,7 @@ exec sleep 60
         let mut after_restart = take_records(&mut resumed, 600).await;
         append_metrics(&mut writer, &run_id, 1601, 1610);
         after_restart.extend(take_records(&mut resumed, 10).await);
-        end_live_writer(&node.paths, &run_id);
+        end_live_writer(live_writer);
         after_restart.extend(read_to_end(&mut resumed).await);
         assert_eq!(sequences(&after_restart), (1001..=1610).collect::<Vec<u64>>());
         let all_records = records_in(&run_events_log_path(&node.paths, &run_id));

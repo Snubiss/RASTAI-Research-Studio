@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
+use crate::jobs::signals::ProcessIdentity;
+
 /// The file's name in the run folder.
 pub const JOB_FILE: &str = "job.json";
 /// The name the next version is written under before the rename.
@@ -57,6 +59,22 @@ pub struct JobFile {
 /// `<run folder>/job.json`.
 pub fn job_file_path(run_folder: &Path) -> PathBuf {
     run_folder.join(JOB_FILE)
+}
+
+/// The worker's process as the file records it, or None when it records none a job could have: no pid yet (the
+/// node stopped between the first write and the spawn), or a pid that doesn't lead its own process group. Every
+/// worker leads its own group (`setsid`, spawn.rs), and the node signals the whole group, so a file that names some
+/// other group's member must never make the node signal that group.
+pub fn recorded_process(job_file: &JobFile) -> Option<ProcessIdentity> {
+    if job_file.pid == 0 || job_file.pid != job_file.process_group_id {
+        return None;
+    }
+    Some(ProcessIdentity {
+        pid: job_file.pid,
+        process_group_id: job_file.process_group_id,
+        start_ticks: job_file.process_start_ticks,
+        boot_id: job_file.boot_id.clone(),
+    })
 }
 
 /// Writes `job.json` into `run_folder` as a whole: a temporary file (mode 0600, synced to disk), renamed over the
@@ -252,6 +270,19 @@ mod tests {
         write_job_file(&folder.path, &sample()).unwrap();
         let metadata = fs::metadata(job_file_path(&folder.path)).unwrap();
         assert_eq!(metadata.permissions().mode() & 0o777, JOB_FILE_MODE);
+    }
+
+    // A worker leads its own group; a file naming no pid, or a pid in another group, names no process to check.
+    #[test]
+    fn only_a_group_leader_is_a_recorded_process() {
+        let recorded = recorded_process(&sample()).unwrap();
+        assert_eq!((recorded.pid, recorded.start_ticks), (4242, 987_654));
+        let member_of_another_group = JobFile {
+            process_group_id: 1,
+            ..sample()
+        };
+        assert_eq!(recorded_process(&member_of_another_group), None);
+        assert_eq!(recorded_process(&JobFile::default()), None);
     }
 
     #[test]

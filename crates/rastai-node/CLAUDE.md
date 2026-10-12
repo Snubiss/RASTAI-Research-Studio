@@ -25,6 +25,12 @@ The node agent. It runs embedded in the daemon (its own tokio runtime, serving `
   `NodeState.jobs`; `job.json` is written only after that, and the run is given back only after the terminal
   `job.json` is written (contracts 9.1). A group signal goes through the `kill` tool, and only after the pid's boot
   id, start ticks and process group were checked again (`signals.rs`).
+- **Reattach before worker-host.sock.** `reattach_jobs` enters every live job from its `job.json` before the socket a
+  worker re-registers on exists. A `job.json` names a live process only when the pid leads its own group and still
+  runs with the recorded boot id and start ticks (`recorded_process`, `is_running_process`); anything else is gone
+  and is never signalled. A gone job whose `stderr.log` ends with `RRS-J3006` takes nothing from the run's log.
+- **State changes ask for a heartbeat.** Whoever changes a job's state calls `request_heartbeat` (it only wakes the
+  loop); the daemon learns job states from heartbeats alone.
 - **Unix first, Windows compiles.** Socket and file-mode code sits behind `#[cfg(unix)]`; `cargo clippy --target
   x86_64-pc-windows-gnu -p rastai-node` must stay clean. The integration tests are Unix only.
 - **Fixtures are recordings.** `fixtures/hardware/` holds what real machines printed. A new case says in its README

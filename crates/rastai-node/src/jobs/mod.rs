@@ -4,6 +4,7 @@
 pub mod exit_cause;
 pub mod job_file;
 pub mod log_lines;
+pub mod reattach;
 pub mod signals;
 pub mod spawn;
 pub mod supervisor;

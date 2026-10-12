@@ -25,7 +25,9 @@
 //! record it needs and reads on from there, so a daemon that reconnects deep into a long run doesn't make the node read
 //! the whole log again. Frames between that position and `after_sequence` go through the same reader (checksum and
 //! sequence checked) and are dropped. After a node restart the table is empty and the first watch reads from the
-//! file header.
+//! file header. A finished run's positions are forgotten: when its job ends (supervisor.rs), and when a watch ends
+//! having seen the writer gone, since that watch may have kept positions after the job ended. A later watch of the
+//! run reads from the header, which is right for a log nobody appends to any more.
 //!
 //! The reads are blocking file work, so they run on tokio's blocking threads, a batch at a time; the waits don't hold a
 //! thread at all.
@@ -72,9 +74,9 @@ struct LogPosition {
     offset: u64,
 }
 
-/// The node's read positions in each run's log, in memory only (layout 7.5). A run's positions stay until the node
-/// restarts: a few dozen bytes per run, but a node that lives through very many runs keeps them all. Forgetting a
-/// finished run's positions belongs with reattach (M1-45), which knows when a run is done for good.
+/// The node's read positions in each run's log, in memory only (layout 7.5). A run's positions stay while its writer
+/// lives; once the run is finished they are forgotten, so a node that lives through very many runs keeps only the
+/// live ones.
 #[derive(Debug, Default)]
 pub struct RunEventPositions {
     /// Per run, the position after every `POSITION_MARK_EVERY`th record, oldest first.
@@ -96,6 +98,8 @@ struct RunTail {
 struct TailRead {
     records: Vec<EventRecord>,
     next: NextStep,
+    /// Whether the run's writer was alive when this read began.
+    writer_alive: bool,
 }
 
 enum NextStep {
@@ -111,48 +115,62 @@ enum NextStep {
 
 /// Streams the records of `run_id`'s log after `after_sequence` to `sender` until the writer is gone and its last
 /// frame was sent, the log turns out damaged (then the node's report is the last record), or the daemon closes the
-/// stream. Never an error: what goes wrong in the log is the report.
+/// stream. Never an error: what goes wrong in the log is the report. A watch that ends after it saw the writer gone
+/// forgets the run's positions: the run is finished.
 pub async fn watch_run_events(
     state: &Arc<NodeState>,
     run_id: &str,
     after_sequence: u64,
     sender: mpsc::Sender<EventRecord>,
 ) {
-    let log_path = run_events_log_path(&state.paths, run_id);
     if !id_has_prefix(run_id, IdPrefix::Run) {
         // The id becomes a folder name, so it must be a real id (contracts 8.6), never a path. A wrong id is the
         // daemon's request refused, not a log that failed to read.
         let _ = sender.send(node_report(run_id, run_id_refused(run_id))).await;
         return;
     }
+    let writer_seen_gone = stream_run_events(state, run_id, after_sequence, &sender).await;
+    if writer_seen_gone {
+        forget_run_positions(state, run_id);
+    }
+}
+
+/// The loop of `watch_run_events`. True when its last read saw the run's writer gone.
+async fn stream_run_events(
+    state: &Arc<NodeState>,
+    run_id: &str,
+    after_sequence: u64,
+    sender: &mpsc::Sender<EventRecord>,
+) -> bool {
     let mut tail = RunTail {
         run_id: run_id.to_string(),
-        log_path,
+        log_path: run_events_log_path(&state.paths, run_id),
         after_sequence,
         reader: None,
     };
     loop {
         let Some((returned_tail, read)) = read_in_background(state, tail).await else {
-            return;
+            return false;
         };
         tail = returned_tail;
+        let writer_seen_gone = !read.writer_alive;
         for record in read.records {
             if sender.send(record).await.is_err() {
-                return;
+                return writer_seen_gone;
             }
         }
         match read.next {
             NextStep::ReadAgain => {}
             NextStep::Wait => {
-                if !wait_unless_closed(&sender).await {
-                    return;
+                if !wait_unless_closed(sender).await {
+                    return writer_seen_gone;
                 }
             }
-            NextStep::Finished => return,
+            NextStep::Finished => return writer_seen_gone,
             NextStep::Damaged(found) => {
                 log_diagnostic(&found, &[("run_id", run_id)]);
                 let _ = sender.send(node_report(run_id, found)).await;
-                return;
+                return writer_seen_gone;
             }
         }
     }
@@ -210,11 +228,18 @@ fn remember_position(positions: &mut RunEventPositions, run_id: &str, position: 
     }
 }
 
-/// Forgets a run's positions, for a log that is no longer the file they were read from.
-fn forget_positions(state: &NodeState, run_id: &str) {
+/// Forgets a run's positions: its log is no longer the file they were read from, or the run is finished.
+pub(crate) fn forget_run_positions(state: &NodeState, run_id: &str) {
     let mut positions = lock_positions(state);
     positions.marks.remove(run_id);
     positions.last_read.remove(run_id);
+}
+
+/// Whether the node keeps any position for the run: what the tests of forgetting a finished run's positions check.
+#[cfg(test)]
+pub(crate) fn run_has_positions(state: &NodeState, run_id: &str) -> bool {
+    let positions = lock_positions(state);
+    positions.marks.contains_key(run_id) || positions.last_read.contains_key(run_id)
 }
 
 /// One `read_frames` on a blocking thread. None when that thread failed, which ends the watch.
@@ -242,6 +267,7 @@ fn read_frames(state: &NodeState, tail: &mut RunTail) -> TailRead {
     let mut read = TailRead {
         records: Vec::new(),
         next: NextStep::ReadAgain,
+        writer_alive,
     };
     if tail.reader.is_none() {
         match open_tail_reader(state, tail) {
@@ -320,7 +346,7 @@ fn open_tail_reader(state: &NodeState, tail: &RunTail) -> Result<Option<EventLog
             open_event_log_at(&tail.log_path, position.offset, position.next_sequence)
         }
         Some(_) => {
-            forget_positions(state, &tail.run_id);
+            forget_run_positions(state, &tail.run_id);
             open_event_log(&tail.log_path)
         }
         None => open_event_log(&tail.log_path),

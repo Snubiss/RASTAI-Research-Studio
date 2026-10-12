@@ -20,6 +20,7 @@ mod on_linux {
     use std::collections::BTreeSet;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -157,6 +158,7 @@ exit "$(cat "$run_folder/exit-code")"
         options.jobs = JobOptions {
             worker_register_timeout: register_timeout,
             stop_grace,
+            host_reconnect_timeout: LONG_TIMEOUT,
             environments: vec![JobEnvironment {
                 environment_id: ENVIRONMENT_ID.to_string(),
                 folder: environment_folder,
@@ -766,8 +768,14 @@ exit "$(cat "$run_folder/exit-code")"
         let run_id = new_run_id();
         let folder = run_folder(&node, &run_id);
         fs::create_dir_all(&folder).unwrap();
-        // This test's own process stands in for the live worker; the node must never signal it.
-        let alive = read_process_identity(std::process::id()).unwrap();
+        // A stand-in process leading its own group, as a worker does, is the live worker; the node must never
+        // signal it.
+        let mut stand_in = std::process::Command::new("sleep")
+            .arg("600")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let alive = read_process_identity(stand_in.id()).unwrap();
         let mut earlier = JobFile {
             job_id: "job_from_before_the_restart".to_string(),
             run_id: run_id.clone(),
@@ -792,6 +800,12 @@ exit "$(cat "$run_folder/exit-code")"
         let admitted = job_spec(&run_id);
         assert_eq!(start_job(&mut node, admitted.clone()).await.state(), JobState::Starting);
         kill_and_wait(&mut node, &admitted.job_id).await;
+        assert!(
+            read_process_identity(stand_in.id()).is_some(),
+            "the stand-in was never signalled"
+        );
+        stand_in.kill().unwrap();
+        stand_in.wait().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
