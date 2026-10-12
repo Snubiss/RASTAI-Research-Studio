@@ -2484,7 +2484,9 @@ pub async fn record_daemon_event(server: &Server, record: EventRecord) -> Result
 // indexing/run_tail.rs: the node a run's records come from. The node links (M1-47) implement it over
 // NodeService.WatchRunEvents; tests use a fake node. The channel closes when the node ends the stream; an Err item
 // means the stream broke, and the tail itself watches again after the ack (1 s doubling to 30 s): reconnecting to the
-// node is the node link's job, re-watching a run is the tail's.
+// node is the node link's job, re-watching a run is the tail's. A source is one long-lived object per node that
+// survives reconnects, never one per connection: a tail keeps its claim and re-watches through the source it started
+// with, so a new object per connection would leave the run skipped and the old tail retrying a dead link.
 pub trait RunEventSource: Send + Sync {
     fn node_id(&self) -> &str;
     fn is_remote(&self) -> bool;                                                 // remote runs get a daemon mirror

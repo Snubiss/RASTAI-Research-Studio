@@ -78,6 +78,9 @@ const CODE_EVENT_LOG_CORRUPT: &str = "RRS-S2002";
 const CODE_RUN_LOG_RECORD_REFUSED: &str = "RRS-S2004";
 
 /// The node a run's records come from. M1-47's node links implement it over `NodeService.WatchRunEvents`.
+/// A source is one long-lived object per node that survives reconnects, never one per connection: a tail keeps its
+/// claim and re-watches through the source it started with, so a source made per connection would leave the run
+/// skipped by `start_run_tails` and the old tail retrying a dead link.
 pub trait RunEventSource: Send + Sync {
     /// The node's id, as `runs.node_id` holds it.
     fn node_id(&self) -> &str;
