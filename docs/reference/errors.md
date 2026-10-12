@@ -1170,6 +1170,15 @@ Source: `catalog/errors/RRS-S.json`.
 - **In plain words:** Some entries are missing from a run's log.
 - **Fix:** Report the problem with a bundle of the run.
 
+<a id="rrs-s2004"></a>
+
+### RRS-S2004: Event log record refused: a run's log may not carry it
+
+- **Severity:** error
+- **Message:** The event log of run {run_id} has a record at sequence {sequence} that a run's log may not carry: {reason}. The run's records were indexed up to the one before it.
+- **In plain words:** A run's log holds an entry the run isn't allowed to write, so Rastai stopped reading that log there.
+- **Fix:** Report the problem with a bundle of the run.
+
 <a id="rrs-s3001"></a>
 
 ### RRS-S3001: Not enough free disk space

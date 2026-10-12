@@ -3383,6 +3383,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-S2004",
+        severity: Severity::Error,
+        title: "Event log record refused: a run's log may not carry it",
+        message: "The event log of run {run_id} has a record at sequence {sequence} that a run's log may not carry: {reason}. The run's records were indexed up to the one before it.",
+        basic_text: "A run's log holds an entry the run isn't allowed to write, so Rastai stopped reading that log there.",
+        fix_text: "Report the problem with a bundle of the run.",
+        fix_command_id: "",
+        docs_anchor: "rrs-s2004",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-S3001",
         severity: Severity::Error,
         title: "Not enough free disk space",

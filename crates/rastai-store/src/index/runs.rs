@@ -68,6 +68,7 @@ const UPSERT_CHECKPOINT: &str = "INSERT INTO checkpoints (checkpoint_id, run_id,
 const CLEAR_OTHER_BEST_CHECKPOINTS: &str =
     "UPDATE checkpoints SET is_best = 0 WHERE run_id = ?1 AND checkpoint_id <> ?2";
 const SET_CHECKPOINT_PINNED: &str = "UPDATE checkpoints SET pinned = ?2 WHERE checkpoint_id = ?1";
+const SELECT_CHECKPOINT_RUN_ID: &str = "SELECT run_id FROM checkpoints WHERE checkpoint_id = ?1";
 
 const UPSERT_JOB: &str = "INSERT INTO jobs (job_id, run_id, node_id, kind, state, pid, process_group_id, exit_code,
         error_code)
@@ -296,6 +297,19 @@ pub(crate) fn upsert_checkpoint(
         execute(transaction, CLEAR_OTHER_BEST_CHECKPOINTS, &parameters)?;
     }
     Ok(())
+}
+
+/// The run a checkpoint belongs to, or `None` when the index has no such checkpoint. The indexer reads it before a
+/// run's log saves a checkpoint, so a job can't take over another run's checkpoint id (indexer.rs).
+pub(crate) fn read_checkpoint_run_id(
+    transaction: &SqliteTransaction<'_>,
+    checkpoint_id: &str,
+) -> Result<Option<String>, StoreError> {
+    let rows = query_rows_in_transaction(transaction, SELECT_CHECKPOINT_RUN_ID, &[text_value(checkpoint_id)])?;
+    match rows.first() {
+        Some(row) => Ok(Some(read_text(row, 0)?)),
+        None => Ok(None),
+    }
 }
 
 pub(crate) fn set_checkpoint_pinned(

@@ -18,6 +18,7 @@ const CODE_BLOB_HASH_MISMATCH: &str = "RRS-S1001";
 const CODE_BLOB_MISSING: &str = "RRS-S1002";
 const CODE_EVENT_LOG_CORRUPT: &str = "RRS-S2002";
 const CODE_EVENT_SEQUENCE_GAP: &str = "RRS-S2003";
+const CODE_RUN_LOG_RECORD_REFUSED: &str = "RRS-S2004";
 const CODE_NOT_ENOUGH_FREE_SPACE: &str = "RRS-S3001";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
@@ -62,6 +63,16 @@ pub enum StoreError {
         path: PathBuf,
         expected_sequence: u64,
         found_sequence: u64,
+    },
+    /// A record in run `run_id`'s log that a run's log may not carry (contracts 7.1): it names another run, its
+    /// payload is an event only the daemon's log carries, or it would take over another run's checkpoint or rewrite
+    /// an existing artifact. The job writes its run's log, so the log is untrusted: the record and the rest of its
+    /// batch are not applied and the ack stays before it. The log counts as damaged at `sequence`, as at a corrupt
+    /// frame. `reason` says which rule it broke.
+    RunLogRecordRefused {
+        run_id: String,
+        sequence: u64,
+        reason: String,
     },
     /// Opening or reading an event log failed: a missing file, a permission, an I/O error. `reason` keeps the
     /// operating system's words. The store's read code, `RRS-S0006`, like `DatabaseReadFailed`: nothing was written,
@@ -110,6 +121,7 @@ impl StoreError {
             StoreError::WriterStopped => CODE_WRITE_FAILED,
             StoreError::EventLogCorrupt { .. } => CODE_EVENT_LOG_CORRUPT,
             StoreError::EventSequenceGap { .. } => CODE_EVENT_SEQUENCE_GAP,
+            StoreError::RunLogRecordRefused { .. } => CODE_RUN_LOG_RECORD_REFUSED,
             StoreError::EventLogReadFailed { .. } => CODE_READ_FAILED,
             StoreError::EventLogWriteFailed { .. } => CODE_WRITE_FAILED,
             StoreError::BlobHashMismatch { .. } => CODE_BLOB_HASH_MISMATCH,
@@ -218,6 +230,11 @@ mod tests {
             expected_sequence: 3,
             found_sequence: 4,
         };
+        let refused = StoreError::RunLogRecordRefused {
+            run_id: "run_a".to_string(),
+            sequence: 2,
+            reason: "r".to_string(),
+        };
         let read_failed = StoreError::EventLogReadFailed {
             path: path.clone(),
             reason: "r".to_string(),
@@ -228,6 +245,7 @@ mod tests {
         };
         assert_eq!(corrupt.code(), "RRS-S2002");
         assert_eq!(gap.code(), "RRS-S2003");
+        assert_eq!(refused.code(), "RRS-S2004");
         assert_eq!(read_failed.code(), "RRS-S0006");
         assert_eq!(write_failed.code(), "RRS-S3005");
     }

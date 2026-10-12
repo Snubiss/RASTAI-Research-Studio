@@ -340,6 +340,7 @@ RRS_S1002 = "RRS-S1002"
 RRS_S2001 = "RRS-S2001"
 RRS_S2002 = "RRS-S2002"
 RRS_S2003 = "RRS-S2003"
+RRS_S2004 = "RRS-S2004"
 RRS_S3001 = "RRS-S3001"
 RRS_S3002 = "RRS-S3002"
 RRS_S3003 = "RRS-S3003"
@@ -3774,6 +3775,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Report the problem with a bundle of the run.",
         fix_command_id="",
         docs_anchor="rrs-s2003",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_S2004,
+        severity="error",
+        title="Event log record refused: a run's log may not carry it",
+        message="The event log of run {run_id} has a record at sequence {sequence} that a run's log may not carry: {reason}. The run's records were indexed up to the one before it.",
+        basic_text="A run's log holds an entry the run isn't allowed to write, so Rastai stopped reading that log there.",
+        fix_text="Report the problem with a bundle of the run.",
+        fix_command_id="",
+        docs_anchor="rrs-s2004",
         retired=False,
     ),
     CatalogEntry(

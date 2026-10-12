@@ -10,6 +10,13 @@
 //!   (`runs.acked_sequence` or `log_cursors.acked_sequence`). A crash before the commit loses both; a re-sent batch
 //!   after it changes nothing, and an older one can't move the ack back.
 //!
+//! A run's log is untrusted (contracts 7.1): the job writes it (worker and plugin code), and a remote run's log is
+//! mirrored from another machine. So `apply_run_events` checks every record before it writes a row: the record must
+//! name the log's run, its payload must be one a run's log may carry (`run_log_may_carry`), and it may not take over
+//! another run's checkpoint or rewrite an existing artifact. A record that breaks a rule is refused with `RRS-S2004`:
+//! nothing of its batch is applied, the ack stays before it, and the log counts as damaged there, as at a corrupt
+//! frame. The daemon's own log is the daemon's, so its records are applied as they are.
+//!
 //! The row a record makes is chosen by its payload, the typed `oneof` the event type names (contracts 7.3). A record
 //! without a payload, or one whose payload makes no rows (live state, plugin events), is acknowledged and skipped.
 //! Event types that have no payload message yet (`transfer.finished`, `download.finished`, `lineage.linked`,
@@ -27,14 +34,17 @@ use rastai_proto::events::v1::{
 };
 
 use crate::error::StoreError;
-use crate::index::artifacts::{CreatedArtifact, insert_lineage, set_artifact_pinned, upsert_artifact};
+use crate::index::artifacts::{
+    CreatedArtifact, artifact_differs, insert_lineage, set_artifact_pinned, upsert_artifact,
+};
 use crate::index::documents::set_document_hash;
 use crate::index::journal::{FinishedCommand, record_command_finished};
 use crate::index::kept_tables::{set_node_state, set_plugin_state};
 use crate::index::log_cursors::{read_log_cursor_for_writing, set_log_cursor};
 use crate::index::runs::{
-    JobStateUpdate, MetricValue, SavedCheckpoint, read_run_acked_sequence, replace_run_tags, set_checkpoint_pinned,
-    set_run_acked_sequence, set_run_pinned, set_run_state, upsert_checkpoint, upsert_job_state, upsert_run_metric,
+    JobStateUpdate, MetricValue, SavedCheckpoint, read_checkpoint_run_id, read_run_acked_sequence, replace_run_tags,
+    set_checkpoint_pinned, set_run_acked_sequence, set_run_pinned, set_run_state, upsert_checkpoint, upsert_job_state,
+    upsert_run_metric,
 };
 use crate::sqlite::SqliteTransaction;
 
@@ -77,7 +87,8 @@ pub fn apply_event_record(transaction: &SqliteTransaction<'_>, record: &EventRec
 
 /// `IndexWrite::ApplyRunEvents`: the records of one run's log after its ack, and the ack moved to the last one, in
 /// the caller's transaction. The run's row must exist (the daemon writes it when it starts the run), so the ack has
-/// somewhere to go; without it nothing is written.
+/// somewhere to go; without it nothing is written. A record the run's log may not carry fails the whole write with
+/// `RRS-S2004` (`check_run_log_record`); the caller sends the records before it again and stops there.
 pub(crate) fn apply_run_events(
     transaction: &SqliteTransaction<'_>,
     run_id: &str,
@@ -88,7 +99,12 @@ pub(crate) fn apply_run_events(
             reason: format!("no runs row for {run_id}, so its event records have no ack to move"),
         });
     };
-    let newest_sequence = apply_records_after(transaction, records, acked_sequence)?;
+    let mut newest_sequence = acked_sequence;
+    for record in records_after(records, acked_sequence) {
+        check_run_log_record(transaction, run_id, record)?;
+        apply_event_record(transaction, record)?;
+        newest_sequence = record.sequence;
+    }
     set_run_acked_sequence(transaction, run_id, newest_sequence)
 }
 
@@ -100,26 +116,144 @@ pub(crate) fn apply_daemon_events(
     records: &[EventRecord],
 ) -> Result<(), StoreError> {
     let acked_sequence = read_log_cursor_for_writing(transaction, log_name)?.unwrap_or(0);
-    let newest_sequence = apply_records_after(transaction, records, acked_sequence)?;
+    let mut newest_sequence = acked_sequence;
+    for record in records_after(records, acked_sequence) {
+        apply_event_record(transaction, record)?;
+        newest_sequence = record.sequence;
+    }
     set_log_cursor(transaction, log_name, newest_sequence)
 }
 
-/// Applies each record whose sequence is past the ack and returns the new ack. A record at or below it was indexed
-/// by an earlier commit (or earlier in this batch) and is skipped, so it is applied exactly once.
-fn apply_records_after(
-    transaction: &SqliteTransaction<'_>,
-    records: &[EventRecord],
-    acked_sequence: u64,
-) -> Result<u64, StoreError> {
+/// The records past the ack, in log order. A record at or below the ack was indexed by an earlier commit (or earlier
+/// in this batch) and is skipped, so each one is applied exactly once.
+fn records_after(records: &[EventRecord], acked_sequence: u64) -> Vec<&EventRecord> {
+    let mut newer = Vec::new();
     let mut newest_sequence = acked_sequence;
     for record in records {
         if record.sequence <= newest_sequence {
             continue;
         }
-        apply_event_record(transaction, record)?;
+        newer.push(record);
         newest_sequence = record.sequence;
     }
-    Ok(newest_sequence)
+    newer
+}
+
+/// Refuses, with `RRS-S2004`, a record that run `run_id`'s log may not carry: one that names another run, one whose
+/// payload only the daemon's log carries, a checkpoint id another run owns, or an artifact that exists with other
+/// contents. Each would let the job change rows outside its own run.
+fn check_run_log_record(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    record: &EventRecord,
+) -> Result<(), StoreError> {
+    if record.run_id != run_id {
+        let reason = format!("it names run {:?}", record.run_id);
+        return Err(refused_record(run_id, record, reason));
+    }
+    let Some(payload) = record.payload.as_ref().and_then(|payload| payload.payload.as_ref()) else {
+        return Ok(());
+    };
+    if !run_log_may_carry(payload) {
+        let reason = format!(
+            "{} is an event only the daemon's log carries",
+            payload_event_type(payload)
+        );
+        return Err(refused_record(run_id, record, reason));
+    }
+    match payload {
+        Payload::CheckpointSaved(checkpoint) => check_checkpoint_owner(transaction, run_id, record, checkpoint),
+        Payload::ArtifactCreated(artifact) => check_artifact_unchanged(transaction, run_id, record, artifact),
+        _ => Ok(()),
+    }
+}
+
+/// The payloads a run's log may carry (contracts 7.1): what the worker, a plugin's code in the job and the chain
+/// driver write. Every other payload is the daemon's (tags, pins, node, plugin and document states, finished
+/// commands), the node's (job states, which reach the daemon by heartbeat and its own log) or ephemeral (progress,
+/// log lines and heartbeats are never written to a log).
+fn run_log_may_carry(payload: &Payload) -> bool {
+    match payload {
+        Payload::RunStateChanged(_)
+        | Payload::RunMetrics(_)
+        | Payload::CheckpointSaved(_)
+        | Payload::ArtifactCreated(_)
+        | Payload::DiagnosticReported(_)
+        | Payload::PluginEvent(_) => true,
+        Payload::JobStateChanged(_)
+        | Payload::JobProgress(_)
+        | Payload::JobLogLine(_)
+        | Payload::RunTagsChanged(_)
+        | Payload::PinChanged(_)
+        | Payload::NodeHeartbeat(_)
+        | Payload::NodeStateChanged(_)
+        | Payload::DocumentChanged(_)
+        | Payload::CommandFinished(_)
+        | Payload::PluginStateChanged(_) => false,
+    }
+}
+
+/// A checkpoint id the index already has for another run is refused: the upsert would move it to this run.
+fn check_checkpoint_owner(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    record: &EventRecord,
+    checkpoint: &CheckpointSaved,
+) -> Result<(), StoreError> {
+    match read_checkpoint_run_id(transaction, &checkpoint.checkpoint_id)? {
+        Some(owner) if owner != run_id => {
+            let reason = format!("checkpoint {:?} belongs to run {owner:?}", checkpoint.checkpoint_id);
+            Err(refused_record(run_id, record, reason))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// An artifact the index already has with other contents is refused: the upsert would rewrite what another run, or
+/// the daemon, made.
+fn check_artifact_unchanged(
+    transaction: &SqliteTransaction<'_>,
+    run_id: &str,
+    record: &EventRecord,
+    artifact: &ArtifactCreated,
+) -> Result<(), StoreError> {
+    let created = created_artifact(record, artifact);
+    if artifact_differs(transaction, &created)? {
+        let reason = format!("artifact {:?} already exists with other contents", artifact.artifact_id);
+        return Err(refused_record(run_id, record, reason));
+    }
+    Ok(())
+}
+
+fn refused_record(run_id: &str, record: &EventRecord, reason: String) -> StoreError {
+    StoreError::RunLogRecordRefused {
+        run_id: run_id.to_string(),
+        sequence: record.sequence,
+        reason,
+    }
+}
+
+/// The event type a payload stands for (contracts 7.3), for the refusal's reason. The record's own `event_type` is
+/// the writer's word; the payload is what would make the rows.
+fn payload_event_type(payload: &Payload) -> &'static str {
+    match payload {
+        Payload::JobStateChanged(_) => "job.state_changed",
+        Payload::JobProgress(_) => "job.progress",
+        Payload::JobLogLine(_) => "job.log_line",
+        Payload::RunStateChanged(_) => "run.state_changed",
+        Payload::RunMetrics(_) => "run.metrics",
+        Payload::RunTagsChanged(_) => "run.tags_changed",
+        Payload::CheckpointSaved(_) => "checkpoint.saved",
+        Payload::ArtifactCreated(_) => "artifact.created",
+        Payload::PinChanged(_) => "pin.changed",
+        Payload::NodeHeartbeat(_) => "node.heartbeat",
+        Payload::NodeStateChanged(_) => "node.state_changed",
+        Payload::DocumentChanged(_) => "document.changed",
+        Payload::CommandFinished(_) => "command.finished",
+        Payload::PluginStateChanged(_) => "plugin.state_changed",
+        Payload::DiagnosticReported(_) => "diagnostic.reported",
+        Payload::PluginEvent(_) => "a plugin event",
+    }
 }
 
 /// `jobs`: state, exit code and error code. A record that names no known state changes nothing.
@@ -210,19 +344,24 @@ fn index_artifact(
     record: &EventRecord,
     artifact: &ArtifactCreated,
 ) -> Result<(), StoreError> {
-    let created = CreatedArtifact {
+    let created = created_artifact(record, artifact);
+    upsert_artifact(transaction, &created)?;
+    for parent in &artifact.parents {
+        insert_lineage(transaction, &parent.id, &artifact.artifact_id, &parent.relation)?;
+    }
+    Ok(())
+}
+
+/// The artifact row a record makes; its time is the record's.
+fn created_artifact<'a>(record: &EventRecord, artifact: &'a ArtifactCreated) -> CreatedArtifact<'a> {
+    CreatedArtifact {
         artifact_id: &artifact.artifact_id,
         kind: &artifact.kind,
         content_hash: &artifact.content_hash,
         size_bytes: artifact.size_bytes,
         home_node_id: &artifact.home_node_id,
         created_unix_ms: record.emitted_unix_ms,
-    };
-    upsert_artifact(transaction, &created)?;
-    for parent in &artifact.parents {
-        insert_lineage(transaction, &parent.id, &artifact.artifact_id, &parent.relation)?;
     }
-    Ok(())
 }
 
 /// `pinned` on the run, checkpoint or artifact the record names; another subject kind changes nothing.
