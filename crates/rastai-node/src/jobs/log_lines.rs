@@ -208,6 +208,7 @@ fn line_text(bytes: &[u8]) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::live::{live_subject_ids, take_live_event};
 
     struct TestFile {
         path: std::path::PathBuf,
@@ -216,6 +217,17 @@ mod tests {
     impl Drop for TestFile {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    /// A folder removed when the test ends, also when an assertion fails.
+    struct TestFolder {
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for TestFolder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
         }
     }
 
@@ -283,6 +295,85 @@ mod tests {
         assert_eq!(read.lines[1], "x".repeat(10));
         assert!(read.lines[2].ends_with("ok"));
         assert_eq!(read.next_offset, bytes.len() as u64);
+    }
+
+    /// A node state whose folders live under `folder`, with no hardware and no environments.
+    fn test_state(folder: &Path) -> NodeState {
+        use rastai_core::paths::DataPaths;
+        use rastai_core::settings::{default_settings, node_settings, resolve_settings};
+        use rastai_proto::common::v1::HardwareProfile;
+
+        use crate::hardware::system_hardware_sources;
+        use crate::identity::load_or_create_identity;
+        use crate::jobs::supervisor::default_job_options;
+        use crate::node::{NodeMode, NodeOptions, build_node_state};
+
+        let options = NodeOptions {
+            mode: NodeMode::Embedded,
+            paths: DataPaths {
+                config: folder.join("config"),
+                data: folder.join("data"),
+                cache: folder.join("cache"),
+                state: folder.join("state"),
+                runtime: folder.join("run"),
+            },
+            settings: node_settings(&resolve_settings(&[default_settings()])),
+            hardware_sources: system_hardware_sources(),
+            jobs: default_job_options(Vec::new()),
+        };
+        let identity = load_or_create_identity(&folder.join("node.key")).unwrap();
+        build_node_state(options, identity, HardwareProfile::default())
+    }
+
+    /// The stream and text of every `job.log_line` waiting on the hub, in the order a stream takes them.
+    fn take_log_lines(hub: &LiveHub) -> Vec<(i32, String)> {
+        let mut lines = Vec::new();
+        while let Some(event) = take_live_event(hub) {
+            if let Some(Payload::JobLogLine(line)) = event.payload {
+                lines.push((line.stream, line.text));
+            }
+        }
+        lines
+    }
+
+    // A job that has ended still has its last lines sent (a crash's traceback is usually the last thing it wrote),
+    // and only then is its queue closed. The table doesn't hold this job, so it has ended from the first look.
+    #[tokio::test]
+    async fn an_ended_job_has_its_last_lines_sent_then_its_queue_closed() {
+        let stdout = test_file("ended-stdout", b"step 1\nstep 2\n");
+        let stderr = test_file(
+            "ended-stderr",
+            b"Traceback (most recent call last):\nValueError: boom\n",
+        );
+        let folder = TestFolder {
+            path: std::env::temp_dir().join(format!("rastai-log-lines-{}-ended-state", std::process::id())),
+        };
+        std::fs::create_dir_all(&folder.path).unwrap();
+        let state = Arc::new(test_state(&folder.path));
+        let logs = JobLogs {
+            stdout_path: stdout.path.clone(),
+            stderr_path: stderr.path.clone(),
+            stdout_offset: 0,
+            stderr_offset: 0,
+        };
+        let followed = follow_job_logs(Arc::clone(&state), "job_ended".to_string(), logs);
+        tokio::time::timeout(Duration::from_secs(10), followed).await.unwrap();
+        // The queue is closed while its last lines wait, so a later event for the job is dropped.
+        publish_live_event(
+            &state.live,
+            log_line_event("job_ended", LogStream::Stdout, "late".to_string()),
+        );
+        let expected = vec![
+            (LogStream::Stdout as i32, "step 1".to_string()),
+            (LogStream::Stdout as i32, "step 2".to_string()),
+            (
+                LogStream::Stderr as i32,
+                "Traceback (most recent call last):".to_string(),
+            ),
+            (LogStream::Stderr as i32, "ValueError: boom".to_string()),
+        ];
+        assert_eq!(take_log_lines(&state.live), expected);
+        assert!(live_subject_ids(&state.live).is_empty());
     }
 
     #[test]

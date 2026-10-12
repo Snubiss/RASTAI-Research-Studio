@@ -11,7 +11,11 @@
 //!
 //! **Closed when the job ends.** Whoever feeds a job's events closes its subject after its last event (log_lines.rs
 //! does after the job's final read). A closed subject takes no new events while its last ones wait, and goes away once
-//! they are taken, so ended jobs leave nothing behind.
+//! they are taken, so ended jobs leave nothing behind once a stream has taken their events. Two limits, for the worker's
+//! `WatchLive` feed and reattach (M1-45) to settle: with no daemon watching, a closed subject's last events (up to
+//! `LIVE_QUEUE_CAPACITY` of them) wait until one does; and an event published after its subject was closed and taken
+//! opens the subject again, which nothing then closes. Today log_lines.rs is the only feeder and closes last, so the
+//! second can't happen.
 //!
 //! One daemon watches a node, so one stream takes the events. A second `WatchLive` would share them with the first.
 
@@ -42,7 +46,8 @@ struct LiveQueues {
 #[derive(Debug, Default)]
 struct SubjectQueue {
     events: VecDeque<LiveEvent>,
-    /// How many of this subject's events a full queue has dropped, for the log.
+    /// How many of this subject's events a full queue has dropped, which `dropped_live_events` reports. Nothing logs
+    /// them: a dropped log line or progress event is the expected cost of a slow daemon, not a fault.
     dropped: u64,
     closed: bool,
 }
@@ -131,6 +136,13 @@ fn next_subject_with_events(queues: &LiveQueues) -> Option<String> {
         }
     }
     None
+}
+
+/// The subjects the hub holds, open or closed with events waiting, for tests outside this file.
+#[cfg(test)]
+pub(crate) fn live_subject_ids(hub: &LiveHub) -> Vec<String> {
+    let queues = lock_queues(hub);
+    queues.subjects.keys().cloned().collect()
 }
 
 fn lock_queues(hub: &LiveHub) -> MutexGuard<'_, LiveQueues> {

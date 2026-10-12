@@ -17,7 +17,8 @@
 //! **Damage** stops the stream: a bad frame with more of the file after it (`RRS-S2002`), a sequence gap
 //! (`RRS-S2003`) or a log that can't be read (`RRS-S0006`). The records before it are sent, then the node's report:
 //! a `diagnostic.reported` record with sequence 0, which no log record has, so the daemon can't take it for one or
-//! acknowledge it (contracts 4.4). Nothing after the damage is guessed at.
+//! acknowledge it (contracts 4.4). Nothing after the damage is guessed at. A `run_id` that isn't a run id is refused
+//! the same way (`RRS-C0002`), before anything is read.
 //!
 //! **Positions.** `RunEventPositions` keeps, per run, where the frame of every `POSITION_MARK_EVERY`th sequence starts
 //! and where the last read ended, in memory. A watch opens the log at the nearest position at or before the first
@@ -71,7 +72,9 @@ struct LogPosition {
     offset: u64,
 }
 
-/// The node's read positions in each run's log, in memory only (layout 7.5).
+/// The node's read positions in each run's log, in memory only (layout 7.5). A run's positions stay until the node
+/// restarts: a few dozen bytes per run, but a node that lives through very many runs keeps them all. Forgetting a
+/// finished run's positions belongs with reattach (M1-45), which knows when a run is done for good.
 #[derive(Debug, Default)]
 pub struct RunEventPositions {
     /// Per run, the position after every `POSITION_MARK_EVERY`th record, oldest first.
@@ -117,9 +120,9 @@ pub async fn watch_run_events(
 ) {
     let log_path = run_events_log_path(&state.paths, run_id);
     if !id_has_prefix(run_id, IdPrefix::Run) {
-        // The id becomes a folder name, so it must be a real id (contracts 8.6), never a path.
-        let reason = format!("{run_id:?} isn't a run_ id, so no run log was read");
-        let _ = sender.send(node_report(run_id, read_failed(&reason))).await;
+        // The id becomes a folder name, so it must be a real id (contracts 8.6), never a path. A wrong id is the
+        // daemon's request refused, not a log that failed to read.
+        let _ = sender.send(node_report(run_id, run_id_refused(run_id))).await;
         return;
     }
     let mut tail = RunTail {
@@ -160,14 +163,30 @@ pub async fn watch_run_events(
 fn nearest_position(positions: &RunEventPositions, run_id: &str, after_sequence: u64) -> Option<LogPosition> {
     let first_needed = after_sequence.saturating_add(1);
     let mut best: Option<LogPosition> = None;
-    let marks = positions.marks.get(run_id).into_iter().flatten();
-    let last_read = positions.last_read.get(run_id);
-    for candidate in marks.chain(last_read) {
-        let fits = candidate.next_sequence <= first_needed;
-        let nearer = best.is_none_or(|found| candidate.next_sequence > found.next_sequence);
-        if fits && nearer {
-            best = Some(*candidate);
+    if let Some(marks) = positions.marks.get(run_id) {
+        for mark in marks {
+            best = nearer_fitting_position(best, *mark, first_needed);
         }
+    }
+    if let Some(last_read) = positions.last_read.get(run_id) {
+        best = nearer_fitting_position(best, *last_read, first_needed);
+    }
+    best
+}
+
+/// `candidate` when it starts at or before the frame of `first_needed` and later than `best`, else `best`.
+fn nearer_fitting_position(
+    best: Option<LogPosition>,
+    candidate: LogPosition,
+    first_needed: u64,
+) -> Option<LogPosition> {
+    let fits = candidate.next_sequence <= first_needed;
+    let nearer = match best {
+        Some(found) => candidate.next_sequence > found.next_sequence,
+        None => true,
+    };
+    if fits && nearer {
+        return Some(candidate);
     }
     best
 }
@@ -373,6 +392,12 @@ fn read_error_diagnostic(error: &StoreError) -> Diagnostic {
 
 fn read_failed(reason: &str) -> Diagnostic {
     diagnostic("RRS-S0006", &[("reason", reason)])
+}
+
+/// `RRS-C0002`: the daemon asked for a run id that isn't one.
+fn run_id_refused(run_id: &str) -> Diagnostic {
+    let found = format!("run_id {run_id:?}");
+    diagnostic("RRS-C0002", &[("found", &found), ("expected", "a run_ id")])
 }
 
 fn lock_positions(state: &NodeState) -> MutexGuard<'_, RunEventPositions> {

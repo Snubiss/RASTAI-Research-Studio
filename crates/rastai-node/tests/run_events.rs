@@ -328,7 +328,7 @@ exec sleep 60
         let mut stream = watch(&mut node, "../daemon", 0).await;
         let streamed = read_to_end(&mut stream).await;
         assert_eq!(streamed.len(), 1);
-        assert_eq!(report_code(&streamed[0], "../daemon"), "RRS-S0006");
+        assert_eq!(report_code(&streamed[0], "../daemon"), "RRS-C0002");
     }
 
     // ---- Resuming ----
