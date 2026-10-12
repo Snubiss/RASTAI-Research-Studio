@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1P01",
+  "plugin_id": "fixture_tools",
+  "display_name": "Fixture tools",
+  "version": "1.0.0",
+  "engines": {
+    "rastai": ">=0.1, <1"
+  },
+  "requires_capabilities": ["commands@1", "ui.panel@1"],
+  "contributes": {
+    "commands": [
+      {
+        "command_id": "fixture_tools.report.run",
+        "title": "Run the report",
+        "kind": "job",
+        "arguments_type": "ReportRunArgs",
+        "result_type": "ReportRunResult"
+      },
+      {
+        "command_id": "fixture_tools.refresh",
+        "title": "Refresh",
+        "summary": "Read the report again.",
+        "scope": "read",
+        "kind": "sync",
+        "arguments_type": "RefreshArgs",
+        "result_type": "RefreshResult",
+        "basic": true
+      }
+    ],
+    "panels": [
+      {
+        "panel_id": "fixture_tools.report",
+        "title": "Report",
+        "placement": "right"
+      }
+    ]
+  },
+  "permissions": ["commands:[read, plugin:fixture_tools]"],
+  "ui": {
+    "entry": "index.html",
+    "kind": "iframe"
+  }
+}

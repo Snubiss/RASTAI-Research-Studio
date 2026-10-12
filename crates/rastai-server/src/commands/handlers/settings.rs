@@ -7,6 +7,10 @@
 //! problem) and writes it back atomically (`write_config_file`). A file that doesn't parse is never overwritten: it is
 //! `RRS-C0009`, and the owner fixes it first. The environment and `--set` layers sit above both files, so a set key may
 //! still be overridden; the answer says which layer the value in effect comes from.
+//!
+//! Some keys are owner-only (contracts 11.1, threat model R27): each one later decides what the daemon runs or where
+//! it reads, writes and listens, so `system.admin` alone must not reach it. `settings.set` refuses them, and any key
+//! under them, to every principal but the owner with `RRS-C1005`, at either level and in a dry run too.
 
 // A refusal is a `Diagnostic`, the contract type every caller renders; it is larger than clippy's default for an
 // `Err`, and refusals are rare, so it is returned as it is rather than boxed.
@@ -17,6 +21,7 @@ use std::path::{Path, PathBuf};
 use rastai_core::commands::output::CommandOutput;
 use rastai_core::ids::{IdPrefix, new_id};
 use rastai_core::paths::user_settings_path;
+use rastai_core::principal::{Principal, PrincipalKind, principal_label};
 use rastai_core::settings::{ResolvedSettings, SettingsLayer, SettingsSource, default_settings, resolve_settings};
 use rastai_core::versions::APP_VERSION;
 use rastai_diag::diagnostic::{Diagnostic, Severity, diagnostic, diagnostic_at, has_errors};
@@ -51,7 +56,22 @@ const MIN_SET_KEY_SEGMENTS: usize = 2;
 const USER_LEVEL: &str = "user";
 const PROJECT_LEVEL: &str = "project";
 
+/// The keys only the owner may set (contracts 11.1): the program run for remote nodes, the folders whose plugins load
+/// as trusted code, the container engine the daemon drives, where it reads and writes, and where it listens.
+const OWNER_ONLY_SETTING_KEYS: &[&str] = &[
+    "nodes.ssh_binary",
+    "plugins.dev_paths",
+    "sandbox.engine_socket",
+    "storage.data_dir",
+    "hf.cache_dir",
+    "daemon.listen",
+];
+/// What `RRS-C1005` names as the needed scope of an owner-only key: no scope grants it.
+const OWNER_ONLY: &str = "owner";
+const SET_COMMAND_ID: &str = "settings.set";
+
 const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
+const CODE_SCOPE_NOT_GRANTED: &str = "RRS-C1005";
 const CODE_SETTINGS_FILE_BROKEN: &str = "RRS-C0009";
 const CODE_UNKNOWN_FIELD: &str = "RRS-E1003";
 const KEY_PATH: &str = "#/key";
@@ -122,6 +142,7 @@ pub(crate) async fn set(
     arguments: SettingsSetArgs,
 ) -> Result<CommandOutput, Vec<Diagnostic>> {
     let segments = set_key_segments(&arguments.key)?;
+    check_owner_only_key(context.principal, &arguments.key)?;
     let target = settings_target(context, &arguments.level)?;
     // Held while the file is read, changed and written, so two sets never lose one another's key. Nothing here waits.
     let mut daemon_settings = match context.server.settings.write() {
@@ -252,6 +273,31 @@ fn project_target(server: &Server, project_id: &str) -> Result<SettingsTarget, V
     Ok(SettingsTarget {
         path: Path::new(&project.path).join(SETTINGS_FILE_NAME),
         source: SettingsSource::Project(project.path),
+    })
+}
+
+/// `RRS-C1005` for an owner-only key, or a key under one, set by anyone but the owner.
+fn check_owner_only_key(caller: &Principal, key: &str) -> Result<(), Vec<Diagnostic>> {
+    if caller.kind == PrincipalKind::Owner || !is_owner_only_key(key) {
+        return Ok(());
+    }
+    let label = principal_label(caller);
+    let refusal = diagnostic_at(
+        CODE_SCOPE_NOT_GRANTED,
+        &[
+            ("command_id", SET_COMMAND_ID),
+            ("scope", OWNER_ONLY),
+            ("principal", &label),
+        ],
+        KEY_PATH,
+    );
+    Err(vec![refusal])
+}
+
+fn is_owner_only_key(key: &str) -> bool {
+    OWNER_ONLY_SETTING_KEYS.iter().any(|owner_only| {
+        let under = format!("{owner_only}{KEY_SEPARATOR}");
+        key == *owner_only || key.starts_with(&under)
     })
 }
 
@@ -446,6 +492,39 @@ mod tests {
             let refusal = set_key_segments(bad).unwrap_err();
             assert_eq!(refusal[0].code, CODE_INVALID_ARGUMENTS, "{bad}");
             assert_eq!(refusal[0].path, KEY_PATH, "{bad}");
+        }
+    }
+
+    #[test]
+    fn owner_only_keys_are_refused_to_everyone_but_the_owner() {
+        let admin = Principal {
+            kind: PrincipalKind::Token,
+            id: "tok_01J".to_string(),
+            scopes: vec![rastai_core::scopes::Scope::SystemAdmin],
+        };
+        let plugin = Principal {
+            kind: PrincipalKind::Plugin,
+            id: "acme".to_string(),
+            scopes: vec![rastai_core::scopes::Scope::SystemAdmin],
+        };
+        let owner = rastai_core::principal::owner_principal();
+        for key in OWNER_ONLY_SETTING_KEYS.iter().copied().chain(["plugins.dev_paths.0"]) {
+            for caller in [&admin, &plugin] {
+                let refusal = check_owner_only_key(caller, key).unwrap_err();
+                assert_eq!(refusal[0].code, CODE_SCOPE_NOT_GRANTED, "{key}");
+                assert_eq!(refusal[0].path, KEY_PATH, "{key}");
+                assert!(refusal[0].message.contains(OWNER_ONLY), "{}", refusal[0].message);
+            }
+            check_owner_only_key(&owner, key).unwrap();
+        }
+        // Keys that merely share a prefix are ordinary keys.
+        for key in [
+            "ui.theme",
+            "plugins.experimental_apis",
+            "daemon.listener_note",
+            "hf.offline",
+        ] {
+            check_owner_only_key(&admin, key).unwrap();
         }
     }
 

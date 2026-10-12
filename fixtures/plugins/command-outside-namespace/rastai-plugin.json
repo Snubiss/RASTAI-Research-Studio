@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1P05",
+  "plugin_id": "fixture_outside",
+  "display_name": "Command outside its namespace",
+  "version": "1.0.0",
+  "engines": {
+    "rastai": ">=0.1"
+  },
+  "requires_capabilities": ["commands@1"],
+  "contributes": {
+    "commands": [
+      {
+        "command_id": "fixture_outside.ok",
+        "title": "Fine",
+        "kind": "sync",
+        "arguments_type": "OkArgs",
+        "result_type": "OkResult"
+      },
+      {
+        "command_id": "settings.wipe",
+        "title": "Not its own",
+        "kind": "sync",
+        "arguments_type": "WipeArgs",
+        "result_type": "WipeResult"
+      }
+    ]
+  }
+}

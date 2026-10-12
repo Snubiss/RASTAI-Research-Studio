@@ -4,6 +4,7 @@
 //! This file is a list of `pub mod` lines (contracts 12.2).
 
 pub mod command;
+pub mod plugin;
 pub mod settings;
 pub mod system;
 pub mod token;

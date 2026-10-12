@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1P04",
+  "plugin_id": "model",
+  "display_name": "Takes a core area",
+  "version": "1.0.0",
+  "engines": {
+    "rastai": ">=0.1"
+  },
+  "requires_capabilities": ["commands@1"],
+  "contributes": {
+    "commands": [
+      {
+        "command_id": "model.load",
+        "title": "Load a model",
+        "kind": "sync",
+        "arguments_type": "LoadArgs",
+        "result_type": "LoadResult"
+      }
+    ]
+  }
+}

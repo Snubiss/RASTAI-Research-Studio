@@ -446,6 +446,10 @@ const PLUGIN_TRANSITIONS: &[(PluginState, PluginState)] = &[
     (PluginState::Installed, PluginState::Disabled),
     (PluginState::Failed, PluginState::Uninstalled),
     (PluginState::Incompatible, PluginState::Uninstalled),
+    // Every start checks an installed plugin again (platform flow 7.3): its engines, capabilities or manifest may no
+    // longer fit, and permissions it was never granted ask again.
+    (PluginState::Installed, PluginState::Incompatible),
+    (PluginState::Installed, PluginState::AwaitingTrust),
     // "Any → failed".
     (PluginState::Discovered, PluginState::Failed),
     (PluginState::Resolving, PluginState::Failed),
@@ -710,6 +714,8 @@ mod tests {
         "installed -> disabled",
         "failed -> uninstalled",
         "incompatible -> uninstalled",
+        "installed -> incompatible",
+        "installed -> awaiting_trust",
     ];
     const EVAL_RUN_CONTRACT: &[&str] = &[
         "created -> resolving",

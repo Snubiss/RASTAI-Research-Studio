@@ -3167,8 +3167,9 @@ pub struct NegotiationResult {
 pub fn available_capabilities(enabled_first_party: &[String]) -> Vec<AvailableCapability>
 pub fn negotiate_capabilities(manifest: &PluginManifest, available: &[AvailableCapability],
                               enabled_plugins: &[(String, Version)], granted_permissions: &[String]) -> NegotiationResult
-pub fn state_after_negotiation(result: &NegotiationResult, experimental_allowed: bool) -> PluginState
-pub fn negotiation_diagnostics(result: &NegotiationResult) -> Vec<Diagnostic>
+pub fn state_after_negotiation(result: &NegotiationResult, experimental_allowed: bool) -> PluginState   // Enabled: may load
+pub fn negotiation_diagnostics(manifest: &PluginManifest, result: &NegotiationResult,
+                               experimental_allowed: bool) -> Vec<Diagnostic>
 ```
 
 `negotiate_capabilities` is a pure function; `tests/plugin_host.rs` runs it over a table of manifests without touching disk.
@@ -3189,15 +3190,20 @@ pub fn negotiation_diagnostics(result: &NegotiationResult) -> Vec<Diagnostic>
 
 ```rust
 // plugin_host/load.rs
-pub struct LoadedPlugin { pub plugin_id: String, pub version: Version, pub source: PluginSource, pub folder: PathBuf,
-                          pub manifest: PluginManifest, pub state: PluginState, pub granted_permissions: Vec<String>,
-                          pub diagnostics: Vec<Diagnostic>, pub contribution_names: Vec<(String, String)>,
+pub struct LoadedPlugin { pub plugin_id: String, pub version: String, pub source: PluginSource, pub folder: PathBuf,
+                          pub manifest: Option<PluginManifest>,   // None when it couldn't be read: failed, RRS-P0001
+                          pub state: PluginState, pub granted_permissions: Vec<String>, pub content_hash: String,
+                          pub diagnostics: Vec<Diagnostic>, pub manifest_problems: Vec<Diagnostic>,
                           pub event_handlers: Vec<EventHandlerContribution> }   // manifest type from rastai-formats: event_type, command_id
 pub enum PluginSource { Preinstalled, Installed, Dev }
+pub struct PluginHost { pub plugins: Vec<LoadedPlugin>, pub state_changes: Vec<PluginStateChanged> }   // Server.plugins
 pub fn discover_plugins(server: &Server) -> Result<(), ServerError>   // discovery.rs: manifests and saved states into PluginHost; starts nothing
 pub async fn load_all_plugins(server: &Server)
 pub async fn load_plugin(server: &Server, plugin_id: &str) -> PluginState
 pub async fn unload_plugin(server: &Server, plugin_id: &str)       // removes commands, file types, catalog; stops the module
+pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState   // unload, disabled, then re-check the others
+pub fn check_module_isolation(plugin: &LoadedPlugin, namespaces_available: bool,
+                              release_content_hash: &str) -> Result<Vec<Diagnostic>, Diagnostic>   // contracts 8.8
 pub async fn forward_command(context: &CommandContext<'_>, arguments_json: &str) -> Result<CommandOutput, Vec<Diagnostic>>
 ```
 

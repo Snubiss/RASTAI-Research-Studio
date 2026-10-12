@@ -45,3 +45,10 @@ path = "fuzz_targets/safetensors_header.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "semver"
+path = "fuzz_targets/semver.rs"
+test = false
+doc = false
+bench = false
