@@ -1,6 +1,9 @@
 """WorkerJobEvents' metrics flusher (job_events.py; contracts 7.1; python layout 7.5; platform flow 6.2): batched
 run.metrics are fsynced within about a second even when the job emits nothing more, and an fsync that fails makes
 the job exit 4 instead of losing its metrics quietly.
+
+Not covered: log_lock around the flusher's flush_if_due. Removing it fails no test here, because a race between the
+job's append and the flusher's fsync can't be forced reliably; the lock is kept by review, not by a test.
 """
 
 import errno
