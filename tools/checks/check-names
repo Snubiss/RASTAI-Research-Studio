@@ -1,0 +1,520 @@
+#!/usr/bin/env python3
+"""check-names: the names the code has (schemas/names.json) against the registry in contracts.md, both ways
+(contracts 12.6, ADR-0038, layout rust-control-plane.md 2.8).
+
+- A name in names.json that contracts.md doesn't list in its place fails as unregistered.
+- A name contracts.md lists that names.json lacks fails as stale, unless a milestone marker covers it: (M<n>),
+  (L2), (Phase 2) or (Phase 3), right after the name, anywhere in its table row, or in its section's heading.
+- A name in both, or listed with a marker and not built yet, passes.
+
+Where contracts.md lists each kind (12.6): the first name in the first column of 2.1-2.3 and 15.1-15.3 (crates and
+packages), the schema ids of 5.2, the first column of 6.4 (commands), 7.3 (events) and 10.3 (error codes), the
+table-and-columns tables of 8.2 and 8.3, and the sections and keys of 11.2. A CLI verb is registered when it is the
+words of a 6.4 command id or is listed under CLI_MODE_WORDS or ALIASES in 15.1.
+
+How a cell is read: only backticked names outside parentheses count, and in a cell that lists names (8.2/8.3
+columns, 11.2 keys, 15.x names) only those before the notes, which start at the first ':', ';' or full stop outside
+backticks and parentheses. A marker in such a list cell covers only the name it follows; any other marker in a row
+covers the whole row. A heading or table that moves so this reader can't find it fails the check: the reader and
+contracts.md change together.
+
+Standard library only, like every check here.
+"""
+
+import json
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from repo_files import parse_root_argument, report
+
+CONTRACTS_FILE = "docs/architecture/contracts.md"
+NAMES_FILE = "schemas/names.json"
+NAMES_FORMAT_VERSION = 1
+
+# A milestone marker (contracts conventions): the whole parenthesized text, nothing else inside.
+MARKER = re.compile(r"\((?:M\d+|L2|Phase 2|Phase 3)\)")
+# The schema ids 5.2 lists for documents; `rastai.command.<command_id>/1` and shared types don't match.
+DOCUMENT_SCHEMA_ID = re.compile(r"rastai\.[a-z_]+/\d+")
+# Where the notes of a list cell begin, outside backticks and parentheses (12.6).
+NOTES_START = (":", ";", ".")
+# `lora{rank 16, alpha 32}` counts as `lora`, and `dev_paths[]` as `dev_paths` (12.6).
+NAME_DETAIL_START = ("{", "[")
+CLI_WORD_SEPARATOR = " "
+COMMAND_ID_SEPARATOR = "."
+# A CLI word writes a command id segment's `_` as `-` (contracts 6.1).
+SEGMENT_WORD_SEPARATOR = "_"
+CLI_DASH = "-"
+# The two lists of 15.1 that register the CLI's fixed words (contracts 12.6).
+CLI_LIST_NAMES = ("CLI_MODE_WORDS", "ALIASES")
+CLI_LISTS_HEADING = "### 15.1 "
+
+# The two databases, the sections that list their tables, and where the code keeps their migrations.
+DATABASES = {
+    "rastai.db": ("### 8.2 ", "crates/rastai-store/src/index/migrations/"),
+    "vault.db": ("### 8.3 ", "crates/rastai-store/src/vault/migrations/"),
+}
+TABLES_FIRST_HEADER = "Table"
+SETTINGS_HEADING = "### 11.2 "
+SETTINGS_FIRST_HEADER = "Section"
+SETTINGS_KEY_SEPARATOR = "."
+
+# Every kind of names.json but `tables` (which DATABASES covers), with where the code keeps it, for the
+# unregistered-name message: the file to look at besides contracts.
+CODE_SOURCES = {
+    "command_ids": "crates/rastai-core/src/commands/table.rs or plugins/*/rastai-plugin.json",
+    "cli_verbs": "crates/rastai-core/src/commands/naming.rs (CLI_MODE_WORDS, ALIASES) or a command id",
+    "event_types": "crates/rastai-core/src/event_types.rs",
+    "error_codes": "catalog/errors/ or plugins/*/catalog/",
+    "settings_keys": "the rastai.settings/1 description in crates/rastai-formats/src/documents/",
+    "document_schema_ids": "crates/rastai-formats/src/documents/",
+    "crates": "a Cargo.toml of the workspace",
+    "js_packages": "a package.json of the pnpm workspace",
+    "python_packages": "python/<project>/ or plugins/*/python/",
+}
+
+
+@dataclass(frozen=True)
+class Place:
+    """One table column of contracts.md that lists one kind of name."""
+
+    key: str  # the names.json key
+    label: str  # what one name is called in a message
+    heading: str  # the start of the section's heading line
+    first_header: str  # the first header cell of the tables to read in that section
+    column: int  # the cell that holds the names
+    first_name_only: bool = False
+    pattern: re.Pattern | None = None  # when set, only names that match it fully count
+
+
+PLACES = [
+    Place("crates", "crate", "### 2.1 ", "Crate", 0, first_name_only=True),
+    Place("crates", "crate", "### 15.1 ", "Crate", 0, first_name_only=True),
+    Place("python_packages", "Python package", "### 2.2 ", "Package", 0, first_name_only=True),
+    Place("python_packages", "Python package", "### 15.2 ", "Package", 0, first_name_only=True),
+    Place("js_packages", "JavaScript package", "### 2.3 ", "Package", 0, first_name_only=True),
+    Place("js_packages", "JavaScript package", "### 15.3 ", "Package", 0, first_name_only=True),
+    Place("document_schema_ids", "document schema id", "### 5.2 ", "Document", 1, pattern=DOCUMENT_SCHEMA_ID),
+    Place("command_ids", "command id", "### 6.4 ", "Command", 0),
+    Place("event_types", "event type", "### 7.3 ", "Event type", 0),
+    Place("error_codes", "error code", "### 10.3 ", "Code", 0),
+]
+# The cells that list names, per section heading: in them a marker covers only the name it follows.
+LIST_COLUMNS = {"### 8.2 ": 1, "### 8.3 ": 1, SETTINGS_HEADING: 1, "### 15.1 ": 1, "### 15.2 ": 1, "### 15.3 ": 1}
+
+
+@dataclass(frozen=True)
+class Listed:
+    """One name as contracts.md lists it: where, and whether a milestone marker covers it."""
+
+    name: str
+    line: int  # 1-based line in contracts.md
+    section: str  # the section number, "6.4"
+    covered: bool
+
+
+@dataclass(frozen=True)
+class TableRow:
+    line: int
+    cells: list[str]
+    covered: bool  # a marker in the heading or in a cell that isn't a list cell
+
+
+def main() -> int:
+    root = parse_root_argument("Compares schemas/names.json with the names contracts.md registers, both ways.")
+    problems = find_problems(root)
+    return report("check-names", problems, "every name in the code is registered, and every registered name is built")
+
+
+def find_problems(root: Path) -> list[str]:
+    names, problems = read_names(root)
+    if problems:
+        return problems
+    lines = (root / CONTRACTS_FILE).read_text(encoding="utf-8").splitlines()
+    for key in CODE_SOURCES:
+        if key == "cli_verbs":
+            problems += check_cli_verbs(lines, names)
+        elif key == "settings_keys":
+            problems += check_settings_keys(lines, names)
+        else:
+            problems += check_simple_kind(lines, names, key)
+    for database, (heading, migrations_folder) in DATABASES.items():
+        code_tables = names["tables"].get(database, {})
+        problems += check_tables(lines, database, heading, migrations_folder, code_tables)
+    return without_repeats(problems)
+
+
+def without_repeats(problems: list[str]) -> list[str]:
+    """Each problem once, in order: a moved 6.4 is found by both the command id and the CLI verb comparison."""
+    unique = []
+    for problem in problems:
+        if problem not in unique:
+            unique.append(problem)
+    return unique
+
+
+def read_names(root: Path) -> tuple[dict, list[str]]:
+    path = root / NAMES_FILE
+    if not path.is_file():
+        return {}, [f"{NAMES_FILE}: missing; run `just codegen`"]
+    names = json.loads(path.read_text(encoding="utf-8"))
+    if names.get("format_version") != NAMES_FORMAT_VERSION:
+        return {}, [f"{NAMES_FILE}: format_version isn't {NAMES_FORMAT_VERSION}; this check reads only that format"]
+    missing = [key for key in [*CODE_SOURCES, "tables"] if key not in names]
+    if missing:
+        return {}, [f"{NAMES_FILE}: no {', '.join(missing)}; run `just codegen`"]
+    return names, []
+
+
+# ---- Comparing ----
+
+
+def check_simple_kind(lines: list[str], names: dict, key: str) -> list[str]:
+    places = [place for place in PLACES if place.key == key]
+    listed, problems = [], []
+    for place in places:
+        place_listed, place_problems = read_place(lines, place)
+        listed += place_listed
+        problems += place_problems
+    if problems:
+        return problems
+    label = places[0].label
+    sections = " and ".join(section_number(place.heading) for place in places)
+    listed_names = {entry.name for entry in listed}
+    code_names = set(names[key])
+    for name in names[key]:
+        if name not in listed_names:
+            problems.append(unregistered(CODE_SOURCES[key], label, name, sections))
+    for entry in listed:
+        if entry.name not in code_names and not entry.covered:
+            problems.append(stale(entry, label))
+    return problems
+
+
+def check_cli_verbs(lines: list[str], names: dict) -> list[str]:
+    """A verb is registered as the words of a 6.4 command id, marked or not, or in 15.1's CLI_MODE_WORDS or
+    ALIASES. Contracts lists no verbs of its own to go stale: they follow the command ids."""
+    command_place = next(place for place in PLACES if place.key == "command_ids")
+    commands, problems = read_place(lines, command_place)
+    fixed_words, list_problems = read_cli_lists(lines)
+    problems += list_problems
+    if problems:
+        return problems
+    registered = {cli_verb(entry.name) for entry in commands} | set(fixed_words)
+    for verb in names["cli_verbs"]:
+        if verb not in registered:
+            problems.append(unregistered(CODE_SOURCES["cli_verbs"], "CLI verb", verb, "6.4 or 15.1"))
+    return problems
+
+
+def check_settings_keys(lines: list[str], names: dict) -> list[str]:
+    rows, problems = read_rows(lines, SETTINGS_HEADING, SETTINGS_FIRST_HEADER)
+    if problems:
+        return problems
+    listed = []
+    for row in rows:
+        section = first_name(row.cells[0])
+        for key, own_marker in list_cell_names(row.cells[1]):
+            name = f"{section}{SETTINGS_KEY_SEPARATOR}{key}"
+            listed.append(Listed(name, row.line, "11.2", row.covered or own_marker))
+    listed_names = {entry.name for entry in listed}
+    code_names = set(names["settings_keys"])
+    for name in names["settings_keys"]:
+        if name not in listed_names:
+            problems.append(unregistered(CODE_SOURCES["settings_keys"], "settings key", name, "11.2"))
+    for entry in listed:
+        if entry.name not in code_names and not entry.covered:
+            problems.append(stale(entry, "settings key"))
+    return problems
+
+
+def check_tables(lines: list[str], database: str, heading: str, migrations_folder: str, code_tables: dict) -> list[str]:
+    rows, problems = read_rows(lines, heading, TABLES_FIRST_HEADER)
+    if problems:
+        return problems
+    section = section_number(heading)
+    listed_tables = {}
+    for row in rows:
+        listed_tables[first_name(row.cells[0])] = row
+    for table, columns in code_tables.items():
+        row = listed_tables.get(table)
+        if row is None:
+            problems.append(unregistered(migrations_folder, f"{database} table", table, section))
+            continue
+        listed_columns = {column for column, _ in list_cell_names(row.cells[1])}
+        for column in columns:
+            if column not in listed_columns:
+                problems.append(unregistered(migrations_folder, f"{database} column", f"{table}.{column}", section))
+    for table, row in listed_tables.items():
+        problems += stale_table_names(database, section, table, row, code_tables)
+    return problems
+
+
+def stale_table_names(database: str, section: str, table: str, row: TableRow, code_tables: dict) -> list[str]:
+    """A listed table that isn't migrated, or listed columns its migrated table lacks. A missing table is reported
+    once, not once per column."""
+    if table not in code_tables:
+        if row.covered:
+            return []
+        return [stale(Listed(table, row.line, section, False), f"{database} table")]
+    problems = []
+    for column, own_marker in list_cell_names(row.cells[1]):
+        if column not in code_tables[table] and not (row.covered or own_marker):
+            problems.append(stale(Listed(f"{table}.{column}", row.line, section, False), f"{database} column"))
+    return problems
+
+
+def unregistered(source: str, label: str, name: str, sections: str) -> str:
+    return (
+        f"{source}: unregistered name: {label} `{name}` is in the code ({NAMES_FILE}) but not in contracts.md "
+        f"{sections}; add it there in this PR (a wire, document or command shape needs its contract PR first)"
+    )
+
+
+def stale(entry: Listed, label: str) -> str:
+    return (
+        f"{CONTRACTS_FILE}:{entry.line}: stale name: {label} `{entry.name}` is in contracts.md {entry.section} but "
+        f"not in the code ({NAMES_FILE}); remove it, or mark it with the milestone that builds it, such as (M4)"
+    )
+
+
+def cli_verb(command_id: str) -> str:
+    segments = command_id.split(COMMAND_ID_SEPARATOR)
+    return CLI_WORD_SEPARATOR.join(segment.replace(SEGMENT_WORD_SEPARATOR, CLI_DASH) for segment in segments)
+
+
+# ---- Reading contracts.md ----
+
+
+def read_place(lines: list[str], place: Place) -> tuple[list[Listed], list[str]]:
+    rows, problems = read_rows(lines, place.heading, place.first_header)
+    listed = []
+    for row in rows:
+        if place.column >= len(row.cells):
+            continue
+        cell_entries = key_cell_names(row.cells[place.column])
+        if place.pattern is not None:
+            cell_entries = [(name, own) for name, own in cell_entries if place.pattern.fullmatch(name)]
+        if place.first_name_only:
+            cell_entries = cell_entries[:1]
+        for name, own_marker in cell_entries:
+            listed.append(Listed(name, row.line, section_number(place.heading), row.covered or own_marker))
+    return listed, problems
+
+
+def read_rows(lines: list[str], heading: str, first_header: str) -> tuple[list[TableRow], list[str]]:
+    """The body rows of every table in the section whose first header cell is first_header. A section or table the
+    reader can't find is a problem: contracts.md moved it, so this check must move with it."""
+    section = find_section(lines, heading)
+    if section is None:
+        return [], [f"{CONTRACTS_FILE}: no section heading starting `{heading.strip()}`; check-names reads it (12.6)"]
+    start, end = section
+    heading_covered = has_marker(lines[start])
+    list_column = LIST_COLUMNS.get(heading)
+    rows = []
+    found_table = False
+    index = start + 1
+    while index < end:
+        if not lines[index].startswith("|"):
+            index += 1
+            continue
+        table_end = index
+        while table_end < end and lines[table_end].startswith("|"):
+            table_end += 1
+        header = split_cells(lines[index])
+        if header and header[0].strip() == first_header:
+            found_table = True
+            for row_index in range(index + 2, table_end):
+                cells = split_cells(lines[row_index])
+                covered = heading_covered or row_has_marker(cells, list_column)
+                rows.append(TableRow(row_index + 1, cells, covered))
+        index = table_end
+    if not found_table:
+        message = f"no table whose first column is `{first_header}` under `{lines[start].strip()}`"
+        return [], [f"{CONTRACTS_FILE}:{start + 1}: {message}; check-names reads it (12.6)"]
+    return rows, []
+
+
+def find_section(lines: list[str], heading: str) -> tuple[int, int] | None:
+    """The heading's line index and the index of the next heading of any level."""
+    for start, line in enumerate(lines):
+        if line.startswith(heading):
+            for end in range(start + 1, len(lines)):
+                if lines[end].startswith("#"):
+                    return start, end
+            return start, len(lines)
+    return None
+
+
+def section_number(heading: str) -> str:
+    return heading.strip("# ").strip()
+
+
+def read_cli_lists(lines: list[str]) -> tuple[list[str], list[str]]:
+    """The first backticked word of each item of the parenthesized lists after `CLI_MODE_WORDS` and `ALIASES` in
+    15.1: `node serve`, `doctor` (from "`doctor` → `system.doctor`")."""
+    section = find_section(lines, CLI_LISTS_HEADING)
+    if section is None:
+        return [], [f"{CONTRACTS_FILE}: no section heading starting `{CLI_LISTS_HEADING.strip()}`"]
+    text = "\n".join(lines[section[0] : section[1]])
+    words, problems = [], []
+    for list_name in CLI_LIST_NAMES:
+        opening = text.find(f"`{list_name}` (")
+        if opening == -1:
+            problems.append(f"{CONTRACTS_FILE}: 15.1 doesn't list `{list_name}` (...); check-names reads it (12.6)")
+            continue
+        group_start = text.index("(", opening)
+        group_end = closing_parenthesis(text, group_start)
+        for item in split_outside(text[group_start + 1 : group_end], ","):
+            item_names = backticked_names(item)
+            if item_names:
+                words.append(item_names[0])
+    return words, problems
+
+
+# ---- Reading one table row or cell ----
+
+
+def split_cells(line: str) -> list[str]:
+    """The cells of a Markdown table line, split at each `|` outside backticks (a `|` inside code is text, and so is
+    an escaped `\\|`). Parentheses don't matter here: Markdown splits a row at a `|` inside them too."""
+    cells = []
+    current = []
+    in_backticks = False
+    previous = ""
+    for character in line.strip():
+        if character == "`":
+            in_backticks = not in_backticks
+        if character == "|" and not in_backticks and previous != "\\":
+            cells.append("".join(current))
+            current = []
+        else:
+            current.append(character)
+        previous = character
+    cells.append("".join(current))
+    return cells[1:-1] if len(cells) >= 2 else cells
+
+
+def row_has_marker(cells: list[str], list_column: int | None) -> bool:
+    """A marker in any cell but a list cell covers the row; a list cell's markers belong to their names."""
+    for index, cell in enumerate(cells):
+        if index != list_column and has_marker(cell):
+            return True
+    return False
+
+
+def has_marker(text: str) -> bool:
+    return MARKER.search(without_backticked(text)) is not None
+
+
+def first_name(cell: str) -> str:
+    names = key_cell_names(cell)
+    return names[0][0] if names else ""
+
+
+def key_cell_names(cell: str) -> list[tuple[str, bool]]:
+    """The names of a key cell (the first column, or 5.2's schema id): every backticked name outside parentheses,
+    each with whether its own marker follows it."""
+    return scan_cell(cell, stop_at_notes=False)
+
+
+def list_cell_names(cell: str) -> list[tuple[str, bool]]:
+    """The names of a list cell: as a key cell, but only those before the notes, and cut at `{` or `[`."""
+    names = []
+    for name, own_marker in scan_cell(cell, stop_at_notes=True):
+        for detail_start in NAME_DETAIL_START:
+            name = name.split(detail_start)[0]
+        names.append((name, own_marker))
+    return names
+
+
+def scan_cell(cell: str, stop_at_notes: bool) -> list[tuple[str, bool]]:
+    names = []
+    depth = 0
+    position = 0
+    while position < len(cell):
+        character = cell[position]
+        if character == "`":
+            end = cell.find("`", position + 1)
+            if end == -1:
+                break
+            if depth == 0:
+                names.append((cell[position + 1 : end], own_marker_follows(cell, end + 1)))
+            position = end + 1
+            continue
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth = max(depth - 1, 0)
+        elif stop_at_notes and depth == 0 and character in NOTES_START:
+            break
+        position += 1
+    return names
+
+
+def own_marker_follows(cell: str, position: int) -> bool:
+    """Whether a marker is among the parenthesized groups right after a name: `x` (M4), `x` (`y`) (M1)."""
+    while True:
+        while position < len(cell) and cell[position] == " ":
+            position += 1
+        if position >= len(cell) or cell[position] != "(":
+            return False
+        end = closing_parenthesis(cell, position)
+        if MARKER.fullmatch(cell[position : end + 1]):
+            return True
+        position = end + 1
+
+
+def closing_parenthesis(text: str, opening: int) -> int:
+    """The index of the `)` that closes the `(` at opening, skipping backticked text; the end if none does."""
+    depth = 0
+    position = opening
+    while position < len(text):
+        character = text[position]
+        if character == "`":
+            end = text.find("`", position + 1)
+            position = len(text) if end == -1 else end + 1
+            continue
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth == 0:
+                return position
+        position += 1
+    return len(text)
+
+
+def backticked_names(text: str) -> list[str]:
+    return re.findall(r"`([^`]*)`", text)
+
+
+def without_backticked(text: str) -> str:
+    return re.sub(r"`[^`]*`", "", text)
+
+
+def split_outside(text: str, separator: str) -> list[str]:
+    """text split at each separator outside backticks and parentheses."""
+    pieces = []
+    current = []
+    depth = 0
+    in_backticks = False
+    for character in text:
+        if character == "`":
+            in_backticks = not in_backticks
+        elif not in_backticks and character == "(":
+            depth += 1
+        elif not in_backticks and character == ")":
+            depth = max(depth - 1, 0)
+        elif not in_backticks and depth == 0 and character == separator:
+            pieces.append("".join(current))
+            current = []
+            continue
+        current.append(character)
+    pieces.append("".join(current))
+    return pieces
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,6 +1,6 @@
 //! rastai-codegen: the dev-only code generators (layout: rust-control-plane.md section 4.9). Each bin in src/bin/ is
-//! a thin main over these modules. M1-12 landed the catalog generator and M1-16 the formats generator; the names
-//! generator joins later (M1-57).
+//! a thin main over these modules. M1-12 landed the catalog generator, M1-16 the formats generator and M1-57 the
+//! names generator.
 //!
 //! This file is a list of `pub mod` lines (contracts 12.2).
 
@@ -15,9 +15,11 @@ pub mod javascript_commands;
 pub mod javascript_types;
 pub mod json_schema_files;
 pub mod literals;
+pub mod names_registry;
 pub mod output_root;
 pub mod python_dataclasses;
 pub mod reference_docs;
 pub mod repo_root;
+pub mod sql_names;
 pub mod type_modules;
 pub mod write_if_changed;

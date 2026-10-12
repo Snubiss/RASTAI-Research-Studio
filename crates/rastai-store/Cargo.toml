@@ -26,6 +26,10 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+# tests/index_migrations.rs runs the real migrations and compares PRAGMA table_info with what rastai-codegen's
+# sql_names.rs reads from the same .sql files, so the reader behind schemas/names.json can't drift (contracts 12.6,
+# layout rust-control-plane.md 2.8). Test-only: rastai-codegen never depends on rastai-store.
+rastai-codegen = { path = "../../tools/codegen" }
 # tests/writer_thread.rs runs 256 writers at once on a multi-threaded runtime, the way the daemon calls write_index.
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 

@@ -1,12 +1,14 @@
 //! Migration 1 of `rastai.db` (layout rust-control-plane.md section 6.7): the migrated tables and columns are exactly
-//! the ones contracts 8.2 lists (no `settings` table), `runs.archive_state` starts `local`, and reopening migrates
-//! nothing twice. The refusal of a file a newer app migrated is tested at the bottom of `src/store.rs`, because
+//! the ones contracts 8.2 lists (no `settings` table) and the ones rastai-codegen's `sql_names.rs` reads from the
+//! migration files for `schemas/names.json` (contracts 12.6), `runs.archive_state` starts `local`, and reopening
+//! migrates nothing twice. The refusal of a file a newer app migrated is tested at the bottom of `src/store.rs`, because
 //! modelling the newer app takes the crate's own migration functions, which no other crate may call.
 
 #![allow(clippy::unwrap_used)]
 
 use std::path::{Path, PathBuf};
 
+use rastai_codegen::sql_names::read_migration_tables;
 use rastai_core::paths::rastai_db_path;
 use rastai_store::index::reads::{TableColumns, list_table_columns, open_index_reader, read_index_schema_version};
 use rastai_store::index::runs::{RunRow, get_run};
@@ -23,6 +25,8 @@ const INDEX_TABLES_HEADING: &str = "### 8.2 ";
 const NEXT_HEADING: &str = "### 8.3 ";
 // A table row of 8.2 starts with its backticked table name.
 const TABLE_ROW_START: &str = "| `";
+// The migration files the store compiles in, which sql_names.rs reads for schemas/names.json.
+const INDEX_MIGRATIONS_FOLDER: &str = "crates/rastai-store/src/index/migrations";
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -130,6 +134,24 @@ fn the_migrated_tables_and_columns_are_the_ones_contracts_8_2_lists() {
     let expected = contracts_index_tables();
     assert!(expected.len() > 10, "8.2's table wasn't found in {CONTRACTS_PATH}");
     assert_eq!(migrated_tables("contracts"), expected);
+}
+
+// names.json's tables come from reading the .sql files, not from a database; this keeps that reader honest.
+#[test]
+fn the_tables_sql_names_reads_are_the_migrated_tables() {
+    let read_from_files: Vec<TableColumns> = read_migration_tables(&repo_root().join(INDEX_MIGRATIONS_FOLDER))
+        .unwrap()
+        .into_iter()
+        .map(|table| TableColumns {
+            table_name: table.table_name,
+            column_names: table.column_names,
+        })
+        .collect();
+    assert!(
+        read_from_files.len() > 10,
+        "no migrations read from {INDEX_MIGRATIONS_FOLDER}"
+    );
+    assert_eq!(read_from_files, migrated_tables("sql-names"));
 }
 
 #[test]

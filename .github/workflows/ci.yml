@@ -40,7 +40,7 @@ defaults:
 
 jobs:
   # The gate every PR passes (contracts 12.6): format, lint, the JSDoc check, every test, wasm, cargo-deny and the
-  # repo checks. check-names and check-schema-diff join `just check` with M1-57 and M1-58.
+  # repo checks, check-names among them. check-schema-diff joins `just check` with M1-58.
   checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
