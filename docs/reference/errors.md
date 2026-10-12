@@ -1953,6 +1953,15 @@ Source: `catalog/errors/RRS-J.json`.
 - **In plain words:** This task didn't start in time.
 - **Fix:** Try again; if it keeps happening, reinstall the environment.
 
+<a id="rrs-j0004"></a>
+
+### RRS-J0004: Signal not delivered to a job
+
+- **Severity:** error
+- **Message:** Signal {signal} wasn't delivered to job {job_id}: {reason}.
+- **In plain words:** Rastai couldn't pass this request on to the task.
+- **Fix:** Refresh the job list; if the task is still running, try again.
+
 <a id="rrs-j1001"></a>
 
 ### RRS-J1001: Job killed by a signal
