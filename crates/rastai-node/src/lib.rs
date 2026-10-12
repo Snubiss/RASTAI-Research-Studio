@@ -14,4 +14,6 @@ pub mod node_service;
 pub mod permissions;
 pub mod run_events;
 pub mod telemetry;
+#[cfg(all(test, unix))]
+mod test_support;
 pub mod worker_host_service;
