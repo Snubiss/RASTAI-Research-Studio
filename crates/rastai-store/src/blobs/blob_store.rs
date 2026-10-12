@@ -11,16 +11,14 @@
 //! the server's (no policy here).
 
 use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rastai_formats::hashing::{finish_stream_hasher, new_stream_hasher, update_stream_hasher};
 use rastai_proto::common::v1::BlobRef;
 
 use crate::blobs::incoming::{
-    IncomingFile, copy_into_incoming, discard_incoming_file, link_into_incoming, move_into_place, open_existing_file,
-    write_incoming_bytes,
+    IncomingFile, copy_into_incoming, discard_incoming_file, hash_open_file, link_into_incoming, move_into_place,
+    open_existing_file, write_incoming_bytes,
 };
 use crate::blobs::quarantine::quarantine_blob;
 use crate::error::{StoreError, blob_read_error, blob_write_error};
@@ -29,7 +27,6 @@ const HASH_PREFIX: &str = "blake3:";
 const HASH_HEX_DIGITS: usize = 64;
 // Blobs are spread over 256 folders by their first two hex digits, so no folder grows to millions of names.
 const FOLDER_HEX_DIGITS: usize = 2;
-const READ_BUFFER_BYTES: usize = 1 << 20;
 
 /// Where the blobs live: `<data>/blobs/` (contracts 8.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,8 +39,9 @@ pub struct BlobStore {
 pub enum PutMode {
     /// Copy the bytes: the source stays the caller's to change or delete.
     Copy,
-    /// Hard-link the file, as when a checkpoint is pinned: no second copy on disk. Falls back to a copy when the
-    /// file is on another filesystem. The source must not be changed afterwards, since it is the blob.
+    /// Hard-link the file, as when a checkpoint is pinned: no second copy on disk. A symbolic link is followed and
+    /// the file it names is linked. Falls back to a copy when the file is on another filesystem or isn't a plain
+    /// file. The source must not be changed afterwards, since it is the blob.
     HardLink,
 }
 
@@ -130,11 +128,9 @@ fn finish_put(store: &BlobStore, incoming: IncomingFile, media_type: &str) -> Re
     })
 }
 
-/// Hashes the file where it is, then hard-links it into `.incoming/`; copies it when no link can be made.
+/// Hard-links the file into `.incoming/` and hashes the link; copies it when no link can be made.
 fn link_or_copy_into_incoming(store: &BlobStore, source: &Path) -> Result<IncomingFile, StoreError> {
-    let mut file = File::open(source).map_err(|error| blob_read_error(source, &error))?;
-    let (hash, size_bytes) = hash_open_file(&mut file, source)?;
-    match link_into_incoming(&store.root, source, &hash, size_bytes)? {
+    match link_into_incoming(&store.root, source)? {
         Some(incoming) => Ok(incoming),
         None => copy_into_incoming(&store.root, source),
     }
@@ -159,20 +155,4 @@ fn missing_or_read_error(hash: &str, path: &Path, error: &std::io::Error) -> Sto
         return StoreError::BlobMissing { hash: hash.to_string() };
     }
     blob_read_error(path, error)
-}
-
-/// The hash and size of everything left to read in `file`, read a piece at a time.
-fn hash_open_file(file: &mut File, path: &Path) -> Result<(String, u64), StoreError> {
-    let mut hasher = new_stream_hasher();
-    let mut buffer = vec![0u8; READ_BUFFER_BYTES];
-    let mut size_bytes = 0u64;
-    loop {
-        let count = file.read(&mut buffer).map_err(|error| blob_read_error(path, &error))?;
-        if count == 0 {
-            break;
-        }
-        update_stream_hasher(&mut hasher, &buffer[..count]);
-        size_bytes += count as u64;
-    }
-    Ok((finish_stream_hasher(hasher), size_bytes))
 }

@@ -177,6 +177,49 @@ fn a_file_is_copied_or_linked_and_keeps_its_source() {
     remove_store(&store);
 }
 
+/// A symbolic link is followed: the blob is the file it names, never the link itself, so it stays inside the store
+/// and outlives the link's target. Both an absolute link and a relative one (the Hugging Face cache's layout).
+#[cfg(unix)]
+#[test]
+fn a_symlinked_source_is_stored_as_the_file_it_names() {
+    use std::os::unix::fs::{MetadataExt, symlink};
+
+    let store = test_store("blobs-symlink-source");
+    let outside = store.root.parent().unwrap().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let absolute_target = outside.join("absolute-target.bin");
+    let relative_target = outside.join("relative-target.bin");
+    std::fs::write(&absolute_target, b"absolute target bytes").unwrap();
+    std::fs::write(&relative_target, b"relative target bytes").unwrap();
+    let absolute_link = outside.join("absolute-link.bin");
+    let relative_link = outside.join("relative-link.bin");
+    symlink(&absolute_target, &absolute_link).unwrap();
+    symlink("relative-target.bin", &relative_link).unwrap();
+
+    for (link, target) in [(&absolute_link, &absolute_target), (&relative_link, &relative_target)] {
+        let bytes = std::fs::read(target).unwrap();
+        let blob = put_file(&store, link, PutMode::HardLink, MEDIA_TYPE).unwrap();
+        let path = expected_blob_path(&store, &blob.hash);
+
+        assert_eq!(blob.hash, hash_bytes(&bytes));
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_file());
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().ino(),
+            std::fs::metadata(target).unwrap().ino()
+        );
+        // Copy follows the same link to the same blob.
+        assert_eq!(put_file(&store, link, PutMode::Copy, MEDIA_TYPE).unwrap(), blob);
+        assert!(files_in(&store.root.join(".incoming")).is_empty());
+
+        // Deleting the target (a run folder removed) leaves the blob whole.
+        std::fs::remove_file(target).unwrap();
+        assert!(has_blob(&store, &blob.hash));
+        assert_eq!(read_blob(&store, &blob.hash), bytes);
+        verify_blob(&store, &blob.hash).unwrap();
+    }
+    remove_store(&store);
+}
+
 #[test]
 fn a_missing_source_file_is_a_failed_read() {
     let store = test_store("blobs-missing-source");
