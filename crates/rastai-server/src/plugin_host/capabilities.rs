@@ -108,12 +108,15 @@ pub const FIRST_PARTY_CAPABILITIES: &[FirstPartyCapability] = &[
     first_party("eval", "eval.benchmark_loader", "benchmark_loaders"),
 ];
 
-/// One capability a plugin may require right now.
+/// One capability a plugin may require right now, or one a first-party plugin would provide once it is enabled again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvailableCapability {
     pub name: String,
     pub major: u32,
     pub experimental: bool,
+    /// Its first-party plugin is known but not enabled: a plugin that requires it is `disabled` (`RRS-P1002`) rather
+    /// than `incompatible`, since enabling that plugin again is the fix (flows/platform.md 7.3, the capability table).
+    pub provider_disabled: bool,
 }
 
 /// What negotiation found. Every list names what it is about, so each entry becomes one diagnostic.
@@ -123,6 +126,8 @@ pub struct NegotiationResult {
     pub engines_ok: bool,
     /// Required capabilities this build doesn't provide, as written in the manifest (`RRS-P1002`).
     pub missing_capabilities: Vec<String>,
+    /// Required capabilities of a first-party plugin that is known but not enabled (`RRS-P1002`, `disabled`).
+    pub capabilities_of_disabled_plugins: Vec<String>,
     /// Required capabilities that are experimental (`RRS-P1003` unless `plugins.experimental_apis` is on).
     pub experimental_capabilities: Vec<String>,
     /// Contribution keys used without requiring their capability (`RRS-P0006`).
@@ -156,8 +161,12 @@ const fn first_party(
 }
 
 /// What a plugin may require now: the host's supported and experimental rows, plus the rows of each first-party
-/// plugin that is enabled. Disabling Psychology so takes `psychology.lens@1` away from the plugins that need it.
-pub fn available_capabilities(enabled_first_party: &[String]) -> Vec<AvailableCapability> {
+/// plugin that is enabled. The rows of a first-party plugin the host knows but that isn't enabled come back marked
+/// `provider_disabled`: disabling Psychology so disables the plugins that need `psychology.lens@1`.
+pub fn available_capabilities(
+    enabled_first_party: &[String],
+    disabled_first_party: &[String],
+) -> Vec<AvailableCapability> {
     let mut available = Vec::new();
     for row in HOST_CAPABILITIES {
         let experimental = match row.status {
@@ -165,23 +174,26 @@ pub fn available_capabilities(enabled_first_party: &[String]) -> Vec<AvailableCa
             CapabilityStatus::Experimental => true,
             CapabilityStatus::Unsupported => continue,
         };
-        available.extend(each_major(row.name, row.majors, experimental));
+        available.extend(each_major(row.name, row.majors, experimental, false));
     }
     for row in FIRST_PARTY_CAPABILITIES {
         if enabled_first_party.iter().any(|plugin_id| plugin_id == row.plugin_id) {
-            available.extend(each_major(row.name, row.majors, false));
+            available.extend(each_major(row.name, row.majors, false, false));
+        } else if disabled_first_party.iter().any(|plugin_id| plugin_id == row.plugin_id) {
+            available.extend(each_major(row.name, row.majors, false, true));
         }
     }
     available
 }
 
-fn each_major(name: &str, majors: &[u32], experimental: bool) -> Vec<AvailableCapability> {
+fn each_major(name: &str, majors: &[u32], experimental: bool, provider_disabled: bool) -> Vec<AvailableCapability> {
     majors
         .iter()
         .map(|major| AvailableCapability {
             name: name.to_string(),
             major: *major,
             experimental,
+            provider_disabled,
         })
         .collect()
 }
@@ -206,6 +218,7 @@ pub fn negotiate_capabilities(
     for required in &manifest.requires_capabilities {
         match find_available(available, required) {
             None => result.missing_capabilities.push(required.clone()),
+            Some(found) if found.provider_disabled => result.capabilities_of_disabled_plugins.push(required.clone()),
             Some(found) if found.experimental => result.experimental_capabilities.push(required.clone()),
             Some(_) => {}
         }
@@ -229,6 +242,9 @@ pub fn state_after_negotiation(result: &NegotiationResult, experimental_allowed:
         || !result.undeclared_contribution_keys.is_empty();
     if incompatible {
         return PluginState::Incompatible;
+    }
+    if !result.capabilities_of_disabled_plugins.is_empty() {
+        return PluginState::Disabled;
     }
     if !result.experimental_capabilities.is_empty() && !experimental_allowed {
         return PluginState::Disabled;
@@ -258,7 +274,11 @@ pub fn negotiation_diagnostics(
         ];
         diagnostics.push(diagnostic(CODE_ENGINES_EXCLUDE_API, &values));
     }
-    for capability in &result.missing_capabilities {
+    let not_provided = result
+        .missing_capabilities
+        .iter()
+        .chain(&result.capabilities_of_disabled_plugins);
+    for capability in not_provided {
         let values = [("plugin_id", plugin_id), ("capability", capability.as_str())];
         diagnostics.push(diagnostic(CODE_CAPABILITY_NOT_PROVIDED, &values));
     }
@@ -373,24 +393,27 @@ mod tests {
 
     #[test]
     fn first_party_capabilities_exist_only_while_their_plugin_is_enabled() {
-        let without = available_capabilities(&[]);
+        let without = available_capabilities(&[], &[]);
         assert!(!without.iter().any(|row| row.name == "psychology.lens"));
-        let with = available_capabilities(&["psychology".to_string()]);
-        assert!(with.iter().any(|row| row.name == "psychology.lens" && row.major == 1));
-        assert!(!with.iter().any(|row| row.name == "eval.metric"));
+        let with = available_capabilities(&["psychology".to_string()], &["eval".to_string()]);
+        let lens = with.iter().find(|row| row.name == "psychology.lens" && row.major == 1);
+        assert!(lens.is_some_and(|row| !row.provider_disabled));
+        // A known first-party plugin that isn't enabled: its rows are there, marked, so a dependent is disabled.
+        let metric = with.iter().find(|row| row.name == "eval.metric");
+        assert!(metric.is_some_and(|row| row.provider_disabled));
     }
 
     #[test]
     fn unsupported_rows_are_never_available() {
-        let available = available_capabilities(&["psychology".to_string(), "eval".to_string()]);
-        for name in [
-            "ui.theme",
-            "ui.icon_set",
-            "ui.locale",
-            "ui.macro",
-            "inference.chat_template",
-        ] {
-            assert!(!available.iter().any(|row| row.name == name), "{name}");
+        let available = available_capabilities(&["psychology".to_string(), "eval".to_string()], &[]);
+        let unsupported: Vec<&HostCapability> = HOST_CAPABILITIES
+            .iter()
+            .filter(|row| row.status == CapabilityStatus::Unsupported)
+            .collect();
+        // ui.theme, ui.icon_set, ui.locale, ui.macro, inference.chat_template and assistant.skill (contracts 5.5).
+        assert_eq!(unsupported.len(), 6);
+        for row in unsupported {
+            assert!(!available.iter().any(|item| item.name == row.name), "{}", row.name);
         }
         let tokenizer = available.iter().find(|row| row.name == "inference.tokenizer");
         assert!(tokenizer.is_some_and(|row| row.experimental));
@@ -398,7 +421,7 @@ mod tests {
 
     #[test]
     fn requirements_without_a_major_match_nothing() {
-        let available = available_capabilities(&[]);
+        let available = available_capabilities(&[], &[]);
         assert!(find_available(&available, "commands@1").is_some());
         assert!(find_available(&available, "commands").is_none());
         assert!(find_available(&available, "commands@x").is_none());

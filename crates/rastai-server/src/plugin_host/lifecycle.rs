@@ -5,8 +5,9 @@
 //! reason as its diagnostic. "Disabled with a diagnostic, never a crash": `incompatible`, `disabled` and `failed` are
 //! ordinary states the Plugins section shows with their fix.
 //!
-//! What is persisted: an installed plugin's state in its `plugins` row (`save_plugin_row`); a dev plugin has no row
-//! and is found again at every start. The record itself goes into the daemon log and onto the bus with M1-28
+//! What is persisted: an installed plugin's state in its `plugins` row (`save_plugin_row`), when the user decided it
+//! (a load that enabled it, or `disable_plugin`); the host's own outcomes are decided again at every start (load.rs).
+//! A dev plugin has no row and is found again at every start. The record itself goes into the daemon log and onto the bus with M1-28
 //! (`record_daemon_event`); until then `record_state_change` logs it and keeps it in `PluginHost.state_changes`.
 
 use rastai_core::states::{plugin_state_name, plugin_transition_allowed};

@@ -6,6 +6,11 @@
 //! load (contributions.rs) and moves it to its new state (lifecycle.rs). A failure never stops the loop or the daemon:
 //! the plugin keeps its state and its diagnostics, and `plugin.list` shows them.
 //!
+//! Only the user's decisions reach a plugin's `plugins` row: a load that enables it, and `disable_plugin`. What the
+//! host decides on a load (`incompatible`, `failed`, `awaiting_trust`, or `disabled` for `RRS-P1002`, `RRS-P1003` or
+//! `RRS-P3001`) stays in memory and is decided again at the next start, so a plugin comes back once its fix (a setting,
+//! a dependency, an app update) is in place.
+//!
 //! Starting a plugin's Python module is the M4 step after registration (`plugin_module` jobs, forward.rs); until then
 //! a plugin with a `python` entry loads its declarations only, and its commands answer `RRS-P1004`. The isolation rule
 //! that start follows (contracts 8.8) is `check_module_isolation`, ready for it.
@@ -38,7 +43,7 @@ const CODE_NO_NAMESPACES_FIRST_PARTY: &str = "RRS-P2005";
 /// A granted permission of this form gives the plugin's module the network (contracts 6.3).
 const NETWORK_PERMISSION_PREFIX: &str = "network:";
 /// The states a load may start from. A `disabled` plugin is loaded only when asked (`plugin.enable`, M8), never at
-/// startup: the user or the host turned it off.
+/// startup: a `disabled` row is the user's decision (the host's own outcomes are never saved).
 const LOADABLE_STATES: &[PluginState] = &[PluginState::Installed, PluginState::Enabled, PluginState::Disabled];
 const STARTUP_STATES: &[PluginState] = &[PluginState::Installed, PluginState::Enabled];
 
@@ -93,15 +98,15 @@ pub(crate) fn plugin_source_name(source: PluginSource) -> &'static str {
     }
 }
 
-/// Loads every plugin discovery found, first-party first, then each after the plugins it depends on. A dependency
-/// cycle disables every plugin in it with `RRS-P3001`.
+/// Loads every plugin discovery found, first-party first, then each after the plugins it depends on. A plugin in a
+/// dependency cycle, or depending on one, is disabled with `RRS-P3001` naming the dependency that can't be ordered.
 pub async fn load_all_plugins(server: &Server) {
-    let (order, in_cycle) = {
+    let (order, blocked) = {
         let host = read_plugin_host(server);
         plugin_load_order(&host.plugins)
     };
-    for plugin_id in &in_cycle {
-        refuse_dependency_cycle(server, plugin_id).await;
+    for (plugin_id, dependency_id) in &blocked {
+        refuse_dependency_cycle(server, plugin_id, dependency_id).await;
     }
     for plugin_id in &order {
         let starts_now = {
@@ -135,7 +140,11 @@ pub async fn load_plugin(server: &Server, plugin_id: &str) -> PluginState {
         unload_plugin(server, plugin_id).await;
     }
     let row = apply_state(server, plugin_id, target_state, diagnostics);
-    save_plugin_row(server, row).await;
+    // Any other outcome is the host's, decided again at every start: saving it would keep the plugin off after its
+    // fix is in place, since a start loads only installed and enabled rows.
+    if target_state == PluginState::Enabled {
+        save_plugin_row(server, row).await;
+    }
     current_state(server, plugin_id)
 }
 
@@ -146,17 +155,39 @@ pub async fn unload_plugin(server: &Server, plugin_id: &str) {
     remove_plugin_commands(&mut registry, plugin_id);
 }
 
-/// Turns a plugin off: its contributions go, its state becomes `disabled`, and every other enabled plugin is checked
-/// again, since it may have needed this one's capabilities (`RRS-P1002`) or this one as a dependency (`RRS-P3001`).
-/// `plugin.disable` (M8) calls it; until then tests do.
+/// Turns a plugin off: its contributions go, its state becomes `disabled` (the user's decision, so its row keeps
+/// it), and every other enabled plugin is checked again, since it may have needed this one's capabilities
+/// (`RRS-P1002`) or this one as a dependency (`RRS-P3001`). `plugin.disable` (M8) calls it; until then tests do.
 pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState {
     unload_plugin(server, plugin_id).await;
     let row = apply_state(server, plugin_id, PluginState::Disabled, Vec::new());
     save_plugin_row(server, row).await;
-    for other_id in enabled_plugin_ids(server) {
-        load_plugin(server, &other_id).await;
-    }
+    recheck_enabled_plugins(server).await;
     current_state(server, plugin_id)
+}
+
+/// Checks every enabled plugin again, in load order, until a pass turns nothing off. Load order checks a dependency
+/// before its dependents, and the repeat catches what one pass can't: a plugin turned off late in a pass that an
+/// earlier one needed. A check never turns a plugin on, so each pass either turns one off or is the last.
+async fn recheck_enabled_plugins(server: &Server) {
+    loop {
+        let order = {
+            let host = read_plugin_host(server);
+            plugin_load_order(&host.plugins).0
+        };
+        let mut turned_off = false;
+        for plugin_id in &order {
+            if current_state(server, plugin_id) != PluginState::Enabled {
+                continue;
+            }
+            if load_plugin(server, plugin_id).await != PluginState::Enabled {
+                turned_off = true;
+            }
+        }
+        if !turned_off {
+            return;
+        }
+    }
 }
 
 /// The scopes a plugin's principal holds (flows/platform.md 3.2, 3.3): its granted `commands:[scopes]` and its own
@@ -208,9 +239,10 @@ pub fn check_module_isolation(
 }
 
 /// The order plugins load in: first-party plugins first, then repeatedly every plugin whose dependencies among the
-/// discovered plugins are already ordered. What is left over depends on a cycle; it comes back in the second list.
-/// A dependency nobody discovered doesn't hold a plugin back: negotiation reports it (`RRS-P3001`).
-pub(crate) fn plugin_load_order(plugins: &[LoadedPlugin]) -> (Vec<String>, Vec<String>) {
+/// discovered plugins are already ordered. What is left over is in a dependency cycle or depends on one; it comes
+/// back in the second list, each plugin with the first dependency that couldn't be ordered. A dependency nobody
+/// discovered doesn't hold a plugin back: negotiation reports it (`RRS-P3001`).
+pub(crate) fn plugin_load_order(plugins: &[LoadedPlugin]) -> (Vec<String>, Vec<(String, String)>) {
     let mut ordered: Vec<String> = Vec::new();
     let mut waiting: Vec<&LoadedPlugin> = Vec::new();
     for plugin in plugins {
@@ -225,8 +257,16 @@ pub(crate) fn plugin_load_order(plugins: &[LoadedPlugin]) -> (Vec<String>, Vec<S
             .into_iter()
             .partition(|plugin| dependencies_ordered(plugin, plugins, &ordered));
         if ready.is_empty() {
-            let in_cycle = still_waiting.iter().map(|plugin| plugin.plugin_id.clone()).collect();
-            return (ordered, in_cycle);
+            let blocked = still_waiting
+                .iter()
+                .map(|plugin| {
+                    (
+                        plugin.plugin_id.clone(),
+                        unordered_dependency(plugin, plugins, &ordered),
+                    )
+                })
+                .collect();
+            return (ordered, blocked);
         }
         ordered.extend(ready.iter().map(|plugin| plugin.plugin_id.clone()));
         waiting = still_waiting;
@@ -234,25 +274,39 @@ pub(crate) fn plugin_load_order(plugins: &[LoadedPlugin]) -> (Vec<String>, Vec<S
 }
 
 fn dependencies_ordered(plugin: &LoadedPlugin, plugins: &[LoadedPlugin], ordered: &[String]) -> bool {
-    let Some(manifest) = &plugin.manifest else {
-        return true;
-    };
-    manifest.dependencies.keys().all(|dependency_id| {
-        let discovered = plugins.iter().any(|other| &other.plugin_id == dependency_id);
-        !discovered || ordered.contains(dependency_id)
-    })
+    unordered_dependencies(plugin, plugins, ordered).is_empty()
 }
 
-async fn refuse_dependency_cycle(server: &Server, plugin_id: &str) {
+/// The plugin's dependencies that were discovered but aren't ordered yet, in the manifest's order.
+fn unordered_dependencies(plugin: &LoadedPlugin, plugins: &[LoadedPlugin], ordered: &[String]) -> Vec<String> {
+    let Some(manifest) = &plugin.manifest else {
+        return Vec::new();
+    };
+    manifest
+        .dependencies
+        .keys()
+        .filter(|dependency_id| {
+            let discovered = plugins.iter().any(|other| &other.plugin_id == *dependency_id);
+            discovered && !ordered.contains(dependency_id)
+        })
+        .cloned()
+        .collect()
+}
+
+/// The first dependency that held the plugin back; a plugin is only left over when it has one.
+fn unordered_dependency(plugin: &LoadedPlugin, plugins: &[LoadedPlugin], ordered: &[String]) -> String {
+    let unordered = unordered_dependencies(plugin, plugins, ordered);
+    unordered.into_iter().next().unwrap_or_default()
+}
+
+/// Disables a plugin that can't be ordered. The host's decision: its row isn't written, and the next start checks
+/// the order again.
+async fn refuse_dependency_cycle(server: &Server, plugin_id: &str, dependency_id: &str) {
     let refusal = diagnostic(
         CODE_DEPENDENCY_MISSING,
-        &[
-            ("dependency", "a plugin in a dependency cycle"),
-            ("plugin_id", plugin_id),
-        ],
+        &[("dependency", dependency_id), ("plugin_id", plugin_id)],
     );
-    let row = apply_state(server, plugin_id, PluginState::Disabled, vec![refusal]);
-    save_plugin_row(server, row).await;
+    apply_state(server, plugin_id, PluginState::Disabled, vec![refusal]);
 }
 
 /// The state a load leads to, with its reasons: `failed` without a readable manifest, `incompatible` with layer-3
@@ -273,7 +327,8 @@ fn load_decision(
         .iter()
         .filter(|other| other.plugin_id != plugin.plugin_id)
         .collect();
-    let available = available_capabilities(&enabled_first_party_ids(&others));
+    let (enabled_first_party, disabled_first_party) = first_party_ids(&others);
+    let available = available_capabilities(&enabled_first_party, &disabled_first_party);
     let result = negotiate_capabilities(
         manifest,
         &available,
@@ -284,12 +339,21 @@ fn load_decision(
     (state, negotiation_diagnostics(manifest, &result, experimental_allowed))
 }
 
-fn enabled_first_party_ids(plugins: &[&LoadedPlugin]) -> Vec<String> {
-    plugins
-        .iter()
-        .filter(|plugin| plugin.state == PluginState::Enabled && is_first_party_plugin_id(&plugin.plugin_id))
-        .map(|plugin| plugin.plugin_id.clone())
-        .collect()
+/// The first-party plugins the host knows: those enabled, and those in any other state.
+fn first_party_ids(plugins: &[&LoadedPlugin]) -> (Vec<String>, Vec<String>) {
+    let mut enabled = Vec::new();
+    let mut disabled = Vec::new();
+    for plugin in plugins {
+        if !is_first_party_plugin_id(&plugin.plugin_id) {
+            continue;
+        }
+        if plugin.state == PluginState::Enabled {
+            enabled.push(plugin.plugin_id.clone());
+        } else {
+            disabled.push(plugin.plugin_id.clone());
+        }
+    }
+    (enabled, disabled)
 }
 
 /// Each enabled plugin's id and version, for `dependencies`. A version that doesn't parse satisfies no range.
@@ -342,15 +406,6 @@ fn apply_state(
 fn current_state(server: &Server, plugin_id: &str) -> PluginState {
     let host = read_plugin_host(server);
     find_plugin(&host, plugin_id).map_or(PluginState::Unspecified, |plugin| plugin.state)
-}
-
-fn enabled_plugin_ids(server: &Server) -> Vec<String> {
-    let host = read_plugin_host(server);
-    host.plugins
-        .iter()
-        .filter(|plugin| plugin.state == PluginState::Enabled)
-        .map(|plugin| plugin.plugin_id.clone())
-        .collect()
 }
 
 fn experimental_apis_allowed(server: &Server) -> bool {
@@ -432,9 +487,9 @@ mod tests {
             plugin("psychology", &[]),
             plugin("acme_extra", &["missing_one"]),
         ];
-        let (order, in_cycle) = plugin_load_order(&plugins);
+        let (order, blocked) = plugin_load_order(&plugins);
         assert_eq!(order, ["psychology", "acme_base", "acme_extra", "acme_lens"]);
-        assert!(in_cycle.is_empty());
+        assert!(blocked.is_empty());
     }
 
     #[test]
@@ -445,9 +500,15 @@ mod tests {
             plugin("acme_c", &[]),
             plugin("acme_d", &["acme_a"]),
         ];
-        let (order, in_cycle) = plugin_load_order(&plugins);
+        let (order, blocked) = plugin_load_order(&plugins);
         assert_eq!(order, ["acme_c"]);
-        assert_eq!(in_cycle, ["acme_a", "acme_b", "acme_d"]);
+        // Each names the dependency that held it back; acme_d is only behind the cycle.
+        let expected = [("acme_a", "acme_b"), ("acme_b", "acme_a"), ("acme_d", "acme_a")];
+        let expected: Vec<(String, String)> = expected
+            .iter()
+            .map(|(plugin_id, dependency_id)| (plugin_id.to_string(), dependency_id.to_string()))
+            .collect();
+        assert_eq!(blocked, expected);
     }
 
     #[test]

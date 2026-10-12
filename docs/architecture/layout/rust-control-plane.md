@@ -3153,18 +3153,20 @@ A major version is added to `majors` when an extension point changes incompatibl
 
 ```rust
 // plugin_host/capabilities.rs
-pub struct AvailableCapability { pub name: String, pub major: u32, pub experimental: bool }
+pub struct AvailableCapability { pub name: String, pub major: u32, pub experimental: bool,
+                                 pub provider_disabled: bool }   // a known first-party plugin that isn't enabled
 
 pub struct NegotiationResult {
     pub engines_ok: bool,                          // engines.rastai covers PLUGIN_API_VERSION, else RRS-P1001
-    pub missing_capabilities: Vec<String>,         // RRS-P1002, each named
+    pub missing_capabilities: Vec<String>,         // RRS-P1002, each named: incompatible
+    pub capabilities_of_disabled_plugins: Vec<String>, // RRS-P1002 too, but disabled: enabling that plugin is the fix
     pub experimental_capabilities: Vec<String>,    // RRS-P1003 unless plugins.experimental_apis is on
     pub undeclared_contribution_keys: Vec<String>, // RRS-P0006
     pub missing_dependencies: Vec<String>,         // RRS-P3001
     pub new_permissions: Vec<String>,              // back to awaiting_trust
 }
 
-pub fn available_capabilities(enabled_first_party: &[String]) -> Vec<AvailableCapability>
+pub fn available_capabilities(enabled_first_party: &[String], disabled_first_party: &[String]) -> Vec<AvailableCapability>
 pub fn negotiate_capabilities(manifest: &PluginManifest, available: &[AvailableCapability],
                               enabled_plugins: &[(String, Version)], granted_permissions: &[String]) -> NegotiationResult
 pub fn state_after_negotiation(result: &NegotiationResult, experimental_allowed: bool) -> PluginState   // Enabled: may load
@@ -3172,7 +3174,7 @@ pub fn negotiation_diagnostics(manifest: &PluginManifest, result: &NegotiationRe
                                experimental_allowed: bool) -> Vec<Diagnostic>
 ```
 
-`negotiate_capabilities` is a pure function; `tests/plugin_host.rs` runs it over a table of manifests without touching disk.
+`negotiate_capabilities` is a pure function; `tests/plugin_host.rs` runs it over a table of manifests without touching disk. A capability of a first-party plugin the host knows but that isn't enabled leaves the plugin `disabled` with `RRS-P1002` rather than `incompatible` (platform flow 7.3: disabling Psychology disables lens plugins), so it loads again once that plugin is enabled. Only the user's decisions reach a `plugins` row (a load that enabled the plugin, and `disable_plugin`); the host's own outcomes stay in memory and are decided again at every start.
 
 ### 12.4 What registration does on the daemon side
 
@@ -3201,7 +3203,7 @@ pub fn discover_plugins(server: &Server) -> Result<(), ServerError>   // discove
 pub async fn load_all_plugins(server: &Server)
 pub async fn load_plugin(server: &Server, plugin_id: &str) -> PluginState
 pub async fn unload_plugin(server: &Server, plugin_id: &str)       // removes commands, file types, catalog; stops the module
-pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState   // unload, disabled, then re-check the others
+pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState   // unload, disabled, then re-check the others in load order until nothing changes
 pub fn check_module_isolation(plugin: &LoadedPlugin, namespaces_available: bool,
                               release_content_hash: &str) -> Result<Vec<Diagnostic>, Diagnostic>   // contracts 8.8
 pub async fn forward_command(context: &CommandContext<'_>, arguments_json: &str) -> Result<CommandOutput, Vec<Diagnostic>>

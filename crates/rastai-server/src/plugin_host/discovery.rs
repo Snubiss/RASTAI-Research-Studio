@@ -45,6 +45,8 @@ const CODE_MANIFEST_INVALID: &str = "RRS-P0001";
 const CODE_PLUGIN_ID_TAKEN: &str = "RRS-P0002";
 const NOT_A_MANIFEST: &str = "the file isn't a rastai.plugin document";
 const OTHER_PLUGIN_ID: &str = "the manifest names a different plugin id than its installed row";
+/// The period that ends a catalog message.
+const SENTENCE_END: char = '.';
 
 /// Reads every plugin's manifest and saved state into `server.plugins`: installed and preinstalled ones first, then
 /// the dev folders. A plugin id found twice keeps its first place; the later copy is logged with `RRS-P0002`.
@@ -196,11 +198,13 @@ fn read_manifest(folder: &Path) -> (Option<PluginManifest>, Vec<Diagnostic>) {
     }
 }
 
-/// `RRS-P0001` naming the first error, followed by every finding.
+/// `RRS-P0001` naming the first error, followed by every finding. The catalog message ends `{reason}.`, so the
+/// error's own final period is left out.
 fn refused_manifest(plugin_id: &str, findings: Vec<Diagnostic>) -> Vec<Diagnostic> {
     let first_error = findings.iter().find(|item| item.severity == Severity::Error);
-    let reason = first_error.map_or(NOT_A_MANIFEST.to_string(), |item| item.message.clone());
-    let mut diagnostics = vec![manifest_invalid(plugin_id, &reason)];
+    let message = first_error.map_or(NOT_A_MANIFEST, |item| item.message.as_str());
+    let reason = message.trim_end().trim_end_matches(SENTENCE_END);
+    let mut diagnostics = vec![manifest_invalid(plugin_id, reason)];
     diagnostics.extend(findings);
     diagnostics
 }
