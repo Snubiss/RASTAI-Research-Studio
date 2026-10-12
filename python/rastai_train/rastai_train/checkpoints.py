@@ -6,6 +6,9 @@ rng.safetensors and resume.json (resume.py). It is written into `step-NNNNNNNN.p
 renamed: the rename is the moment it exists. A job killed during the write leaves only the `.partial` folder, which
 nothing here ever returns and the next write at that step replaces (the daemon's GC removes the others).
 
+A resume that falls back past damaged newer checkpoints removes them: the run goes on from the older step, and a
+damaged folder newer than the run would otherwise stay its latest, count against keep_last and could stay its best.
+
 Retention keeps the newest `keep_last` complete checkpoints, the best (lowest validation.loss) and every pinned one;
 the loop removes the rest after each save, so a run's disk use stays at keep_last + best + the one being written
 (platform flow 8.1's estimate).
@@ -18,11 +21,10 @@ import shutil
 import time
 from pathlib import Path
 
-from rastai_models.io.safetensors_writer import sync_folder
 from rastai_plugin.catalog.generated import RRS_T2001, RRS_T2002, RRS_T2004
 
 import rastai_formats
-from rastai_models import ModelError, SafetensorsFile, write_safetensors
+from rastai_models import ModelError, SafetensorsFile, sync_folder, write_safetensors
 from rastai_plugin import TrainingContext
 from rastai_train.errors import TrainError
 from rastai_train.optimizer import optimizer_state_tensors, trainable_parameters
@@ -81,7 +83,8 @@ def write_checkpoint(
         if error.errno == errno.ENOSPC:
             raise TrainError(RRS_T2001, f"The checkpoint of step {step} didn't fit on the disk.") from error
         raise
-    # A complete folder of this step exists only when an older checkpoint was resumed past a damaged newer one.
+    # A resume removes damaged newer checkpoints, so a complete folder of this step shouldn't exist; if one does
+    # (a folder copied in by hand), the step's new checkpoint replaces it, since a rename can't.
     remove_folder(final_folder)
     os.rename(partial_folder, final_folder)
     sync_folder(final_folder.parent)
@@ -152,9 +155,11 @@ def find_latest_checkpoint(run_folder: Path) -> Path | None:
 
 def resume_from_latest_checkpoint(run_folder: Path, context: TrainingContext) -> ResumePoint:
     """Loads the newest complete checkpoint whose files are sound into the run, trying older ones past damaged
-    files (each named in `damaged_checkpoints`). None at all is RRS-T2004; one of another run stops at once
-    (RRS-T2005)."""
+    files. The damaged ones it passed are removed once an older one loads (each named in `damaged_checkpoints` for
+    the job to report), so the run's latest and best are never newer than its step. None at all is RRS-T2004; one
+    of another run stops at once (RRS-T2005)."""
     damaged = []
+    damaged_folders = []
     for _step, folder in reversed(list_complete_checkpoints(run_folder)):
         try:
             point = load_resume_state(folder, context)
@@ -162,12 +167,23 @@ def resume_from_latest_checkpoint(run_folder: Path, context: TrainingContext) ->
             if error.code != RRS_T2002:
                 raise
             damaged.append(error.message)
+            damaged_folders.append(folder)
             continue
         point.damaged_checkpoints = damaged
+        remove_damaged_checkpoints(damaged_folders)
         restore_best_checkpoint(run_folder, context)
         return point
     reason = f" ({len(damaged)} damaged: {damaged[0]})" if damaged else ""
     raise TrainError(RRS_T2004, f"No complete checkpoint to resume from in {run_folder}{reason}.")
+
+
+def remove_damaged_checkpoints(folders: list[Path]) -> None:
+    """Removes the damaged checkpoints a resume fell back past. Training passes their steps again and writes them
+    anew; the daemon's GC drops the index rows of folders that are gone."""
+    for folder in folders:
+        shutil.rmtree(folder)
+    if folders:
+        sync_folder(folders[0].parent)
 
 
 def restore_best_checkpoint(run_folder: Path, context: TrainingContext) -> None:

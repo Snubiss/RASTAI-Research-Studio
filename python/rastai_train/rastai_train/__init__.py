@@ -10,7 +10,13 @@ from rastai_train.checkpoints import (
     resume_from_latest_checkpoint,
     write_checkpoint,
 )
-from rastai_train.context import CheckpointPolicy, TrainingProgress, TrainingSettings, build_training_context
+from rastai_train.context import (
+    CheckpointPolicy,
+    TrainingProgress,
+    TrainingSettings,
+    build_training_context,
+    checkpoint_policy,
+)
 from rastai_train.errors import TrainError
 from rastai_train.loop import TrainingOutcome, optimizer_step, preempt_at_step_boundary, train
 from rastai_train.recipes import FIRST_PARTY_RECIPES, register_first_party
@@ -28,6 +34,7 @@ __all__ = [
     "TrainingSettings",
     "build_training_context",
     "checkpoint_folder",
+    "checkpoint_policy",
     "checkpoints_to_keep",
     "find_latest_checkpoint",
     "list_complete_checkpoints",

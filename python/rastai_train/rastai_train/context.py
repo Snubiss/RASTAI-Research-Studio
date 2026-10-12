@@ -19,6 +19,7 @@ from pathlib import Path
 import torch
 from rastai_formats.generated.command_train_start import TrainStartArgs
 from rastai_formats.generated.model import model_spec_from_json
+from rastai_formats.generated.settings import SettingsCheckpoint
 from rastai_plugin.catalog.generated import RRS_D1001, RRS_T0003
 
 import rastai_formats
@@ -40,23 +41,47 @@ CSV_SUFFIX = ".csv"
 ROW_ID_COLUMN = "id"
 # CPU training is float32 (the capability matrix: bf16 needs a GPU of Ampere or newer).
 TRAINING_DTYPE = torch.float32
+# The training.checkpoint defaults (contracts 11.2), for the fields a run's settings leave out. A spot notice gives
+# about 30 s, so the preemption budget leaves a few seconds for the process to exit.
+DEFAULT_KEEP_LAST = 3
+DEFAULT_INTERVAL_MINUTES = 15
+DEFAULT_PREEMPTION_BUDGET_SECONDS = 25
 
 
 @dataclass(frozen=True)
 class CheckpointPolicy:
-    """When checkpoints are written and which are kept: the `training.checkpoint` settings (contracts 11.2) as
-    `JobSpec.checkpoint_policy_json` resolves them for the node the run is on."""
+    """When checkpoints are written and which are kept. `checkpoint_settings` is the run's `training.checkpoint`
+    section (contracts 11.2) as the generated type, with every field filled (checkpoint_policy does that); the two
+    other values aren't settings: the run sets them for itself."""
 
-    # Complete checkpoints kept besides the best and the pinned ones.
-    keep_last: int = 3
-    # Minutes between timed checkpoints; 0 writes them only when asked, every `every_steps` and at the end.
-    interval_minutes: float = 15.0
-    # SIGTERM writes a checkpoint only when the last one took no longer than this (spot notices give about 30 s).
-    preemption_budget_seconds: float = 25.0
+    checkpoint_settings: SettingsCheckpoint
     # A checkpoint every this many steps besides the timed ones; 0 for none.
     every_steps: int = 0
     # Steps whose checkpoints are pinned: never removed by the keep_last rule.
     pinned_steps: tuple[int, ...] = ()
+
+
+def checkpoint_policy(
+    checkpoint_settings: SettingsCheckpoint | None = None, every_steps: int = 0, pinned_steps: tuple[int, ...] = ()
+) -> CheckpointPolicy:
+    """The policy for these `training.checkpoint` settings, each field they leave out at its 11.2 default. The train
+    job (M1-46) passes the settings it reads from job.json; the shape of `JobSpec.checkpoint_policy_json` lands with
+    that job's contract change, not here."""
+    given = checkpoint_settings
+    if given is None:
+        given = SettingsCheckpoint()
+    filled = SettingsCheckpoint(
+        keep_last=value_or_default(given.keep_last, DEFAULT_KEEP_LAST),
+        interval_minutes=value_or_default(given.interval_minutes, DEFAULT_INTERVAL_MINUTES),
+        preemption_budget_seconds=value_or_default(given.preemption_budget_seconds, DEFAULT_PREEMPTION_BUDGET_SECONDS),
+    )
+    return CheckpointPolicy(filled, every_steps, pinned_steps)
+
+
+def value_or_default(value: int | None, default: int) -> int:
+    if value is None:
+        return default
+    return value
 
 
 @dataclass(frozen=True)
@@ -79,9 +104,10 @@ class TrainingSettings:
     seed: int = 0
     # The share of rows held out for validation.loss; 0 for none.
     validation_ratio: float = 0.1
-    # Deterministic torch kernels: bit-for-bit repeats on the CPU, at some speed cost on a GPU.
+    # Deterministic torch kernels: bit-for-bit repeats on the CPU, at some speed cost on a GPU. On CUDA, cuBLAS
+    # refuses deterministic matmuls unless CUBLAS_WORKSPACE_CONFIG is set before CUDA starts: the train job's to set.
     deterministic: bool = True
-    checkpoint: CheckpointPolicy = field(default_factory=CheckpointPolicy)
+    checkpoint: CheckpointPolicy = field(default_factory=checkpoint_policy)
 
 
 @dataclass
@@ -139,8 +165,15 @@ def check_settings(settings: TrainingSettings) -> None:
         raise ValueError(f"max_steps, micro_batch and gradient_accumulation must be at least 1: {settings}")
     if not 0.0 <= settings.validation_ratio < 1.0:
         raise ValueError(f"validation_ratio must be in [0, 1); got {settings.validation_ratio}")
-    if settings.checkpoint.keep_last < 1:
-        raise ValueError(f"checkpoint.keep_last must be at least 1; got {settings.checkpoint.keep_last}")
+    checkpoint_settings = settings.checkpoint.checkpoint_settings
+    if None in (
+        checkpoint_settings.keep_last,
+        checkpoint_settings.interval_minutes,
+        checkpoint_settings.preemption_budget_seconds,
+    ):
+        raise ValueError(f"every training.checkpoint field must be filled (checkpoint_policy): {checkpoint_settings}")
+    if checkpoint_settings.keep_last < 1:
+        raise ValueError(f"checkpoint.keep_last must be at least 1; got {checkpoint_settings.keep_last}")
 
 
 def set_random_state(settings: TrainingSettings) -> None:

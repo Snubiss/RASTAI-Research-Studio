@@ -6,7 +6,7 @@ from rastai_models.compiler.compiled_model import CompiledModel
 from rastai_models.compiler.weights import BindReport, bind_weights, init_weights
 from rastai_models.errors import ModelError
 from rastai_models.io.safetensors_reader import SafetensorsFile
-from rastai_models.io.safetensors_writer import write_safetensors
+from rastai_models.io.safetensors_writer import sync_folder, write_safetensors
 
 __all__ = [
     "BindReport",
@@ -16,5 +16,6 @@ __all__ = [
     "bind_weights",
     "compile_model",
     "init_weights",
+    "sync_folder",
     "write_safetensors",
 ]

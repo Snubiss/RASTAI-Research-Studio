@@ -13,6 +13,7 @@ decoder fine-tuning and join with the SFT recipe (M5); none applies to a classif
 import torch
 from rastai_data.word_vocabulary import PADDING_ID
 from rastai_formats.generated.model import (
+    GraphNode,
     ModelSpec,
     classifier_head_attributes_from_json,
     embedding_attributes_from_json,
@@ -98,7 +99,7 @@ def class_count(spec: ModelSpec) -> int:
     return classifier_head_attributes_from_json(node.attributes).class_count
 
 
-def find_node(spec: ModelSpec, node_id: str, op: str):
+def find_node(spec: ModelSpec, node_id: str, op: str) -> GraphNode:
     for node in spec.graph.nodes:
         if node.node_id == node_id and node.op == op:
             return node
