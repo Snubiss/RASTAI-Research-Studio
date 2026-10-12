@@ -9,9 +9,13 @@ mod common;
 #[allow(clippy::unwrap_used)]
 mod table {
     use rastai_core::principal::PrincipalKind;
+    use rastai_core::scopes::Scope;
     use rastai_formats::hashing::hash_bytes;
     use rastai_server::http::gate::{Listener, RequestHead, check_request_gate, read_request_head};
-    use rastai_server::http::sessions::{AuthState, NewSession, create_login_code, new_auth_state, redeem_login_code};
+    use rastai_server::http::sessions::{
+        AuthState, NewSession, ScopedToken, add_scoped_token, create_login_code, new_auth_state, redeem_login_code,
+        revoke_scoped_token,
+    };
 
     const OWNER_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const COOKIE_NAME: &str = "rastai_session_0a1b2c3d";
@@ -345,6 +349,38 @@ mod table {
         assert_eq!(refused_with(&bearer, &auth), "RRS-C1002");
     }
 
+    #[test]
+    fn a_scoped_token_carries_its_own_scopes_until_it_is_revoked() {
+        let auth = auth();
+        add_scoped_token(
+            &auth,
+            ScopedToken {
+                token_id: "tok_01J".to_string(),
+                token_hash: hash_bytes(b"scoped-token-text"),
+                scopes: vec![Scope::Chat],
+                revoked: false,
+            },
+        );
+        let bearer = RequestHead {
+            bearer_token: Some("scoped-token-text".to_string()),
+            ..request("POST", EXECUTE_PATH, DAEMON_HOST)
+        };
+        let principal = check_request_gate(&bearer, &Listener::LoopbackTcp, &auth)
+            .unwrap()
+            .unwrap();
+        assert_eq!(principal.kind, PrincipalKind::Token);
+        assert_eq!(principal.id, "tok_01J");
+        assert_eq!(principal.scopes, vec![Scope::Chat]);
+        // The Host and Origin rules still come first.
+        let rebinding = RequestHead {
+            host: "attacker.test".to_string(),
+            ..bearer.clone()
+        };
+        assert_eq!(refused_with(&rebinding, &auth), "RRS-C1003");
+        revoke_scoped_token(&auth, "tok_01J");
+        assert_eq!(refused_with(&bearer, &auth), "RRS-C1006");
+    }
+
     // ---- daemon.sock ----
 
     #[tokio::test]
@@ -481,6 +517,15 @@ mod end_to_end {
 
     const EXECUTE_PATH: &str = "/rastai.commands.v1.CommandService/Execute";
     const BLOB_PATH: &str = "/api/blobs/blake3:00";
+    /// A command any credential may run: what a request that passed the gate sends.
+    const STATUS_REQUEST: &[u8] = br#"{"command_id": "system.status"}"#;
+
+    /// The gate let the request through and the command ran: HTTP 200 with `ok: true`.
+    fn assert_executed(response: HttpResponse) {
+        assert_eq!(response.status, 200, "{}", String::from_utf8_lossy(&response.body));
+        let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["ok"], true, "{body}");
+    }
 
     fn assert_refused(response: HttpResponse, status: u16, code: &str) {
         assert_eq!((response.status, refusal_code(&response).as_str()), (status, code));
@@ -518,7 +563,7 @@ mod end_to_end {
         );
         assert_eq!(body["node_protocol"], 1);
         assert!(body["plugin_api"].is_string() && body["version"].is_string());
-        let over_socket = send_to_socket(&paths, "GET", "/api/health", &[]).await;
+        let over_socket = send_to_socket(&paths, "GET", "/api/health", &[], b"").await;
         assert_eq!(over_socket.status, 200);
         stop_test_daemon(running).await;
         remove_test_folder(&paths);
@@ -606,19 +651,21 @@ mod end_to_end {
         let port = running.http_port;
         let origin = daemon_origin(port);
         let (cookie, key) = sign_in_over_http(&running).await;
-        // Passing the gate reaches the router, which has no Execute route until M1-27: 404, not 401 or 403.
+        // Passing the gate reaches Execute, which runs the command.
         let with_key = [
             ("Origin", origin.as_str()),
             ("Cookie", cookie.as_str()),
             ("Rastai-Session-Key", key.as_str()),
+            ("Content-Type", "application/json"),
         ];
-        assert_eq!(
-            send_to_port(port, "POST", EXECUTE_PATH, &with_key, b"{}").await.status,
-            404
-        );
-        let without_key = [("Origin", origin.as_str()), ("Cookie", cookie.as_str())];
+        assert_executed(send_to_port(port, "POST", EXECUTE_PATH, &with_key, STATUS_REQUEST).await);
+        let without_key = [
+            ("Origin", origin.as_str()),
+            ("Cookie", cookie.as_str()),
+            ("Content-Type", "application/json"),
+        ];
         assert_refused(
-            send_to_port(port, "POST", EXECUTE_PATH, &without_key, b"{}").await,
+            send_to_port(port, "POST", EXECUTE_PATH, &without_key, STATUS_REQUEST).await,
             401,
             "RRS-C1002",
         );
@@ -690,19 +737,15 @@ mod end_to_end {
         let port = running.http_port;
         let token = std::fs::read_to_string(rastai_core::paths::owner_token_path(&paths)).unwrap();
         let bearer = format!("Bearer {token}");
-        assert_eq!(
-            send_to_port(port, "POST", EXECUTE_PATH, &[("Authorization", &bearer)], b"{}")
-                .await
-                .status,
-            404
-        );
+        let with_token = [("Authorization", bearer.as_str()), ("Content-Type", "application/json")];
+        assert_executed(send_to_port(port, "POST", EXECUTE_PATH, &with_token, STATUS_REQUEST).await);
         let wrong = send_to_port(port, "POST", EXECUTE_PATH, &[("Authorization", "Bearer nope")], b"{}").await;
         assert_eq!((wrong.status, refusal_code(&wrong)), (401, "RRS-C1002".to_string()));
         let nothing = send_to_port(port, "POST", EXECUTE_PATH, &[], b"{}").await;
         assert_eq!((nothing.status, refusal_code(&nothing)), (401, "RRS-C1002".to_string()));
         // Over daemon.sock the peer's user is the credential, whatever Host says.
-        let over_socket = send_to_socket(&paths, "POST", EXECUTE_PATH, &[("Host", "attacker.test")]).await;
-        assert_eq!(over_socket.status, 404);
+        let socket_headers = [("Host", "attacker.test"), ("Content-Type", "application/json")];
+        assert_executed(send_to_socket(&paths, "POST", EXECUTE_PATH, &socket_headers, STATUS_REQUEST).await);
         stop_test_daemon(running).await;
         remove_test_folder(&paths);
     }

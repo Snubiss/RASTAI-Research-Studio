@@ -8,7 +8,11 @@
 //! - The gate (gate.rs) finds the session for a cookie, checks the Origin against `bound_origin` and, for anything
 //!   but GET or HEAD, the request key against `key_hash`.
 //!
-//! Everything lives in memory: a restart signs everyone out. Only hashes are kept (`hash_bytes` of the hex text as
+//! - Scoped API tokens (`token.create`) live in `rastai.db`; the daemon keeps their hashes and scopes here too
+//!   (`scoped_tokens`), loaded at startup and updated by `token.create` and `token.revoke`, so the gate stays one
+//!   plain function over this struct and a revoked token is refused on its very next request (`RRS-C1006`).
+//!
+//! Login codes and sessions live in memory only: a restart signs everyone out. Only hashes are kept (`hash_bytes` of the hex text as
 //! sent), so a memory dump of the daemon holds no usable code, cookie or key, and comparing hashes takes the same
 //! time whichever character of a guess is wrong. No HTTP types here; the login endpoint is in router.rs.
 
@@ -20,6 +24,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use rastai_core::error::CoreError;
 use rastai_core::random::random_bytes;
+use rastai_core::scopes::Scope;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_formats::hashing::hash_bytes;
 
@@ -51,6 +56,17 @@ pub struct AuthState {
     pub cookie_name: String,
     pub login_codes: Mutex<Vec<LoginCode>>,
     pub sessions: Mutex<Vec<Session>>,
+    /// Every scoped API token, revoked ones included, as `rastai.db`'s `tokens` table holds them.
+    pub scoped_tokens: Mutex<Vec<ScopedToken>>,
+}
+
+/// A scoped API token as the gate checks it: never its text, only `hash_bytes` of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedToken {
+    pub token_id: String,
+    pub token_hash: String,
+    pub scopes: Vec<Scope>,
+    pub revoked: bool,
 }
 
 /// A login code not yet redeemed.
@@ -95,6 +111,7 @@ pub fn new_auth_state(owner_token_hash: String, daemon_id_prefix: &str) -> AuthS
         cookie_name: session_cookie_name(daemon_id_prefix),
         login_codes: Mutex::new(Vec::new()),
         sessions: Mutex::new(Vec::new()),
+        scoped_tokens: Mutex::new(Vec::new()),
     }
 }
 
@@ -165,6 +182,30 @@ pub fn touch_session(auth: &AuthState, session_id_hash: &str, now_unix_ms: i64) 
             session.last_used_unix_ms = now_unix_ms;
         }
     }
+}
+
+/// Adds a token the gate accepts from now on: one read from `rastai.db` at startup, or one `token.create` just made.
+/// A token already known by id is replaced, so loading it twice keeps one entry.
+pub fn add_scoped_token(auth: &AuthState, token: ScopedToken) {
+    let mut tokens = lock_list(&auth.scoped_tokens);
+    tokens.retain(|known| known.token_id != token.token_id);
+    tokens.push(token);
+}
+
+/// Marks a token revoked, so its next request is refused with `RRS-C1006`. An unknown id changes nothing.
+pub fn revoke_scoped_token(auth: &AuthState, token_id: &str) {
+    let mut tokens = lock_list(&auth.scoped_tokens);
+    for token in tokens.iter_mut() {
+        if token.token_id == token_id {
+            token.revoked = true;
+        }
+    }
+}
+
+/// The scoped token whose text hashes to `token_hash`, revoked or not; the gate decides what a revoked one means.
+pub fn find_scoped_token(auth: &AuthState, token_hash: &str) -> Option<ScopedToken> {
+    let tokens = lock_list(&auth.scoped_tokens);
+    tokens.iter().find(|token| token.token_hash == token_hash).cloned()
 }
 
 /// The `Set-Cookie` value that signs a window in.
@@ -302,5 +343,24 @@ mod tests {
             session_cookie_header(&auth, "abc"),
             "rastai_session_0a1b2c3d=abc; HttpOnly; SameSite=Strict; Path=/"
         );
+    }
+
+    #[test]
+    fn scoped_tokens_are_added_found_and_revoked() {
+        let auth = auth();
+        let token = ScopedToken {
+            token_id: "tok_a".to_string(),
+            token_hash: hash_bytes(b"secret"),
+            scopes: vec![Scope::Read],
+            revoked: false,
+        };
+        add_scoped_token(&auth, token.clone());
+        add_scoped_token(&auth, token.clone());
+        assert_eq!(lock_list(&auth.scoped_tokens).len(), 1);
+        assert_eq!(find_scoped_token(&auth, &hash_bytes(b"secret")), Some(token));
+        assert_eq!(find_scoped_token(&auth, &hash_bytes(b"other")), None);
+        revoke_scoped_token(&auth, "tok_a");
+        revoke_scoped_token(&auth, "tok_unknown");
+        assert!(find_scoped_token(&auth, &hash_bytes(b"secret")).unwrap().revoked);
     }
 }
