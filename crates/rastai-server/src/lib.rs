@@ -2,7 +2,8 @@
 //! flows/platform.md 2.1, the HTTP listeners, the request gate of 4.2, one-time login codes and origin-bound
 //! sessions (4.1), clean shutdown, `/api/health` and the Connect JSON of the `CommandService` messages (11.3). M1-27
 //! adds the command layer: `execute_command` with its scope check, argument check, idempotency and journal, `dispatch`
-//! with the first handlers and the L0 stubs, and `Execute` and `ListCommands` over Connect.
+//! with the first handlers and the L0 stubs, and `Execute` and `ListCommands` over Connect. M1-32 adds the plugin
+//! host: discovery, capability negotiation, registration and plugin states, with `plugin.list`.
 //!
 //! This file is a list of `pub mod` lines (contracts 12.2).
 
@@ -11,5 +12,6 @@ pub mod commands;
 pub mod daemon;
 pub mod error;
 pub mod http;
+pub mod plugin_host;
 pub mod server_state;
 pub mod shutdown;

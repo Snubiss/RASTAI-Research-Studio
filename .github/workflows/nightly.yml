@@ -42,6 +42,7 @@ jobs:
           - { crate: rastai-formats, target: json_reader }
           - { crate: rastai-formats, target: read_document }
           - { crate: rastai-formats, target: safetensors_header }
+          - { crate: rastai-formats, target: semver }
           - { crate: rastai-core, target: base32_decode }
           - { crate: rastai-core, target: rfc3339_parse }
           - { crate: rastai-store, target: event_frame }

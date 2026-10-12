@@ -38,6 +38,6 @@ and §15.1.
 ## Fuzzing
 
 `fuzz/` is a cargo-fuzz crate with its own workspace, built on the pinned nightly:
-`just fuzz rastai-formats json_reader 60` runs the reader target for a minute, and `read_document` and
-`safetensors_header` the same way.
+`just fuzz rastai-formats json_reader 60` runs the reader target for a minute, and `read_document`,
+`safetensors_header` and `semver` the same way.
 Nightly CI runs each target for 10 minutes (contracts §12.5).

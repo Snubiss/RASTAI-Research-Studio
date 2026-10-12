@@ -33,6 +33,8 @@ use crate::commands::handlers::settings::{read_settings_layer, resolve_with_file
 use crate::error::ServerError;
 use crate::http::listeners::{FIRST_DEFAULT_PORT, LOOPBACK_ADDRESS, listen_http};
 use crate::http::sessions::{AuthState, ScopedToken, add_scoped_token, new_auth_state};
+use crate::plugin_host::discovery::discover_plugins;
+use crate::plugin_host::load::load_all_plugins;
 use crate::server_state::{Server, build_server};
 use crate::shutdown::{stop_on_signals, wait_for_shutdown};
 
@@ -103,6 +105,8 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
     let preferred_port = preferred_port(options, &settings.resolved);
     let listen_address = listen_address(&settings.resolved);
     let server = Arc::new(build_server(paths, settings.resolved, settings.overrides, store, auth));
+    discover_plugins(&server)?; // manifests and saved states only; nothing starts
+    load_all_plugins(&server).await; // failures disable or fail a plugin, never the daemon
     let http = listen_http(&server, preferred_port, listen_address).await?; // writes daemon.port; health ok from here
     let _ = server.http_port.set(http.tcp_port);
     log_info("daemon started", &[("port", &http.tcp_port.to_string())]);

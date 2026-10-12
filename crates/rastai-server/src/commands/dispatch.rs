@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 
 use crate::commands::arguments::invalid_arguments;
 use crate::commands::context::CommandContext;
-use crate::commands::handlers::{command, settings, system, token};
+use crate::commands::handlers::{command, plugin, settings, system, token};
 
 const CODE_UNKNOWN_COMMAND: &str = "RRS-C0001";
 const CODE_PLUGIN_COMMAND_NOT_AVAILABLE: &str = "RRS-P1004";
@@ -75,7 +75,7 @@ pub async fn dispatch(context: &CommandContext<'_>, arguments_json: &str) -> Res
         "token.create" => token::create(context, typed_arguments(command_id, arguments_json)?).await,
         "token.list" => token::list(context, typed_arguments(command_id, arguments_json)?).await,
         "token.revoke" => token::revoke(context, typed_arguments(command_id, arguments_json)?).await,
-        "plugin.list" => not_available_yet(command_id),
+        "plugin.list" => plugin::list(context, typed_arguments(command_id, arguments_json)?).await,
         "node.list" => not_available_yet(command_id),
         "node.status" => not_available_yet(command_id),
         _ => forward_to_plugin_host(context),

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1P02",
+  "plugin_id": "fixture_broken",
+  "version": 3,
+  "engines": {
+    "rastai": ">=0.1"
+  }
+}

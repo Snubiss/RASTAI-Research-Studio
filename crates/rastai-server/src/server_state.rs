@@ -2,8 +2,8 @@
 //! std locks that are never held across an `.await`.
 //!
 //! M1-26 brought the fields startup and sign-in need; M1-27 the command registry, the settings layers that sit above
-//! the files, the idempotency locks and the port. The bus (M1-28), the node links and identity (M1-42, M1-47), the
-//! plugin host, the gateway and the rest join with the tasks that build them.
+//! the files, the idempotency locks and the port; M1-32 the plugin host. The bus (M1-28), the node links and identity
+//! (M1-42, M1-47), the gateway and the rest join with the tasks that build them.
 
 use std::sync::{Mutex, OnceLock, RwLock};
 
@@ -20,6 +20,7 @@ use tokio::sync::watch;
 
 use crate::commands::journal::IdempotencyKeyLock;
 use crate::http::sessions::AuthState;
+use crate::plugin_host::load::PluginHost;
 
 pub struct Server {
     pub paths: DataPaths,
@@ -31,6 +32,8 @@ pub struct Server {
     pub store: Store,
     /// Every command, core and plugin, with its argument and result schemas (layout 10.2). Rebuilt at every start.
     pub registry: RwLock<CommandRegistry>,
+    /// Every plugin discovery found, with its state and diagnostics (plugin_host/). Rebuilt at every start.
+    pub plugins: RwLock<PluginHost>,
     /// Login codes, sessions, the owner token's hash and the scoped tokens' hashes.
     pub auth: AuthState,
     /// One lock per (principal, idempotency key) while a command with that key runs (commands/journal.rs).
@@ -56,6 +59,7 @@ pub fn build_server(
         settings_overrides,
         store,
         registry: RwLock::new(core_command_registry()),
+        plugins: RwLock::new(PluginHost::default()),
         auth,
         idempotency_locks: Mutex::new(Vec::new()),
         http_port: OnceLock::new(),

@@ -3,7 +3,7 @@
 //! one the request names.
 //!
 //! The decisions, in order, each with its code:
-//! 1. `acting_plugin_id` narrows the principal to that plugin's grant; it can only remove rights.
+//! 1. `acting_plugin_id` narrows the principal to that plugin's grant (the plugin host's); it can only remove rights.
 //! 2. The command must be registered (`RRS-C0001`); a retired one names its replacement (`RRS-C0007`).
 //! 3. The principal must hold its scope (`RRS-C1005`), checked before the arguments so a caller without the scope
 //!    learns nothing about their shape.
@@ -27,6 +27,7 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_diag::logger::log_warn;
 use rastai_formats::validate::meaning::plugin_manifest::{EXPECTED_PLUGIN_ID_FORM, is_plugin_id};
 use rastai_proto::commands::v1::{CommandDescriptor, ExecuteRequest, ExecuteResponse};
+use rastai_proto::common::v1::PluginState;
 
 use crate::commands::arguments::check_arguments;
 use crate::commands::context::CommandContext;
@@ -35,6 +36,7 @@ use crate::commands::journal::{
     arguments_hash, find_recent_journal_row, idempotency_key_lock, is_journaled, is_same_request, journal_finished,
     journal_started,
 };
+use crate::plugin_host::load::{plugin_principal_scopes, plugin_status};
 use crate::server_state::Server;
 
 const CODE_UNKNOWN_COMMAND: &str = "RRS-C0001";
@@ -42,6 +44,8 @@ const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
 const CODE_PLUGIN_NOT_ENABLED: &str = "RRS-C0003";
 const CODE_KEY_REUSED: &str = "RRS-C0004";
 const CODE_RETIRED: &str = "RRS-C0007";
+/// The fix of `RRS-C0003` (M8 builds it).
+const PLUGIN_ENABLE_COMMAND_ID: &str = "plugin.enable";
 
 /// The outcome of one request, and the journal row it has (empty when it has none).
 struct CommandOutcome {
@@ -74,18 +78,23 @@ fn check_command(
     caller: &Principal,
     request: &ExecuteRequest,
 ) -> Result<CheckedCommand, Vec<Diagnostic>> {
-    let principal = narrow_to_acting_plugin(caller, &request.acting_plugin_id)?;
+    let plugin_grant = plugin_principal_scopes(server, &request.acting_plugin_id);
+    let principal = narrow_to_acting_plugin(caller, &request.acting_plugin_id, plugin_grant)?;
     let command = find_descriptor(server, &request.command_id)?;
     check_scope(&principal, &command).map_err(|refusal| vec![refusal])?;
-    check_plugin_enabled(&command)?;
+    check_plugin_enabled(&command, plugin_status(server, &command.plugin_id))?;
     check_arguments(&command, &request.arguments_json)?;
     Ok(CheckedCommand { principal, command })
 }
 
 /// A plugin UI's call runs as `plugin:<plugin_id>`, with only the scopes both the caller and the plugin's grant hold.
-/// The grant comes from the plugin host (M1-32); until it loads plugins none is enabled, so the grant is empty and
-/// every scope check fails, as for a disabled plugin.
-fn narrow_to_acting_plugin(caller: &Principal, acting_plugin_id: &str) -> Result<Principal, Vec<Diagnostic>> {
+/// The grant comes from the plugin host: an enabled plugin's `commands:[scopes]` and its own scope; a plugin that
+/// isn't enabled, or that the host doesn't know, holds nothing, so every scope check fails.
+fn narrow_to_acting_plugin(
+    caller: &Principal,
+    acting_plugin_id: &str,
+    plugin_grant: Vec<Scope>,
+) -> Result<Principal, Vec<Diagnostic>> {
     if acting_plugin_id.is_empty() {
         return Ok(caller.clone());
     }
@@ -96,7 +105,6 @@ fn narrow_to_acting_plugin(caller: &Principal, acting_plugin_id: &str) -> Result
         );
         return Err(vec![refusal]);
     }
-    let plugin_grant: Vec<Scope> = Vec::new();
     let scopes = plugin_grant
         .into_iter()
         .filter(|scope| caller.kind == PrincipalKind::Owner || scopes_allow(&caller.scopes, scope))
@@ -138,18 +146,29 @@ fn retired_command_refusal(retired: &RetiredCommand) -> Diagnostic {
     refusal
 }
 
-/// A plugin's command runs only while its plugin is enabled. The plugin host (M1-32) keeps the plugins' states;
-/// until it lands no plugin is enabled, and the registry holds no plugin command to reach this.
-fn check_plugin_enabled(command: &CommandDescriptor) -> Result<(), Vec<Diagnostic>> {
+/// A plugin's command runs only while its plugin is enabled. A disabled plugin's commands leave the registry, so this
+/// catches the moment between a state change and its unregistering, and a plugin the host doesn't know. The refusal
+/// carries the plugin's own diagnostics after it, so the caller sees why.
+fn check_plugin_enabled(
+    command: &CommandDescriptor,
+    plugin_status: Option<(PluginState, Vec<Diagnostic>)>,
+) -> Result<(), Vec<Diagnostic>> {
     if command.plugin_id.is_empty() {
         return Ok(());
     }
+    let plugin_diagnostics = match plugin_status {
+        Some((PluginState::Enabled, _)) => return Ok(()),
+        Some((_, diagnostics)) => diagnostics,
+        None => Vec::new(),
+    };
     let mut refusal = diagnostic(
         CODE_PLUGIN_NOT_ENABLED,
         &[("command_id", &command.command_id), ("plugin_id", &command.plugin_id)],
     );
-    refusal.fix_command_id = "plugin.enable".to_string();
-    Err(vec![refusal])
+    refusal.fix_command_id = PLUGIN_ENABLE_COMMAND_ID.to_string();
+    let mut refusals = vec![refusal];
+    refusals.extend(plugin_diagnostics);
+    Err(refusals)
 }
 
 /// Steps 6 to 8 of the header.
@@ -259,19 +278,30 @@ mod tests {
 
     #[test]
     fn an_acting_plugin_only_removes_rights() {
-        let narrowed = narrow_to_acting_plugin(&owner_principal(), "acme").unwrap();
+        let narrowed = narrow_to_acting_plugin(&owner_principal(), "acme", Vec::new()).unwrap();
         assert_eq!(narrowed.kind, PrincipalKind::Plugin);
         assert_eq!(narrowed.id, "acme");
         assert!(narrowed.scopes.is_empty());
         assert_eq!(principal_label(&narrowed), "plugin:acme");
-        let unchanged = narrow_to_acting_plugin(&owner_principal(), "").unwrap();
+        let unchanged = narrow_to_acting_plugin(&owner_principal(), "", Vec::new()).unwrap();
         assert_eq!(unchanged, owner_principal());
+        // The owner narrowed to a plugin holds the plugin's grant; a token keeps only what it holds itself.
+        let grant = vec![Scope::Read, Scope::Plugin("acme".to_string())];
+        let as_owner = narrow_to_acting_plugin(&owner_principal(), "acme", grant.clone()).unwrap();
+        assert_eq!(as_owner.scopes, grant);
+        let token = Principal {
+            kind: PrincipalKind::Token,
+            id: "tok_01J".to_string(),
+            scopes: vec![Scope::Read, Scope::SystemAdmin],
+        };
+        let as_token = narrow_to_acting_plugin(&token, "acme", grant).unwrap();
+        assert_eq!(as_token.scopes, [Scope::Read]);
     }
 
     #[test]
     fn an_acting_plugin_id_that_is_not_one_is_refused() {
         for bad in ["Acme", "acme_", "a.b", "plugin:acme"] {
-            let refusal = narrow_to_acting_plugin(&owner_principal(), bad).unwrap_err();
+            let refusal = narrow_to_acting_plugin(&owner_principal(), bad, Vec::new()).unwrap_err();
             assert_eq!(refusal[0].code, CODE_INVALID_ARGUMENTS, "{bad}");
         }
     }
@@ -292,15 +322,23 @@ mod tests {
     #[test]
     fn a_plugin_command_is_refused_until_its_plugin_is_enabled() {
         let core = CommandDescriptor::default();
-        check_plugin_enabled(&core).unwrap();
+        check_plugin_enabled(&core, None).unwrap();
         let plugin = CommandDescriptor {
             command_id: "acme.tool.run".to_string(),
             plugin_id: "acme".to_string(),
             ..CommandDescriptor::default()
         };
-        let refusal = check_plugin_enabled(&plugin).unwrap_err();
+        let refusal = check_plugin_enabled(&plugin, None).unwrap_err();
         assert_eq!(refusal[0].code, CODE_PLUGIN_NOT_ENABLED);
         assert_eq!(refusal[0].fix_command_id, "plugin.enable");
+        check_plugin_enabled(&plugin, Some((PluginState::Enabled, Vec::new()))).unwrap();
+        let why = vec![diagnostic(
+            "RRS-P3001",
+            &[("dependency", "base"), ("plugin_id", "acme")],
+        )];
+        let refusal = check_plugin_enabled(&plugin, Some((PluginState::Disabled, why))).unwrap_err();
+        let codes: Vec<&str> = refusal.iter().map(|item| item.code.as_str()).collect();
+        assert_eq!(codes, [CODE_PLUGIN_NOT_ENABLED, "RRS-P3001"]);
     }
 
     #[test]

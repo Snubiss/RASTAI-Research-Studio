@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1P03",
+  "plugin_id": "fixture_lens",
+  "display_name": "Fixture lens",
+  "version": "1.0.0",
+  "engines": {
+    "rastai": ">=0.1"
+  },
+  "requires_capabilities": ["psychology.lens@9"],
+  "contributes": {
+    "lenses": [
+      {
+        "lens_id": "fixture_lens.norms",
+        "title": "Norms"
+      }
+    ]
+  }
+}
