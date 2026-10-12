@@ -15,6 +15,10 @@ loader agree, so a checkpoint is always of a whole step.
 
 The last step of the run writes a final checkpoint too. preempt_requested is read first: only SIGTERM has a deadline.
 Its checkpoint skips the validation pass, which the budget doesn't time and which can take longer than the write.
+
+A checkpoint that hits a full disk raises RRS-T2001. The train job (rastai_worker/jobs/train.py) then pauses the run
+with its state in memory and, after RESUME, calls `train_from_current_step`, not `train`: the run isn't prepared
+again (Recipe.prepare runs once), and the checkpoint the disk refused is written before the next step.
 The loop never writes the run's final state; the worker's edge does (rastai_worker/diagnostics.py). `train.preempted`
 and `checkpoint.resumed` are worker events from M5 on (contracts 7.3); until their contract lands the edge's
 `run.state_changed preempted` and exit 75 tell the node.
@@ -81,8 +85,16 @@ class TrainingOutcome:
 
 
 def train(context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl) -> TrainingOutcome:
-    """Trains until the run's last step or until a flag ends it (see the table at the top)."""
+    """Prepares the run, then trains until its last step or until a flag ends it (see the table at the top)."""
     prepare_run(context, recipe)
+    return train_from_current_step(context, recipe, events, control)
+
+
+def train_from_current_step(
+    context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl
+) -> TrainingOutcome:
+    """The loop from the step the run stands at, on a run already prepared: `train`'s own loop, and how the train job
+    goes on after a full disk paused the run. A checkpoint the disk refused is written first, before the next step."""
     events.emit_durable(RUN_STATE_CHANGED, {"run_state": RUN_STATE_RUNNING})
     while True:
         wait_while_paused(control)
@@ -92,6 +104,8 @@ def train(context: TrainingContext, recipe: Recipe, events: JobEvents, control: 
             return outcome(context, OUTCOME_CANCELLED)
         if control.stop_requested:
             return end_with_checkpoint(context, recipe, events, OUTCOME_STOPPED)
+        if context.progress.checkpoint_unwritten:
+            save_checkpoint_and_report(context, recipe, events)
         if context.progress.step >= context.settings.max_steps:
             return end_with_checkpoint(context, recipe, events, OUTCOME_COMPLETED)
         run_training_step(context, recipe, events)
@@ -102,7 +116,8 @@ def train(context: TrainingContext, recipe: Recipe, events: JobEvents, control: 
 
 def prepare_run(context: TrainingContext, recipe: Recipe) -> None:
     """recipe.prepare, then, on a resume, the recipe state and the random generators: after prepare, so whatever
-    prepare draws can't move the stream the first batch draws from."""
+    prepare draws can't move the stream the first batch draws from. Once per job: Recipe.prepare is called once
+    before the first step, so a run that paused goes on through train_from_current_step without it."""
     recipe.prepare(context)
     resume_point = context.progress.resume_point
     if resume_point is not None:
@@ -252,7 +267,11 @@ def save_checkpoint_and_report(
         progress.best_validation_loss is None or validation_loss < progress.best_validation_loss
     )
     write_started = time.monotonic()
+    # Up until the write succeeds: a write that raises (a full disk) leaves it up, so the loop tries this step's
+    # checkpoint again when the run goes on, whatever asked for it (a timer, a step count, CHECKPOINT_NOW).
+    progress.checkpoint_unwritten = True
     folder = write_checkpoint(context.run_folder, progress.step, context, recipe.resume_state(), validation_loss)
+    progress.checkpoint_unwritten = False
     progress.last_checkpoint_seconds = time.monotonic() - write_started
     progress.last_checkpoint_time = time.monotonic()
     progress.last_checkpoint_step = progress.step

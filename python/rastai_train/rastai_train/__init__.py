@@ -18,7 +18,14 @@ from rastai_train.context import (
     checkpoint_policy,
 )
 from rastai_train.errors import TrainError
-from rastai_train.loop import TrainingOutcome, optimizer_step, preempt_at_step_boundary, train
+from rastai_train.loop import (
+    TrainingOutcome,
+    optimizer_step,
+    preempt_at_step_boundary,
+    prepare_run,
+    train,
+    train_from_current_step,
+)
 from rastai_train.recipes import FIRST_PARTY_RECIPES, register_first_party
 from rastai_train.recipes.classification import ClassificationRecipe
 from rastai_train.resume import ResumePoint, load_resume_state
@@ -41,9 +48,11 @@ __all__ = [
     "load_resume_state",
     "optimizer_step",
     "preempt_at_step_boundary",
+    "prepare_run",
     "register_first_party",
     "remove_unkept_checkpoints",
     "resume_from_latest_checkpoint",
     "train",
+    "train_from_current_step",
     "write_checkpoint",
 ]

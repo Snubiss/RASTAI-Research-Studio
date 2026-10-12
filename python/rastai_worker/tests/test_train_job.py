@@ -1,8 +1,9 @@
 """The train job (rastai_worker/jobs/train.py; python layout 7.4; contracts 4.4 and 9.5), called in process as the
 worker's edge calls it, with fixtures/jobs/textcnn_train/job.json: TextCNN trains and the records come in order;
 the JobSpec's two JSON fields are read as TrainJobArgs and SettingsCheckpoint, and anything else is RRS-J2001 before
-a record is written; a full disk at a checkpoint pauses the run until RESUME; a job with resume_from continues the
-run from its newest checkpoint that loads, the same as a run that never stopped.
+a record is written; a full disk at a checkpoint pauses the run until RESUME, which writes that checkpoint before the
+next step and doesn't prepare the run again; a job with resume_from continues the run from its newest checkpoint that
+loads, the same as a run that never stopped.
 
 The whole job process, under a fake node, is in test_worker_server.py.
 """
@@ -19,6 +20,8 @@ import torch
 from rastai_formats.generated.command_train_start import train_job_args_from_json
 from rastai_plugin.catalog.generated import RRS_J2001, RRS_T0002, RRS_T2001, RRS_T2002
 from rastai_train.errors import TrainError
+from rastai_train.loop import STEPS_BETWEEN_METRIC_RECORDS
+from rastai_train.recipes.classification import ClassificationRecipe
 from rastai_worker.errors import WorkerError
 from rastai_worker.event_payloads import job_spec_from_dict
 from rastai_worker.job_file import read_job_file
@@ -43,6 +46,7 @@ UNUSED_TOKEN = "ab" * 32
 FIXTURE_MAX_STEPS = 40
 METRIC_STEPS = [10, 20, 30, 40]
 PREEMPT_AT_STEP = 20
+CHECKPOINT_NOW_AT_STEP = 10
 CHECKPOINT_FOLDER_PATTERN = "checkpoints/step-*"
 DAMAGED_STEP_FOLDER = "checkpoints/step-00000030"
 OPTIMIZER_FILE = "optimizer.safetensors"
@@ -206,6 +210,9 @@ BAD_ARGUMENT_CHANGES = {
     "two GPUs": set_value(["plan", "gpu_indices"], [0, 1]),
     "no design": set_value(["start_arguments", "design_path"], ""),
     "start arguments that aren't an object": set_value(["start_arguments"], "classification"),
+    "an unknown key": set_value(["max_step"], 40),
+    "an unknown plan key": set_value(["plan", "micro_batches"], 8),
+    "an unknown start arguments key": set_value(["start_arguments", "dataset"], "rows.jsonl"),
 }
 
 
@@ -228,6 +235,7 @@ BAD_JSON_FIELDS = {
     "a policy that isn't JSON": ("checkpoint_policy_json", "keep_last=3"),
     "a policy keeping no checkpoint": ("checkpoint_policy_json", '{"keep_last": 0}'),
     "a policy with a text budget": ("checkpoint_policy_json", '{"preemption_budget_seconds": "25"}'),
+    "a policy with a misspelt key": ("checkpoint_policy_json", '{"keep_lst": 1}'),
 }
 
 
@@ -262,7 +270,10 @@ def test_a_job_file_of_another_job_is_j2001(tmp_path: Path, fields: dict) -> Non
 
 def test_a_gpu_plan_sets_cublas_workspace_before_cuda(fields: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     plan = train_job_args_from_json(json.loads(fields["job_spec"]["arguments_json"])).plan
-    monkeypatch.delenv(CUBLAS_WORKSPACE_VARIABLE, raising=False)
+    # setenv first, so undo removes the variable the job sets: a delenv of an absent variable records nothing to undo,
+    # and the setting would leak into every later test and its subprocesses.
+    monkeypatch.setenv(CUBLAS_WORKSPACE_VARIABLE, CUBLAS_WORKSPACE_SETTING)
+    monkeypatch.delenv(CUBLAS_WORKSPACE_VARIABLE)
     assert training_device(plan) == "cpu"
     assert CUBLAS_WORKSPACE_VARIABLE not in os.environ
     # The node shows the job only its own GPUs, so its one GPU is cuda:0 whatever its physical index.
@@ -290,21 +301,42 @@ def full_disk_once(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     return failed_steps
 
 
+def count_prepare_calls(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Counts the classification recipe's prepare calls; returns a list that grows by one per call."""
+    real_prepare = ClassificationRecipe.prepare
+    calls = []
+
+    def counted_prepare(recipe, context) -> None:
+        calls.append(1)
+        real_prepare(recipe, context)
+
+    monkeypatch.setattr(ClassificationRecipe, "prepare", counted_prepare)
+    return calls
+
+
+def resume_when_paused(control: JobControl):
+    """Clears `paused` when the run writes `paused`: the user freed space and sent RESUME (control.py's RESUME clears
+    the flag)."""
+
+    def resume(event_type: str, payload: dict) -> None:
+        if event_type == RUN_STATE_CHANGED and payload["run_state"] == "RUN_STATE_PAUSED":
+            assert control.paused
+            control.paused = False
+
+    return resume
+
+
 def test_a_full_disk_at_a_checkpoint_pauses_the_run_until_resume(
     tmp_path: Path, fields: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     failed_steps = full_disk_once(monkeypatch)
+    prepare_calls = count_prepare_calls(monkeypatch)
     control = JobControl()
-
-    def resume_when_paused(event_type: str, payload: dict) -> None:
-        if event_type == RUN_STATE_CHANGED and payload["run_state"] == "RUN_STATE_PAUSED":
-            # The user freed space and sent RESUME (control.py's RESUME clears the flag).
-            assert control.paused
-            control.paused = False
-
-    events = RecordingEvents(resume_when_paused)
+    events = RecordingEvents(resume_when_paused(control))
     run_fixture_job(write_job(tmp_path, fields), events, control)
     assert failed_steps == [FIXTURE_MAX_STEPS]
+    # The run went on in memory: the recipe was prepared once, not again after RESUME.
+    assert len(prepare_calls) == 1
     assert events.run_states() == ["RUN_STATE_PREPARING", "RUN_STATE_RUNNING", "RUN_STATE_PAUSED", "RUN_STATE_RUNNING"]
     diagnostic = events.payloads(DIAGNOSTIC_REPORTED)[0]["diagnostic"]
     assert diagnostic["code"] == RRS_T2001
@@ -312,6 +344,56 @@ def test_a_full_disk_at_a_checkpoint_pauses_the_run_until_resume(
     assert [payload["step"] for payload in events.payloads(CHECKPOINT_SAVED)] == [FIXTURE_MAX_STEPS]
     assert events.types().index(DIAGNOSTIC_REPORTED) < events.types().index(CHECKPOINT_SAVED)
     assert not list((tmp_path / RUN_FOLDER_NAME).rglob("*.partial"))
+
+
+def step_records(events: RecordingEvents) -> list[tuple[str, int]]:
+    """The run.metrics and checkpoint.saved records in order, each as its type and step."""
+    records = []
+    for event_type, payload in events.durable:
+        if event_type in (RUN_METRICS, CHECKPOINT_SAVED):
+            records.append((event_type, payload["step"]))
+    return records
+
+
+def checkpoint_now_at(control: JobControl, step: int):
+    """Sets checkpoint_requested, as Control CHECKPOINT_NOW does, when the metrics of `step` are recorded, and
+    resumes the run when it pauses."""
+    resume = resume_when_paused(control)
+
+    def checkpoint_now(event_type: str, payload: dict) -> None:
+        if event_type == RUN_METRICS and payload["step"] == step and TRAIN_LOSS in payload["values"]:
+            control.checkpoint_requested = True
+        resume(event_type, payload)
+
+    return checkpoint_now
+
+
+def test_a_mid_run_checkpoint_a_full_disk_refused_is_written_after_resume(
+    tmp_path: Path, fields: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uninterrupted = RecordingEvents()
+    run_fixture_job(write_job(tmp_path / "uninterrupted", fields), uninterrupted)
+    failed_steps = full_disk_once(monkeypatch)
+    prepare_calls = count_prepare_calls(monkeypatch)
+    control = JobControl()
+    events = RecordingEvents(checkpoint_now_at(control, CHECKPOINT_NOW_AT_STEP))
+    run_fixture_job(write_job(tmp_path / "paused", fields), events, control)
+    assert failed_steps == [CHECKPOINT_NOW_AT_STEP]
+    assert events.run_states() == ["RUN_STATE_PREPARING", "RUN_STATE_RUNNING", "RUN_STATE_PAUSED", "RUN_STATE_RUNNING"]
+    # CHECKPOINT_NOW's checkpoint isn't lost: RESUME writes it, of the step it was asked at, before the next step.
+    saved_steps = [payload["step"] for payload in events.payloads(CHECKPOINT_SAVED)]
+    assert saved_steps == [CHECKPOINT_NOW_AT_STEP, FIXTURE_MAX_STEPS]
+    assert events.types().index(DIAGNOSTIC_REPORTED) < events.types().index(CHECKPOINT_SAVED)
+    # Step 10's training metrics, its checkpoint and validation loss, and only then step 20's metrics.
+    assert step_records(events)[:4] == [
+        (RUN_METRICS, CHECKPOINT_NOW_AT_STEP),
+        (CHECKPOINT_SAVED, CHECKPOINT_NOW_AT_STEP),
+        (RUN_METRICS, CHECKPOINT_NOW_AT_STEP),
+        (RUN_METRICS, CHECKPOINT_NOW_AT_STEP + STEPS_BETWEEN_METRIC_RECORDS),
+    ]
+    assert len(prepare_calls) == 1
+    # Pausing changed nothing the run computes: its losses are the uninterrupted run's, bit for bit on the CPU.
+    assert events.train_losses() == uninterrupted.train_losses()
 
 
 def test_a_cancel_while_paused_ends_without_training_again(

@@ -10,22 +10,29 @@
 3. `run.state_changed preparing`, then the context (the design compiled, the dataset split, the optimizer) and the
    recipe from the registry. With `resume_from` set, the run continues from its newest complete checkpoint that
    loads, past damaged ones, each reported as RRS-T2002 (flow 5.2).
-4. rastai_train's `train`, which writes `running`, the metrics and the checkpoints, and honours every JobControl
-   flag at a step boundary.
+4. rastai_train's loop (`prepare_run` once, then `train_from_current_step`), which writes `running`, the metrics and
+   the checkpoints, and honours every JobControl flag at a step boundary.
 
 The job never writes the run's final state: the worker's edge (diagnostics.py) does, from how this function ended
 and the flags: completed, stopped, cancelled (exit 3), preempted (exit 75) or failed (exit 1).
 
 A checkpoint that hits a full disk (RRS-T2001) pauses the run instead of failing it (contracts 9.5): the job reports
 the code and `paused`, keeps the model, the optimizer and the loader in memory, and waits for RESUME; the loop then
-goes on from the same step and writes `running` again. A job already asked to end doesn't pause: a preemption whose
-checkpoint doesn't fit fails the job (python layout 5.4), so the node doesn't relaunch it forever.
+goes on from the same step without preparing the run again, writes `running` again and writes the checkpoint the disk
+refused before the next step. A job already asked to end doesn't pause: a preemption whose checkpoint doesn't fit
+fails the job (python layout 5.4), so the node doesn't relaunch it forever.
 """
 
+import dataclasses
 import json
 import os
 
-from rastai_formats.generated.command_train_start import TrainingPlan, TrainJobArgs, train_job_args_from_json
+from rastai_formats.generated.command_train_start import (
+    TrainingPlan,
+    TrainJobArgs,
+    TrainStartArgs,
+    train_job_args_from_json,
+)
 from rastai_formats.generated.settings import SettingsCheckpoint, settings_checkpoint_from_json
 from rastai_plugin.catalog.generated import RRS_J2001, RRS_T0002, RRS_T2001, RRS_T2002
 from rastai_proto.node.v1.jobs_pb2 import JobSpec
@@ -38,9 +45,10 @@ from rastai_train import (
     TrainingSettings,
     build_training_context,
     checkpoint_policy,
+    prepare_run,
     register_first_party,
     resume_from_latest_checkpoint,
-    train,
+    train_from_current_step,
 )
 from rastai_worker.control import job_is_ending, wait_for_resume
 from rastai_worker.diagnostics import coded_diagnostic
@@ -101,6 +109,10 @@ def read_train_job_arguments(job_spec: JobSpec) -> TrainJobArgs:
         job_arguments = train_job_args_from_json(values)
     except (KeyError, TypeError) as error:
         raise bad_field_error(job_spec, ARGUMENTS_FIELD, f"it isn't a TrainJobArgs ({error!r})") from None
+    # The reader took start_arguments and plan as objects, so their keys can be checked too.
+    check_known_keys(job_spec, ARGUMENTS_FIELD, values, TrainJobArgs)
+    check_known_keys(job_spec, ARGUMENTS_FIELD, values["start_arguments"], TrainStartArgs)
+    check_known_keys(job_spec, ARGUMENTS_FIELD, values["plan"], TrainingPlan)
     check_start_arguments(job_spec, job_arguments)
     check_counts(job_spec, job_arguments)
     check_plan_is_supported(job_spec, job_arguments.plan)
@@ -148,6 +160,7 @@ def read_checkpoint_policy(job_spec: JobSpec) -> CheckpointPolicy:
     if not job_spec.checkpoint_policy_json:
         return checkpoint_policy()
     values = read_json_object(job_spec, CHECKPOINT_POLICY_FIELD, job_spec.checkpoint_policy_json)
+    check_known_keys(job_spec, CHECKPOINT_POLICY_FIELD, values, SettingsCheckpoint)
     checkpoint_settings = settings_checkpoint_from_json(values)
     check_checkpoint_settings(job_spec, checkpoint_settings)
     return checkpoint_policy(checkpoint_settings)
@@ -174,6 +187,19 @@ def read_json_object(job_spec: JobSpec, field_name: str, text: str) -> dict:
     if not isinstance(values, dict):
         raise bad_field_error(job_spec, field_name, "it isn't a JSON object")
     return values
+
+
+def check_known_keys(job_spec: JobSpec, field_name: str, values: dict, shape: type) -> None:
+    """Every key is one of the shape's fields. The generated readers skip keys they don't know, so without this a
+    typo such as `keep_lst` would quietly take a default instead of being the RRS-J2001 contracts 4.4 says it is."""
+    known_names = [field.name for field in dataclasses.fields(shape)]
+    unknown_names = []
+    for name in values:
+        if name not in known_names:
+            unknown_names.append(name)
+    if unknown_names:
+        listed = ", ".join(sorted(unknown_names))
+        raise bad_field_error(job_spec, field_name, f"it has keys a {shape.__name__} doesn't ({listed})")
 
 
 def is_whole_number(value: object, minimum: int) -> bool:
@@ -235,17 +261,20 @@ def resume_run(context: TrainingContext, events: JobEvents, job_id: str) -> None
 def train_until_done(
     context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl, job_id: str
 ) -> None:
-    """rastai_train's loop, paused and started again after each checkpoint a full disk refused (see the top)."""
+    """rastai_train's loop, paused after each checkpoint a full disk refused and then continued from the same step
+    (see the top). The run is prepared once: a recipe that builds modules or draws from the random generators in
+    prepare would otherwise start over in the middle of the run."""
+    prepare_run(context, recipe)
     while True:
         try:
-            train(context, recipe, events, control)
+            train_from_current_step(context, recipe, events, control)
             return
         except TrainError as error:
             if error.code != RRS_T2001 or job_is_ending(control):
                 raise
             pause_for_full_checkpoint_disk(error, events, control, job_id)
-        # Cancelled while paused: nothing is left to save, so the edge can record it at once. STOP and SIGTERM go
-        # back into the loop, which tries their checkpoint again.
+        # Cancelled while paused: nothing is left to save, so the edge can record it at once. RESUME, STOP and
+        # SIGTERM go back into the loop, which tries the refused checkpoint again.
         if control.cancel_requested:
             return
 
