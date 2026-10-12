@@ -11,21 +11,28 @@
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use rastai_core::paths::{DataPaths, daemon_log_path, read_path_environment, resolve_paths};
+use rastai_core::paths::{DataPaths, daemon_log_path, read_path_environment, resolve_paths, user_settings_path};
+use rastai_core::scopes::{Scope, parse_scope};
 use rastai_core::settings::{
-    ResolvedSettings, default_settings, resolve_settings, setting_text, setting_u64, settings_from_environment,
+    ResolvedSettings, SettingsLayer, SettingsSource, setting_text, setting_u64, settings_from_environment,
     settings_from_flags,
 };
+use rastai_diag::diagnostic::Diagnostic;
 use rastai_diag::logger::{LogLevel, LoggerSettings, init_logger, log_info, log_warn};
 use rastai_formats::hashing::hash_bytes;
 use rastai_store::data_dir_lock::{DaemonLock, take_daemon_lock};
-use rastai_store::store::open_store;
+use rastai_store::index::kept_tables::list_tokens;
+use rastai_store::index::reads::open_index_reader;
+use rastai_store::index::writes::IndexWrite;
+use rastai_store::store::{Store, open_store};
+use rastai_store::writer_thread::write_index;
 use tokio::task::JoinHandle;
 
 use crate::auth_files::ensure_owner_token;
+use crate::commands::handlers::settings::{read_settings_layer, resolve_with_files};
 use crate::error::ServerError;
 use crate::http::listeners::{FIRST_DEFAULT_PORT, LOOPBACK_ADDRESS, listen_http};
-use crate::http::sessions::new_auth_state;
+use crate::http::sessions::{AuthState, ScopedToken, add_scoped_token, new_auth_state};
 use crate::server_state::{Server, build_server};
 use crate::shutdown::{stop_on_signals, wait_for_shutdown};
 
@@ -41,6 +48,15 @@ const LOG_KEEP_FILES_SETTING: &str = "logging.keep_files";
 const DAEMON_ID_PREFIX_LENGTH: usize = 8;
 /// `hash_bytes` writes `blake3:<hex>`; the prefix is taken from the hex.
 const HASH_ALGORITHM_SEPARATOR: char = ':';
+
+/// The settings the daemon starts with, and what it noticed on the way.
+struct StartupSettings {
+    resolved: ResolvedSettings,
+    /// The environment and `--set` layers, kept for `settings.set` (server_state.rs).
+    overrides: Vec<SettingsLayer>,
+    /// The user's `settings.json` when it doesn't parse (`RRS-C0009`): logged once the logger runs, and left out.
+    user_file_problem: Option<Diagnostic>,
+}
 
 /// What `rastai serve` passes in.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -74,17 +90,21 @@ pub async fn run_daemon(options: DaemonOptions) -> Result<(), ServerError> {
 
 /// Everything up to serving, in the order of flows/platform.md 2.1.
 pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<RunningDaemon, ServerError> {
-    let settings = load_settings_layers(options)?;
+    let settings = load_settings_layers(&paths, options)?;
     let daemon_lock = take_daemon_lock(&paths)?; // RRS-S0001, RRS-S0007
-    start_logger(&paths, &settings); // after the lock, so two daemons never rotate one log file
+    start_logger(&paths, &settings.resolved); // after the lock, so two daemons never rotate one log file
+    log_settings_problem(settings.user_file_problem.as_ref());
     let owner_token_hash = ensure_owner_token(&paths)?; // RRS-C1008, RRS-C1010: before any database or listener
     let store = open_store(&paths)?; // migrations, writer thread
+    close_interrupted_commands(&store).await?; // RRS-C0005 on the rows a crash left unfinished
     start_embedded_node();
     let auth = new_auth_state(owner_token_hash.clone(), &daemon_id_prefix(&owner_token_hash));
-    let preferred_port = preferred_port(options, &settings);
-    let listen_address = listen_address(&settings);
-    let server = Arc::new(build_server(paths, settings, store, auth));
+    load_scoped_tokens(&store, &auth)?;
+    let preferred_port = preferred_port(options, &settings.resolved);
+    let listen_address = listen_address(&settings.resolved);
+    let server = Arc::new(build_server(paths, settings.resolved, settings.overrides, store, auth));
     let http = listen_http(&server, preferred_port, listen_address).await?; // writes daemon.port; health ok from here
+    let _ = server.http_port.set(http.tcp_port);
     log_info("daemon started", &[("port", &http.tcp_port.to_string())]);
     Ok(RunningDaemon {
         server,
@@ -94,15 +114,58 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
     })
 }
 
-/// Defaults, the environment and `--set` flags (contracts 11.1). The user's and the project's `settings.json`
-/// layers join with `settings.get` and `settings.set` (M1-27), which own reading those files and reporting one that
-/// doesn't parse; a malformed `--set` refuses the start (`RRS-C0002`).
-fn load_settings_layers(options: &DaemonOptions) -> Result<ResolvedSettings, ServerError> {
+/// The defaults, the user's `settings.json`, the environment and `--set` flags (contracts 11.1). A project's file
+/// applies only to requests inside that project (`settings.get`). A malformed `--set` refuses the start
+/// (`RRS-C0002`); a user file that doesn't parse doesn't: it is left out, reported, and never overwritten.
+fn load_settings_layers(paths: &DataPaths, options: &DaemonOptions) -> Result<StartupSettings, ServerError> {
     let flags = settings_from_flags(&options.set_flags).map_err(|diagnostic| ServerError::InvalidSetFlag {
         message: diagnostic.message,
     })?;
     let environment = settings_from_environment(&environment_variables());
-    Ok(resolve_settings(&[default_settings(), environment, flags]))
+    let overrides = vec![environment, flags];
+    let (user_layer, user_file_problem) = match read_settings_layer(&user_settings_path(paths), SettingsSource::User) {
+        Ok(layer) => (layer, None),
+        Err(problem) => (None, Some(problem)),
+    };
+    Ok(StartupSettings {
+        resolved: resolve_with_files(user_layer, None, &overrides),
+        overrides,
+        user_file_problem,
+    })
+}
+
+fn log_settings_problem(problem: Option<&Diagnostic>) {
+    if let Some(problem) = problem {
+        log_warn(
+            "the user settings file was left out",
+            &[("code", &problem.code), ("message", &problem.message)],
+        );
+    }
+}
+
+/// Journal rows started and never finished belong to commands the last daemon was running when it stopped; they
+/// are closed as interrupted (`RRS-C0005`) before anything is served. The daemon log's replay (M1-28) goes first,
+/// so a command whose `command.finished` record made it to the log keeps its real outcome.
+async fn close_interrupted_commands(store: &Store) -> Result<(), ServerError> {
+    write_index(&store.index, IndexWrite::MarkUnfinishedJournalRows).await?;
+    Ok(())
+}
+
+/// The gate's copy of the scoped tokens' hashes and scopes, from `rastai.db`. A stored scope this build can't read
+/// is left out of the token, so it never grants more than it says.
+fn load_scoped_tokens(store: &Store, auth: &AuthState) -> Result<(), ServerError> {
+    let reader = open_index_reader(&store.index_readers)?;
+    for row in list_tokens(&reader)? {
+        let scopes: Vec<Scope> = row.scopes.iter().filter_map(|name| parse_scope(name).ok()).collect();
+        let token = ScopedToken {
+            token_id: row.token_id,
+            token_hash: row.token_hash,
+            scopes,
+            revoked: row.revoked_unix_ms.is_some(),
+        };
+        add_scoped_token(auth, token);
+    }
+    Ok(())
 }
 
 /// The process's variables that are text. `std::env::vars` would panic on one that isn't Unicode; such a variable
@@ -188,12 +251,12 @@ fn listen_address(settings: &ResolvedSettings) -> IpAddr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rastai_core::settings::SettingsLayer;
+    use rastai_core::settings::{default_settings, resolve_settings};
     use serde_json::json;
 
     fn settings_with(values: serde_json::Value) -> ResolvedSettings {
         let layer = SettingsLayer {
-            source: rastai_core::settings::SettingsSource::Flag,
+            source: SettingsSource::Flag,
             values,
         };
         resolve_settings(&[default_settings(), layer])

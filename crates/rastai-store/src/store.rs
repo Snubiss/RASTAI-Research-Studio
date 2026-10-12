@@ -26,10 +26,16 @@ pub(crate) const INDEX_DATABASE_SETTINGS: DatabaseSettings = DatabaseSettings {
 
 /// The migration chain of `rastai.db`, oldest first. A migration is never edited once released; a change is a new
 /// one at the end.
-pub(crate) const INDEX_MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: include_str!("index/migrations/0001_initial.sql"),
-}];
+pub(crate) const INDEX_MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("index/migrations/0001_initial.sql"),
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("index/migrations/0002_journal_arguments_hash.sql"),
+    },
+];
 
 // Reads are short and the daemon serves a handful of clients, so a few readers keep them from queueing.
 const INDEX_READER_COUNT: usize = 4;
@@ -115,17 +121,18 @@ mod tests {
         let paths = test_paths("newer-schema");
         close(open_store(&paths).unwrap());
         let database_path = rastai_db_path(&paths);
-        // A newer app is this one plus a migration: it migrates the file to version 2 and closes it cleanly.
-        let newer_migrations = [
-            Migration {
-                version: 1,
-                sql: INDEX_MIGRATIONS[0].sql,
-            },
-            Migration {
-                version: 2,
-                sql: NEWER_MIGRATION_SQL,
-            },
-        ];
+        // A newer app is this one plus a migration: it migrates the file one version further and closes it cleanly.
+        let mut newer_migrations: Vec<Migration> = INDEX_MIGRATIONS
+            .iter()
+            .map(|migration| Migration {
+                version: migration.version,
+                sql: migration.sql,
+            })
+            .collect();
+        newer_migrations.push(Migration {
+            version: i64::try_from(INDEX_MIGRATIONS.len()).unwrap() + 1,
+            sql: NEWER_MIGRATION_SQL,
+        });
         drop(open_database_for_writing(&database_path, &INDEX_DATABASE_SETTINGS, &newer_migrations).unwrap());
         let bytes_before = std::fs::read(&database_path).unwrap();
 

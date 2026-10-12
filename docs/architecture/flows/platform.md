@@ -630,7 +630,7 @@ async fn run_command(server: &Server, caller: &Principal, request: &ExecuteReque
 - **Scope before arguments**, so a caller without the scope learns nothing about argument shapes.
 - **Arguments** are parsed by `rastai-formats` into the generated `<Name>Args` type. The `RRS-E` diagnostics come back with JSON-pointer paths, wrapped in `RRS-C0002`.
 - **Journal:** every command except `read`-scope ones gets a started row before the handler and a finished row after. Fields marked `secret` or `content` in the argument type's description are written as `<redacted>` in `arguments_json`, and those marked so in the result type's description are written as `<redacted>` in `result_json` (contracts 5.1). So a command that changes something never holds `read` (`job.cancel` holds `training`, contracts 6.4). A started row with no finished row means the daemon died mid-command; the next start marks it `RRS-C0005`, so the user can see what was interrupted.
-- **Idempotency:** the same `idempotency_key`, principal and command within 24 h returns the stored response, so a retried `train.start` never starts two runs. The stored response is the redacted `result_json`: a retried `token.create` makes no second token, and its `token` reads `<redacted>` (the caller that lost it revokes it by `token_id` and creates another). Different arguments under the same key → `RRS-C0004`. A duplicate arriving while the first is still running waits for it.
+- **Idempotency:** the same `idempotency_key`, principal and command within 24 h returns the stored response, so a retried `train.start` never starts two runs. The stored response is the redacted `result_json`: a retried `token.create` makes no second token, and its `token` reads `<redacted>` (the caller that lost it revokes it by `token_id` and creates another). Different arguments under the same key → `RRS-C0004`. Arguments are compared by `command_journal.arguments_hash`, a keyed hash of the canonical, unredacted arguments (contracts 5.1, 8.2), not by the redacted `arguments_json`, so two requests that differ only in a secret are different requests. A duplicate arriving while the first is still running waits for it.
 - **Kinds:** `sync` handlers aim for under 2 s; longer work is a `job`. A `stream` command returns a session id at once and its ephemeral events follow on the bus.
 - **Failures** come back as `ExecuteResponse{ok: false, diagnostics}` over HTTP 200. Only credential problems (4.2) are HTTP 401 or 403.
 
@@ -799,6 +799,7 @@ sequenceDiagram
   SH->>WEB: reload the window with the new url
 ```
 
+- **Login codes are owner-only.** A session runs as the owner with every scope, so `token.login_code.create` refuses every principal but the owner with `RRS-C1005`: a scoped token or a plugin holding `system.admin`, and the owner narrowed to a plugin UI by `acting_plugin_id`. Otherwise a `system.admin` token could redeem a code at `POST /api/login` and then create tokens with any scope. The callers that need a code (`rastai open` over `daemon.sock`, `rastai tunnel` over SSH) are the owner by peer uid.
 - The code travels in the URL fragment (`#login=<code>`), which browsers never send to servers or put in a Referer header.
 - **The desktop shell does no HTTP and no crypto, and never reads `owner.token`** (layout/frontend-and-plugins.md 9.3, 9.5; plan §10 row 2). It only spawns the bundled `rastai` and loads the URL the CLI prints. The CLI mints the code over `daemon.sock`, where the peer uid proves the owner.
 - `rastai open` without a flag creates a code the same way and opens the default browser. `rastai open --print-url` prints one `DesktopLaunchInfo` JSON line (`{url, cli_version, daemon_version, runtime_dir, config_dir, updates}`) instead; the shell parses it, and on a headless GPU box reached through an SSH tunnel the user copies `url` to the laptop.
@@ -914,7 +915,7 @@ sequenceDiagram
   SRV->>SRV: mark revoked, drop the cached entry, close its open streams
 ```
 
-- Presets: `chat-only` = `chat`; `mcp-default` = `read`, `chat`, `project` (contracts §6.3). Custom scope lists are allowed. Only the owner can create tokens (`system.admin`).
+- Presets: `chat-only` = `chat`; `mcp-default` = `read`, `chat`, `project` (contracts §6.3). Custom scope lists are allowed. Only the owner can create tokens (`system.admin`) with any scope; a token or plugin that holds `system.admin` can create only tokens whose scopes it holds itself, and is refused each other scope with `RRS-C1005`. Neither can ask for a login code (4.1), whose session would be the owner's.
 - `rastai mcp` without `RASTAI_TOKEN` answers every request with `RRS-C3002` and a fix that runs `token.create` with `mcp-default`. It never falls back to the owner token: an agent gets scopes only when the owner grants them.
 - MCP tool names are command ids with dots replaced by `__`. Malformed JSON-RPC → `RRS-C3001`.
 - Revocation applies on the next request; open streams for that token close with `RRS-C1006`.

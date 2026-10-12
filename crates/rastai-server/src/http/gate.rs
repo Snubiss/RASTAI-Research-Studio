@@ -10,8 +10,8 @@
 //! 4. `POST /api/login` must carry an Origin: the session it makes is bound to it.
 //! 5. A **session cookie** must name a live session, come from the Origin that redeemed it, and, for anything but
 //!    GET or HEAD, carry the session's request key. Without an Origin only GET or HEAD with `Sec-Fetch-Site`
-//!    `same-origin` or `none` pass. A **bearer token** must be the owner token (scoped tokens come with
-//!    `token.create`, M1-27). No credential is `RRS-C1002`.
+//!    `same-origin` or `none` pass. A **bearer token** must be the owner token or a scoped token `token.create`
+//!    made; a revoked one is `RRS-C1006`. No credential, or an unknown one, is `RRS-C1002`.
 //!
 //! A header that is malformed (not visible ASCII) or sent twice when it may only be sent once is refused with the
 //! code of the rule it would have fed, never guessed at, so an odd request can't slip between two readings of it.
@@ -21,13 +21,13 @@
 // `Err`, and refusals are rare, so it is returned as it is rather than boxed.
 #![allow(clippy::result_large_err)]
 
-use rastai_core::principal::{Principal, owner_principal};
+use rastai_core::principal::{Principal, PrincipalKind, owner_principal};
 use rastai_core::time::now_unix_ms;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_formats::hashing::hash_bytes;
 use rastai_transport::peer::{PeerIdentity, check_same_user};
 
-use crate::http::sessions::{AuthState, Session, find_live_session, touch_session};
+use crate::http::sessions::{AuthState, Session, find_live_session, find_scoped_token, touch_session};
 
 /// Any port: SSH tunnels forward other ports (plan §10 row 22). Lowercase only, as browsers send them; `LOCALHOST`
 /// would also fail the Origin comparison, so it is refused here already.
@@ -268,13 +268,22 @@ fn allowed_without_origin(request: &RequestHead) -> bool {
     safe_method && safe_site
 }
 
-/// The owner token, compared by hash. Scoped tokens, looked up by hash in the `tokens` table, arrive with
-/// `token.create` (M1-27); until then no other token can exist, so any other is unknown.
+/// The owner token or a scoped token, each compared by hash. A scoped token's principal holds exactly the scopes
+/// it was created with; a revoked one is `RRS-C1006`, so its holder learns why rather than guessing at a typo.
 fn check_bearer(token: &str, auth: &AuthState) -> Result<Option<Principal>, Diagnostic> {
-    if hash_bytes(token.as_bytes()) == auth.owner_token_hash {
+    let token_hash = hash_bytes(token.as_bytes());
+    if token_hash == auth.owner_token_hash {
         return Ok(Some(owner_principal()));
     }
-    Err(credential_refusal())
+    match find_scoped_token(auth, &token_hash) {
+        Some(scoped) if scoped.revoked => Err(diagnostic("RRS-C1006", &[])),
+        Some(scoped) => Ok(Some(Principal {
+            kind: PrincipalKind::Token,
+            id: scoped.token_id,
+            scopes: scoped.scopes,
+        })),
+        None => Err(credential_refusal()),
+    }
 }
 
 // ---- Reading headers ----

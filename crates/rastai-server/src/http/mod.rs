@@ -2,6 +2,8 @@
 //!
 //! This file is a list of `pub mod` lines (contracts 12.2).
 
+pub mod command_endpoints;
+pub mod connect;
 pub mod connect_json;
 pub mod gate;
 pub mod health;

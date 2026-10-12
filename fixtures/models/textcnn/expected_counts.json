@@ -1,0 +1,21 @@
+{
+  "design": "templates/designs/textcnn.rrsmodel",
+  "parameter_count": 3290692,
+  "trainable_parameter_count": 3290692,
+  "node_parameter_counts": {
+    "embedding": 3200000,
+    "conv_1": 24640,
+    "relu_1": 0,
+    "conv_2": 16448,
+    "relu_2": 0,
+    "conv_3": 20544,
+    "relu_3": 0,
+    "conv_4": 16448,
+    "relu_4": 0,
+    "conv_5": 12352,
+    "relu_5": 0,
+    "pool": 0,
+    "dropout": 0,
+    "classifier": 260
+  }
+}

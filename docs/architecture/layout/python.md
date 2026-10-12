@@ -1382,7 +1382,7 @@ python/rastai_worker/
     arguments.py                argv modes: run, plugin, rank, check
     check.py                    check subcommand: print torch version, backend, CUDA or HIP version and visible devices
                                 as one JSON line; the node runs it with -I after uv sync (platform flow 1.3)
-    launch.py                   read job.json → WorkerLaunch; set cache env; register first-party contributions
+    launch.py                   the start order: control, job.json → WorkerLaunch, entry, event log, server, Register
     job_file.py                 WorkerLaunch dataclass and its reader
     worker_server.py            grpcio WorkerService on jobs/<job_id>.sock; handlers only enqueue or flip flags
     host_connection.py          WorkerHost client from rastai_plugin; Register with retry; reconnect backoff
@@ -1397,7 +1397,7 @@ python/rastai_worker/
     diagnostics.py              exception → Diagnostic dict; traceback to stderr.log; exit code choice
     exit_codes.py               EXIT_OK, EXIT_FAILED, EXIT_BAD_LAUNCH, EXIT_CANCELLED, EXIT_EVENT_LOG_UNWRITABLE,
                                 EXIT_EVENT_LOG_LOCKED, EXIT_PREEMPTED
-    dispatch.py                 JOB_ENTRIES: job kind → entry function (a plain dict)
+    dispatch.py                 JOB_ENTRIES: job kind → `<module>:<function>` entry name (a plain dict)
     distributed.py              start rank processes, init the process group from a FileStore in the run folder
     plugin_module.py            plugin mode: import the manifest's module, serve HandleCommand
     proto_convert.py            engine results ↔ wire messages (DecodedToken → TokenEvent, packet → LivePacket, ...)
@@ -1450,35 +1450,49 @@ def pause_for_full_disk(log: EventLogWriter, control: JobControl) -> None: ...
     # and run.state_changed paused, fsync, wait for RESUME, then recreate the reserve before training continues
 
 class LiveStream:
-    def put(self, event_type: str, payload: Message) -> None: ...
-    def read(self, after_index: int, timeout_seconds: float) -> list[tuple[int, str, Message]]: ...
+    def put(self, event_type: str, event: LiveEvent) -> None: ...
+    def read(self, after_index: int, timeout_seconds: float) -> list[tuple[int, str, LiveEvent]]: ...
+    def close(self) -> None: ...      # ends every WatchLive stream when the job exits
 
-JOB_ENTRIES: dict[str, Callable] = {
-    "serve_inspectable": serve_inspectable.run_job,
-    "train": train.run_job,
-    "gym": gym.run_job,
-    "data_import": data_import.run_job,
-    "data_check": data_check.run_job,
-    "compile": compile_design.run_job,
-    "export": export.run_job,
-    "doctor_selftest": doctor_selftest.run_job,
-    # "eval" and "lens" always carry JobSpec.entry and go through plugin_entry.run_job
+# <module>:<function>, the form of JobSpec.entry; a kind's module is imported only when a job of that kind starts,
+# so a job imports only its own engine, and a kind whose module hasn't landed yet is a bad launch (RRS-J2001).
+JOB_ENTRIES: dict[str, str] = {
+    "serve_inspectable": "rastai_worker.jobs.serve_inspectable:run_job",
+    "train": "rastai_worker.jobs.train:run_job",
+    "gym": "rastai_worker.jobs.gym:run_job",
+    # eval and lens jobs must name JobSpec.entry; plugin_entry.py is the one place that imports and calls it
+    "eval": "rastai_worker.jobs.plugin_entry:run_job",
+    "lens": "rastai_worker.jobs.plugin_entry:run_job",
+    "data_import": "rastai_worker.jobs.data_import:run_job",
+    "data_check": "rastai_worker.jobs.data_check:run_job",
+    "compile": "rastai_worker.jobs.compile_design:run_job",
+    "export": "rastai_worker.jobs.export:run_job",
+    "doctor_selftest": "rastai_worker.jobs.doctor_selftest:run_job",
+    # "plugin_module" runs in plugin mode
 }
 ```
 
-`main` is thin:
+`main` is thin. The start order, as built (`launch.py`, which splits it into small functions):
 
 ```python
 def run_job_process(job_file: Path) -> int:
-    launch = read_job_file(job_file)
-    events = open_job_events(launch)               # flock, truncate a torn tail, write the reserve file
-    control = install_control(launch)              # Control calls, SIGTERM and SIGINT only set flags
+    control = install_control()                    # first: a SIGTERM during the start is a flag, not a dead process
+    launch = read_job_file(job_file)               # RRS-J2001 and exit 2 on a bad file
+    entry = find_job_entry(launch.job_spec)        # RRS-J2001 and exit 2 on a kind this worker can't run
+    job_token = job_token_from_environment(launch) # RASTAI_JOB_TOKEN; never in a file
+    log = EventLogWriter(launch.event_log_path, launch.run_id, launch.job_id)   # exit 5 on a held lock
+    live = LiveStream()
+    events = WorkerJobEvents(log, live, control, launch.job_id)
+    events.start_flusher()                         # fsyncs quiet metrics; stopped before the log closes
     # serve before Register: the node calls Hello as soon as Register arrives
-    start_worker_server(launch, control, events)
-    host = connect_to_host(launch)                 # WorkerHostService.Register with the job token
-    apply_vram_lease(launch)
-    return run_entry_with_diagnostics(launch, host, events, control)
+    server = start_worker_server(launch, control, live, job_token)
+    host = connect_to_host(launch, job_token)      # WorkerHostService.Register with the job token, with retry
+    HostWatcher(host).start()                      # registers again after a node restart
+    apply_vram_lease(launch)                       # M2
+    return run_entry_with_diagnostics(entry, launch, host, events, control)   # final records, fsync, exit code
 ```
+
+The final `run.state_changed` has one writer, `run_entry_with_diagnostics`: an entry emits metrics, checkpoints and artifacts, and the edge records how it ended (completed, with reason `stopped` after STOP; cancelled; preempted; or failed after a coded `diagnostic.reported`).
 
 ### 7.3 `job.json`: what the worker reads
 
@@ -1552,14 +1566,14 @@ sequenceDiagram
 - **The event log is the source of truth.** Durable events reach the daemon only through the file; a restart loses nothing. Ephemeral events (`job.progress`, live packets, peek steps) go through `LiveStream` and may be dropped.
 - **Single writer.** `EventLogWriter` takes an exclusive `fcntl.flock` on `events.log`. A second writer (a relaunch racing a live job) fails with `RRS-J3006` instead of interleaving frames: `EventLogWriter` raises it before it reads or writes the log or `events.log.reserve`, the worker prints the diagnostic as one line to `stderr.log` (which the node opens for append) and exits with `EXIT_EVENT_LOG_LOCKED` (5) before `Register`, and the node fails that job with `RRS-J3006` and leaves the running copy, its log and its run state alone (platform flow 5.1, 5.5). The node refuses a second job on a live run before it spawns one: it checks for a live job of the run and reserves the run for the new job under one lock of its job table, and writes `job.json` only after that (contracts 9.1, "One live job per run"). So this is the backstop for a writer the node doesn't know is alive, such as a worker started by hand. That writer had no live `job.json`, so the `job.json` this worker read is its own job's, and the node finalizes it with `final_state` `failed` as on any terminal state, never over another live job's. Frames are `body_length u32 LE | CRC-32 u32 LE | EventRecord`, after the 8-byte `RRSEVLG1` header; the checksum is `zlib.crc32`, the same as the Rust reader's (contracts.md §7.1).
 - **Frames are never rewritten.** A frame with a valid CRC keeps its sequence forever, so the optional long-term archive (contracts 8.7) can copy frames by `(log, sequence)` and a restore can write them back unchanged. Only a torn tail (a frame that never completed) is truncated.
-- **fsync policy.** State changes, checkpoints, diagnostics and artifacts fsync at once; `run.metrics` is batched and fsynced at least once a second.
-- **Disk-full reserve** (platform flow 6.1). At start `EventLogWriter` writes `runs/<run_id>/events.log.reserve`: `EVENT_LOG_RESERVE_BYTES` (1 MiB) of zeros, fsynced. An append that fails with ENOSPC calls `pause_for_full_disk`: the run pauses with `RRS-S3002` and the training state stays in memory until the user frees space and sends `RESUME`. The job stays `running` and keeps its lease. Only if those two pause records can't be written either does the worker exit with `EXIT_EVENT_LOG_UNWRITABLE` (4), and the node marks the job `failed` with `RRS-S3002`. The reserve is deleted on exit.
-- **Failure reporting.** On any exception the edge writes `diagnostic.reported` (a coded `Diagnostic`, never a bare traceback) and a final `run.state_changed`, fsyncs, prints the traceback to stderr.log, and exits 1. Two cases can't use the log: an event log that can't be written exits 4 (`EXIT_EVENT_LOG_UNWRITABLE`, above), and an event log another process holds exits 5 (`EXIT_EVENT_LOG_LOCKED`, single writer above) with the diagnostic in stderr.log only, because the log isn't this worker's to write. The node builds `job.state_changed` from the exit code and the last diagnostic. OOM maps to RRS-H3xxx with the requested and leased bytes; unexpected exceptions map to RRS-J1xxx.
+- **fsync policy.** State changes, checkpoints, diagnostics and artifacts fsync at once; `run.metrics` is batched and fsynced at least once a second. A job can go quiet after its last metrics, so `WorkerJobEvents` runs a flusher thread that calls `EventLogWriter.flush_if_due` on a timer; the writer isn't thread-safe, so the flusher and the job's thread take one lock around it.
+- **Disk-full reserve** (platform flow 6.1). At start `EventLogWriter` writes `runs/<run_id>/events.log.reserve`: `EVENT_LOG_RESERVE_BYTES` (1 MiB) of zeros, fsynced. An append that fails with ENOSPC calls `pause_for_full_disk`: the run pauses with `RRS-S3002` and the training state stays in memory until the user frees space and sends `RESUME`. The job stays `running` and keeps its lease. Only if those two pause records can't be written either does the worker exit with `EXIT_EVENT_LOG_UNWRITABLE` (4), and the node marks the job `failed` with `RRS-S3002`. A job already asked to end (STOP, CANCEL or SIGINT, SIGTERM) doesn't pause: it frees the reserve and tries the record once more, so it still ends `completed`, `cancelled` or `preempted`, and exits 4 only if that try fails too. Only a write that failed is tried again: when the frame was written and its fsync failed (ENOSPC or any other error), the record is already in the file, so the worker exits 4 instead of appending it twice, the same as a failed fsync of batched metrics on the flusher's timer. The reserve is deleted on exit.
+- **Failure reporting.** On any exception the edge writes `diagnostic.reported` (a coded `Diagnostic`, never a bare traceback) and a final `run.state_changed`, fsyncs, prints the traceback to stderr.log, and exits 1. Two cases can't use the log: an event log that can't be written exits 4 (`EXIT_EVENT_LOG_UNWRITABLE`, above), and an event log another process holds exits 5 (`EXIT_EVENT_LOG_LOCKED`, single writer above) with the diagnostic in stderr.log only, because the log isn't this worker's to write. The node builds `job.state_changed` from the exit code and the last diagnostic. OOM maps to RRS-H3xxx with the requested and leased bytes; an unexpected exception (one that carries no catalog code) maps to `RRS-J1005`, with the error's type in the message and the traceback in stderr.log only.
 - **Host outages.** `WorkerHost` calls retry with backoff for up to `HOST_RECONNECT_TIMEOUT_SECONDS`. Training keeps running meanwhile; only calls that need the host (gateway, sandboxes, blobs) wait.
 
 ### 7.6 Threads, signals and multi-GPU
 
-- **Threads.** The main thread is the model thread. gRPC handler threads (grpcio's pool) do three things only: answer `Hello` from cached data, flip `JobControl` flags, and move requests or stream items through queues. `Generate` handlers put a request on the serve queue and stream results back from a per-request queue.
+- **Threads.** The main thread is the model thread. The metrics flusher (`job_events.py`) only fsyncs the event log, under the writer's lock. gRPC handler threads (grpcio's pool) do three things only: answer `Hello` from cached data, flip `JobControl` flags, and move requests or stream items through queues. `Generate` handlers put a request on the serve queue and stream results back from a per-request queue.
 - **Signals and Control values.** Handlers only set flags; each `JobSignal` has its own (contracts §4.4):
   - SIGTERM → `preempt_requested`: checkpoint if it fits the preemption budget, `train.preempted`, exit 75 for every kind, even one with nothing to save (plan §10 row 24).
   - Control `STOP` → `stop_requested`: final checkpoint, run `completed` with reason `stopped`, exit 0.
@@ -1593,8 +1607,9 @@ sequenceDiagram
 | `tests/test_live_stream.py` | the oldest event is dropped at capacity; readers resume by index |
 | `tests/test_control.py` | SIGTERM sets only `preempt_requested`, SIGINT only `cancel_requested`; Control `STOP` sets `stop_requested`, never `preempt_requested`; the other Control values map to their flags |
 | `tests/test_job_file.py`, `test_dispatch.py` | every job kind has an entry; bad files exit 2 with RRS-J2xxx |
-| `tests/test_worker_server.py` | in-process grpcio over a temporary Unix socket: Hello, Control, WatchLive, HandleCommand |
-| `tests/test_diagnostics.py` | OOM → RRS-H3xxx; package errors keep their code; unknown exceptions → RRS-J1xxx with the traceback in stderr; an event log another process holds → exit 5 with RRS-J3006 in stderr.log and the log's bytes unchanged |
+| `tests/test_worker_server.py` | in-process grpcio over a temporary Unix socket: Hello, Control, WatchLive (HandleCommand (M4)), each refused without the job token; the whole process against a fake node: Register with the token, then STOP exits 0 and SIGTERM 75 |
+| `tests/test_host_connection.py` | Register retried while the node is unreachable, never after a refusal; a replaced `worker-host.sock` registers again |
+| `tests/test_diagnostics.py` | OOM → RRS-H3xxx; package errors keep their code; unknown exceptions → `RRS-J1005` with the traceback in stderr.log only; an event log another process holds → exit 5 with RRS-J3006 in stderr.log and the log's bytes unchanged |
 | `tests/test_hardware_fingerprint.py` | all `HardwareFingerprint` fields filled on CPU |
 | `tests/crash/test_worker_kill9.py` | kill -9 mid-append and mid-checkpoint: the next job recovers the log and ignores `.partial` |
 | `tests/crash/test_worker_survives_node_restart.py` | kill the node mid-run; the worker keeps writing and registers again; the node checks the token hash, then reattaches with `Hello`; the daemon sees no gap (the weeks 3–4 exit criterion) |

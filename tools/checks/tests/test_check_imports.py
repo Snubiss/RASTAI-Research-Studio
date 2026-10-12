@@ -28,6 +28,7 @@ PASSING_PYTHON = {
     "python/rastai_proto/tests/test_services.py": "import grpc\n\nfrom rastai_proto.node.v1 import jobs_pb2\n",
     "python/rastai_plugin/rastai_plugin/host.py": "import grpc\nfrom rastai_proto.worker.v1 import worker_pb2\n",
     "python/rastai_plugin/tests/test_host.py": "import grpc\n\nfrom rastai_plugin import WorkerHost\n",
+    "python/rastai_worker/tests/test_worker_server.py": "import grpc\n\nfrom rastai_worker import worker_server\n",
     "python/conftest.py": "import pytest\n",
     "python/envs/tests/test_cpu_environment.py": "import torch\nimport grpc\n",
     "plugins/evaluation/python/rastai_eval/rastai_eval/metrics.py": "import rastai\nfrom rastai_plugin import Metric\n",
@@ -61,6 +62,9 @@ FAILING_PYTHON = [
     # rastai_plugin's other files and tests call the host client instead.
     ("python/rastai_plugin/rastai_plugin/registry.py", "import grpc\n", "`grpc` is imported only in"),
     ("python/rastai_plugin/tests/test_registry.py", "import grpc\n", "`grpc` is imported only in"),
+    # rastai_worker's other files and tests go through worker_server.py and rastai_plugin's host client.
+    ("python/rastai_worker/rastai_worker/launch.py", "import grpc\n", "`grpc` is imported only in"),
+    ("python/rastai_worker/tests/test_control.py", "import grpc\n", "`grpc` is imported only in"),
     ("python/rastai_newthing/rastai_newthing/a.py", "import json\n", "package `rastai_newthing` isn't in contracts"),
 ]
 

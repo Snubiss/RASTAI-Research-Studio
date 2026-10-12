@@ -8,7 +8,12 @@
 use std::path::PathBuf;
 
 use rastai_core::paths::DataPaths;
+use rastai_core::principal::{Principal, PrincipalKind};
+use rastai_core::scopes::Scope;
+use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
+use rastai_server::commands::execute::execute_command;
 use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
+use rastai_server::server_state::Server;
 use rastai_server::shutdown::{request_shutdown, wait_for_shutdown};
 use rastai_transport::http_client::{HttpRequest, HttpResponse, HttpTarget, send_request};
 
@@ -75,7 +80,13 @@ pub async fn send_to_port(port: u16, method: &str, path: &str, headers: &[(&str,
 
 /// One request over daemon.sock.
 #[allow(clippy::unwrap_used)]
-pub async fn send_to_socket(paths: &DataPaths, method: &str, path: &str, headers: &[(&str, &str)]) -> HttpResponse {
+pub async fn send_to_socket(
+    paths: &DataPaths,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> HttpResponse {
     let request = HttpRequest {
         method: method.to_string(),
         target: HttpTarget::LocalSocket {
@@ -83,7 +94,7 @@ pub async fn send_to_socket(paths: &DataPaths, method: &str, path: &str, headers
         },
         path: path.to_string(),
         headers: owned_headers(headers),
-        body: Vec::new(),
+        body: body.to_vec(),
         timeout_ms: REQUEST_TIMEOUT_MS,
     };
     send_request(request).await.unwrap()
@@ -96,6 +107,48 @@ fn owned_headers(headers: &[(&str, &str)]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// `Authorization: Bearer <owner token>`, read from the test daemon's `owner.token`.
+#[allow(clippy::unwrap_used)]
+pub fn owner_bearer(paths: &DataPaths) -> String {
+    let token = std::fs::read_to_string(rastai_core::paths::owner_token_path(paths)).unwrap();
+    format!("Bearer {}", token.trim())
+}
+
+/// An `ExecuteRequest` for a command and its arguments, everything else at its default.
+pub fn execute_request(command_id: &str, arguments_json: &str) -> ExecuteRequest {
+    ExecuteRequest {
+        command_id: command_id.to_string(),
+        arguments_json: arguments_json.to_string(),
+        ..ExecuteRequest::default()
+    }
+}
+
+/// Runs a command in-process, the way every caller ends (`execute_command`).
+pub async fn run_command(server: &Server, principal: &Principal, request: ExecuteRequest) -> ExecuteResponse {
+    execute_command(server, principal, request).await
+}
+
+/// A scoped token's principal holding exactly these scopes.
+pub fn token_principal(scopes: Vec<Scope>) -> Principal {
+    Principal {
+        kind: PrincipalKind::Token,
+        id: "tok_01JA2B3C4D5E6F7G8H9J0K1M2N".to_string(),
+        scopes,
+    }
+}
+
+/// The codes of a response's diagnostics, in order.
+pub fn response_codes(response: &ExecuteResponse) -> Vec<String> {
+    response.diagnostics.iter().map(|item| item.code.clone()).collect()
+}
+
+/// The result of a response that must have succeeded, as JSON.
+#[allow(clippy::unwrap_used)]
+pub fn ok_result(response: &ExecuteResponse) -> serde_json::Value {
+    assert!(response.ok, "{:?}", response.diagnostics);
+    serde_json::from_str(&response.result_json).unwrap()
+}
+
 /// A response header's value, by lowercase name.
 pub fn header_value<'a>(response: &'a HttpResponse, name: &str) -> Option<&'a str> {
     response
@@ -105,9 +158,13 @@ pub fn header_value<'a>(response: &'a HttpResponse, name: &str) -> Option<&'a st
         .map(|(_, value)| value.as_str())
 }
 
-/// The `code` of a refusal's diagnostic body.
+/// The catalog code of a refusal: the diagnostic body itself on `/api/` paths, the one detail of the Connect error
+/// envelope (`{"code": "unauthenticated", "details": [{"debug": <diagnostic>}]}`) on Connect paths.
 #[allow(clippy::unwrap_used)]
 pub fn refusal_code(response: &HttpResponse) -> String {
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
-    body["code"].as_str().unwrap().to_string()
+    match body["details"][0]["debug"]["code"].as_str() {
+        Some(code) => code.to_string(),
+        None => body["code"].as_str().unwrap().to_string(),
+    }
 }

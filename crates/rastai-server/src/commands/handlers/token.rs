@@ -1,0 +1,426 @@
+//! The `token` commands (contracts 6.3, 6.4): the one-time login code, and scoped API tokens for scripts and MCP
+//! clients (flows/platform.md 4.3).
+//!
+//! A token is 32 random bytes written as 64 lowercase hex characters, the same form as the owner token. Only its
+//! BLAKE3 hash is stored (`tokens.token_hash`) and kept in the gate's cache; its text is in `token.create`'s answer
+//! and nowhere else, since the journal redacts that field (`secret`, contracts 5.1). A revoked token is refused on
+//! its next request (`RRS-C1006`). Closing a revoked token's open streams joins with the streams (M1-28).
+//!
+//! Only the owner creates tokens with any scope (flows/platform.md 4.3). Any other principal that reaches
+//! `token.create` (a token or a plugin holding `system.admin`) can only hand out scopes it holds itself, so no token
+//! is ever a way to more rights than its creator had (`RRS-C1005`, the same code as a missing scope).
+//!
+//! A login code is owner-only (flows/platform.md 4.1): its session is the owner's, with every scope, so a code made
+//! for a token or a plugin, even one holding `system.admin`, would turn that principal into the owner. Every principal
+//! but the owner is refused `token.login_code.create` with `RRS-C1005`, dry runs included.
+
+use rastai_core::commands::output::CommandOutput;
+use rastai_core::ids::{IdPrefix, new_id};
+use rastai_core::principal::{Principal, PrincipalKind, principal_label};
+use rastai_core::random::random_bytes;
+use rastai_core::scopes::{Scope, parse_scope, scope_name, scopes_allow, token_preset_scopes};
+use rastai_core::time::now_unix_ms;
+use rastai_diag::diagnostic::{Diagnostic, diagnostic, diagnostic_at};
+use rastai_formats::commands::result_json;
+use rastai_formats::commands::token::{
+    TokenCreateArgs, TokenCreateResult, TokenListArgs, TokenListResult, TokenLoginCodeCreateArgs,
+    TokenLoginCodeCreateResult, TokenRevokeArgs, TokenRevokeResult, TokenSummary,
+};
+use rastai_formats::hashing::hash_bytes;
+use rastai_store::index::kept_tables::{TokenRow, list_tokens};
+use rastai_store::index::reads::open_index_reader;
+use rastai_store::index::writes::IndexWrite;
+use rastai_store::writer_thread::write_index;
+
+use crate::auth_files::lowercase_hex;
+use crate::commands::arguments::invalid_arguments;
+use crate::commands::context::{CommandContext, core_failure, store_failure, sync_result};
+use crate::http::sessions::{ScopedToken, add_scoped_token, create_login_code, revoke_scoped_token};
+use crate::server_state::Server;
+
+/// The same strength as the owner token, login codes and session keys.
+const TOKEN_SECRET_BYTES: usize = 32;
+const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
+const CODE_SCOPE_NOT_GRANTED: &str = "RRS-C1005";
+const CREATE_COMMAND_ID: &str = "token.create";
+const LOGIN_CODE_COMMAND_ID: &str = "token.login_code.create";
+/// What `RRS-C1005` names as the needed scope of an owner-only command: no scope grants it.
+const OWNER_ONLY: &str = "owner";
+const NAME_PATH: &str = "#/name";
+const SCOPES_PATH: &str = "#/scopes";
+const TOKEN_ID_PATH: &str = "#/token_id";
+const EXPECTED_NAME: &str = "a name to recognise the token by, such as claude-desktop";
+const EXPECTED_SOME_SCOPE: &str = "a preset or at least one scope";
+const EXPECTED_TOKEN_ID: &str = "the id of a token token.list shows";
+/// How a refusal shows text that is empty.
+const EMPTY_TEXT: &str = "(blank)";
+
+/// A single-use code for the UI start URL, valid for 60 seconds, and the port to open it on. A dry run makes none:
+/// its answer has the port and an empty code.
+pub(crate) async fn login_code_create(
+    context: &CommandContext<'_>,
+    _arguments: TokenLoginCodeCreateArgs,
+) -> Result<CommandOutput, Vec<Diagnostic>> {
+    check_owner(context.principal, LOGIN_CODE_COMMAND_ID)?;
+    if context.dry_run {
+        let planned = TokenLoginCodeCreateResult {
+            code: String::new(),
+            expires_unix_ms: 0,
+            http_port: u32::from(http_port(context.server)),
+        };
+        return Ok(sync_result(result_json(&planned)));
+    }
+    let new_code = create_login_code(&context.server.auth, now_unix_ms()).map_err(|error| core_failure(&error))?;
+    let result = TokenLoginCodeCreateResult {
+        code: new_code.code,
+        expires_unix_ms: u64::try_from(new_code.expires_unix_ms).unwrap_or(0),
+        http_port: u32::from(http_port(context.server)),
+    };
+    Ok(sync_result(result_json(&result)))
+}
+
+/// A new scoped token: the preset's scopes plus the listed ones, each one the caller may grant. A dry run checks
+/// them and makes no token: its answer lists the scopes, with an empty id and token.
+pub(crate) async fn create(
+    context: &CommandContext<'_>,
+    arguments: TokenCreateArgs,
+) -> Result<CommandOutput, Vec<Diagnostic>> {
+    check_name(&arguments.name)?;
+    let scopes = requested_scopes(&arguments)?;
+    check_grantable(context.principal, &scopes)?;
+    let scope_names: Vec<String> = scopes.iter().map(scope_name).collect();
+    if context.dry_run {
+        let planned = TokenCreateResult {
+            token_id: String::new(),
+            name: arguments.name,
+            scopes: scope_names,
+            token: String::new(),
+        };
+        return Ok(sync_result(result_json(&planned)));
+    }
+    let token_id = new_id(IdPrefix::Token).map_err(|error| core_failure(&error))?;
+    let secret = random_bytes(TOKEN_SECRET_BYTES).map_err(|error| core_failure(&error))?;
+    let token = lowercase_hex(&secret);
+    let row = TokenRow {
+        token_id: token_id.clone(),
+        name: arguments.name.clone(),
+        token_hash: hash_bytes(token.as_bytes()),
+        scopes: scope_names.clone(),
+        created_unix_ms: now_unix_ms(),
+        revoked_unix_ms: None,
+    };
+    let cached = ScopedToken {
+        token_id: token_id.clone(),
+        token_hash: row.token_hash.clone(),
+        scopes,
+        revoked: false,
+    };
+    write_index(&context.server.store.index, IndexWrite::InsertToken(row))
+        .await
+        .map_err(|error| store_failure(&error))?;
+    add_scoped_token(&context.server.auth, cached);
+    let result = TokenCreateResult {
+        token_id,
+        name: arguments.name,
+        scopes: scope_names,
+        token,
+    };
+    Ok(sync_result(result_json(&result)))
+}
+
+/// The tokens, oldest first, never with their text; revoked ones only when asked for.
+pub(crate) async fn list(
+    context: &CommandContext<'_>,
+    arguments: TokenListArgs,
+) -> Result<CommandOutput, Vec<Diagnostic>> {
+    let rows = read_tokens(context.server)?;
+    let tokens = rows
+        .iter()
+        .filter(|row| arguments.include_revoked || row.revoked_unix_ms.is_none())
+        .map(token_summary)
+        .collect();
+    Ok(sync_result(result_json(&TokenListResult { tokens })))
+}
+
+/// Revokes a token at once. Revoking one already revoked keeps its first time. A dry run checks the id only.
+pub(crate) async fn revoke(
+    context: &CommandContext<'_>,
+    arguments: TokenRevokeArgs,
+) -> Result<CommandOutput, Vec<Diagnostic>> {
+    let rows = read_tokens(context.server)?;
+    let Some(row) = rows.iter().find(|row| row.token_id == arguments.token_id) else {
+        let found = shown_text(&arguments.token_id);
+        let refusal = diagnostic_at(
+            CODE_INVALID_ARGUMENTS,
+            &[("found", &found), ("expected", EXPECTED_TOKEN_ID)],
+            TOKEN_ID_PATH,
+        );
+        return Err(vec![refusal]);
+    };
+    let revoked_unix_ms = match row.revoked_unix_ms {
+        Some(earlier) => earlier,
+        None if context.dry_run => now_unix_ms(),
+        None => revoke_now(context.server, &row.token_id).await?,
+    };
+    let result = TokenRevokeResult {
+        token_id: row.token_id.clone(),
+        revoked_unix_ms: u64::try_from(revoked_unix_ms).unwrap_or(0),
+    };
+    Ok(sync_result(result_json(&result)))
+}
+
+async fn revoke_now(server: &Server, token_id: &str) -> Result<i64, Vec<Diagnostic>> {
+    let revoked_unix_ms = now_unix_ms();
+    let write = IndexWrite::RevokeToken {
+        token_id: token_id.to_string(),
+        revoked_unix_ms,
+    };
+    write_index(&server.store.index, write)
+        .await
+        .map_err(|error| store_failure(&error))?;
+    revoke_scoped_token(&server.auth, token_id);
+    Ok(revoked_unix_ms)
+}
+
+fn check_name(name: &str) -> Result<(), Vec<Diagnostic>> {
+    if !name.trim().is_empty() {
+        return Ok(());
+    }
+    let refusal = diagnostic_at(
+        CODE_INVALID_ARGUMENTS,
+        &[("found", EMPTY_TEXT), ("expected", EXPECTED_NAME)],
+        NAME_PATH,
+    );
+    Err(vec![refusal])
+}
+
+/// The preset's scopes, then each listed scope once. A scope name that isn't one is refused at its place in the
+/// list, after `RRS-C0002` like any argument problem; a token with no scope at all would be useless, so it is
+/// refused too.
+fn requested_scopes(arguments: &TokenCreateArgs) -> Result<Vec<Scope>, Vec<Diagnostic>> {
+    let mut scopes = if arguments.preset.is_empty() {
+        Vec::new()
+    } else {
+        // Layer 2 already refused any word but the two presets.
+        token_preset_scopes(&arguments.preset).unwrap_or_default()
+    };
+    let mut refusals = Vec::new();
+    for (index, name) in arguments.scopes.iter().enumerate() {
+        match parse_scope(name) {
+            Ok(scope) if scopes.contains(&scope) => {}
+            Ok(scope) => scopes.push(scope),
+            Err(mut refusal) => {
+                refusal.path = format!("{SCOPES_PATH}/{index}");
+                refusals.push(refusal);
+            }
+        }
+    }
+    if !refusals.is_empty() {
+        return Err(invalid_arguments(CREATE_COMMAND_ID, refusals));
+    }
+    if scopes.is_empty() {
+        let refusal = diagnostic_at(
+            CODE_INVALID_ARGUMENTS,
+            &[("found", "no scope"), ("expected", EXPECTED_SOME_SCOPE)],
+            SCOPES_PATH,
+        );
+        return Err(vec![refusal]);
+    }
+    Ok(scopes)
+}
+
+/// The owner may grant every scope. Anyone else may grant only the scopes it holds: `system.admin` lets it run
+/// `token.create`, but doesn't grant `chat` (scopes.rs), so it can't make a token that has `chat`. Every scope it
+/// lacks is refused, so the caller sees them all at once.
+fn check_grantable(creator: &Principal, scopes: &[Scope]) -> Result<(), Vec<Diagnostic>> {
+    if creator.kind == PrincipalKind::Owner {
+        return Ok(());
+    }
+    let label = principal_label(creator);
+    let refusals: Vec<Diagnostic> = scopes
+        .iter()
+        .filter(|scope| !scopes_allow(&creator.scopes, scope))
+        .map(|scope| scope_not_granted(scope, &label))
+        .collect();
+    if refusals.is_empty() { Ok(()) } else { Err(refusals) }
+}
+
+/// A login code's session runs as the owner (http/gate.rs), so only the owner may ask for one. A token or a plugin
+/// holding `system.admin` reaches the handler past the scope check and is refused here.
+fn check_owner(caller: &Principal, command_id: &str) -> Result<(), Vec<Diagnostic>> {
+    if caller.kind == PrincipalKind::Owner {
+        return Ok(());
+    }
+    let label = principal_label(caller);
+    let refusal = diagnostic(
+        CODE_SCOPE_NOT_GRANTED,
+        &[("command_id", command_id), ("scope", OWNER_ONLY), ("principal", &label)],
+    );
+    Err(vec![refusal])
+}
+
+fn scope_not_granted(scope: &Scope, creator_label: &str) -> Diagnostic {
+    let name = scope_name(scope);
+    diagnostic(
+        CODE_SCOPE_NOT_GRANTED,
+        &[
+            ("command_id", CREATE_COMMAND_ID),
+            ("scope", &name),
+            ("principal", creator_label),
+        ],
+    )
+}
+
+fn read_tokens(server: &Server) -> Result<Vec<TokenRow>, Vec<Diagnostic>> {
+    // A small table on a pooled read-only connection; it never waits on the writer (WAL).
+    let reader = open_index_reader(&server.store.index_readers).map_err(|error| store_failure(&error))?;
+    list_tokens(&reader).map_err(|error| store_failure(&error))
+}
+
+fn token_summary(row: &TokenRow) -> TokenSummary {
+    TokenSummary {
+        token_id: row.token_id.clone(),
+        name: row.name.clone(),
+        scopes: row.scopes.clone(),
+        created_unix_ms: u64::try_from(row.created_unix_ms).unwrap_or(0),
+        revoked_unix_ms: row
+            .revoked_unix_ms
+            .map(|unix_ms| u64::try_from(unix_ms).unwrap_or(0))
+            .unwrap_or(0),
+    }
+}
+
+/// The loopback port, once the listener is bound; 0 before, which only a command run during startup could see.
+fn http_port(server: &Server) -> u16 {
+    server.http_port.get().copied().unwrap_or(0)
+}
+
+fn shown_text(text: &str) -> String {
+    if text.is_empty() {
+        EMPTY_TEXT.to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn create_arguments(preset: &str, scopes: &[&str]) -> TokenCreateArgs {
+        TokenCreateArgs {
+            name: "ci".to_string(),
+            preset: preset.to_string(),
+            scopes: scopes.iter().map(|scope| scope.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn scopes_are_the_preset_plus_the_list_each_once() {
+        let scopes = requested_scopes(&create_arguments("chat-only", &["read", "chat", "read"])).unwrap();
+        assert_eq!(scopes, vec![Scope::Chat, Scope::Read]);
+        let plugin = requested_scopes(&create_arguments("", &["plugin:acme"])).unwrap();
+        assert_eq!(plugin, vec![Scope::Plugin("acme".to_string())]);
+    }
+
+    #[test]
+    fn unknown_scopes_are_refused_at_their_place() {
+        let refusal = requested_scopes(&create_arguments("", &["read", "everything", "root"])).unwrap_err();
+        let found: Vec<(&str, &str)> = refusal
+            .iter()
+            .map(|item| (item.code.as_str(), item.path.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("RRS-C0002", "#/scopes/1"),
+                ("RRS-E1004", "#/scopes/1"),
+                ("RRS-E1004", "#/scopes/2")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_token_needs_some_scope_and_a_name() {
+        let refusal = requested_scopes(&create_arguments("", &[])).unwrap_err();
+        assert_eq!(
+            (refusal[0].code.as_str(), refusal[0].path.as_str()),
+            ("RRS-C0002", SCOPES_PATH)
+        );
+        let refusal = check_name("  ").unwrap_err();
+        assert_eq!(
+            (refusal[0].code.as_str(), refusal[0].path.as_str()),
+            ("RRS-C0002", NAME_PATH)
+        );
+        check_name("claude-desktop").unwrap();
+    }
+
+    fn token_holding(scopes: Vec<Scope>) -> Principal {
+        Principal {
+            kind: PrincipalKind::Token,
+            id: "tok_admin".to_string(),
+            scopes,
+        }
+    }
+
+    #[test]
+    fn only_the_owner_grants_scopes_it_was_not_given() {
+        let wanted = vec![Scope::Read, Scope::Chat, Scope::Secrets];
+        check_grantable(&rastai_core::principal::owner_principal(), &wanted).unwrap();
+        let admin = token_holding(vec![Scope::SystemAdmin, Scope::Read]);
+        let refusals = check_grantable(&admin, &wanted).unwrap_err();
+        let codes: Vec<&str> = refusals.iter().map(|item| item.code.as_str()).collect();
+        assert_eq!(codes, ["RRS-C1005", "RRS-C1005"]);
+        assert!(refusals[0].message.contains("chat"), "{}", refusals[0].message);
+        assert!(refusals[0].message.contains("tok_admin"), "{}", refusals[0].message);
+        assert!(refusals[1].message.contains("secrets"), "{}", refusals[1].message);
+        // What it holds, it may pass on, its own system.admin included.
+        check_grantable(&admin, &[Scope::Read, Scope::SystemAdmin]).unwrap();
+    }
+
+    #[test]
+    fn only_the_owner_may_ask_for_a_login_code() {
+        check_owner(&rastai_core::principal::owner_principal(), LOGIN_CODE_COMMAND_ID).unwrap();
+        let every_scope = vec![Scope::SystemAdmin, Scope::Read, Scope::Chat, Scope::Secrets];
+        let plugin = Principal {
+            kind: PrincipalKind::Plugin,
+            id: "acme".to_string(),
+            scopes: every_scope.clone(),
+        };
+        for caller in [token_holding(every_scope), plugin] {
+            let refusal = check_owner(&caller, LOGIN_CODE_COMMAND_ID).unwrap_err();
+            assert_eq!(refusal[0].code, CODE_SCOPE_NOT_GRANTED);
+            assert!(
+                refusal[0].message.contains(LOGIN_CODE_COMMAND_ID),
+                "{}",
+                refusal[0].message
+            );
+            assert!(
+                refusal[0].message.contains(&principal_label(&caller)),
+                "{}",
+                refusal[0].message
+            );
+        }
+    }
+
+    #[test]
+    fn a_summary_shows_an_active_token_as_revoked_at_zero() {
+        let row = TokenRow {
+            token_id: "tok_a".to_string(),
+            name: "ci".to_string(),
+            token_hash: "blake3:00".to_string(),
+            scopes: vec!["read".to_string()],
+            created_unix_ms: 5,
+            revoked_unix_ms: None,
+        };
+        let summary = token_summary(&row);
+        assert_eq!(summary.created_unix_ms, 5);
+        assert_eq!(summary.revoked_unix_ms, 0);
+        let revoked = TokenRow {
+            revoked_unix_ms: Some(9),
+            ..row
+        };
+        assert_eq!(token_summary(&revoked).revoked_unix_ms, 9);
+    }
+}

@@ -111,6 +111,19 @@ def test_a_tensor_reads_back_its_exact_bytes_and_converts_on_request(tmp_path: P
         assert converted.dtype == torch.float64 and torch.equal(converted, values.double())
 
 
+def test_a_shape_comes_from_the_header_without_reading_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    header = {
+        "w": {"dtype": "F32", "shape": [2, 2], "data_offsets": [0, 16]},
+        "s": {"dtype": "I64", "shape": [], "data_offsets": [16, 24]},
+    }
+    path = write_raw_file(tmp_path / "w.safetensors", header, bytes(24))
+    with SafetensorsFile(path) as reader:
+        # bind_weights checks shapes before it copies a value, so asking for one must not read tensor bytes.
+        monkeypatch.setattr(torch, "frombuffer", None)
+        assert reader.shape("w") == [2, 2]
+        assert reader.shape("s") == []
+
+
 def test_a_loaded_tensor_is_a_copy_that_outlives_the_file() -> None:
     reader = SafetensorsFile(CORPUS_FOLDER / "valid_two_tensors.safetensors")
     loaded = reader.load("a")

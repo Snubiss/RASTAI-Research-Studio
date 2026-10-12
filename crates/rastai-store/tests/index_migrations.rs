@@ -1,4 +1,4 @@
-//! Migration 1 of `rastai.db` (layout rust-control-plane.md section 6.7): the migrated tables and columns are exactly
+//! The migrations of `rastai.db` (layout rust-control-plane.md section 6.7): the migrated tables and columns are exactly
 //! the ones contracts 8.2 lists (no `settings` table) and the ones rastai-codegen's `sql_names.rs` reads from the
 //! migration files for `schemas/names.json` (contracts 12.6), `runs.archive_state` starts `local`, and reopening
 //! migrates nothing twice. The refusal of a file a newer app migrated is tested at the bottom of `src/store.rs`, because
@@ -26,6 +26,8 @@ const NEXT_HEADING: &str = "### 8.3 ";
 // A table row of 8.2 starts with its backticked table name.
 const TABLE_ROW_START: &str = "| `";
 // The migration files the store compiles in, which sql_names.rs reads for schemas/names.json.
+// The version of the last one (0002_journal_arguments_hash.sql), which a migrated file records.
+const LAST_MIGRATION_VERSION: i64 = 2;
 const INDEX_MIGRATIONS_FOLDER: &str = "crates/rastai-store/src/index/migrations";
 
 fn repo_root() -> PathBuf {
@@ -190,7 +192,7 @@ fn reopening_migrates_nothing_twice() {
         read_index_schema_version(&reader).unwrap()
     };
     close(store);
-    assert_eq!(version, 1);
+    assert_eq!(version, LAST_MIGRATION_VERSION);
     remove_test_folder(&paths);
 }
 

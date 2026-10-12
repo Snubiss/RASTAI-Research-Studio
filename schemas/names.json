@@ -234,6 +234,7 @@
     "RRS-J1002",
     "RRS-J1003",
     "RRS-J1004",
+    "RRS-J1005",
     "RRS-J2001",
     "RRS-J2002",
     "RRS-J2003",
@@ -572,7 +573,8 @@
         "result_json",
         "job_id",
         "started_unix_ms",
-        "finished_unix_ms"
+        "finished_unix_ms",
+        "arguments_hash"
       ],
       "documents": [
         "document_id",

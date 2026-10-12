@@ -94,9 +94,11 @@ PYTHON_LIBRARY_FILES = {
     "transformers": ["rastai_models/compat/transformers_runtime.py"],
     "tokenizers": ["rastai_data/tokenization.py"],
     "bitsandbytes": ["rastai_train/kernels/four_bit_linear.py"],
-    # rastai_plugin's host test serves a fake WorkerHostService, so it needs grpcio's server (contracts 2.5).
+    # rastai_plugin's host test serves a fake WorkerHostService, and rastai_worker's server test calls the worker's
+    # WorkerService as the node does and serves a fake WorkerHostService, so both need grpcio (contracts 2.5).
     "grpc": [
         "rastai_worker/worker_server.py",
+        "rastai_worker/tests/test_worker_server.py",
         "rastai_plugin/host.py",
         "rastai_plugin/tests/test_host.py",
         "rastai_proto/*",

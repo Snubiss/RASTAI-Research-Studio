@@ -1,6 +1,7 @@
-//! Rows of `command_journal` (contracts 8.2): one per executed command, written when it starts. The indexer fills
-//! the finished columns from the daemon log's `command.finished` record; a restart marks the rows it interrupted
-//! with `RRS-C0005`.
+//! Rows of `command_journal` (contracts 8.2): one per executed command, written when it starts and finished when it
+//! ends (`execute_command` in rastai-server writes both, the finished row with the redacted result an idempotent
+//! replay returns). The indexer also fills the finished columns from the daemon log's `command.finished` record, so a
+//! rebuild brings them back; a restart marks the rows it interrupted with `RRS-C0005`.
 
 use crate::error::StoreError;
 use crate::index::reads::IndexReader;
@@ -13,8 +14,13 @@ use crate::sqlite::{
 const CODE_INTERRUPTED_BY_RESTART: &str = "RRS-C0005";
 
 const INSERT_JOURNAL_STARTED: &str = "INSERT INTO command_journal (journal_id, command_id, principal, arguments_json,
-        idempotency_key, started_unix_ms)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+        idempotency_key, started_unix_ms, arguments_hash)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+// The finished columns of a row the start wrote. A row that is already finished keeps its first finish: the command
+// ran once, so its outcome is written once.
+const FINISH_JOURNAL_ROW: &str = "UPDATE command_journal SET ok = ?2, code = ?3, result_json = ?4, job_id = ?5,
+        finished_unix_ms = ?6
+    WHERE journal_id = ?1 AND finished_unix_ms IS NULL";
 const MARK_UNFINISHED_ROWS: &str = "UPDATE command_journal SET ok = 0, code = ?1, finished_unix_ms = ?2
     WHERE finished_unix_ms IS NULL";
 // A rebuild has no started rows, so a command.finished record makes the row (contracts 8.2: commands that never
@@ -30,15 +36,17 @@ const ARGUMENTS_NOT_RECORDED: &str = "{}";
 // Both selects list the columns in the order journal_from_columns reads them.
 // The newest row wins: whether it is still inside the key's 24 hours is the server's call (flows/platform.md 3.2).
 const SELECT_BY_IDEMPOTENCY_KEY: &str = "SELECT journal_id, command_id, principal, arguments_json, ok, code,
-        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms
+        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms, arguments_hash
     FROM command_journal WHERE principal = ?1 AND idempotency_key = ?2
     ORDER BY started_unix_ms DESC, journal_id DESC LIMIT 1";
 const SELECT_BY_JOURNAL_ID: &str = "SELECT journal_id, command_id, principal, arguments_json, ok, code,
-        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms
+        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms, arguments_hash
     FROM command_journal WHERE journal_id = ?1";
 
 /// What is known when a command starts. `idempotency_key` is "" when the caller sent none. `arguments_json` must
-/// already have its `secret` and `content` fields redacted (contracts 5.1).
+/// already have its `secret` and `content` fields redacted (contracts 5.1). `arguments_hash` is what the idempotency
+/// check compares, a keyed hash of the unredacted arguments that never holds a secret itself; "" (stored as NULL) for
+/// a row without a key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JournalStartedRow {
     pub journal_id: String,
@@ -47,6 +55,20 @@ pub struct JournalStartedRow {
     pub arguments_json: String,
     pub idempotency_key: String,
     pub started_unix_ms: i64,
+    pub arguments_hash: String,
+}
+
+/// What is known when a command ends. `code` is the catalog code of its first error, "" when it succeeded;
+/// `result_json` must already have its `secret` and `content` fields redacted (contracts 5.1); `job_id` is "" for a
+/// command that started no job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JournalFinishedRow {
+    pub journal_id: String,
+    pub ok: bool,
+    pub code: String,
+    pub result_json: String,
+    pub job_id: String,
+    pub finished_unix_ms: i64,
 }
 
 /// A whole journal row. Until the command finishes, `ok` and `finished_unix_ms` are `None` and the other finished
@@ -65,6 +87,8 @@ pub struct JournalRow {
     pub job_id: String,
     pub started_unix_ms: i64,
     pub finished_unix_ms: Option<i64>,
+    /// "" for a row without an idempotency key, one a rebuild made, or one written before migration 2.
+    pub arguments_hash: String,
 }
 
 pub(crate) fn insert_journal_started(
@@ -78,8 +102,25 @@ pub(crate) fn insert_journal_started(
         text_value(&row.arguments_json),
         idempotency_key_value(&row.idempotency_key),
         integer_value(row.started_unix_ms),
+        optional_text_value(&row.arguments_hash),
     ];
     execute(transaction, INSERT_JOURNAL_STARTED, &parameters)?;
+    Ok(())
+}
+
+pub(crate) fn finish_journal_row(
+    transaction: &SqliteTransaction<'_>,
+    row: &JournalFinishedRow,
+) -> Result<(), StoreError> {
+    let parameters = [
+        text_value(&row.journal_id),
+        boolean_value(row.ok),
+        optional_text_value(&row.code),
+        text_value(&row.result_json),
+        optional_text_value(&row.job_id),
+        integer_value(row.finished_unix_ms),
+    ];
+    execute(transaction, FINISH_JOURNAL_ROW, &parameters)?;
     Ok(())
 }
 
@@ -170,5 +211,6 @@ fn journal_from_columns(row: &[SqlValue]) -> Result<JournalRow, StoreError> {
         job_id: read_text(row, 8)?,
         started_unix_ms: read_integer(row, 9)?,
         finished_unix_ms: read_optional_integer(row, 10)?,
+        arguments_hash: read_text(row, 11)?,
     })
 }

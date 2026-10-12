@@ -10,7 +10,9 @@ use rastai_proto::events::v1::EventRecord;
 
 use crate::error::StoreError;
 use crate::index::documents::{DocumentRow, UndoStepRow, clear_undo_steps, record_undo_step, upsert_document};
-use crate::index::journal::{JournalStartedRow, insert_journal_started, mark_unfinished_journal_rows};
+use crate::index::journal::{
+    JournalFinishedRow, JournalStartedRow, finish_journal_row, insert_journal_started, mark_unfinished_journal_rows,
+};
 use crate::index::kept_tables::{
     NodeRow, PluginRow, ProjectRow, TokenRow, insert_token, revoke_token, upsert_node, upsert_plugin, upsert_project,
 };
@@ -23,6 +25,8 @@ use crate::sqlite::SqliteTransaction;
 pub enum IndexWrite {
     /// A command started: its journal row, before it runs.
     JournalStarted(JournalStartedRow),
+    /// The command ended: its outcome and redacted result. A row that is already finished is left as it is.
+    JournalFinished(JournalFinishedRow),
     /// At startup: close every journal row a restart interrupted, as failed with `RRS-C0005`.
     MarkUnfinishedJournalRows,
     /// A batch of one run's event-log records, in log order: their rows and `runs.acked_sequence`, in one
@@ -62,6 +66,7 @@ pub enum IndexWrite {
 pub(crate) fn apply_index_write(transaction: &SqliteTransaction<'_>, write: &IndexWrite) -> Result<(), StoreError> {
     match write {
         IndexWrite::JournalStarted(row) => insert_journal_started(transaction, row),
+        IndexWrite::JournalFinished(row) => finish_journal_row(transaction, row),
         IndexWrite::MarkUnfinishedJournalRows => {
             mark_unfinished_journal_rows(transaction, rastai_core::time::now_unix_ms())
         }

@@ -608,12 +608,14 @@ name = "rastai-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "prost",
  "rastai-core",
  "rastai-diag",
  "rastai-formats",
  "rastai-proto",
  "rastai-store",
  "rastai-transport",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -623,8 +625,10 @@ name = "rastai-server-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "rastai-core",
  "rastai-diag",
  "rastai-formats",
+ "rastai-proto",
  "rastai-server",
 ]
 

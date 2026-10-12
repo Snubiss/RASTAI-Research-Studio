@@ -195,6 +195,7 @@ RRS_J1001 = "RRS-J1001"
 RRS_J1002 = "RRS-J1002"
 RRS_J1003 = "RRS-J1003"
 RRS_J1004 = "RRS-J1004"
+RRS_J1005 = "RRS-J1005"
 RRS_J2001 = "RRS-J2001"
 RRS_J2002 = "RRS-J2002"
 RRS_J2003 = "RRS-J2003"
@@ -2182,6 +2183,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Check the job's stderr.log, then run it again.",
         fix_command_id="",
         docs_anchor="rrs-j1004",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_J1005,
+        severity="error",
+        title="Worker stopped on an unexpected error",
+        message="The worker of job {job_id} stopped on an unexpected {error_type}.",
+        basic_text="This task stopped because of a problem inside Rastai or a plugin.",
+        fix_text="Check the job's stderr.log for the details, then run it again; if it keeps happening, report it.",
+        fix_command_id="",
+        docs_anchor="rrs-j1005",
         retired=False,
     ),
     CatalogEntry(

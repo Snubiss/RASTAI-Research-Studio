@@ -2,7 +2,8 @@
 
 Engines and plugin jobs never import rastai_proto. They emit an event type from contracts 7.3 and a plain dict, and
 `payload_from_dict` turns that into the typed `EventPayload` the event log and the live stream carry. It is also the
-only file that imports the protobuf runtime (contracts 2.5), so the frame body's encoding and decoding live here too.
+only file that imports the protobuf runtime (contracts 2.5), so the frame body's encoding and decoding live here too,
+and so does `job_spec_from_dict`, which reads the `JobSpec` the node writes into job.json as protobuf JSON.
 
 Why `encode_message` exists instead of `SerializeToString`: a frame's bytes must be the same whichever writer made
 them, the Python worker or the Rust daemon (a remote run's mirror, the archive's verbatim copies, the shared fixtures).
@@ -22,6 +23,7 @@ from google.protobuf.descriptor import FieldDescriptor
 from google.protobuf.message import DecodeError, Message
 from rastai_proto.events.v1.event_record_pb2 import EventRecord
 from rastai_proto.events.v1.payloads_pb2 import EventPayload
+from rastai_proto.node.v1.jobs_pb2 import JobSpec
 
 # The event types a worker writes to its log or streams live (contracts 7.3, emitter "worker"), and the field of the
 # EventPayload oneof that holds each one's payload. The other M1 types come from the node or the daemon, so a worker
@@ -96,6 +98,23 @@ def payload_from_dict(event_type: str, values: dict) -> EventPayload:
     # An empty dict sets no field, so mark the oneof's choice explicitly: the payload still says which event it is.
     message.SetInParent()
     return payload
+
+
+# ---- job.json ----
+
+
+def job_spec_from_dict(values: dict) -> JobSpec:
+    """job.json's `job_spec`, which the node writes in the protobuf JSON mapping (rastai-core's `job_spec_to_json`;
+    python layout 7.3). A value that can't be a JobSpec raises ValueError; the caller reports the file as damaged.
+
+    Fields this worker doesn't know are skipped, not refused: the worker reads the fields it needs by name, and a
+    field a newer node adds must not stop an older worker that is still running its job after an update."""
+    job_spec = JobSpec()
+    try:
+        json_format.ParseDict(values, job_spec, ignore_unknown_fields=True)
+    except json_format.ParseError as error:
+        raise ValueError(f"the job_spec isn't a JobSpec: {error}") from error
+    return job_spec
 
 
 # ---- Frame bodies ----

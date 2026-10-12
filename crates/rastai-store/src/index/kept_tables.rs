@@ -23,6 +23,9 @@ const INSERT_TOKEN: &str = "INSERT INTO tokens (token_id, name, token_hash, scop
 const REVOKE_TOKEN: &str = "UPDATE tokens SET revoked_unix_ms = ?2 WHERE token_id = ?1 AND revoked_unix_ms IS NULL";
 const SELECT_TOKEN_BY_HASH: &str = "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms
     FROM tokens WHERE token_hash = ?1";
+// Oldest first, as token.list shows them; the id breaks a tie, since ids sort by creation time too.
+const SELECT_ALL_TOKENS: &str = "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms
+    FROM tokens ORDER BY created_unix_ms, token_id";
 
 const UPSERT_NODE: &str = "INSERT INTO nodes (node_id, name, transport, address, state, protocol_version,
         capabilities, last_heartbeat_unix_ms)
@@ -192,17 +195,32 @@ pub fn get_project(reader: &IndexReader, project_id: &str) -> Result<Option<Proj
 /// The token with this hash, revoked or not: the caller decides what a revoked token means.
 pub fn find_token_by_hash(reader: &IndexReader, token_hash: &str) -> Result<Option<TokenRow>, StoreError> {
     let rows = query_rows(&reader.connection, SELECT_TOKEN_BY_HASH, &[text_value(token_hash)])?;
-    let Some(row) = rows.first() else {
-        return Ok(None);
-    };
-    Ok(Some(TokenRow {
+    match rows.first() {
+        Some(row) => Ok(Some(token_from_columns(row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Every token, revoked ones included, oldest first: `token.list`, and the daemon's token cache at startup.
+pub fn list_tokens(reader: &IndexReader) -> Result<Vec<TokenRow>, StoreError> {
+    let rows = query_rows(&reader.connection, SELECT_ALL_TOKENS, &[])?;
+    let mut tokens = Vec::with_capacity(rows.len());
+    for row in &rows {
+        tokens.push(token_from_columns(row)?);
+    }
+    Ok(tokens)
+}
+
+/// Columns in the order of `SELECT_TOKEN_BY_HASH` and `SELECT_ALL_TOKENS`.
+fn token_from_columns(row: &[SqlValue]) -> Result<TokenRow, StoreError> {
+    Ok(TokenRow {
         token_id: read_text(row, 0)?,
         name: read_text(row, 1)?,
         token_hash: read_text(row, 2)?,
         scopes: read_word_list(row, 3)?,
         created_unix_ms: read_integer(row, 4)?,
         revoked_unix_ms: read_optional_integer(row, 5)?,
-    }))
+    })
 }
 
 pub fn get_node(reader: &IndexReader, node_id: &str) -> Result<Option<NodeRow>, StoreError> {

@@ -3,24 +3,28 @@
 //! `check_request_gate`, and a malformed head must be refused, never let through:
 //!
 //! - the input is read as a request head: a first line `METHOD PATH`, then `name: value` lines;
-//! - whatever `read_request_head` accepts goes through the gate over loopback TCP, with one live session and an
-//!   owner token planted under short secrets, so the cookie, key and bearer branches are reachable too;
+//! - whatever `read_request_head` accepts goes through the gate over loopback TCP, with one live session, an owner
+//!   token, a scoped token and a revoked one planted under short secrets, so the cookie, key and every bearer
+//!   branch are reachable too;
 //! - a request the gate lets through has a Host that is a loopback name, and, when it carries an Origin, that
 //!   Origin is `http://` plus the Host.
 
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use rastai_core::scopes::Scope;
 use rastai_formats::hashing::hash_bytes;
 use rastai_server::http::gate::{Listener, check_request_gate, read_request_head};
-use rastai_server::http::sessions::{AuthState, Session, new_auth_state};
+use rastai_server::http::sessions::{AuthState, ScopedToken, Session, add_scoped_token, new_auth_state};
 
 const COOKIE_NAME: &str = "rastai_session_0a1b2c3d";
 /// Short secrets, so the fuzzer can find them: `Cookie: rastai_session_0a1b2c3d=s`, `Rastai-Session-Key: k`,
-/// `Authorization: Bearer t`.
+/// `Authorization: Bearer t`, and the scoped tokens `Bearer u` (live) and `Bearer v` (revoked).
 const SESSION_ID: &[u8] = b"s";
 const SESSION_KEY: &[u8] = b"k";
 const OWNER_TOKEN: &[u8] = b"t";
+const SCOPED_TOKEN: &[u8] = b"u";
+const REVOKED_TOKEN: &[u8] = b"v";
 const SESSION_ORIGIN: &str = "http://127.0.0.1:47820";
 /// Far in the future, so the planted session never goes idle during a run.
 const LAST_USED_UNIX_MS: i64 = i64::MAX / 2;
@@ -40,6 +44,15 @@ fn planted_auth() -> AuthState {
             key_hash: hash_bytes(SESSION_KEY),
             last_used_unix_ms: LAST_USED_UNIX_MS,
         });
+    }
+    for (token_id, secret, revoked) in [("tok_u", SCOPED_TOKEN, false), ("tok_v", REVOKED_TOKEN, true)] {
+        let token = ScopedToken {
+            token_id: token_id.to_string(),
+            token_hash: hash_bytes(secret),
+            scopes: vec![Scope::Read],
+            revoked,
+        };
+        add_scoped_token(&auth, token);
     }
     auth
 }

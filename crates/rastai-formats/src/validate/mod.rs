@@ -140,7 +140,7 @@ fn typed_document(
 /// `RRS-E1002` at the file for a value serde refused. An integer out of its field's range is the case layer 2 lets
 /// through, so it gets a sentence of its own with the value shown: "A number in this file should be a whole number of
 /// zero or more that fits its field, but it is -1."
-fn wrong_kind_diagnostic(file_name: &str, serde_reason: &str) -> Diagnostic {
+pub(crate) fn wrong_kind_diagnostic(file_name: &str, serde_reason: &str) -> Diagnostic {
     let values = match refused_integer(serde_reason) {
         Some(integer) => [
             ("field", FIELD_SOME_NUMBER),

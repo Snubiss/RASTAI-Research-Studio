@@ -22,8 +22,8 @@ both languages read and write.
 - **fsync policy.** State changes, checkpoints, diagnostics and artifacts fsync at once (`fsync_now`); metrics are
   batched and fsynced at least once a second, on the next append or `flush_if_due`.
 - **Disk-full reserve.** While it is open, `events.log.reserve` holds `EVENT_LOG_RESERVE_BYTES` of zeros, so that
-  freeing it on a full disk makes room for the records that pause the run (platform flow 6.1; pause_for_full_disk
-  arrives with the job process, M1-40). `close` deletes it.
+  freeing it on a full disk makes room for the records that pause the run (`pause_for_full_disk`, platform flow
+  6.1). `close` deletes it.
 
 How the open tells a torn tail from corruption is the Rust reader's rule (contracts 7.1, `reader.rs`), ported here
 line for line so both sides give every file a writer can produce the same verdict. A crash only damages the end of a
@@ -55,6 +55,8 @@ from rastai_proto.common.v1.states_pb2 import EVENT_CLASS_DURABLE
 from rastai_proto.events.v1.event_record_pb2 import EventRecord
 from rastai_proto.events.v1.payloads_pb2 import EventPayload
 
+from rastai_plugin import JobControl
+from rastai_worker.control import job_is_ending, wait_for_resume
 from rastai_worker.errors import WorkerError
 from rastai_worker.event_payloads import (
     UINT64_MASK,
@@ -65,6 +67,7 @@ from rastai_worker.event_payloads import (
     WIRE_TYPE_VARINT,
     decode_event_record,
     encode_message,
+    payload_from_dict,
 )
 
 # Metrics are batched and fsynced at least this often (contracts 7.1 and 15.10; the Rust writer's batched policy).
@@ -73,6 +76,12 @@ METRICS_FSYNC_INTERVAL_SECONDS = 1.0
 EVENT_LOG_RESERVE_BYTES = 1024 * 1024
 # The reserve sits beside the log: runs/<run_id>/events.log.reserve (contracts 8.4).
 RESERVE_FILE_SUFFIX = ".reserve"
+# The records that pause a run on a full disk (platform flow 6.1), as an engine would emit them.
+DIAGNOSTIC_REPORTED = "diagnostic.reported"
+RUN_STATE_CHANGED = "run.state_changed"
+SEVERITY_ERROR = "SEVERITY_ERROR"
+RUN_STATE_PAUSED = "RUN_STATE_PAUSED"
+RUN_STATE_RUNNING = "RUN_STATE_RUNNING"
 
 # The first 8 bytes of every event log.
 EVENT_LOG_HEADER = b"RRSEVLG1"
@@ -207,6 +216,56 @@ class EventLogWriter:
             raise write_error(self.path, error) from error
         self.end_offset += len(frame)
         self.has_unsynced_bytes = True
+
+
+# ---- A full disk ----
+
+
+def pause_for_full_disk(log: EventLogWriter, control: JobControl) -> None:
+    """An append failed with ENOSPC (RRS-S3002; the writer already cut its partial frame off): pause the run instead
+    of failing it (platform flow 6.1). Frees the reserve so the next two records fit, appends diagnostic.reported
+    (RRS-S3002) and run.state_changed paused, both fsynced, and waits for RESUME with the job's state in memory. The
+    job stays running and keeps its lease. On RESUME the reserve comes back and the run is running again; if the disk
+    is still full, the job stays paused until the next RESUME. A job asked to end while paused returns at once,
+    without its reserve, so its final records can use what the reserve freed.
+
+    Raises the append's WorkerError when even the pause records can't be written: the caller then exits with
+    EXIT_EVENT_LOG_UNWRITABLE (4)."""
+    log.reserve_path.unlink(missing_ok=True)
+    log.append(DIAGNOSTIC_REPORTED, disk_full_payload(log), [], fsync_now=True)
+    log.append(RUN_STATE_CHANGED, run_state_payload(RUN_STATE_PAUSED), [], fsync_now=True)
+    control.paused = True
+    if not wait_for_resume_with_reserve(log, control):
+        return
+    log.append(RUN_STATE_CHANGED, run_state_payload(RUN_STATE_RUNNING), [], fsync_now=True)
+
+
+def wait_for_resume_with_reserve(log: EventLogWriter, control: JobControl) -> bool:
+    """Waits for a RESUME after which the reserve can be written again. False when the job was asked to end
+    first."""
+    while True:
+        wait_for_resume(control)
+        if job_is_ending(control):
+            return False
+        try:
+            write_reserve_file(log.reserve_path)
+            return True
+        except WorkerError:
+            # Still no room: resuming now would only fail the next append. The run's records already say paused.
+            control.paused = True
+
+
+def disk_full_payload(log: EventLogWriter) -> EventPayload:
+    diagnostic = {
+        "code": RRS_S3002,
+        "severity": SEVERITY_ERROR,
+        "message": f"The disk filled up during a write: appending to {log.path}. The run is paused until RESUME.",
+    }
+    return payload_from_dict(DIAGNOSTIC_REPORTED, {"diagnostic": diagnostic, "subject_id": log.job_id})
+
+
+def run_state_payload(run_state: str) -> EventPayload:
+    return payload_from_dict(RUN_STATE_CHANGED, {"run_state": run_state})
 
 
 def current_unix_ms() -> int:

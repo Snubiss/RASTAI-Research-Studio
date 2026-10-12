@@ -5,11 +5,13 @@
 name = "rastai-worker"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
 requires-python = "==3.12.*"
-# The workspace packages it imports so far. The environments (python/envs/) install them from their folders and pin
-# the protobuf runtime that rastai-proto brings; grpcio (worker_server.py) joins with M1-40, torch with the jobs.
+# The workspace packages it imports so far, and grpcio. The environments (python/envs/) install the workspace
+# packages from their folders and pin the exact grpcio and the protobuf runtime that rastai-proto brings; torch joins
+# with the jobs.
 dependencies = [
-    "rastai-proto",        # EventRecord, EventPayload and the other generated messages
-    "rastai-plugin",       # rastai_plugin.catalog: the error codes WorkerError carries
+    "rastai-proto",        # EventRecord, EventPayload, WorkerService and the other generated messages
+    "rastai-plugin",       # the catalog codes, JobControl, JobEvents and the WorkerHost client
+    "grpcio>=1.84.0",      # the WorkerService server (worker_server.py only; contracts 2.5)
 ]
 
 [tool.uv.sources]
