@@ -228,6 +228,22 @@ def write_from_python_log(path: Path) -> None:
         writer.close()
 
 
+def record_file_calls(patch: pytest.MonkeyPatch) -> list[str]:
+    """Replaces the calls that read, write or cut the log with ones that also note their name in the returned list."""
+    calls = []
+    for name in ("pread", "pwrite", "ftruncate", "fsync"):
+        patch.setattr(event_log.os, name, noting_call(calls, name, getattr(os, name)))
+    return calls
+
+
+def noting_call(calls: list[str], name: str, real_call):
+    def note_then_call(*arguments):
+        calls.append(name)
+        return real_call(*arguments)
+
+    return note_then_call
+
+
 def assert_refused_and_left_alone(folder: Path, log_bytes: bytes, code: str) -> None:
     path = write_log(folder, log_bytes)
     with pytest.raises(WorkerError) as refusal:
@@ -318,24 +334,37 @@ def test_appending_to_a_good_log_continues_its_sequence(tmp_path: Path, fixtures
 # ---- One writer ----
 
 
-def test_flock_blocks_a_second_writer(tmp_path: Path) -> None:
+def test_flock_blocks_a_second_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / LOG_FILE_NAME
+    reserve = event_log.reserve_path_for(path)
     first = EventLogWriter(path, RUN_ID, JOB_ID)
+    append_good_event(first, 0, fsync_now=True)
+    log_before = path.read_bytes()
+    reserve_before = reserve.stat()
+    file_calls = record_file_calls(monkeypatch)
     with pytest.raises(WorkerError) as refusal:
         EventLogWriter(path, RUN_ID, JOB_ID)
+    monkeypatch.undo()
     assert refusal.value.code == "RRS-J3006"
-    # The refused writer touched nothing: the first one keeps appending, and its reserve is still there.
-    assert append_good_event(first, 0, fsync_now=True) == 1
-    assert event_log.reserve_path_for(path).exists()
+    # The refusal comes before the log or the reserve is read or written (contracts 9.1; python layout 7.5): the
+    # live writer's log, its reserve and its run state are left alone, and the first writer keeps appending.
+    assert file_calls == [], "the refused writer read or wrote the log"
+    assert path.read_bytes() == log_before
+    assert reserve.stat().st_ino == reserve_before.st_ino
+    assert reserve.stat().st_mtime_ns == reserve_before.st_mtime_ns
+    assert append_good_event(first, 1, fsync_now=True) == 2
+    assert reserve.exists()
     first.close()
     second = EventLogWriter(path, RUN_ID, JOB_ID)
-    assert second.next_sequence == 2
+    assert second.next_sequence == 3
     second.close()
 
 
 def test_flock_blocks_a_writer_in_another_process(tmp_path: Path) -> None:
     path = tmp_path / LOG_FILE_NAME
     writer = EventLogWriter(path, RUN_ID, JOB_ID)
+    append_good_event(writer, 0, fsync_now=True)
+    log_before = path.read_bytes()
     script = (
         "import sys\n"
         "from pathlib import Path\n"
@@ -348,8 +377,10 @@ def test_flock_blocks_a_writer_in_another_process(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-c", script, str(path)], capture_output=True, text=True, timeout=60, check=True
     )
-    writer.close()
     assert result.stdout.strip() == "RRS-J3006"
+    assert path.read_bytes() == log_before
+    assert event_log.reserve_path_for(path).exists()
+    writer.close()
 
 
 # ---- fsync policy and the reserve ----
