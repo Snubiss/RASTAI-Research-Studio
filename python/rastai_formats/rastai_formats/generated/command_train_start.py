@@ -127,3 +127,37 @@ def training_plan_to_json(value: TrainingPlan) -> dict[str, Any]:
     data["memory_estimate_bytes"] = value.memory_estimate_bytes
     data["time_estimate_seconds"] = value.time_estimate_seconds
     return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class TrainJobArgs:
+    "What the daemon hands a train job in JobSpec.arguments_json: what to train and how."
+
+    # The train.start arguments the run was started with.
+    start_arguments: TrainStartArgs
+    # How the daemon decided to train.
+    plan: TrainingPlan
+    # Optimizer steps in the whole run; the learning-rate schedule ends here.
+    max_steps: int
+    # The run's seed: weights, dropout, the split and the shuffle.
+    seed: int
+
+
+def train_job_args_from_json(data: dict[str, Any]) -> TrainJobArgs:
+    """A TrainJobArgs from its JSON object."""
+    return TrainJobArgs(
+        start_arguments=train_start_args_from_json(data["start_arguments"]),
+        plan=training_plan_from_json(data["plan"]),
+        max_steps=data["max_steps"],
+        seed=data["seed"],
+    )
+
+
+def train_job_args_to_json(value: TrainJobArgs) -> dict[str, Any]:
+    """The JSON object of a TrainJobArgs; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    data["start_arguments"] = train_start_args_to_json(value.start_arguments)
+    data["plan"] = training_plan_to_json(value.plan)
+    data["max_steps"] = value.max_steps
+    data["seed"] = value.seed
+    return data

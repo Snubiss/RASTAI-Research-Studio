@@ -1513,7 +1513,7 @@ The node writes `runs/<run_id>/job.json` before spawning the worker (contracts.m
 
 | Field | Meaning |
 |---|---|
-| `job_spec` | the `JobSpec` as protobuf JSON (kind, `arguments_json` with resolved settings, `entry`, resources, `checkpoint_policy_json`, `plugin_id`) |
+| `job_spec` | the `JobSpec` as protobuf JSON (kind, `arguments_json` with resolved settings, `entry`, resources, `checkpoint_policy_json`, `plugin_id`); a `train` job's `arguments_json` is a `TrainJobArgs` and its `checkpoint_policy_json` a `SettingsCheckpoint` (contracts 4.4) |
 | `job_socket_path`, `worker_host_socket_path` | where to serve `WorkerService` and where `WorkerHostService` is |
 | `run_folder`, `cache_folder` | the run's folder; a node-local cache that is safe to delete (anchors, drift base answers, tokenized datasets) |
 | `environment_id`, `environment_lock_hash` | for the hardware fingerprint and run record |

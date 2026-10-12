@@ -28,7 +28,7 @@ use rastai_formats::commands::token::{
     TokenCreateArgs, TokenCreateResult, TokenListArgs, TokenListResult, TokenLoginCodeCreateArgs,
     TokenLoginCodeCreateResult, TokenRevokeArgs, TokenRevokeResult, TokenSummary,
 };
-use rastai_formats::commands::train::{TrainStartArgs, TrainStartResult, TrainingPlan};
+use rastai_formats::commands::train::{TrainJobArgs, TrainStartArgs, TrainStartResult, TrainingPlan};
 use rastai_formats::describe::registry::{describe_all_types, find_description};
 use rastai_formats::describe::structure_check::{StructureCheck, find_mismatches};
 use rastai_formats::documents::lock::{LockEnvironment, LockFile, LockedModel, LockedPlugin};
@@ -1000,9 +1000,16 @@ fn the_train_types_match_their_descriptions() {
     assert_description_matches(&plan, "TrainingPlan");
     let result = TrainStartResult {
         run_id: "run_01J".to_string(),
-        plan,
+        plan: plan.clone(),
     };
     assert_description_matches(&result, "TrainStartResult");
+    let job_arguments = TrainJobArgs {
+        start_arguments: arguments,
+        plan,
+        max_steps: 200,
+        seed: 7,
+    };
+    assert_description_matches(&job_arguments, "TrainJobArgs");
 }
 
 #[test]

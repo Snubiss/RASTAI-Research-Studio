@@ -1,4 +1,5 @@
-//! The training area's types (contracts 6.4, 6.5): `train.start` and the `TrainingPlan` it returns.
+//! The training area's types (contracts 6.4, 6.5): `train.start`, the `TrainingPlan` it returns, and
+//! `TrainJobArgs`, what the daemon hands the train job it starts (`JobSpec.arguments_json`, contracts 4.4).
 //!
 //! M1 trains one recipe, `classification`, on a design file and a dataset path (TextCNN, plan M1-46). Model
 //! references, recipe settings and the other recipes join these types with the milestones that build them (M5).
@@ -10,6 +11,8 @@ use crate::describe::types::{FieldKind, OPTIONAL, REQUIRED, TypeDescription, enu
 
 const START_COMMAND_ID: &str = "train.start";
 const TRAINING_PLAN_TYPE: &str = "TrainingPlan";
+const TRAIN_START_ARGS_TYPE: &str = "TrainStartArgs";
+const TRAIN_JOB_ARGS_TYPE: &str = "TrainJobArgs";
 /// How a run trains the weights (contracts 6.5); a closed set, so the schema and the generated types limit it.
 const TRAINING_METHODS: &[&str] = &["full", "lora", "qlora"];
 /// The number formats a run trains in (contracts 6.5).
@@ -55,6 +58,21 @@ pub struct TrainingPlan {
     pub time_estimate_seconds: u64,
 }
 
+/// A train job's `JobSpec.arguments_json` (contracts 4.4): what to train, as `train.start` was called, and how,
+/// as the daemon decided. The worker reads nothing else to set a run up (python/CLAUDE.md rule 3), so everything a
+/// rerun needs to train the same way is here or in `JobSpec.checkpoint_policy_json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrainJobArgs {
+    /// The `train.start` arguments the run was started with.
+    pub start_arguments: TrainStartArgs,
+    /// How the daemon decided to train: micro-batch, accumulation, dtype and GPUs.
+    pub plan: TrainingPlan,
+    /// Optimizer steps in the whole run; the learning-rate schedule ends here.
+    pub max_steps: u32,
+    /// The run's one seed (run.json `seed`): weights, dropout, the split and the shuffle.
+    pub seed: u64,
+}
+
 pub fn describe_train_start_args() -> TypeDescription {
     let fields = vec![
         field(
@@ -89,7 +107,7 @@ pub fn describe_train_start_args() -> TypeDescription {
         ),
     ];
     command_type(
-        "TrainStartArgs",
+        TRAIN_START_ARGS_TYPE,
         START_COMMAND_ID,
         "What to train: a recipe, the design to train and the data to train it on.",
         fields,
@@ -160,6 +178,41 @@ pub fn describe_training_plan() -> TypeDescription {
         TRAINING_PLAN_TYPE,
         START_COMMAND_ID,
         "How the daemon decided to train: recipe, method, dtype, GPUs, batch sizes and the estimates.",
+        fields,
+    )
+}
+
+pub fn describe_train_job_args() -> TypeDescription {
+    let fields = vec![
+        field(
+            "start_arguments",
+            FieldKind::Type(TRAIN_START_ARGS_TYPE.to_string()),
+            REQUIRED,
+            "The train.start arguments the run was started with.",
+        ),
+        field(
+            "plan",
+            FieldKind::Type(TRAINING_PLAN_TYPE.to_string()),
+            REQUIRED,
+            "How the daemon decided to train.",
+        ),
+        field(
+            "max_steps",
+            FieldKind::Integer,
+            REQUIRED,
+            "Optimizer steps in the whole run; the learning-rate schedule ends here.",
+        ),
+        field(
+            "seed",
+            FieldKind::Integer,
+            REQUIRED,
+            "The run's seed: weights, dropout, the split and the shuffle.",
+        ),
+    ];
+    command_type(
+        TRAIN_JOB_ARGS_TYPE,
+        START_COMMAND_ID,
+        "What the daemon hands a train job in JobSpec.arguments_json: what to train and how.",
         fields,
     )
 }
