@@ -1083,7 +1083,7 @@ fn write_zip_stored(destination_path: &str, entries: Vec<(String, String)>) -> P
 - **Callers:** `rastai_worker` (job specs, run records, resume state), `rastai_models` (`load_model_spec`, `check_safetensors_header` before every tensor read, GGUF), `rastai_lens` (replay archives), `rastai_train` (resume and run records), `rastai_data` (`MysqlConnection` through the generated dataclass, validated by `read_document`), `rastai.load()` in notebooks.
 - **Paths in the binding only.** `write_zip_stored` is the one function here that takes paths. The binding crate opens them; `rastai-formats` itself still only sees a `FileSource` and a `FileSink` (4.10).
 - Built by `just wheel` with maturin (§27 dev tooling) for CPython 3.12, `abi3` off: one wheel per platform in each `envs/<backend>/uv.lock`, by hash. Nothing installs at runtime. In development the cpu environment installs `python/rastai_formats` editable, built without build isolation by the maturin its lock pins; `just env-cpu` rebuilds the module on every sync.
-- The GIL is released (`py.allow_threads`) around anything that can take more than a millisecond (Q8_0 encoding, large documents).
+- The GIL is released (`py.detach`, pyo3 0.29's name for the older `allow_threads`) around anything that can take more than a millisecond (Q8_0 encoding, large documents).
 
 ### 4.8 Dependencies
 

@@ -16,6 +16,7 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic, diagnostic_at, has_errors}
 use rastai_diag::path::{DiagnosticPath, format_path};
 use rastai_diag::render_json::render_json;
 use rastai_formats::byte_source::SliceSource;
+use rastai_formats::documents::model::MODEL_TYPE_NAME;
 use rastai_formats::documents::{Document, document_header};
 use rastai_formats::error::FormatsError;
 use rastai_formats::json::canonical::canonical_json;
@@ -27,10 +28,7 @@ use serde_json::{Map, Value};
 /// field says what it is. It shows in the paths of their diagnostics (`document.json:3:5#/step`).
 const DOCUMENT_TEXT_NAME: &str = "document.json";
 /// The name `load_model_spec` reads its bytes under: the ModelSpec extension, so the type check knows what to expect.
-const MODEL_SPEC_NAME: &str = "model.rrsmodel";
-/// The ModelSpec's type name (contracts 5.2). M1-18 adds the type itself; until then every model spec is refused as
-/// an unknown type (RRS-E1004 at /type), which is the truth: this build can't validate one.
-const MODEL_TYPE_NAME: &str = "rastai.model";
+const MODEL_FILE_NAME: &str = "model.rrsmodel";
 const TYPE_POINTER: &str = "/type";
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
 
@@ -120,7 +118,7 @@ fn outcome_json(outcome: &ReadOutcome) -> Result<String, Vec<Diagnostic>> {
 }
 
 fn model_spec_json(json_bytes: &[u8]) -> Result<String, Vec<Diagnostic>> {
-    let document = sound_document(MODEL_SPEC_NAME, json_bytes)?;
+    let document = sound_document(MODEL_FILE_NAME, json_bytes)?;
     let type_name = &document_header(&document).document_type;
     if type_name != MODEL_TYPE_NAME {
         return Err(vec![not_a_model_spec(type_name)]);
@@ -151,7 +149,7 @@ fn sound_document(file_name: &str, data: &[u8]) -> Result<Document, Vec<Diagnost
 /// RRS-E1004 at /type: a valid document of another type where a ModelSpec belongs.
 fn not_a_model_spec(type_name: &str) -> Diagnostic {
     let path = DiagnosticPath {
-        file: MODEL_SPEC_NAME.to_string(),
+        file: MODEL_FILE_NAME.to_string(),
         json_pointer: TYPE_POINTER.to_string(),
         ..DiagnosticPath::default()
     };
