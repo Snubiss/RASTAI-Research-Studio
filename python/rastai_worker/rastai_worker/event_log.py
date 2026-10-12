@@ -11,7 +11,9 @@ both languages read and write.
 
 `EventLogWriter` is the log's one writer:
 - **One writer.** It takes an exclusive `flock` on the file before reading or writing anything. A second writer (a
-  relaunch racing a live job) fails with `RRS-J3006` instead of interleaving frames.
+  worker the node doesn't know is alive, contracts 9.1) fails with `RRS-J3006` before it reads or writes the log or
+  `events.log.reserve`, so the live job's log, reserve and run state are left alone; its job process exits with
+  `EXIT_EVENT_LOG_LOCKED` (5) and the diagnostic in stderr.log only (python layout 7.5; M1-40).
 - **Torn-tail recovery.** On open it reads every frame and truncates a torn tail (`RRS-S2001`, info; the caller
   reports it from `truncated_tail_bytes`). A corrupt frame (`RRS-S2002`) or a sequence gap (`RRS-S2003`) before
   the end is an error and the file is left alone: appending after it would hide it.
@@ -259,7 +261,8 @@ def open_log_file(path: Path) -> tuple[bool, int]:
 
 
 def lock_exclusively(file_descriptor: int, path: Path) -> None:
-    """Takes the exclusive flock without waiting: a second writer fails at once instead of interleaving frames."""
+    """Takes the exclusive flock without waiting: a second writer fails at once instead of interleaving frames. It is
+    the first thing the open does to the file, so a refused writer has read and written nothing (contracts 9.1)."""
     # fcntl exists only on POSIX. It is imported here, not at the top, so the package still imports on Windows,
     # where python/conftest.py imports every package before the portable tests run; the worker itself is
     # POSIX-only until tier 2.
