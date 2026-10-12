@@ -80,7 +80,7 @@ class LossRecordingRecipe(ClassificationRecipe):
         return result
 
 
-def new_context(repo_root: Path, run_folder: Path, every_steps: int = 0) -> TrainingContext:
+def new_context(repo_root: Path, run_folder: Path, every_steps: int = 0, keep_last: int = 3) -> TrainingContext:
     """A new job's context, built from scratch exactly as the train job builds it."""
     arguments = TrainStartArgs(
         recipe="classification",
@@ -94,7 +94,9 @@ def new_context(repo_root: Path, run_folder: Path, every_steps: int = 0) -> Trai
         warmup_steps=3,
         seed=1234,
         deterministic=True,
-        checkpoint=checkpoint_policy(SettingsCheckpoint(interval_minutes=0), every_steps=every_steps),
+        checkpoint=checkpoint_policy(
+            SettingsCheckpoint(keep_last=keep_last, interval_minutes=0), every_steps=every_steps
+        ),
     )
     return build_training_context(arguments, RUN_ID, run_folder, settings)
 
@@ -107,9 +109,9 @@ def run_uninterrupted(repo_root: Path, run_folder: Path) -> tuple[TrainingContex
     return context, recipe.losses
 
 
-def resume_and_finish(repo_root: Path, run_folder: Path) -> tuple[TrainingContext, list[float]]:
+def resume_and_finish(repo_root: Path, run_folder: Path, every_steps: int = 0) -> tuple[TrainingContext, list[float]]:
     """A second job on the same run folder: resume from the newest checkpoint, train to the end."""
-    context = new_context(repo_root, run_folder)
+    context = new_context(repo_root, run_folder, every_steps)
     resume_from_latest_checkpoint(run_folder, context)
     control = JobControl()
     recipe = LossRecordingRecipe(control)
@@ -197,8 +199,9 @@ def test_training_after_a_fallback_never_returns_the_damaged_newer_checkpoint(re
     assert first_job.progress.best_step == 8
     (run_folder / "checkpoints" / "step-00000008" / "rng.safetensors").write_bytes(b"damaged")
 
-    # The second job falls back to step 4 and is preempted at step 6.
-    second_job = new_context(repo_root, run_folder, every_steps=4)
+    # The second job falls back to step 4 and is preempted at step 6. It keeps only its last checkpoint and the
+    # best (step 4): counting the skipped step 8 as its newest would remove step 6.
+    second_job = new_context(repo_root, run_folder, every_steps=4, keep_last=1)
     assert resume_from_latest_checkpoint(run_folder, second_job).step == 4
     assert second_job.progress.best_step == 4
     second_control = JobControl()
@@ -207,12 +210,15 @@ def test_training_after_a_fallback_never_returns_the_damaged_newer_checkpoint(re
 
     assert outcome.step == 6
     assert outcome.checkpoint_folder == run_folder / "checkpoints" / "step-00000006"
-    assert checkpoint_steps(run_folder) == [4, 6]
+    # The damaged step 8 stays on disk for inspection (flow 5.2), out of the second job's checkpoints.
+    assert checkpoint_steps(run_folder) == [4, 6, 8]
+    assert second_job.progress.skipped_checkpoint_steps == (8,)
 
-    # And the run still ends exactly as the uninterrupted one.
-    third_job, third_losses = resume_and_finish(repo_root, run_folder)
+    # And the run still ends exactly as the uninterrupted one, its step-8 checkpoint written anew on the way.
+    third_job, third_losses = resume_and_finish(repo_root, run_folder, every_steps=4)
     assert first_recipe.losses[:4] + second_recipe.losses + third_losses == straight_losses
     assert_same_run_state(straight, third_job)
+    assert third_job.progress.skipped_checkpoint_steps == ()
 
 
 def test_resume_json_records_the_loader_position_schedule_and_recipe_state(repo_root: Path, tmp_path: Path) -> None:

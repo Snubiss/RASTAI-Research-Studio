@@ -129,6 +129,9 @@ class TrainingProgress:
     non_finite_steps_in_a_row: int = 0
     # Set by load_resume_state: what the loop restores after recipe.prepare, before the first batch.
     resume_point: ResumePoint | None = None
+    # Steps of newer checkpoints the resume couldn't load and fell back past. They stay on disk for inspection, and
+    # the run's latest, best and keep_last leave them out until it writes that step again.
+    skipped_checkpoint_steps: tuple[int, ...] = ()
 
 
 def build_training_context(

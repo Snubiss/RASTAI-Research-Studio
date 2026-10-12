@@ -631,7 +631,7 @@ def epoch_order(example_count: int, shuffle_seed: int, epoch: int) -> list[int]:
 
 Because the position counts samples, a resume may change the micro-batch (the OOM fix) or the GPU count.
 
-Persisted: durable: `checkpoint.resumed` with the step and the checkpoint used. A rejected checkpoint stays on disk for inspection; GC removes it on its usual rules.
+Persisted: durable: `checkpoint.resumed` with the step and the checkpoint used. A rejected checkpoint stays on disk for inspection; GC removes it on its usual rules. A resumed run leaves the newer checkpoints it fell back past out of its latest, its best and keep_last until it writes that step again (`TrainingProgress.skipped_checkpoint_steps`), since they are ahead of it.
 
 Tests:
 - **Resume parity (CPU, deterministic mode):** `rastai_train/tests/test_resume.py`: train N steps straight; separately train k steps, kill -9, resume, and train N − k. Final weights and the loss curve must be bit-identical. Run for SFT, DPO and PPO on tiny random-weight models in `tests/loop/`.

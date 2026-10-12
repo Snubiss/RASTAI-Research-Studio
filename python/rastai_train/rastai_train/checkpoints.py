@@ -6,8 +6,11 @@ rng.safetensors and resume.json (resume.py). It is written into `step-NNNNNNNN.p
 renamed: the rename is the moment it exists. A job killed during the write leaves only the `.partial` folder, which
 nothing here ever returns and the next write at that step replaces (the daemon's GC removes the others).
 
-A resume that falls back past damaged newer checkpoints removes them: the run goes on from the older step, and a
-damaged folder newer than the run would otherwise stay its latest, count against keep_last and could stay its best.
+A resume that falls back past newer checkpoints it can't load leaves them on disk for inspection (flow 5.2): the
+error may be a passing one (a file it can't open for the moment) and nothing here can tell, so nothing is deleted on
+a guess. The run goes on from the older step and its progress names the skipped steps
+(`TrainingProgress.skipped_checkpoint_steps`): its latest, its best and keep_last leave them out until the run writes
+that step again, which replaces the folder. The daemon's GC removes the others on its usual rules.
 
 Retention keeps the newest `keep_last` complete checkpoints, the best (lowest validation.loss) and every pinned one;
 the loop removes the rest after each save, so a run's disk use stays at keep_last + best + the one being written
@@ -83,8 +86,8 @@ def write_checkpoint(
         if error.errno == errno.ENOSPC:
             raise TrainError(RRS_T2001, f"The checkpoint of step {step} didn't fit on the disk.") from error
         raise
-    # A resume removes damaged newer checkpoints, so a complete folder of this step shouldn't exist; if one does
-    # (a folder copied in by hand), the step's new checkpoint replaces it, since a rename can't.
+    # A complete folder of this step is one a resume skipped (or one copied in by hand): the step's new checkpoint
+    # replaces it, since a rename can't.
     remove_folder(final_folder)
     os.rename(partial_folder, final_folder)
     sync_folder(final_folder.parent)
@@ -132,63 +135,60 @@ def checkpoint_file_hashes(folder: Path) -> dict[str, str]:
 # ---- Finding ----
 
 
-def list_complete_checkpoints(run_folder: Path) -> list[tuple[int, Path]]:
-    """Every complete checkpoint of the run as (step, folder), oldest first. `.partial` folders are never listed."""
+def list_complete_checkpoints(run_folder: Path, skipped_steps: tuple[int, ...] = ()) -> list[tuple[int, Path]]:
+    """Every complete checkpoint of the run as (step, folder), oldest first, but the `skipped_steps` a resume fell
+    back past. `.partial` folders are never listed."""
     checkpoints_folder = run_folder / CHECKPOINTS_FOLDER_NAME
     if not checkpoints_folder.is_dir():
         return []
     checkpoints = []
     for entry in checkpoints_folder.iterdir():
         matched = COMPLETE_FOLDER_PATTERN.fullmatch(entry.name)
-        if matched and entry.is_dir():
-            checkpoints.append((int(matched.group(1)), entry))
+        if not matched or not entry.is_dir():
+            continue
+        step = int(matched.group(1))
+        if step not in skipped_steps:
+            checkpoints.append((step, entry))
     return sorted(checkpoints)
 
 
-def find_latest_checkpoint(run_folder: Path) -> Path | None:
-    """The newest complete checkpoint, or None when the run has none."""
-    checkpoints = list_complete_checkpoints(run_folder)
+def find_latest_checkpoint(run_folder: Path, skipped_steps: tuple[int, ...] = ()) -> Path | None:
+    """The newest complete checkpoint but the `skipped_steps`, or None when the run has none."""
+    checkpoints = list_complete_checkpoints(run_folder, skipped_steps)
     if not checkpoints:
         return None
     return checkpoints[-1][1]
 
 
 def resume_from_latest_checkpoint(run_folder: Path, context: TrainingContext) -> ResumePoint:
-    """Loads the newest complete checkpoint whose files are sound into the run, trying older ones past damaged
-    files. The damaged ones it passed are removed once an older one loads (each named in `damaged_checkpoints` for
-    the job to report), so the run's latest and best are never newer than its step. None at all is RRS-T2004; one
-    of another run stops at once (RRS-T2005)."""
+    """Loads the newest complete checkpoint whose files load into the run, trying older ones past files it can't
+    read or the wheel refuses (RRS-T2002). The ones it passed stay on disk, each named in `damaged_checkpoints` for
+    the job to report, and their steps go into the run's `skipped_checkpoint_steps`, so its latest, best and
+    keep_last leave them out. None at all is RRS-T2004; one of another run stops at once (RRS-T2005)."""
     damaged = []
-    damaged_folders = []
-    for _step, folder in reversed(list_complete_checkpoints(run_folder)):
+    skipped_steps = []
+    for step, folder in reversed(list_complete_checkpoints(run_folder)):
         try:
             point = load_resume_state(folder, context)
         except TrainError as error:
             if error.code != RRS_T2002:
                 raise
             damaged.append(error.message)
-            damaged_folders.append(folder)
+            skipped_steps.append(step)
             continue
         point.damaged_checkpoints = damaged
-        remove_damaged_checkpoints(damaged_folders)
+        context.progress.skipped_checkpoint_steps = tuple(sorted(skipped_steps))
         restore_best_checkpoint(run_folder, context)
         return point
     reason = f" ({len(damaged)} damaged: {damaged[0]})" if damaged else ""
     raise TrainError(RRS_T2004, f"No complete checkpoint to resume from in {run_folder}{reason}.")
 
 
-def remove_damaged_checkpoints(folders: list[Path]) -> None:
-    """Removes the damaged checkpoints a resume fell back past. Training passes their steps again and writes them
-    anew; the daemon's GC drops the index rows of folders that are gone."""
-    for folder in folders:
-        shutil.rmtree(folder)
-    if folders:
-        sync_folder(folders[0].parent)
-
-
 def restore_best_checkpoint(run_folder: Path, context: TrainingContext) -> None:
-    """Sets the run's best checkpoint from the validation losses its checkpoints recorded."""
-    for step, folder in list_complete_checkpoints(run_folder):
+    """Sets the run's best checkpoint from the validation losses its checkpoints recorded, leaving out the newer
+    ones the resume skipped: the run hasn't reached them."""
+    skipped_steps = context.progress.skipped_checkpoint_steps
+    for step, folder in list_complete_checkpoints(run_folder, skipped_steps):
         loss = recorded_validation_loss(folder)
         best_loss = context.progress.best_validation_loss
         if loss is not None and (best_loss is None or loss < best_loss):
@@ -227,10 +227,15 @@ def checkpoints_to_keep(
 
 
 def remove_unkept_checkpoints(
-    run_folder: Path, keep_last: int, best_step: int | None, pinned_steps: tuple[int, ...]
+    run_folder: Path,
+    keep_last: int,
+    best_step: int | None,
+    pinned_steps: tuple[int, ...],
+    skipped_steps: tuple[int, ...] = (),
 ) -> list[Path]:
-    """Removes the complete checkpoints the retention rule doesn't keep and returns their folders."""
-    checkpoints = list_complete_checkpoints(run_folder)
+    """Removes the complete checkpoints the retention rule doesn't keep and returns their folders. The
+    `skipped_steps` a resume fell back past are neither counted nor removed: they stay for inspection."""
+    checkpoints = list_complete_checkpoints(run_folder, skipped_steps)
     kept = checkpoints_to_keep([step for step, _folder in checkpoints], keep_last, best_step, pinned_steps)
     removed = []
     for step, folder in checkpoints:

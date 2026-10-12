@@ -4,6 +4,7 @@ damaged checkpoint."""
 
 import errno
 import json
+import os
 import re
 from pathlib import Path
 
@@ -40,6 +41,12 @@ CHECKPOINT_FILES = ["optimizer.safetensors", "resume.json", "rng.safetensors", "
 # contracts 8.6: a prefix, then 26 Crockford base32 characters whose first holds only 3 bits.
 CHECKPOINT_ID_PATTERN = re.compile(r"ckpt_[0-7][0-9A-HJKMNP-TV-Z]{25}")
 RECIPE_STATE = {"labels": ["cooking", "music", "sports", "weather"]}
+# No permission at all, to make a sound file or folder unreadable for a moment; a user's own default back after.
+NO_PERMISSION = 0o000
+FILE_PERMISSION = 0o644
+FOLDER_PERMISSION = 0o755
+# Root reads files whatever their permissions, so the unreadable-checkpoint tests can't run as root.
+IS_ROOT = os.name == "posix" and os.geteuid() == 0
 
 
 @pytest.fixture(autouse=True)
@@ -250,9 +257,71 @@ def test_resume_skips_a_damaged_newer_checkpoint(repo_root: Path, tmp_path: Path
     assert point.step == 10
     assert len(point.damaged_checkpoints) == 1
     assert "step-00000020" in point.damaged_checkpoints[0]
-    # The run goes on from step 10, so the damaged step 20 is removed: never the run's latest or best again.
-    assert not newest.exists()
-    assert list_complete_checkpoints(context.run_folder) == [(10, checkpoint_folder(context.run_folder, 10))]
+    # Step 20 stays on disk for inspection (flow 5.2); the run, at step 10, leaves it out of its checkpoints.
+    assert (newest / "resume.json").read_text() == "{ not json"
+    assert resumed_progress_skips(context.run_folder, repo_root) == (20,)
+    assert list_complete_checkpoints(context.run_folder, (20,)) == [(10, checkpoint_folder(context.run_folder, 10))]
+    assert find_latest_checkpoint(context.run_folder, (20,)) == checkpoint_folder(context.run_folder, 10)
+
+
+def resumed_progress_skips(run_folder: Path, repo_root: Path) -> tuple[int, ...]:
+    resumed = new_context(repo_root, run_folder)
+    resume_from_latest_checkpoint(run_folder, resumed)
+    return resumed.progress.skipped_checkpoint_steps
+
+
+@pytest.mark.posix_only
+@pytest.mark.skipif(IS_ROOT, reason="root reads files whatever their permissions")
+def test_a_sound_checkpoint_unreadable_for_the_moment_survives_the_fallback(repo_root: Path, tmp_path: Path) -> None:
+    context = new_context(repo_root, tmp_path / "run")
+    write_at_step(context, 10)
+    newest = write_at_step(context, 20)
+    resume_json = newest / "resume.json"
+    resume_json_bytes = resume_json.read_bytes()
+    resume_json.chmod(NO_PERMISSION)
+    try:
+        resumed = new_context(repo_root, context.run_folder)
+        assert resume_from_latest_checkpoint(context.run_folder, resumed).step == 10
+    finally:
+        resume_json.chmod(FILE_PERMISSION)
+
+    assert resumed.progress.skipped_checkpoint_steps == (20,)
+    assert resume_json.read_bytes() == resume_json_bytes
+    # Readable again, it is the run's newest checkpoint once more.
+    assert resume_from_latest_checkpoint(context.run_folder, new_context(repo_root, context.run_folder)).step == 20
+
+
+@pytest.mark.posix_only
+@pytest.mark.skipif(IS_ROOT, reason="root reads files whatever their permissions")
+def test_a_checkpoint_folder_unreadable_for_the_moment_survives_the_fallback(repo_root: Path, tmp_path: Path) -> None:
+    context = new_context(repo_root, tmp_path / "run")
+    write_at_step(context, 10)
+    newest = write_at_step(context, 20)
+    newest.chmod(NO_PERMISSION)
+    try:
+        resumed = new_context(repo_root, context.run_folder)
+        point = resume_from_latest_checkpoint(context.run_folder, resumed)
+    finally:
+        newest.chmod(FOLDER_PERMISSION)
+
+    assert point.step == 10
+    assert "step-00000020" in point.damaged_checkpoints[0]
+    assert sorted(path.name for path in newest.iterdir()) == CHECKPOINT_FILES
+
+
+def test_retention_neither_counts_nor_removes_the_skipped_checkpoints(repo_root: Path, tmp_path: Path) -> None:
+    context = new_context(repo_root, tmp_path / "run")
+    for step in (10, 20, 30, 40, 50, 60):
+        write_at_step(context, step)
+
+    # A resume at step 30 skipped 40, 50 and 60: keep_last counts 10, 20 and 30 and removes nothing.
+    skipped_steps = (40, 50, 60)
+    removed = remove_unkept_checkpoints(context.run_folder, 3, None, (), skipped_steps)
+    assert removed == []
+    removed = remove_unkept_checkpoints(context.run_folder, 2, None, (), skipped_steps)
+    assert [path.name for path in removed] == ["step-00000010"]
+    kept_steps = [step for step, _folder in list_complete_checkpoints(context.run_folder)]
+    assert kept_steps == [20, 30, 40, 50, 60]
 
 
 def test_the_best_after_a_fallback_is_never_the_damaged_newer_checkpoint(repo_root: Path, tmp_path: Path) -> None:
