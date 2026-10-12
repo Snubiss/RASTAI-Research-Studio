@@ -397,8 +397,8 @@ sequenceDiagram
   SRV->>SRV: load identity keys
   SRV->>STO: mark unfinished journal rows RRS-C0005
   SRV->>ND: start on its own tokio runtime
-  ND->>ND: detect hardware, bind worker-host.sock first, then node.sock
-  ND->>ND: reattach live jobs from job.json files, see 2.3
+  ND->>ND: detect hardware, reattach live jobs from job.json files (see 2.3)
+  ND->>ND: bind worker-host.sock, then node.sock
   SRV->>SRV: replay the daemon event log after its cursor
   SRV->>ND: Handshake over node.sock
   ND-->>SRV: node_id, HardwareProfile, session token
@@ -500,10 +500,10 @@ sequenceDiagram
   W->>LOG: keeps appending durable events
   W->>W: Register retries with backoff, live events dropped
   Note over SRV,ND: daemon starts again, see 2.1
-  ND->>ND: serve the new worker-host.sock first
   ND->>ND: read each job.json that has no final state
-  ND->>ND: pid alive with the same start ticks and process group?
+  ND->>ND: pid alive with the same boot id, start ticks and process group, leading it?
   ND->>ND: job lost, leases restored from granted_leases
+  ND->>ND: then serve the new worker-host.sock
   W->>ND: Register on the new worker-host.sock with the job token
   ND->>ND: BLAKE3 of the token equals job_token_hash
   ND->>W: connect jobs/job_id.sock, Hello
@@ -528,8 +528,10 @@ The sequence above is the happy path: the worker re-registers and the daemon cat
 flowchart TD
   A["rastai-node reads one job.json"] --> K{"Node-native download or transfer?"}
   K -->|"yes"| NN["lost, then failed with info RRS-J3004<br/>rastai-server resubmits, resumes from the partial file"]
-  K -->|"no"| P{"pid alive, same boot id,<br/>start ticks and process group?"}
-  P -->|"no"| L{"Last log record is a final run state?"}
+  K -->|"no"| P{"pid alive, same boot id,<br/>start ticks and process group,<br/>leading that group?"}
+  P -->|"no"| X{"stderr.log ends with RRS-J3006?<br/>(exit 5)"}
+  X -->|"yes"| LOCKED["failed, RRS-J3006<br/>nothing read from the log: its frames are another writer's"]
+  X -->|"no"| L{"Last log record is a final run state?"}
   L -->|"yes"| FIN["succeeded, failed or cancelled<br/>as the record says"]
   L -->|"no"| GONE["failed, RRS-J3002<br/>no final state, stderr tail attached"]
   P -->|"yes"| H{"Register within HOST_RECONNECT_TIMEOUT_SECONDS (300)?"}
@@ -541,7 +543,9 @@ flowchart TD
   V -->|"no"| OLD["SignalJob TERMINATE, SIGTERM to the group<br/>worker checkpoints and records preempted<br/>cancelled, reason preempted, RRS-J2003, resume offered"]
 ```
 
-- The pid check uses `job.json`'s `boot_id` and `process_start_ticks` (from `/proc/<pid>/stat`), so a reused pid is never mistaken for the job.
+- The pid check uses `job.json`'s `boot_id` and `process_start_ticks` (from `/proc/<pid>/stat`), so a reused pid is never mistaken for the job. The pid must also lead its own process group, as every worker does (`setsid`), and must not have exited (a zombie is gone), so a `job.json` naming a member of another group never makes the node signal that group (layout/rust-node-gateway-proto.md 7.4).
+- **The node reads every `job.json` before it serves `worker-host.sock`.** A worker registers as soon as it sees the new socket, and a `Register` for a job the node hasn't read yet would be refused, which the worker takes as final.
+- **Exit 5 while no node watched:** a job whose `stderr.log` ends with the `RRS-J3006` line wrote nothing to the log; the log's frames are another writer's, maybe under the same job id, so the job fails with `RRS-J3006` and takes no outcome from them (contracts 9.1, "One live job per run").
 - **Only the token's hash is on disk.** `job.json` (mode 0600) holds `job_token_hash`, the BLAKE3 of the job token; the token itself lives only in the worker's `RASTAI_JOB_TOKEN` and in node memory. After a restart the node has no token to call `Hello` with, so it waits for the worker's re-`Register`, checks BLAKE3(token) against `job_token_hash`, and only then calls `Hello` (plan §10 rows 5 and 6; layout/rust-node-gateway-proto.md 7.4).
 - **How long the node waits:** the worker's host connection retries for up to `HOST_RECONNECT_TIMEOUT_SECONDS` (300, `layout/python.md` 7.2), then checkpoints and exits. A job that hasn't re-registered by then is failed with `RRS-J3003` and its group is killed after the start-ticks check.
 - `serve_fast` (llama-server) takes the same path, with a `/health` call using its saved API key instead of `Hello`. Healthy means the model stays `ready` with no reload; unhealthy means `KILL` first if the pid is still ours, then `failed` with `RRS-J3002` (layout/rust-node-gateway-proto.md 7.8).

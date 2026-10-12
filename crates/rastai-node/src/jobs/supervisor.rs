@@ -10,6 +10,9 @@
 //! exit 5 (another writer holds the event log's lock) that terminal write lands on the refused job's own `job.json`:
 //! the writer holding the lock is one the node had no live `job.json` for.
 //!
+//! Every change to a job's state asks for a heartbeat at once (heartbeat.rs): the daemon learns job states only from
+//! heartbeats (contracts 7.3).
+//!
 //! Each running job has three background tasks, started in `watch_job`: one waits for the process to exit and
 //! classifies the exit (exit_cause.rs) on a blocking thread, since that reads the run's log and writes `job.json`;
 //! one fails the job with `RRS-J0002` and kills its group when the worker hasn't registered within
@@ -17,9 +20,12 @@
 //! A `CANCEL`, `STOP` or `TERMINATE` starts a fourth that kills the group if the job is still alive after
 //! `STOP_GRACE_SECONDS` (`RRS-J1003`).
 //!
+//! A job a restarted node reattached (reattach.rs) enters the table `lost`, holding its run, and ends through
+//! `finish_vanished_job`: it isn't the node's child, so no exit code is ever seen.
+//!
 //! Not here yet: leases and sandbox reservations at admission (M3, M5), an environment still installing that keeps
-//! the job `queued` with `RRS-H2006` (M2-16), the disk-free check at admission (`RRS-S3001`, with a job's space
-//! estimate), the heartbeat sent at once on every state change (M1-45), and reattach after a node restart (M1-45).
+//! the job `queued` with `RRS-H2006` (M2-16), and the disk-free check at admission (`RRS-S3001`, with a job's space
+//! estimate).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, MutexGuard, PoisonError};
@@ -48,19 +54,23 @@ use tonic::transport::Channel;
 
 use crate::error::node_error_diagnostic;
 use crate::hardware::{AMD_VENDOR, NVIDIA_VENDOR};
+use crate::heartbeat::request_heartbeat;
 use crate::jobs::exit_cause::{
     EXIT_EVENT_LOG_LOCKED, ExitFacts, JobOutcome, NodeKill, OomWatch, ProcessExit, RunLogFacts, StderrTail,
-    classify_exit, exit_code_for_info, oom_kill_rose, process_exit_from_status, read_run_log_facts, start_oom_watch,
+    VanishedFacts, classify_exit, classify_vanished, exit_code_for_info, oom_kill_rose, process_exit_from_status,
+    read_run_log_facts, start_oom_watch, stderr_shows_event_log_locked,
 };
-use crate::jobs::job_file::{JobFile, job_file_path, read_job_file, write_job_file};
+use crate::jobs::job_file::{JobFile, job_file_path, read_job_file, recorded_process, write_job_file};
 use crate::jobs::log_lines::{JobLogs, STDERR_LOG_FILE, STDOUT_LOG_FILE, follow_job_logs, read_log_tail};
-use crate::jobs::signals::{GroupSignal, ProcessIdentity, is_same_process, send_control, signal_process_group};
+use crate::jobs::reattach::HOST_RECONNECT_TIMEOUT_SECONDS;
+use crate::jobs::signals::{GroupSignal, ProcessIdentity, is_running_process, send_control, signal_process_group};
 use crate::jobs::spawn::{
     REDACTED_TOKEN, SpawnedWorker, WorkerLaunch, WorkerVariableInputs, node_variables, prepare_job_socket_folder,
     spawn_worker, worker_variables,
 };
 use crate::node::{NodeState, current_hardware};
 use crate::permissions::{JobPermissions, job_permissions};
+use crate::run_events::forget_run_positions;
 use crate::worker_host_service::request_with_job_token;
 
 /// How long a `CANCEL`, `STOP` or `TERMINATE` may take before the node kills the group (contracts 15.10).
@@ -97,6 +107,8 @@ const JOB_SIGNAL_NAME_PREFIX: &str = "JOB_SIGNAL_";
 pub struct JobOptions {
     pub worker_register_timeout: Duration,
     pub stop_grace: Duration,
+    /// How long a job reattached after a node restart has to register again (`RRS-J3003` after it).
+    pub host_reconnect_timeout: Duration,
     /// The environments this node can run jobs in. Until uv environments land (M2-16), whoever starts the node names
     /// them: the embedded node's start (M1-47) gives it the cpu environment that `just env-cpu` syncs.
     pub environments: Vec<JobEnvironment>,
@@ -191,6 +203,7 @@ pub fn default_job_options(environments: Vec<JobEnvironment>) -> JobOptions {
     JobOptions {
         worker_register_timeout: Duration::from_secs(WORKER_REGISTER_TIMEOUT_SECONDS),
         stop_grace: Duration::from_secs(STOP_GRACE_SECONDS),
+        host_reconnect_timeout: Duration::from_secs(HOST_RECONNECT_TIMEOUT_SECONDS),
         environments,
     }
 }
@@ -211,7 +224,7 @@ pub fn list_jobs(state: &NodeState) -> Vec<JobInfo> {
 }
 
 /// Moves a live job to `to` when contracts 9.1 allows it from where it is; true when it moved. `reason` and
-/// `diagnostic` replace the job's own when given.
+/// `diagnostic` replace the job's own when given. A move asks for a heartbeat at once.
 pub fn set_job_state(
     state: &NodeState,
     job_id: &str,
@@ -219,6 +232,14 @@ pub fn set_job_state(
     reason: &str,
     diagnostic: Option<Diagnostic>,
 ) -> bool {
+    let moved = move_job_state(state, job_id, to, reason, diagnostic);
+    if moved {
+        request_heartbeat(state);
+    }
+    moved
+}
+
+fn move_job_state(state: &NodeState, job_id: &str, to: JobState, reason: &str, diagnostic: Option<Diagnostic>) -> bool {
     let mut table = lock_jobs(state);
     let Some(record) = find_record_mut(&mut table, job_id) else {
         return false;
@@ -261,9 +282,11 @@ pub async fn signal_job(state: &Arc<NodeState>, job_id: &str, signal: JobSignal)
 }
 
 /// `WorkerHostService.Register`: checks the token against the job's hash, connects to the job socket, calls
-/// `Hello`, and moves a starting job to `running` (platform flow 5.1). A worker that registers again later (it
-/// reconnected) only gets its link replaced: its job keeps its state, so a paused job stays paused. A token that doesn't match a starting job
-/// means something else is on the socket: the job fails with `RRS-J2002` and its group is killed.
+/// `Hello`, and moves a starting job, or a `lost` one a restarted node reattached, to `running` (platform flows 5.1
+/// and 2.3). A worker that registers again later (it reconnected) only gets its link replaced: its job keeps its
+/// state, so a paused job stays paused. A token that doesn't match a starting job means something else is on the
+/// socket: the job fails with `RRS-J2002` and its group is killed. A `lost` job's wrong token is only refused: the
+/// job stays lost until its real worker registers.
 // A refusal is one diagnostic, the response's own field; it is the rare path, so its size costs nothing in practice
 // (as in rastai-core's scopes.rs).
 #[allow(clippy::result_large_err)]
@@ -331,6 +354,8 @@ fn admit_job(state: &NodeState, spec: &JobSpec) -> Admission {
     };
     table.records.push(record);
     forget_old_ended_jobs(&mut table);
+    drop(table);
+    request_heartbeat(state);
     admission
 }
 
@@ -387,21 +412,17 @@ fn live_run_refusal(state: &NodeState, table: &JobTable, spec: &JobSpec) -> Opti
     Some(diagnostic("RRS-J3006", &[("path", &event_log.display().to_string())]))
 }
 
-/// A `job.json` whose job hasn't ended and whose process is alive and still the one it recorded. A file that can't
-/// be read names no live process; the worker's lock on the event log is the backstop (exit 5).
+/// A `job.json` whose job hasn't ended and whose process is still the one it recorded (same boot, start ticks and
+/// process group, leading that group) and still running. A file that can't be read names no live process; the
+/// worker's lock on the event log is the backstop (exit 5).
 fn job_file_is_live(path: &Path) -> bool {
     let Ok(job_file) = read_job_file(path) else {
         return false;
     };
-    if !job_file.final_state.is_empty() || job_file.pid == 0 {
+    if !job_file.final_state.is_empty() {
         return false;
     }
-    is_same_process(&ProcessIdentity {
-        pid: job_file.pid,
-        process_group_id: job_file.process_group_id,
-        start_ticks: job_file.process_start_ticks,
-        boot_id: job_file.boot_id,
-    })
+    recorded_process(&job_file).is_some_and(|process| is_running_process(&process))
 }
 
 fn new_record(state: &NodeState, spec: &JobSpec) -> JobRecord {
@@ -728,16 +749,78 @@ fn stderr_path_for_diagnostic(state: &NodeState, run_folder: &Path) -> String {
 /// Ends the job: writes the terminal `job.json` first, then puts the job in its terminal state and gives the run
 /// back in one step (contracts 9.1). So a job that `ListJobs` shows as ended has already released its run, and the
 /// daemon can start the run's next job at once. The process is gone, so its end is recorded even where 9.1's table
-/// has no arrow for it (a paused job that crashed); that is logged.
-fn finish_job(state: &NodeState, job_id: &str, outcome: JobOutcome, exit_code: Option<i32>) {
-    match terminal_job_file_to_write(state, job_id, outcome.state) {
+/// has no arrow for it (a paused job that crashed); that is logged. Then the run's tail positions are forgotten (its
+/// writer is gone for good; a later watch reads from the header), and a heartbeat reports the end at once.
+pub(crate) fn finish_job(state: &NodeState, job_id: &str, outcome: JobOutcome, exit_code: Option<i32>) {
+    let held_run = match terminal_job_file_to_write(state, job_id, outcome.state) {
         TerminalWrite::AlreadyEnded => return,
-        TerminalWrite::NothingWritten => {}
-        TerminalWrite::Write(run_folder, job_file) => write_terminal_job_file(job_id, &run_folder, &job_file),
-    }
+        TerminalWrite::NothingWritten => None,
+        TerminalWrite::Write(run_folder, job_file) => {
+            write_terminal_job_file(job_id, &run_folder, &job_file);
+            Some(job_file.run_id)
+        }
+    };
     let _ = std::fs::remove_file(job_socket_path(&state.paths, job_id));
     apply_terminal_outcome(state, job_id, &outcome, exit_code);
-    // The heartbeat that reports this end at once joins with M1-45 (heartbeat.rs).
+    // A refused job never held its run: the positions belong to the copy that is still running.
+    if let Some(run_id) = held_run {
+        forget_run_positions(state, &run_id);
+    }
+    request_heartbeat(state);
+}
+
+/// Ends a job whose process is gone without an exit code the node could read: a job a restarted node reattached
+/// (reattach.rs), which isn't the node's child (platform flow 2.3).
+pub(crate) fn finish_vanished_job(state: &NodeState, job_id: &str) {
+    let Some(facts) = vanished_facts(state, job_id) else {
+        return;
+    };
+    finish_job(state, job_id, classify_vanished(&facts), None);
+}
+
+/// What `classify_vanished` decides from: the node's kill and refusal, the tail of `stderr.log`, and, unless that
+/// tail shows the `RRS-J3006` refusal, what this job wrote to the run's log.
+fn vanished_facts(state: &NodeState, job_id: &str) -> Option<VanishedFacts> {
+    let (record_facts, run_id, run_folder, stderr_start_offset) = {
+        let table = lock_jobs(state);
+        let record = find_record(&table, job_id)?;
+        let record_facts = VanishedFacts {
+            job_id: job_id.to_string(),
+            node_kill: record.node_kill,
+            start_refusal: record.start_refusal.clone(),
+            run_log: RunLogFacts::default(),
+            stderr: StderrTail::default(),
+            event_log_path: String::new(),
+        };
+        let run_id = record.spec.run_id.clone();
+        (
+            record_facts,
+            run_id,
+            record.run_folder.clone(),
+            record.stderr_start_offset,
+        )
+    };
+    let event_log = run_events_log_path(&state.paths, &run_id);
+    let stderr = StderrTail {
+        path: stderr_path_for_diagnostic(state, &run_folder),
+        lines: read_log_tail(
+            &run_folder.join(STDERR_LOG_FILE),
+            stderr_start_offset,
+            STDERR_TAIL_LINES,
+        ),
+    };
+    // After exit 5 the log's frames are another writer's, so nothing is read from it for this job (contracts 9.1).
+    let run_log = if stderr_shows_event_log_locked(&stderr) {
+        RunLogFacts::default()
+    } else {
+        read_run_log_facts(&event_log, job_id)
+    };
+    Some(VanishedFacts {
+        run_log,
+        stderr,
+        event_log_path: path_text(&event_log),
+        ..record_facts
+    })
 }
 
 /// The terminal `job.json` to write, if the job wrote one (a refused job never did).
@@ -792,6 +875,39 @@ fn apply_terminal_outcome(state: &NodeState, job_id: &str, outcome: &JobOutcome,
     record.worker = None;
     record.holds_run = false;
     forget_old_ended_jobs(&mut table);
+}
+
+// ---- Reattach ----
+
+/// Enters a job from a restarted node's `job.json` in the table, `lost` and holding its run (platform flow 2.3).
+/// `process` is the worker's identity when it still runs. False when the table already has the job.
+pub(crate) fn adopt_reattached_job(
+    state: &NodeState,
+    spec: &JobSpec,
+    job_file: &JobFile,
+    process: Option<ProcessIdentity>,
+) -> bool {
+    let mut table = lock_jobs(state);
+    if find_record(&table, &spec.job_id).is_some() {
+        return false;
+    }
+    let mut record = new_record(state, spec);
+    record.info.state = JobState::Lost as i32;
+    record.info.pid = job_file.pid;
+    record.info.process_group_id = job_file.process_group_id;
+    record.info.started_unix_ms = job_file.started_unix_ms;
+    record.token_hash = job_file.job_token_hash.clone();
+    record.process = process;
+    record.holds_run = true;
+    table.records.push(record);
+    drop(table);
+    request_heartbeat(state);
+    true
+}
+
+/// The job's state, if the table has the job.
+pub(crate) fn job_state(state: &NodeState, job_id: &str) -> Option<JobState> {
+    job_info(state, job_id).map(|info| info.state())
 }
 
 /// The last `job.json` of a job: as written at the spawn, with the final state.
@@ -922,7 +1038,7 @@ fn begin_stopping(state: &Arc<NodeState>, job_id: &str, signal: JobSignal) {
 /// SIGKILL to the job's group. The cause is recorded first, so the exit watcher, which may see the exit before
 /// this returns, already knows the node did it. When no SIGKILL went out, the cause this call recorded is cleared
 /// again, so a later crash isn't read as the node's kill (`RRS-J1003`, cancelled).
-async fn kill_job_group(state: &NodeState, job_id: &str, cause: NodeKill) -> Result<(), String> {
+pub(crate) async fn kill_job_group(state: &NodeState, job_id: &str, cause: NodeKill) -> Result<(), String> {
     let (process, recorded_cause) = {
         let mut table = lock_jobs(state);
         let record = find_record_mut(&mut table, job_id).ok_or("the node has no job with this id")?;
@@ -1085,17 +1201,24 @@ fn record_process(
     }
 }
 
-/// Stores the worker's link and moves a job that is still starting to `running`, under one hold of the table. The
-/// state is read under that same hold, not before the `Hello` call: a `PAUSE` that lands while a second `Register`
-/// waits on `Hello` must not be undone by it.
+/// Stores the worker's link and moves a job that is still starting, or `lost` after a node restart, to `running`,
+/// under one hold of the table. The state is read under that same hold, not before the `Hello` call: a `PAUSE` that
+/// lands while a second `Register` waits on `Hello` must not be undone by it.
 fn attach_worker(state: &NodeState, job_id: &str, link: WorkerLink) {
-    let mut table = lock_jobs(state);
-    let Some(record) = find_record_mut(&mut table, job_id) else {
-        return;
+    let moved = {
+        let mut table = lock_jobs(state);
+        let Some(record) = find_record_mut(&mut table, job_id) else {
+            return;
+        };
+        record.worker = Some(link);
+        let waiting = matches!(record.info.state(), JobState::Starting | JobState::Lost);
+        if waiting {
+            record.info.state = JobState::Running as i32;
+        }
+        waiting
     };
-    record.worker = Some(link);
-    if record.info.state() == JobState::Starting {
-        record.info.state = JobState::Running as i32;
+    if moved {
+        request_heartbeat(state);
     }
 }
 
@@ -1123,6 +1246,7 @@ fn path_text(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::jobs::exit_cause::PREEMPTED_REASON;
+    use crate::jobs::signals::is_same_process;
     use rastai_core::ids::new_id;
 
     /// A stand-in `bin/python` with a child in its group. `$5` is the job file (`-m rastai_worker run --job-file`).
@@ -1285,6 +1409,40 @@ exec sleep 60
         assert!(after_exit_one.run_log.last_diagnostic.is_some(), "exit 1 reads the log");
         let after_exit_five = exit_facts(&state, &job_id, ProcessExit::Code(5)).unwrap();
         assert_eq!(after_exit_five.run_log, RunLogFacts::default());
+    }
+
+    // A finished run's tail positions are forgotten (M1-44 left them for the node's life): when its job ends, and
+    // again when a watch that kept some after the end reads to the end.
+    #[tokio::test]
+    async fn a_finished_runs_tail_positions_are_forgotten() {
+        use crate::run_events::{run_has_positions, watch_run_events};
+
+        let (_folder, state) = test_state("positions");
+        let state = Arc::new(state);
+        let job_id = running_job(&state);
+        log_a_diagnostic_of(&state, &job_id);
+        let run_id = job_info(&state, &job_id).unwrap().run_id;
+
+        // A daemon watches while the job runs, then drops the stream: the run is live, so its positions stay.
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+        let watch_state = Arc::clone(&state);
+        let watch_run_id = run_id.clone();
+        let watch = tokio::spawn(async move { watch_run_events(&watch_state, &watch_run_id, 0, sender).await });
+        assert_eq!(receiver.recv().await.unwrap().sequence, 1);
+        drop(receiver);
+        watch.await.unwrap();
+        assert!(run_has_positions(&state, &run_id));
+
+        finish_job(&state, &job_id, classify_exit(&exit_facts_for(&job_id, 3)), Some(3));
+        assert!(!run_has_positions(&state, &run_id), "the job's end forgets them");
+
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+        watch_run_events(&state, &run_id, 0, sender).await;
+        assert_eq!(receiver.recv().await.unwrap().sequence, 1);
+        assert!(
+            !run_has_positions(&state, &run_id),
+            "a watch that saw the writer gone forgets them"
+        );
     }
 
     // Two ends racing past the first check: the first one applied stays.

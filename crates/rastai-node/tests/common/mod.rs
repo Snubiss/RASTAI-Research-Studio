@@ -1,23 +1,35 @@
 //! What the node tests share: a fresh folder per test, data paths inside it, a machine built from a recorded
-//! hardware fixture (`fixtures/hardware/<case>/`), stand-in tools, and a running node to talk to. Unix only, like the
-//! tests that use it: the stand-in tools are shell scripts and the node serves a Unix socket.
+//! hardware fixture (`fixtures/hardware/<case>/`), stand-in tools, a running node to talk to, and the daemon's side of
+//! the node's link: a pinned daemon's handshake and a stand-in `NodeHubService` that keeps the heartbeats it gets.
+//! Unix only, like the tests that use it: the stand-in tools are shell scripts and the node serves a Unix socket.
 #![allow(dead_code)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rastai_core::paths::{DataPaths, node_socket_path};
+use rastai_core::paths::{DataPaths, node_key_path, node_socket_path, paired_daemons_path};
+use rastai_core::random::random_bytes;
 use rastai_core::settings::{default_settings, node_settings, resolve_settings};
+use rastai_core::time::now_unix_ms;
+use rastai_core::versions::{APP_VERSION, NODE_PROTOCOL_VERSION};
 use rastai_node::error::NodeError;
+use rastai_node::handshake::{daemon_challenge_bytes, pin_daemon_key};
 use rastai_node::hardware::HardwareSources;
+use rastai_node::identity::{daemon_id_from_public_key, load_or_create_identity, public_key_bytes, sign_challenge};
 use rastai_node::jobs::supervisor::default_job_options;
 use rastai_node::node::{NodeMode, NodeOptions, run_node};
+use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
+use rastai_proto::node::v1::node_hub_service_server::{NodeHubService, NodeHubServiceServer};
 use rastai_proto::node::v1::node_service_client::NodeServiceClient;
-use rastai_transport::grpc_channel::connect_grpc_channel;
-use tonic::transport::Channel;
+use rastai_proto::node::v1::{HandshakeRequest, HeartbeatRequest, HeartbeatResponse};
+use rastai_transport::grpc_channel::{connect_grpc_channel, serve_grpc_on_socket};
+use rastai_transport::local_socket::bind_local_socket;
+use tonic::transport::{Channel, Server};
+use tonic::{Request, Response, Status};
 
 /// The recorded machines, relative to this crate's folder.
 pub const FIXTURES_FOLDER: &str = "../../fixtures/hardware";
@@ -29,6 +41,12 @@ const NODE_START_POLL: Duration = Duration::from_millis(20);
 const EXECUTABLE_MODE: u32 = 0o755;
 /// Where the stand-in nvidia-smi's telemetry stream writes its process id, in the machine's tools folder.
 const STREAM_PID_FILE: &str = "nvidia-smi-stream.pid";
+/// The test daemon's key, in the test folder.
+const DAEMON_KEY_FILE: &str = "daemon.key";
+/// The daemon's nonce: 32 random bytes, as rastai-server sends.
+const NONCE_BYTES: usize = 32;
+/// How long a test waits for a heartbeat that should come.
+const HEARTBEAT_WAIT: Duration = Duration::from_secs(10);
 
 /// Numbers the folders of one test binary, so tests running at the same time never share one.
 static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
@@ -203,4 +221,110 @@ fn folder_names(folder: &Path) -> Vec<String> {
     entries
         .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
         .collect()
+}
+
+/// The handshake of a daemon whose key is pinned for the node in `folder`, naming `hub_socket_path` as its hub, signed
+/// as rastai-server signs it.
+#[allow(clippy::unwrap_used)]
+pub fn paired_daemon_handshake(folder: &Path, hub_socket_path: &Path) -> HandshakeRequest {
+    let paths = test_paths(folder);
+    let node = load_or_create_identity(&node_key_path(&paths)).unwrap();
+    let node_id = rastai_core::ids::node_id_from_public_key(&public_key_bytes(&node));
+    let daemon = load_or_create_identity(&folder.join(DAEMON_KEY_FILE)).unwrap();
+    let daemon_id = daemon_id_from_public_key(&public_key_bytes(&daemon));
+    pin_daemon_key(&paired_daemons_path(&paths), &daemon_id).unwrap();
+    let hub_socket_path = hub_socket_path.to_string_lossy().into_owned();
+    let nonce = random_bytes(NONCE_BYTES).unwrap();
+    let sent_unix_ms = now_unix_ms();
+    let signed = daemon_challenge_bytes(&node_id, &nonce, sent_unix_ms, &hub_socket_path);
+    HandshakeRequest {
+        protocol_version: NODE_PROTOCOL_VERSION,
+        capabilities: Vec::new(),
+        app_version: APP_VERSION.to_string(),
+        daemon_id,
+        daemon_nonce: nonce,
+        sent_unix_ms,
+        daemon_signature: sign_challenge(&daemon, &signed),
+        hub_socket_path,
+    }
+}
+
+/// The daemon's `NodeHubService` for a test: it keeps every heartbeat it gets, with when it got it. Serving stops
+/// when it is dropped.
+pub struct FakeHub {
+    heartbeats: Arc<Mutex<Vec<(Instant, HeartbeatRequest)>>>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for FakeHub {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+struct FakeHubService {
+    heartbeats: Arc<Mutex<Vec<(Instant, HeartbeatRequest)>>>,
+}
+
+#[tonic::async_trait]
+impl NodeHubService for FakeHubService {
+    async fn heartbeat(&self, request: Request<HeartbeatRequest>) -> Result<Response<HeartbeatResponse>, Status> {
+        let mut heartbeats = self
+            .heartbeats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        heartbeats.push((Instant::now(), request.into_inner()));
+        Ok(Response::new(HeartbeatResponse {}))
+    }
+
+    async fn execute_command(&self, _request: Request<ExecuteRequest>) -> Result<Response<ExecuteResponse>, Status> {
+        Err(Status::unimplemented("the test hub runs no commands"))
+    }
+}
+
+/// Serves a `FakeHub` on `socket_path`.
+#[allow(clippy::unwrap_used)]
+pub fn start_fake_hub(socket_path: &Path) -> FakeHub {
+    let heartbeats = Arc::new(Mutex::new(Vec::new()));
+    let service = FakeHubService {
+        heartbeats: Arc::clone(&heartbeats),
+    };
+    let listener = bind_local_socket(socket_path).unwrap();
+    let router = Server::builder().add_service(NodeHubServiceServer::new(service));
+    let handle = tokio::spawn(async move {
+        let _ = serve_grpc_on_socket(listener, router).await;
+    });
+    FakeHub { heartbeats, handle }
+}
+
+impl FakeHub {
+    /// Every heartbeat so far, oldest first, with when it arrived.
+    pub fn heartbeats(&self) -> Vec<(Instant, HeartbeatRequest)> {
+        self.heartbeats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Waits for the first heartbeat after the first `skip` that `wanted` accepts, and returns it with when it came.
+    pub async fn wait_for_heartbeat(
+        &self,
+        skip: usize,
+        wanted: impl Fn(&HeartbeatRequest) -> bool,
+    ) -> (Instant, HeartbeatRequest) {
+        let started = Instant::now();
+        loop {
+            let heartbeats = self.heartbeats();
+            let found = heartbeats.into_iter().skip(skip).find(|(_, beat)| wanted(beat));
+            if let Some(found) = found {
+                return found;
+            }
+            assert!(
+                started.elapsed() < HEARTBEAT_WAIT,
+                "no such heartbeat in {HEARTBEAT_WAIT:?}: {:?}",
+                self.heartbeats()
+            );
+            tokio::time::sleep(NODE_START_POLL).await;
+        }
+    }
 }

@@ -3,7 +3,7 @@
 //! and `rastai node serve` run the same function; `NodeMode` is the only difference.
 //!
 //! The start-up order of layout 7.3 is spelled out in `run_node`. The steps later tasks build are named where they
-//! go: reattaching jobs and heartbeats (M1-45), llama-server (M3) and sandboxes (M5).
+//! go: llama-server (M3) and sandboxes (M5).
 
 use std::sync::{Arc, Mutex};
 
@@ -14,12 +14,16 @@ use rastai_proto::common::v1::{HardwareProfile, NodeTelemetry};
 use rastai_proto::node::v1::node_service_server::NodeServiceServer;
 use rastai_transport::grpc_channel::serve_grpc_on_socket;
 use rastai_transport::local_socket::bind_local_socket;
+use tokio::sync::Notify;
 use tonic::transport::Server;
 
 use crate::error::NodeError;
 use crate::handshake::HandshakeTable;
 use crate::hardware::{DetectedHardware, HardwareSources, detect_hardware};
+use crate::heartbeat::start_heartbeat_loop;
+use crate::hub_client::HubConnection;
 use crate::identity::{NodeIdentity, load_or_create_identity, public_key_bytes};
+use crate::jobs::reattach::reattach_jobs;
 use crate::jobs::supervisor::{JobOptions, JobTable};
 use crate::live::LiveHub;
 use crate::node_service::NodeServiceHandler;
@@ -60,6 +64,10 @@ pub struct NodeState {
     pub run_events: Mutex<RunEventPositions>,
     /// The ephemeral events waiting for WatchLive; it locks inside (live.rs).
     pub live: LiveHub,
+    /// The channel to the daemon's NodeHubService, once a daemon has handshaken (hub_client.rs).
+    pub hub: Mutex<Option<HubConnection>>,
+    /// Wakes the heartbeat loop for a beat now, after a change the daemon must see (heartbeat.rs).
+    pub heartbeat_now: Notify,
     /// Fixed for the node's life, so it needs no lock.
     pub job_options: JobOptions,
 }
@@ -74,12 +82,16 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
     let nvidia_gpus = detected.nvidia_gpus.clone();
     let amd_gpus = detected.amd_gpus.clone();
     let state = Arc::new(build_node_state(options, identity, detected.profile));
-    // First, so live jobs can re-Register. Serving stops when `_worker_host` is dropped, as the telemetry loops do.
+    // Every live job is in the table before worker-host.sock exists: a worker's Register for a job the node hasn't
+    // read yet would be refused, and the worker takes a refusal as final (layout 7.3).
+    reattach_jobs(&state).await;
+    // Next, so live jobs can re-Register. Serving stops when `_worker_host` is dropped, as the telemetry loops do.
     let _worker_host = serve_worker_host(&state)?;
-    // reattach_jobs (M1-45), reattach_llama_servers (M3) and adopt_and_sweep_sandboxes (M5) go here.
-    // The loops stop when `_telemetry` is dropped: when serving ends or fails, or this future is dropped.
+    // reattach_llama_servers (M3) and adopt_and_sweep_sandboxes (M5) go here.
+    // The loops stop when `_telemetry` and `_heartbeats` are dropped: when serving ends or fails, or this future is
+    // dropped.
     let _telemetry = start_telemetry(&state, &hardware_sources, nvidia_gpus, amd_gpus);
-    // start_heartbeat_loop (M1-45) goes here.
+    let _heartbeats = start_heartbeat_loop(&state);
     serve_node_services(state).await
 }
 
@@ -101,6 +113,8 @@ pub(crate) fn build_node_state(options: NodeOptions, identity: NodeIdentity, har
         jobs: Mutex::new(JobTable::default()),
         run_events: Mutex::new(RunEventPositions::default()),
         live: LiveHub::default(),
+        hub: Mutex::new(None),
+        heartbeat_now: Notify::new(),
         job_options: options.jobs,
     }
 }

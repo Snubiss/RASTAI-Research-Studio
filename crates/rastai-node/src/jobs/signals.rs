@@ -29,11 +29,15 @@ const STAT_FILE: &str = "stat";
 /// The procps tool that signals a process group without `unsafe`.
 const KILL_TOOL: &str = "kill";
 /// In /proc/<pid>/stat, counted from 1: field 2 is the command name in parentheses (it may hold spaces and
-/// parentheses itself, so fields are counted after its last `)`), field 5 the process group, field 22 the start time
-/// in clock ticks since boot.
+/// parentheses itself, so fields are counted after its last `)`), field 3 the state, field 5 the process group,
+/// field 22 the start time in clock ticks since boot.
 const STAT_FIRST_FIELD_AFTER_NAME: usize = 3;
+const STAT_STATE_FIELD: usize = 3;
 const STAT_PROCESS_GROUP_FIELD: usize = 5;
 const STAT_START_TICKS_FIELD: usize = 22;
+/// The states of a process that has exited: a zombie (`Z`) its parent hasn't reaped yet, or one being torn down
+/// (`X`, `x`). /proc still lists it, but it runs no more.
+const EXITED_STATES: &[&str] = &["Z", "X", "x"];
 
 /// Who a job's process is, as recorded at spawn: what `job.json` keeps for the pid-reuse check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,18 +59,38 @@ pub enum GroupSignal {
     Kill,
 }
 
-/// The process group and start ticks of `/proc/<pid>/stat`.
+/// The process group, start ticks and state of `/proc/<pid>/stat`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatFields {
     pub process_group_id: u32,
     pub start_ticks: u64,
+    /// A zombie or a process being torn down: it has exited, though /proc still lists it.
+    pub has_exited: bool,
 }
 
-/// The identity of the live process `pid`, or None when it is gone or `/proc` can't be read.
+/// The identity of the process `pid`, or None when it is gone or `/proc` can't be read. A zombie still has one: a
+/// worker that exits at once is still the node's child to wait on (spawn.rs).
 pub fn read_process_identity(pid: u32) -> Option<ProcessIdentity> {
+    let fields = read_stat_fields(pid)?;
+    identity_from_stat(pid, &fields)
+}
+
+/// Whether `expected` is still the recorded process and has not exited. What a restarted node asks of a job it didn't
+/// start (reattach.rs): such a job isn't its child, and once it exits it may stay a zombie until its parent reaps it.
+pub fn is_running_process(expected: &ProcessIdentity) -> bool {
+    let Some(fields) = read_stat_fields(expected.pid) else {
+        return false;
+    };
+    !fields.has_exited && identity_from_stat(expected.pid, &fields).as_ref() == Some(expected)
+}
+
+fn read_stat_fields(pid: u32) -> Option<StatFields> {
     let stat_path = PathBuf::from(PROC_ROOT).join(pid.to_string()).join(STAT_FILE);
     let text = std::fs::read_to_string(stat_path).ok()?;
-    let fields = parse_process_stat(&text)?;
+    parse_process_stat(&text)
+}
+
+fn identity_from_stat(pid: u32, fields: &StatFields) -> Option<ProcessIdentity> {
     Some(ProcessIdentity {
         pid,
         process_group_id: fields.process_group_id,
@@ -89,6 +113,7 @@ pub fn parse_process_stat(text: &str) -> Option<StatFields> {
     Some(StatFields {
         process_group_id: field(STAT_PROCESS_GROUP_FIELD)?.parse().ok()?,
         start_ticks: field(STAT_START_TICKS_FIELD)?.parse().ok()?,
+        has_exited: EXITED_STATES.contains(&field(STAT_STATE_FIELD)?),
     })
 }
 
@@ -156,8 +181,11 @@ mod tests {
             Some(StatFields {
                 process_group_id: 4242,
                 start_ticks: 987654,
+                has_exited: false,
             })
         );
+        let zombie = text.replace(") S ", ") Z ");
+        assert!(parse_process_stat(&zombie).unwrap().has_exited);
     }
 
     #[test]
@@ -185,5 +213,25 @@ mod tests {
         };
         assert!(!is_same_process(&reused));
         assert!(!is_same_process(&other_boot));
+        assert!(is_running_process(&read_process_identity(std::process::id()).unwrap()));
+    }
+
+    // An exited child that nobody has reaped yet is still in /proc with its identity, but it no longer runs.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_zombie_keeps_its_identity_but_is_not_running() {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let identity = loop {
+            let identity = read_process_identity(child.id()).unwrap();
+            let fields = read_stat_fields(child.id()).unwrap();
+            if fields.has_exited {
+                break identity;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(is_same_process(&identity));
+        assert!(!is_running_process(&identity));
+        child.wait().unwrap();
+        assert!(!is_same_process(&identity));
     }
 }

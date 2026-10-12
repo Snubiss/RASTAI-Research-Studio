@@ -5,6 +5,12 @@
 //!
 //! The worker's exit codes are `rastai_worker/exit_codes.py`'s (contracts 9.1). A worker that never registers has no
 //! exit code to give: the node kills it after `WORKER_REGISTER_TIMEOUT_SECONDS` and the outcome is `RRS-J0002`.
+//!
+//! A job a restarted node reattached isn't the node's child, so its end comes with no exit code. `classify_vanished`
+//! decides it from the rest (platform flow 2.3; layout 7.4, the last row of "Exit causes"): the node's own kill if it
+//! sent one, `RRS-J3006` if the worker's last words in `stderr.log` are that refusal (exit 5: the log's frames are
+//! another writer's, so nothing is read from it), else the job's last `run.state_changed` in the run's log, else
+//! `RRS-J3002`.
 
 use std::path::{Path, PathBuf};
 
@@ -60,6 +66,9 @@ const RUN_STATE_CHANGED: &str = "run.state_changed";
 const DIAGNOSTIC_REPORTED: &str = "diagnostic.reported";
 /// `JOB_SIGNAL_CANCEL` is named `CANCEL` in a message.
 const JOB_SIGNAL_NAME_PREFIX: &str = "JOB_SIGNAL_";
+/// How the worker starts the line it prints to `stderr.log` before exit 5 (`<code>: <message>`, python
+/// diagnostics.py `print_diagnostic_line`).
+const EVENT_LOG_LOCKED_LINE_START: &str = "RRS-J3006:";
 
 /// How a process ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +88,8 @@ pub enum NodeKill {
     KillSignal,
     /// A CANCEL, STOP or TERMINATE that hadn't ended the job within `STOP_GRACE_SECONDS`.
     GraceExpired { signal: JobSignal, grace_seconds: u64 },
+    /// A reattached job whose worker didn't register again within `HOST_RECONNECT_TIMEOUT_SECONDS` (`RRS-J3003`).
+    ReconnectTimeout,
 }
 
 /// What this job wrote to the run's event log that its outcome depends on. Records of other jobs of the run (an
@@ -87,6 +98,8 @@ pub enum NodeKill {
 pub struct RunLogFacts {
     /// A final `run.state_changed` to `completed`.
     pub completed: bool,
+    /// The state of this job's last `run.state_changed`, for a job whose exit code nobody saw.
+    pub last_run_state: Option<State>,
     pub last_diagnostic: Option<Diagnostic>,
 }
 
@@ -118,6 +131,19 @@ pub struct ExitFacts {
     pub free_bytes: Option<u64>,
 }
 
+/// Everything `classify_vanished` decides from: what is known of a reattached job whose process is gone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VanishedFacts {
+    pub job_id: String,
+    pub node_kill: Option<NodeKill>,
+    /// Why the node refused the worker at its new `Register` (`RRS-J2003`: it was sent TERMINATE).
+    pub start_refusal: Option<Diagnostic>,
+    /// Left empty when `stderr` shows the `RRS-J3006` refusal: the log is then another writer's.
+    pub run_log: RunLogFacts,
+    pub stderr: StderrTail,
+    pub event_log_path: String,
+}
+
 /// What the job becomes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobOutcome {
@@ -134,6 +160,38 @@ pub fn classify_exit(facts: &ExitFacts) -> JobOutcome {
         ProcessExit::Code(code) => classify_code(facts, code),
     };
     refuse_success_before_register(facts, outcome)
+}
+
+/// The state, reason and diagnostic of a reattached job whose process is gone, with no exit code to read (platform
+/// flow 2.3, one branch per check).
+pub fn classify_vanished(facts: &VanishedFacts) -> JobOutcome {
+    if let Some(kill) = facts.node_kill {
+        return outcome_of_node_kill(&facts.job_id, kill);
+    }
+    if stderr_shows_event_log_locked(&facts.stderr) {
+        let path = &facts.event_log_path;
+        return failed(diagnostic_at("RRS-J3006", &[("path", path)], &facts.stderr.path));
+    }
+    let gone = || {
+        failed(diagnostic_at(
+            "RRS-J3002",
+            &[("job_id", &facts.job_id)],
+            &facts.stderr.path,
+        ))
+    };
+    match facts.run_log.last_run_state {
+        Some(State::RunState(value)) => outcome_of_run_state(facts, value).unwrap_or_else(gone),
+        Some(State::EvalRunState(value)) => outcome_of_eval_run_state(facts, value).unwrap_or_else(gone),
+        None => gone(),
+    }
+}
+
+/// Whether the worker's last line in `stderr.log` is the `RRS-J3006` refusal it prints before exit 5. Such a job
+/// wrote nothing to the run's log: its frames are another writer's, even under this job's id (a copy started by hand
+/// from the same `job.json`), so they are never read as this job's outcome.
+pub fn stderr_shows_event_log_locked(stderr: &StderrTail) -> bool {
+    let last = stderr.lines.iter().rev().find(|line| !line.trim().is_empty());
+    last.is_some_and(|line| line.trim_start().starts_with(EVENT_LOG_LOCKED_LINE_START))
 }
 
 /// `JobInfo.exit_code` for an exit: the code, or 128 plus the signal's number.
@@ -180,6 +238,7 @@ pub fn read_run_log_facts(event_log_path: &Path, job_id: &str) -> RunLogFacts {
         match (record.event_type.as_str(), payload) {
             (RUN_STATE_CHANGED, Some(Payload::RunStateChanged(change))) => {
                 facts.completed = is_completed(change.state);
+                facts.last_run_state = change.state;
             }
             (DIAGNOSTIC_REPORTED, Some(Payload::DiagnosticReported(reported))) => {
                 if let Some(found) = reported.diagnostic {
@@ -252,9 +311,30 @@ fn is_completed(state: Option<State>) -> bool {
     }
 }
 
+/// A run's final states as the job's end. None for a state that isn't final (the job died mid-run).
+fn outcome_of_run_state(facts: &VanishedFacts, value: i32) -> Option<JobOutcome> {
+    match RunState::try_from(value).ok()? {
+        RunState::Completed => Some(succeeded()),
+        RunState::Preempted => Some(cancelled(PREEMPTED_REASON.to_string(), facts.start_refusal.clone())),
+        RunState::Cancelled => Some(cancelled(String::new(), None)),
+        RunState::Failed => facts.run_log.last_diagnostic.clone().map(failed),
+        _ => None,
+    }
+}
+
+/// An eval run's verdict, `passed` or `failed`, means the job did its work; `errored` and `cancelled` don't.
+fn outcome_of_eval_run_state(facts: &VanishedFacts, value: i32) -> Option<JobOutcome> {
+    match EvalRunState::try_from(value).ok()? {
+        EvalRunState::Passed | EvalRunState::Failed => Some(succeeded()),
+        EvalRunState::Cancelled => Some(cancelled(String::new(), None)),
+        EvalRunState::Errored => facts.run_log.last_diagnostic.clone().map(failed),
+        _ => None,
+    }
+}
+
 fn classify_signal(facts: &ExitFacts, number: i32) -> JobOutcome {
     if let Some(kill) = facts.node_kill {
-        return outcome_of_node_kill(facts, kill);
+        return outcome_of_node_kill(&facts.job_id, kill);
     }
     if number == SIGKILL_NUMBER && facts.oom_kill_rose {
         return failed(diagnostic_with_tail("RRS-J1002", &[("job_id", &facts.job_id)], facts));
@@ -267,34 +347,31 @@ fn classify_signal(facts: &ExitFacts, number: i32) -> JobOutcome {
     ))
 }
 
-fn outcome_of_node_kill(facts: &ExitFacts, kill: NodeKill) -> JobOutcome {
+fn outcome_of_node_kill(job_id: &str, kill: NodeKill) -> JobOutcome {
     match kill {
         NodeKill::RegisterTimeout { timeout_seconds } => {
             let timeout = timeout_seconds.to_string();
             failed(diagnostic(
                 "RRS-J0002",
-                &[("job_id", &facts.job_id), ("timeout_seconds", &timeout)],
+                &[("job_id", job_id), ("timeout_seconds", &timeout)],
             ))
         }
-        NodeKill::TokenRejected => failed(diagnostic("RRS-J2002", &[("job_id", &facts.job_id)])),
-        NodeKill::KillSignal => cancelled_by_node(facts, "KILL was signalled"),
+        NodeKill::TokenRejected => failed(diagnostic("RRS-J2002", &[("job_id", job_id)])),
+        NodeKill::KillSignal => cancelled_by_node(job_id, "KILL was signalled"),
         NodeKill::GraceExpired { signal, grace_seconds } => {
             let reason = format!(
                 "{} didn't end it within {grace_seconds} seconds",
                 signal.as_str_name().trim_start_matches(JOB_SIGNAL_NAME_PREFIX)
             );
-            cancelled_by_node(facts, &reason)
+            cancelled_by_node(job_id, &reason)
         }
+        NodeKill::ReconnectTimeout => failed(diagnostic("RRS-J3003", &[("job_id", job_id)])),
     }
 }
 
 fn classify_code(facts: &ExitFacts, code: i32) -> JobOutcome {
     match code {
-        EXIT_OK if facts.run_log.completed => JobOutcome {
-            state: JobState::Succeeded,
-            reason: String::new(),
-            diagnostic: None,
-        },
+        EXIT_OK if facts.run_log.completed => succeeded(),
         EXIT_FAILED => match &facts.run_log.last_diagnostic {
             Some(logged) => failed(logged.clone()),
             None => no_final_record(facts, code),
@@ -348,8 +425,8 @@ fn disk_full_diagnostic(facts: &ExitFacts) -> Diagnostic {
     diagnostic_with_tail("RRS-S3002", &[("reason", &reason)], facts)
 }
 
-fn cancelled_by_node(facts: &ExitFacts, reason: &str) -> JobOutcome {
-    let killed = diagnostic("RRS-J1003", &[("job_id", &facts.job_id), ("reason", reason)]);
+fn cancelled_by_node(job_id: &str, reason: &str) -> JobOutcome {
+    let killed = diagnostic("RRS-J1003", &[("job_id", job_id), ("reason", reason)]);
     cancelled(String::new(), Some(killed))
 }
 
@@ -365,6 +442,14 @@ fn last_line_or(facts: &ExitFacts, fallback: &str) -> String {
 /// A diagnostic that points at the job's stderr.log, where the worker's own words are.
 fn diagnostic_with_tail(code: &str, values: &[(&str, &str)], facts: &ExitFacts) -> Diagnostic {
     diagnostic_at(code, values, &facts.stderr.path)
+}
+
+fn succeeded() -> JobOutcome {
+    JobOutcome {
+        state: JobState::Succeeded,
+        reason: String::new(),
+        diagnostic: None,
+    }
 }
 
 fn failed(found: Diagnostic) -> JobOutcome {
@@ -424,11 +509,11 @@ mod tests {
     fn exit_code_rows() -> Vec<(ExitFacts, JobState, &'static str, &'static str)> {
         let completed = RunLogFacts {
             completed: true,
-            last_diagnostic: None,
+            ..RunLogFacts::default()
         };
         let with_diagnostic = RunLogFacts {
-            completed: false,
             last_diagnostic: Some(logged_diagnostic()),
+            ..RunLogFacts::default()
         };
         let code = |code: i32| facts(ProcessExit::Code(code));
         vec![
@@ -529,6 +614,7 @@ mod tests {
         let exit_facts = ExitFacts {
             run_log: RunLogFacts {
                 completed: true,
+                last_run_state: Some(State::RunState(RunState::Completed as i32)),
                 last_diagnostic: Some(logged_diagnostic()),
             },
             ..facts(ProcessExit::Code(5))
@@ -566,5 +652,125 @@ mod tests {
         let text = "low 0\nhigh 3\nmax 7\noom 2\noom_kill 2\noom_group_kill 0\n";
         assert_eq!(parse_oom_kill_count(text), Some(2));
         assert_eq!(parse_oom_kill_count("low 0\n"), None);
+    }
+
+    fn vanished(last_run_state: Option<State>) -> VanishedFacts {
+        VanishedFacts {
+            job_id: JOB.to_string(),
+            node_kill: None,
+            start_refusal: None,
+            run_log: RunLogFacts {
+                last_run_state,
+                ..RunLogFacts::default()
+            },
+            stderr: StderrTail {
+                path: STDERR_PATH.to_string(),
+                lines: vec!["epoch 3 of 10".to_string()],
+            },
+            event_log_path: "runs/run_test/events.log".to_string(),
+        }
+    }
+
+    fn run_state(state: RunState) -> Option<State> {
+        Some(State::RunState(state as i32))
+    }
+
+    fn eval_run_state(state: EvalRunState) -> Option<State> {
+        Some(State::EvalRunState(state as i32))
+    }
+
+    // A reattached job that ended while no node watched: its last run state in the log is its end; a state that
+    // isn't final, or none at all, is RRS-J3002 (platform flow 2.3).
+    #[test]
+    fn a_vanished_job_takes_its_end_from_its_last_run_state() {
+        let rows = [
+            (run_state(RunState::Completed), JobState::Succeeded, "", ""),
+            (eval_run_state(EvalRunState::Failed), JobState::Succeeded, "", ""),
+            (
+                run_state(RunState::Preempted),
+                JobState::Cancelled,
+                PREEMPTED_REASON,
+                "",
+            ),
+            (run_state(RunState::Cancelled), JobState::Cancelled, "", ""),
+            (run_state(RunState::Failed), JobState::Failed, "", "RRS-J3002"),
+            (eval_run_state(EvalRunState::Errored), JobState::Failed, "", "RRS-J3002"),
+            (run_state(RunState::Running), JobState::Failed, "", "RRS-J3002"),
+            (None, JobState::Failed, "", "RRS-J3002"),
+        ];
+        for (last_run_state, state, reason, code) in rows {
+            let outcome = classify_vanished(&vanished(last_run_state));
+            assert_eq!(
+                (outcome.state, outcome.reason.as_str(), code_of(&outcome)),
+                (state, reason, code),
+                "{last_run_state:?}"
+            );
+        }
+        let failed_with_diagnostic = VanishedFacts {
+            run_log: RunLogFacts {
+                last_run_state: run_state(RunState::Failed),
+                last_diagnostic: Some(logged_diagnostic()),
+                ..RunLogFacts::default()
+            },
+            ..vanished(None)
+        };
+        assert_eq!(code_of(&classify_vanished(&failed_with_diagnostic)), "RRS-T3001");
+        let gone = classify_vanished(&vanished(None)).diagnostic.unwrap();
+        assert_eq!(gone.path, STDERR_PATH, "RRS-J3002 points at the stderr tail");
+    }
+
+    // The exit-5 edge (#199): a job whose stderr.log ends with the RRS-J3006 refusal never takes the running copy's
+    // records as its own, even a completed one under its own id.
+    #[test]
+    fn a_vanished_job_whose_stderr_ends_with_j3006_takes_nothing_from_the_log() {
+        let refused = VanishedFacts {
+            stderr: StderrTail {
+                path: STDERR_PATH.to_string(),
+                lines: vec![
+                    "RRS-J3006: Another process is writing the event log runs/run_test/events.log.".to_string(),
+                    String::new(),
+                ],
+            },
+            ..vanished(run_state(RunState::Completed))
+        };
+        let outcome = classify_vanished(&refused);
+        assert_eq!((outcome.state, code_of(&outcome)), (JobState::Failed, "RRS-J3006"));
+        let earlier_line = VanishedFacts {
+            stderr: StderrTail {
+                path: STDERR_PATH.to_string(),
+                lines: vec!["RRS-J3006: an earlier copy".to_string(), "step 9".to_string()],
+            },
+            ..vanished(run_state(RunState::Completed))
+        };
+        assert_eq!(classify_vanished(&earlier_line).state, JobState::Succeeded);
+    }
+
+    // The node's own kill decides first: no re-Register in time is RRS-J3003, a KILL is cancelled with RRS-J1003.
+    #[test]
+    fn a_vanished_job_the_node_killed_ends_as_the_kill_says() {
+        let timed_out = VanishedFacts {
+            node_kill: Some(NodeKill::ReconnectTimeout),
+            ..vanished(run_state(RunState::Completed))
+        };
+        let outcome = classify_vanished(&timed_out);
+        assert_eq!((outcome.state, code_of(&outcome)), (JobState::Failed, "RRS-J3003"));
+        let killed = VanishedFacts {
+            node_kill: Some(NodeKill::KillSignal),
+            ..vanished(None)
+        };
+        let outcome = classify_vanished(&killed);
+        assert_eq!((outcome.state, code_of(&outcome)), (JobState::Cancelled, "RRS-J1003"));
+    }
+
+    // A reattached worker of another protocol was sent TERMINATE; its preempted end keeps RRS-J2003 (flow 2.3).
+    #[test]
+    fn a_vanished_job_refused_for_its_protocol_keeps_the_refusal() {
+        let refused = VanishedFacts {
+            start_refusal: Some(diagnostic("RRS-J2003", &[("job_id", JOB), ("version", "2")])),
+            ..vanished(run_state(RunState::Preempted))
+        };
+        let outcome = classify_vanished(&refused);
+        assert_eq!(outcome.reason, PREEMPTED_REASON);
+        assert_eq!(code_of(&outcome), "RRS-J2003");
     }
 }

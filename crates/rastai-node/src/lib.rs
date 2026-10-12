@@ -4,6 +4,8 @@
 pub mod error;
 pub mod handshake;
 pub mod hardware;
+pub mod heartbeat;
+pub mod hub_client;
 pub mod identity;
 pub mod jobs;
 pub mod live;

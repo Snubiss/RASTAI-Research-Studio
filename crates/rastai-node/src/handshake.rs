@@ -32,6 +32,7 @@ use rastai_proto::node::v1::{HandshakeRequest, HandshakeResponse};
 use serde_json::{Value, json};
 
 use crate::error::{NodeError, node_error_diagnostic};
+use crate::heartbeat::request_heartbeat;
 use crate::identity::{
     public_key_from_id, sign_challenge, temporary_path_beside, verify_challenge, write_private_file,
 };
@@ -66,7 +67,7 @@ pub struct DaemonSession {
     pub daemon_id: String,
     /// Sent in gRPC metadata on later calls both ways; in memory only (designer flow C3a).
     pub session_token: String,
-    /// The node-hub socket the hub client (M1-45) dials for NodeHubService.
+    /// The node-hub socket the hub client (hub_client.rs) dials for NodeHubService.
     pub hub_socket_path: String,
 }
 
@@ -93,6 +94,8 @@ pub fn answer_handshake(state: &NodeState, request: &HandshakeRequest) -> Handsh
             response.node_signature = sign_challenge(&state.identity, &signed);
             response.hardware = Some(current_hardware(state));
             response.session_token = session_token;
+            // The new daemon gets the node's state at once, not at the next tick: it reconciles from this snapshot.
+            request_heartbeat(state);
         }
         Err(error) => {
             let refusal = node_error_diagnostic(&error);
@@ -101,6 +104,11 @@ pub fn answer_handshake(state: &NodeState, request: &HandshakeRequest) -> Handsh
         }
     }
     response
+}
+
+/// The current daemon session, if a daemon has handshaken.
+pub(crate) fn current_session(state: &NodeState) -> Option<DaemonSession> {
+    lock_handshakes(state).session.clone()
 }
 
 /// The bytes the daemon signs with daemon.key and the node verifies.

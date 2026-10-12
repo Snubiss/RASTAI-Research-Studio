@@ -5,8 +5,14 @@
 //!
 //! `job_spec_to_json` and `hardware_profile_to_json` (M1-43) are what the node writes into `job.json`, whose
 //! `job_spec` and `hardware_profile` the worker decodes with protobuf's own `json_format` (python layout 7.3).
-//! `tests/proto_json_golden.rs` checks both against the golden messages in `fixtures/proto-golden/`. The decode side and
-//! the `HardwareFingerprint` and `SamplingSettings` pairs join with the first code that reads them.
+//! `job_spec_from_json` (M1-45) reads the `job_spec` back when a restarted node reattaches the job.
+//! `tests/proto_json_golden.rs` checks them against the golden messages in `fixtures/proto-golden/`. The
+//! `HardwareFingerprint` and `SamplingSettings` pairs join with the first code that reads them.
+//!
+//! The decode side reads what the node itself wrote into a file only its user can write (`job.json`, mode 0600), so
+//! it is lenient the way `job.json`'s own reader is: a field that is missing or of another type reads as its default
+//! (a decode that drops an unexpected `network_hosts` gives the job fewer permissions, never more). It accepts what the
+//! mapping allows a writer to put: an enum by name or by number, a 64-bit integer as a string or as a number.
 //!
 //! Each function takes its message apart with a full pattern (no `..`), so a field added to the .proto fails to
 //! compile here until it is written.
@@ -14,6 +20,9 @@
 use rastai_proto::common::v1::{GpuInfo, HardwareProfile, LeaseClass, ResourceRequest};
 use rastai_proto::node::v1::{JobKind, JobSpec};
 use serde_json::{Map, Value};
+
+/// A protobuf JSON object, the decode side's view of one message.
+type JsonObject = Map<String, Value>;
 
 /// The `JobSpec` as protobuf JSON.
 pub fn job_spec_to_json(spec: &JobSpec) -> Value {
@@ -45,6 +54,30 @@ pub fn job_spec_to_json(spec: &JobSpec) -> Value {
     put_text(&mut object, "checkpoint_policy_json", checkpoint_policy_json);
     put_text(&mut object, "plugin_id", plugin_id);
     Value::Object(object)
+}
+
+/// The `JobSpec` a `job_spec_to_json` object holds. The error says why the value isn't a message at all.
+pub fn job_spec_from_json(value: &Value) -> Result<JobSpec, String> {
+    let Some(object) = value.as_object() else {
+        return Err("a JobSpec in JSON must be an object".to_string());
+    };
+    let resources = object
+        .get("resources")
+        .and_then(Value::as_object)
+        .map(resource_request_from_json);
+    Ok(JobSpec {
+        job_id: read_text(object, "job_id"),
+        run_id: read_text(object, "run_id"),
+        kind: read_enum(object, "kind", job_kind_number),
+        environment_id: read_text(object, "environment_id"),
+        entry: read_text(object, "entry"),
+        arguments_json: read_text(object, "arguments_json"),
+        resources,
+        network_hosts: read_text_list(object, "network_hosts"),
+        data_policy: read_text(object, "data_policy"),
+        checkpoint_policy_json: read_text(object, "checkpoint_policy_json"),
+        plugin_id: read_text(object, "plugin_id"),
+    })
 }
 
 /// The node's `HardwareProfile` as protobuf JSON.
@@ -126,6 +159,27 @@ fn gpu_info_to_json(gpu: &GpuInfo) -> Value {
     Value::Object(object)
 }
 
+fn resource_request_from_json(object: &JsonObject) -> ResourceRequest {
+    let gpu_indices = read_list(object, "gpu_indices")
+        .iter()
+        .filter_map(u32_from_value)
+        .collect();
+    let vram_bytes_per_gpu = read_list(object, "vram_bytes_per_gpu")
+        .iter()
+        .filter_map(u64_from_value)
+        .collect();
+    ResourceRequest {
+        gpu_indices,
+        vram_bytes: read_u64(object, "vram_bytes"),
+        vram_bytes_per_gpu,
+        lease_class: read_enum(object, "lease_class", lease_class_number),
+        cpu_count: read_u32(object, "cpu_count"),
+        ram_bytes: read_u64(object, "ram_bytes"),
+        sandbox_count: read_u32(object, "sandbox_count"),
+        may_reclaim_evictable: object.get("may_reclaim_evictable").and_then(Value::as_bool),
+    }
+}
+
 /// The enum value's name, or None for a number this build doesn't know (the mapping then writes the number).
 fn job_kind_name(value: i32) -> Option<&'static str> {
     JobKind::try_from(value).ok().map(|kind| kind.as_str_name())
@@ -133,6 +187,65 @@ fn job_kind_name(value: i32) -> Option<&'static str> {
 
 fn lease_class_name(value: i32) -> Option<&'static str> {
     LeaseClass::try_from(value).ok().map(|class| class.as_str_name())
+}
+
+fn job_kind_number(name: &str) -> Option<i32> {
+    JobKind::from_str_name(name).map(|kind| kind as i32)
+}
+
+fn lease_class_number(name: &str) -> Option<i32> {
+    LeaseClass::from_str_name(name).map(|class| class as i32)
+}
+
+fn read_text(object: &JsonObject, key: &str) -> String {
+    object.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+}
+
+fn read_list<'a>(object: &'a JsonObject, key: &str) -> &'a [Value] {
+    match object.get(key).and_then(Value::as_array) {
+        Some(items) => items,
+        None => &[],
+    }
+}
+
+fn read_text_list(object: &JsonObject, key: &str) -> Vec<String> {
+    let texts = read_list(object, key).iter().filter_map(Value::as_str);
+    texts.map(str::to_string).collect()
+}
+
+fn read_u32(object: &JsonObject, key: &str) -> u32 {
+    object.get(key).and_then(u32_from_value).unwrap_or_default()
+}
+
+fn read_u64(object: &JsonObject, key: &str) -> u64 {
+    object.get(key).and_then(u64_from_value).unwrap_or_default()
+}
+
+/// An enum by its name, or by its number (what the mapping writes for a number it doesn't know).
+fn read_enum(object: &JsonObject, key: &str, number_of_name: fn(&str) -> Option<i32>) -> i32 {
+    match object.get(key) {
+        Some(Value::String(name)) => number_of_name(name).unwrap_or_default(),
+        Some(Value::Number(number)) => number
+            .as_i64()
+            .and_then(|wide| i32::try_from(wide).ok())
+            .unwrap_or_default(),
+        _ => 0,
+    }
+}
+
+/// A 32-bit integer is a JSON number; parsers also take it as a string.
+fn u32_from_value(value: &Value) -> Option<u32> {
+    let wide = u64_from_value(value)?;
+    u32::try_from(wide).ok()
+}
+
+/// A 64-bit integer is a string in the mapping; parsers also take it as a number.
+fn u64_from_value(value: &Value) -> Option<u64> {
+    match value {
+        Value::String(text) => text.parse().ok(),
+        Value::Number(number) => number.as_u64(),
+        _ => None,
+    }
 }
 
 fn put_text(object: &mut Map<String, Value>, key: &str, value: &str) {

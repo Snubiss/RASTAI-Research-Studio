@@ -1169,8 +1169,11 @@ crates/rastai-node/
     support/ruff.toml             python/pyproject.toml's ruff rules for fake_worker.py (`just lint` and `just fmt-check`)
     support/mock_llama_server.rs  llama-server stand-in: /health, streaming /completion, /tokenize
     jobs.rs                       start, signals, cancel grace, process-group kill, exit causes
-    reattach.rs                   node restart mid-run: reattach, no lost events, PID reuse refused (start ticks, process group,
-                                  boot id); llama-server re-adopted
+    reattach.rs                   node killed with -9 mid-run (the test binary runs the node as a process of its own):
+                                  reattach, re-Register and Hello, no lost events; a job.json naming an unrelated process
+                                  refused (start ticks, boot id, group leader) and never signalled; a gone job's end from its
+                                  log, but never after exit 5; RRS-J3003; heartbeats at once on a change; llama-server
+                                  re-adopted (M3)
     run_events.rs                 good, torn-tail, corrupt-middle and sequence-gap logs from fixtures/event-logs/; resume after any
                                   sequence; a live writer followed through a torn frame; a node restart loses and repeats nothing;
                                   a job's lines over WatchLive; a full live queue drops its oldest event
@@ -1219,14 +1222,16 @@ pub struct NodeState {
     pub sandboxes: SandboxManager,              // rastai-sandbox
     pub gateway: Gateway,                       // rastai-gateway, place = Node
     pub hub: Mutex<Option<HubConnection>>,      // NodeHubService client once a daemon has handshaken
+    pub heartbeat_now: Notify,                  // wakes the heartbeat loop for a beat now (heartbeat.rs)
 }
 
 pub async fn run_node(options: NodeOptions) -> Result<(), NodeError>;
 
 // jobs/supervisor.rs
-// The register timeout and stop grace (WORKER_REGISTER_TIMEOUT_SECONDS, STOP_GRACE_SECONDS; tests shorten them) and
-// the environments the node runs jobs in (uv environments replace the list in M2-16).
-pub struct JobOptions { pub worker_register_timeout: Duration, pub stop_grace: Duration, pub environments: Vec<JobEnvironment> }
+// The register timeout, stop grace and reconnect timeout of a reattached job (WORKER_REGISTER_TIMEOUT_SECONDS,
+// STOP_GRACE_SECONDS, HOST_RECONNECT_TIMEOUT_SECONDS; tests shorten them) and the environments the node runs jobs in
+// (uv environments replace the list in M2-16).
+pub struct JobOptions { pub worker_register_timeout: Duration, pub stop_grace: Duration, pub host_reconnect_timeout: Duration, pub environments: Vec<JobEnvironment> }
 pub struct JobEnvironment { pub environment_id: String, pub folder: PathBuf }
 pub fn default_job_options(environments: Vec<JobEnvironment>) -> JobOptions;
 // Also the job's process identity, its OOM watch, why the node killed it, and whether it holds its run (7.4 step 1).
@@ -1338,8 +1343,8 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
     log_hardware_notes(&detected);
     let hardware_sources = options.hardware_sources.clone();
     let state = Arc::new(build_node_state(options, identity, detected.profile));
-    serve_worker_host(&state)?;                 // first, so live jobs can re-Register
-    reattach_jobs(&state).await;                // section 7.4
+    reattach_jobs(&state).await;                // section 7.4; every live job is in the table before the next step
+    serve_worker_host(&state)?;                 // next, so live jobs can re-Register
     reattach_llama_servers(&state).await;       // pid, boot id, start ticks and /health with the saved key; re-adopt, never reload (7.8)
     adopt_and_sweep_sandboxes(&state).await;    // only after reattach (section 5.3)
     let _telemetry = start_telemetry(&state, &hardware_sources, detected.nvidia_gpus, detected.amd_gpus);   // stops when dropped
@@ -1350,6 +1355,7 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 
 - The embedded node and the standalone node run the same function. The only difference is `NodeMode`, which picks where logs go and whether `UpdateNode` is allowed (standalone only; the embedded node updates with the app).
 - A second `rastai node serve` on the same machine fails with `RRS-N0003` (node.sock in use and answering), naming the running node's process id from the socket's peer credentials. `refuse_second_node` checks first, so the second node starts no tool and binds nothing; `bind_local_socket` refuses a live socket too, which covers a race between two starts.
+- `reattach_jobs` runs before `serve_worker_host` (M1-45). A worker notices the new `worker-host.sock` and registers at once; a `Register` for a job the node hasn't read yet would be refused, and the worker takes a refusal as final. Reading the `job.json` files only enters the jobs in the table; their waits and the ends of gone jobs run in the background, so the socket follows within milliseconds.
 - M1-42 builds the identity, detection, telemetry and NodeService steps; the others join the list with their tasks (M1-43, M1-45, M3, M5).
 
 ### 7.4 Jobs in process groups
@@ -1430,10 +1436,13 @@ sequenceDiagram
 ```
 
 - **PID reuse:** the node checks that `boot_id` equals the current boot (`/proc/sys/kernel/random/boot_id`), compares field 22 of `/proc/<pid>/stat` (start time in clock ticks since boot) with `process_start_ticks`, and checks that the process group id matches. Start ticks count from boot, so without the boot id a pid reused after a reboot could carry the same ticks. Any mismatch means the pid was reused; the node never signals it.
+- **Only a group leader is a job's process** (M1-45, `recorded_process`): every worker leads its own group (`setsid`), so `pid` must equal `process_group_id`. A `job.json` naming a member of another group would otherwise make the node's group signals hit that group. A process that has exited but is still listed (a zombie, field 3 `Z`) is gone (`is_running_process`). The same check decides whether a `job.json` holds its run (7.4 step 1) and whether a run's writer is alive (7.5).
+- **Gone after exit 5:** a job whose `stderr.log` ends with the `RRS-J3006` line (`RRS-J3006: ...`, the worker's last words before exit 5) takes nothing from the run's log: its frames are another writer's, maybe under this job's own id (a copy started by hand from the same `job.json`). The job fails with `RRS-J3006` (`classify_vanished` in `exit_cause.rs`). Otherwise the last `run.state_changed` of this job decides: `completed`, or an eval's `passed` or `failed`, is `succeeded`; `preempted` is `cancelled` with reason `preempted`; `cancelled` is `cancelled`; `failed` or `errored` is `failed` with the job's last logged diagnostic; anything else, or none, is `RRS-J3002` with the stderr tail.
+- **A `job.json` that can't be read**, or whose ids don't fit its run folder, is logged and left alone: nothing in it is trusted enough to signal or to end.
 - **Token after restart:** the node only stored the hash, so it waits for the worker to re-register. The worker's host connection retries for up to `HOST_RECONNECT_TIMEOUT_SECONDS = 300` (`layout/python.md`), then checkpoints and exits. After a valid `Register` the node has the token again and can call `Hello`. `layout/python.md` §7.5 draws the same order (plan §10 row 5).
 - **Exit watching:** a reattached job isn't the node's child, so the node polls `/proc/<pid>` once a second instead of waiting on it.
 - **Persisted where:** `job.json` per run, owned by the run's one live job (with `final_state` once the job ends; 7.4 step 1); nothing else is needed. The daemon's `jobs` table is rebuilt from `ListJobs` and heartbeats.
-- **Failure branches:** a worker that never re-registers within 300 s stays `lost`; the node then marks it `failed` with `RRS-J3003` and kills its group (boot id, start ticks and process group checked first).
+- **Failure branches:** a worker that never re-registers within 300 s stays `lost`; the node then marks it `failed` with `RRS-J3003` and kills its group (boot id, start ticks and process group checked first). A wrong token is refused with `RRS-J2002` and the job stays `lost` until its real worker registers.
 
 ### 7.5 Event-log tailing and acknowledgement
 
@@ -1462,7 +1471,7 @@ sequenceDiagram
   N-->>D: stream closes after the final state is sent
 ```
 
-- **Positions** (`RunEventPositions`, in memory): per run, the byte offset of the frame after every 1,000th sequence and of the last frame read. On a reconnect the node opens the log at the nearest position at or before the first record it needs (`rastai_store`'s `open_event_log_at`) and reads on through `read_next_frame`, dropping the records at or before `after_sequence`. Those frames are checked like any other (checksum, sequence) rather than skipped by length: one parser path, and at most 999 frames between a position and the record wanted. After a node restart the table is empty, so the first watch reads from the 8-byte header the same way. A position past the end of the file (the log was replaced) is forgotten.
+- **Positions** (`RunEventPositions`, in memory): per run, the byte offset of the frame after every 1,000th sequence and of the last frame read. On a reconnect the node opens the log at the nearest position at or before the first record it needs (`rastai_store`'s `open_event_log_at`) and reads on through `read_next_frame`, dropping the records at or before `after_sequence`. Those frames are checked like any other (checksum, sequence) rather than skipped by length: one parser path, and at most 999 frames between a position and the record wanted. After a node restart the table is empty, so the first watch reads from the 8-byte header the same way. A position past the end of the file (the log was replaced) is forgotten. So are a finished run's positions (M1-45): when its job ends, and when a watch ends having seen the writer gone, since that watch may have kept some after the job ended; a later watch of the run reads from the header.
 - **Writer alive** means a job in the `JobTable` holds the run, or the run's `job.json` has no `final_state` and names a process that is still the one it recorded (a job from before a node restart, until reattach). It is read before each read, never after, so the read after the writer is seen gone gets its last frame. The stream then ends.
 - **Polling:** the node checks the file size every `TAIL_POLL_MS = 50` while the job is alive. A 50 ms poll on a few files costs nothing and needs no inotify dependency.
 - **The node keeps no acks.** The daemon stores `runs.acked_sequence` after indexing (contracts §7.1). If the daemon dies before indexing, it asks again from its last ack and receives the same records; indexing is idempotent by `(run_id, sequence)`.
@@ -1604,7 +1613,7 @@ pub struct LlamaServerProcess { pub job_id: String, pub pid: u32, pub process_gr
 - **`paired_daemons.json`** is `{"format_version": 1, "daemon_ids": ["daemon_<base32>"]}`, mode 0600. A daemon id is its public key, so the list pins keys. `pin_daemon_key` adds one: the daemon's first start does it for the embedded node (flows/platform.md 2.2), `rastai node init --daemon-key` on a box (M9).
 - **Capability flags in M1:** none. Each flag joins with the milestone that builds it (M3, M4, M5, M7, M9).
 - **Not checked yet:** the session token on later NodeService calls. Its gRPC metadata key is a wire name, so it lands in a contract PR with the daemon's node link. Until then every caller of `node.sock` has already passed the same-user check.
-- Heartbeat every `nodes.heartbeat_seconds` (5), and at once on any state change (section 7.5). A failed heartbeat is retried on the next tick. Jobs never stop because the daemon is gone.
+- Heartbeat every `nodes.heartbeat_seconds` (5), and at once on any state change (section 7.5) and when a daemon handshakes, so a new session starts from a snapshot. `request_heartbeat` only wakes the loop, which sends at most one beat per 100 ms. The hub client dials the `hub_socket_path` of the current session and keeps one channel; a failed heartbeat drops it and is retried on the next tick. Jobs never stop because the daemon is gone. The session token isn't sent on `NodeHubService` calls yet, for the reason under "Not checked yet".
 
 **Hardware detection** (`hardware.rs`)
 - NVIDIA: `nvidia-smi --query-gpu=index,pci.bus_id,name,driver_version,memory.total,compute_cap --format=csv,noheader,nounits` (the spike's query plus bus id and compute capability).
