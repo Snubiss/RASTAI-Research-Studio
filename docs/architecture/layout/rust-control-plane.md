@@ -2136,28 +2136,35 @@ pub async fn run_bridge(daemon: &DaemonEndpoint, token: &str, input: impl AsyncB
 ### 7.3 How a tool call flows through the code
 
 ```rust
-// rastai-server/src/http/mcp_endpoint.rs: the axum handler is the only async glue
-pub async fn handle_mcp_post(server: &Server, principal: Principal, session_id: &str, body: &str) -> McpHttpReply {
-    let message = match parse_message(body) {
+// rastai-server/src/http/mcp_endpoint.rs: the axum handler is the only async glue. `principal` is the bearer token's
+// (the gate's bearer check, on daemon.sock too, where the gate alone would admit the peer as the owner); the two
+// headers are empty when absent.
+pub async fn handle_mcp_post(server: &Server, principal: &Principal, session_id: &str, protocol_version: &str,
+                             body: &[u8]) -> McpHttpReply {
+    let message = match read_message(body) {
         Ok(message) => message,
-        Err(error) => return mcp_http_reply(Some(error_reply(None, &error))),   // RRS-C3001
+        Err(error) => return error_http_reply(HTTP_BAD_REQUEST, None, &error),     // RRS-C3001
     };
+    // ... an MCP-Protocol-Version this server doesn't speak is 400 with RRS-C3001
     // `registry` and `experimental` (setting_bool of plugins.experimental_apis) are read under their locks (8.2).
-    let tools = tools_for_principal(&registry, &principal, experimental);    // registry filtered by scopes
-    let mut session = take_or_create_session(server, session_id, &principal);
-    let step = handle_message(&mut session, message, &tools);
-    let reply = match step {
-        McpStep::Reply(reply) => Some(reply),
-        McpStep::NoReply => None,
+    let tools = principal_tools(server, principal);                          // tools_for_principal
+    // `initialize` opens a new session; anything else runs in the one Mcp-Session-Id names (400 without the
+    // header, 404 for a session this daemon doesn't hold or another principal opened). handle_message runs under
+    // the sessions' lock, which is never held across an .await.
+    let (step, new_session_id) = match step_in_session(server, principal, session_id, message, &tools) {
+        Ok(found) => found,
+        Err(reply) => return reply,
+    };
+    match step {
+        McpStep::Reply(reply) => json_http_reply(&reply, new_session_id),   // 200, application/json
+        McpStep::NoReply => accepted_reply(new_session_id),                 // 202, no body
         McpStep::ExecuteTool { request_id, command_id, arguments_json } => {
             // An experimental command while plugins.experimental_apis is off is RRS-C0001: it isn't listed, so it
             // stays unknown to MCP. Anything else goes through execute_command (flows/platform.md 3.2).
-            let outcome = execute_tool(server, &principal, &command_id, &arguments_json).await;
-            Some(tool_call_reply(request_id, &outcome))
+            let outcome = execute_tool(server, principal, &command_id, &arguments_json).await;
+            json_http_reply(&tool_call_reply(request_id, &outcome), new_session_id)
         }
-    };
-    put_session_back(server, session);
-    mcp_http_reply(reply)
+    }
 }
 ```
 

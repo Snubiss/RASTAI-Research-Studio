@@ -2,8 +2,8 @@
 //! loopback TCP and daemon.sock (listeners.rs); the gate tells the two apart by the peer a daemon.sock connection
 //! carries.
 //!
-//! M1-26 brought `/api/health` and `POST /api/login`, M1-27 `Execute` and `ListCommands`. Subscribe (M1-28), blobs
-//! (M3), `/v1` (M3), `/mcp` (M1-30), plugin assets and the web app join here as they land.
+//! M1-26 brought `/api/health` and `POST /api/login`, M1-27 `Execute` and `ListCommands`, M1-30 `POST /mcp`.
+//! Subscribe (M1-28), blobs (M3), `/v1` (M3), plugin assets and the web app join here as they land.
 //!
 //! A gate refusal on a Connect path (`/rastai.`) comes back in the Connect error envelope (connect.rs), so a Connect
 //! client reads it as an error with its diagnostic attached; on any other path it is the diagnostic as JSON.
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{ConnectInfo, Extension, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -25,6 +25,7 @@ use rastai_core::principal::Principal;
 use rastai_core::time::now_unix_ms;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_diag::render_json::render_json;
+use rastai_mcp::jsonrpc::MAX_MESSAGE_BYTES;
 use serde_json::{Value, json};
 
 use crate::http::command_endpoints::{EXECUTE_PATH, LIST_COMMANDS_PATH, execute_endpoint, list_commands_endpoint};
@@ -34,6 +35,7 @@ use crate::http::gate::{
 };
 use crate::http::health::health_endpoint;
 use crate::http::listeners::SocketPeer;
+use crate::http::mcp_endpoint::{MCP_PATH, mcp_endpoint};
 use crate::http::sessions::{NewSession, redeem_login_code, session_cookie_header};
 use crate::server_state::Server;
 
@@ -61,6 +63,12 @@ pub fn build_router(server: Arc<Server>) -> Router {
         .route(LOGIN_PATH, post(login_endpoint))
         .route(EXECUTE_PATH, post(execute_endpoint))
         .route(LIST_COMMANDS_PATH, post(list_commands_endpoint))
+        // POST only, so GET /mcp is 405: there is no server-to-client stream (layout 7.2). The bridge sends
+        // messages up to MAX_MESSAGE_BYTES, over axum's default body limit; the parser refuses anything larger.
+        .route(
+            MCP_PATH,
+            post(mcp_endpoint).layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES)),
+        )
         .fallback(not_found);
     let gated = routes.layer(middleware::from_fn_with_state(server.clone(), gate_middleware));
     gated.with_state(server)

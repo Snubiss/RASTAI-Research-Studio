@@ -8,5 +8,6 @@ pub mod connect_json;
 pub mod gate;
 pub mod health;
 pub mod listeners;
+pub mod mcp_endpoint;
 pub mod router;
 pub mod sessions;

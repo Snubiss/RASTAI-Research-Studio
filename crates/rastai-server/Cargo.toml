@@ -9,7 +9,7 @@ publish.workspace = true
 
 # The composition root (layout: rust-control-plane.md section 8). M1-26 lands the startup sequence, the listeners,
 # the request gate, login codes and origin-bound sessions, /api/health and the Connect JSON of the CommandService
-# messages; M1-27 the Connect envelopes and the Execute path, with prost. The bus (M1-28) and the node links (M1-47)
+# messages; M1-27 the Connect envelopes and the Execute path, with prost; M1-30 `/mcp`, with rastai-mcp. The bus (M1-28) and the node links (M1-47)
 # bring tonic and keyring with them.
 [dependencies]
 rastai-diag = { path = "../rastai-diag" }
@@ -24,6 +24,8 @@ rastai-proto = { path = "../rastai-proto" }
 # The binary Connect bodies of CommandService (application/proto) and the error details. Only http/connect.rs uses it
 # (layout 8.4).
 prost = { workspace = true }
+# The MCP server side as plain data: JSON-RPC messages, sessions, the tool list and tool replies (http/mcp_endpoint.rs).
+rastai-mcp = { path = "../rastai-mcp" }
 # The daemon lock and rastai.db.
 rastai-store = { path = "../rastai-store" }
 # daemon.sock: bind, accept with the peer's user, and the same-user check.
