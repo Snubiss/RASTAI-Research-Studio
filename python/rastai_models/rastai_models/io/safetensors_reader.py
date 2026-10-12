@@ -67,6 +67,11 @@ class SafetensorsFile:
         """The tensor names, in the order their bytes sit in the file."""
         return list(self._tensors)
 
+    def shape(self, name: str) -> list[int]:
+        """A tensor's shape as the accepted header gives it, without reading its bytes (bind_weights checks every
+        shape before it copies any value)."""
+        return list(self._tensors[name]["shape"])
+
     def load(self, name: str, device: str | torch.device = "cpu", dtype: torch.dtype | None = None) -> torch.Tensor:
         """Copies one tensor out of the file onto `device`, converting it to `dtype` when one is given."""
         tensor = self._tensors[name]
