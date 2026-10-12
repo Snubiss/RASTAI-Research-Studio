@@ -1307,7 +1307,7 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 ### 7.4 Jobs in process groups
 
 **Starting a Python job** (`start_job`, kinds from contracts §9.1):
-1. Check admission: environment ready, leases granted for `ResourceRequest.vram_bytes` on `gpu_indices`, sandbox reservation for `sandbox_count` (section 5.3). Anything missing keeps the job `queued` with the reason; nothing is half-started.
+1. Check admission: environment ready, leases granted for `ResourceRequest.vram_bytes` on `gpu_indices`, sandbox reservation for `sandbox_count` (section 5.3). Anything missing keeps the job `queued` with the reason; nothing is half-started. A run that already has a live job (one in the job table that hasn't ended, or a `job.json` with no `final_state` whose pid, boot id and start ticks are alive, as in "Reattach" below) is refused instead: the job fails with `RRS-J3006` before anything is written into the run folder, so the running copy keeps its `job.json`, log, leases and run state (contracts §9.1).
 2. Make a job token (32 bytes from `/dev/urandom`, hex). Keep it in memory; write only its BLAKE3 hash (`rastai_formats::hashing::hash_bytes`) to `job.json`.
 3. Write `runs/<run_id>/job.json` atomically (write `job.json.tmp` with mode 0600, fsync, rename). Fields: the ones the worker reads (`layout/python.md` §7.3) plus the node's own: `job_id`, `run_id`, `kind`, `state`, `pid`, `process_group_id`, `process_start_ticks`, `boot_id` (from `/proc/sys/kernel/random/boot_id`), `job_token_hash`, `granted_leases[]`, `started_unix_ms`, and `final_state` (empty until the job ends). A `serve_fast` job adds `api_key` and `port` (section 7.8), which is why every `job.json` is 0600.
 4. Spawn (`spawn.rs`), then rewrite `job.json` with the pid, process group, start ticks and boot id.
@@ -1346,6 +1346,7 @@ Node shutdown never stops jobs. They keep running and are reattached on the next
 | exit 2 (bad launch) | `failed` | `RRS-J2001` |
 | exit 3 (cancel honored) | `cancelled` | |
 | exit 4 (the event log can't be written, so no diagnostic could be logged) | `failed` | `RRS-S3002` (disk full), with the stderr tail and the free-space numbers from telemetry |
+| exit 5 (another process holds the event log's lock; the worker wrote nothing to it) | `failed` | `RRS-J3006`, with the stderr tail. Nothing is read from the run's log for this job (its frames are the running copy's), no signal goes to the running copy, and the run's state is left to it |
 | exit 75 (checkpoint written after SIGTERM) | `cancelled`, reason `preempted` | the daemon decides whether to resume |
 | killed by `SIGKILL` the node sent | `cancelled` | `RRS-J1003` |
 | killed by `SIGKILL` the node didn't send, and the cgroup's `memory.events` `oom_kill` count went up | `failed` | `RRS-J1002` (kernel OOM, with RAM numbers) |
@@ -1774,7 +1775,7 @@ Numbers only; titles are in contracts 10.3. A file may raise a code only if it i
 | `rastai-gateway` | `RRS-G0001`, `G0002`, `G0004` to `G0007`, `G0009`, `G0010`, `G1001` to `G1007`, `G2001` to `G2004`, `G3004`, `G3006`, `G4001` |
 | `rastai-node` identity, handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N0006`, `N0007`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `RRS-H0001`, `H0002`, `RRS-S3001` |
 | `rastai-node` environments, leases | `RRS-H2001` to `H2006`, `RRS-H3001`, `H3004` to `H3007`, `RRS-H4002` |
-| `rastai-node` jobs and reattach | `RRS-J0001`, `J0002`, `J1001` to `J1004`, `J2001` to `J2003`, `J3002`, `J3003`, `RRS-S2002`, `RRS-S3002` |
+| `rastai-node` jobs and reattach | `RRS-J0001`, `J0002`, `J1001` to `J1004`, `J2001` to `J2003`, `J3002`, `J3003`, `J3006`, `RRS-S2002`, `RRS-S3002` |
 | `rastai-node` Fast runtime | `RRS-G1003`, `G1004`, `G3002`, `G3003`, `G3005`, `G3007`, `G3008` |
 | `rastai-node` plugin modules | `RRS-P2001`, `RRS-P2005` |
 | `rastai-node` self-update | `RRS-N4001` to `N4004`; `RRS-N4005` (L2) |
