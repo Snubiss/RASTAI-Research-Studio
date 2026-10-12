@@ -9,14 +9,16 @@
 mod common;
 
 use rastai_core::commands::registry::add_plugin_commands;
+use rastai_core::ids::{IdPrefix, new_id};
 use rastai_core::paths::{rastai_db_path, user_settings_path};
 use rastai_core::principal::owner_principal;
 use rastai_core::scopes::Scope;
+use rastai_core::time::now_unix_ms;
 use rastai_formats::hashing::hash_bytes;
 use rastai_proto::commands::v1::{CommandDescriptor, ExecuteRequest, ExecuteResponse};
 use rastai_server::daemon::RunningDaemon;
 use rastai_server::http::sessions::find_scoped_token;
-use rastai_store::index::journal::{JournalRow, get_journal};
+use rastai_store::index::journal::{JournalRow, JournalStartedRow, get_journal};
 use rastai_store::index::kept_tables::ProjectRow;
 use rastai_store::index::reads::{list_table_columns, list_table_rows, open_index_reader};
 use rastai_store::index::writes::IndexWrite;
@@ -187,8 +189,23 @@ async fn a_dry_run_checks_and_writes_nothing() {
         dry("token.create", json!({"name": "ci", "preset": "chat-only"})),
     )
     .await;
-    assert!(token.ok, "{:?}", token.diagnostics);
     assert!(token.journal_id.is_empty());
+    // The answer has the result's shape: the scopes it would have, and no id or token, since none was made.
+    let planned = ok_result(&token);
+    assert_eq!(planned["scopes"], json!(["chat"]));
+    assert_eq!(
+        (planned["token_id"].as_str(), planned["token"].as_str()),
+        (Some(""), Some(""))
+    );
+    let code = run_command(
+        &running.server,
+        &owner_principal(),
+        dry("token.login_code.create", json!({})),
+    )
+    .await;
+    let planned_code = ok_result(&code);
+    assert_eq!(planned_code["code"], "");
+    assert_eq!(planned_code["http_port"], u32::from(running.http_port));
     let setting = run_command(
         &running.server,
         &owner_principal(),
@@ -289,8 +306,8 @@ async fn the_same_key_replays_the_stored_redacted_response() {
     assert_eq!(replay_result["token"], REDACTED);
     let listed = ok_result(&run_as_owner(&running, "token.list", json!({})).await);
     assert_eq!(listed["tokens"].as_array().unwrap().len(), 1);
-    // Another principal's same key is its own.
-    let admin_token = token_principal(vec![Scope::SystemAdmin]);
+    // Another principal's same key is its own. It holds chat, so it may hand chat on.
+    let admin_token = token_principal(vec![Scope::SystemAdmin, Scope::Chat]);
     let request = ExecuteRequest {
         idempotency_key: "key-1".to_string(),
         ..execute_request("token.create", r#"{"name": "ci", "preset": "chat-only"}"#)
@@ -298,6 +315,42 @@ async fn the_same_key_replays_the_stored_redacted_response() {
     let other = run_command(&running.server, &admin_token, request).await;
     assert_ne!(ok_result(&other)["token_id"], first_result["token_id"]);
     stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_closes_an_unfinished_row_as_c0005_and_its_key_runs_again() {
+    let paths = test_paths("x-interrupted");
+    let running = start_test_daemon(&paths).await;
+    // The started row of a token.create the last daemon was running when it stopped: no finished row follows.
+    let arguments = json!({"name": "ci", "preset": "chat-only"});
+    let interrupted_id = new_id(IdPrefix::Journal).unwrap();
+    let started = JournalStartedRow {
+        journal_id: interrupted_id.clone(),
+        command_id: "token.create".to_string(),
+        principal: "owner".to_string(),
+        arguments_json: arguments.to_string(),
+        idempotency_key: "key-i".to_string(),
+        started_unix_ms: now_unix_ms(),
+    };
+    write_index(&running.server.store.index, IndexWrite::JournalStarted(started))
+        .await
+        .unwrap();
+    assert_eq!(journal_row(&running, &interrupted_id).ok, None);
+    stop_test_daemon(running).await;
+
+    let restarted = start_test_daemon(&paths).await;
+    let row = journal_row(&restarted, &interrupted_id);
+    assert_eq!((row.ok, row.code.as_str()), (Some(false), "RRS-C0005"));
+    assert!(row.finished_unix_ms.is_some());
+    // The interrupted attempt kept nothing, so a retry under its key runs the command again.
+    let retry = run_with_key(&restarted, "token.create", arguments, "key-i").await;
+    let retried = ok_result(&retry);
+    assert_ne!(retry.journal_id, interrupted_id);
+    assert_ne!(retried["token"], REDACTED);
+    let listed = ok_result(&run_as_owner(&restarted, "token.list", json!({})).await);
+    assert_eq!(listed["tokens"].as_array().unwrap().len(), 1);
+    stop_test_daemon(restarted).await;
     remove_test_folder(&paths);
 }
 
@@ -393,6 +446,38 @@ async fn a_revoked_token_is_refused_and_listed_only_when_asked() {
     let all = ok_result(&run_as_owner(&running, "token.list", json!({"include_revoked": true})).await);
     assert_eq!(all["tokens"][0]["revoked_unix_ms"], revoked["revoked_unix_ms"]);
     assert!(all["tokens"][0].get("token").is_none());
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_token_hands_out_only_the_scopes_it_holds() {
+    let paths = test_paths("x-escalate");
+    let running = start_test_daemon(&paths).await;
+    let admin_only = token_principal(vec![Scope::SystemAdmin]);
+    let wider = execute_request("token.create", r#"{"name": "wider", "scopes": ["chat", "secrets"]}"#);
+    let refused = run_command(&running.server, &admin_only, wider.clone()).await;
+    assert_eq!(response_codes(&refused), ["RRS-C1005", "RRS-C1005"]);
+    assert!(refused.diagnostics[0].message.contains("chat"));
+    assert!(refused.diagnostics[1].message.contains("secrets"));
+    // A dry run is refused the same way.
+    let dry = ExecuteRequest { dry_run: true, ..wider };
+    assert_eq!(
+        response_codes(&run_command(&running.server, &admin_only, dry).await)[0],
+        "RRS-C1005"
+    );
+    let listed = ok_result(&run_as_owner(&running, "token.list", json!({})).await);
+    assert_eq!(listed["tokens"], json!([]));
+    // What it holds it may pass on; the owner may grant anything.
+    let same = execute_request("token.create", r#"{"name": "same", "scopes": ["system.admin"]}"#);
+    assert!(run_command(&running.server, &admin_only, same).await.ok);
+    let owner_made = run_as_owner(
+        &running,
+        "token.create",
+        json!({"name": "wide", "scopes": ["chat", "secrets"]}),
+    )
+    .await;
+    assert_eq!(ok_result(&owner_made)["scopes"], json!(["chat", "secrets"]));
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }

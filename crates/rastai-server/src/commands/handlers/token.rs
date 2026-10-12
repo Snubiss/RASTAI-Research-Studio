@@ -5,13 +5,18 @@
 //! BLAKE3 hash is stored (`tokens.token_hash`) and kept in the gate's cache; its text is in `token.create`'s answer
 //! and nowhere else, since the journal redacts that field (`secret`, contracts 5.1). A revoked token is refused on
 //! its next request (`RRS-C1006`). Closing a revoked token's open streams joins with the streams (M1-28).
+//!
+//! Only the owner creates tokens with any scope (flows/platform.md 4.3). Any other principal that reaches
+//! `token.create` (a token or a plugin holding `system.admin`) can only hand out scopes it holds itself, so no token
+//! is ever a way to more rights than its creator had (`RRS-C1005`, the same code as a missing scope).
 
 use rastai_core::commands::output::CommandOutput;
 use rastai_core::ids::{IdPrefix, new_id};
+use rastai_core::principal::{Principal, PrincipalKind, principal_label};
 use rastai_core::random::random_bytes;
-use rastai_core::scopes::{Scope, parse_scope, scope_name, token_preset_scopes};
+use rastai_core::scopes::{Scope, parse_scope, scope_name, scopes_allow, token_preset_scopes};
 use rastai_core::time::now_unix_ms;
-use rastai_diag::diagnostic::{Diagnostic, diagnostic_at};
+use rastai_diag::diagnostic::{Diagnostic, diagnostic, diagnostic_at};
 use rastai_formats::commands::result_json;
 use rastai_formats::commands::token::{
     TokenCreateArgs, TokenCreateResult, TokenListArgs, TokenListResult, TokenLoginCodeCreateArgs,
@@ -32,6 +37,7 @@ use crate::server_state::Server;
 /// The same strength as the owner token, login codes and session keys.
 const TOKEN_SECRET_BYTES: usize = 32;
 const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
+const CODE_SCOPE_NOT_GRANTED: &str = "RRS-C1005";
 const CREATE_COMMAND_ID: &str = "token.create";
 const NAME_PATH: &str = "#/name";
 const SCOPES_PATH: &str = "#/scopes";
@@ -42,13 +48,19 @@ const EXPECTED_TOKEN_ID: &str = "the id of a token token.list shows";
 /// How a refusal shows text that is empty.
 const EMPTY_TEXT: &str = "(blank)";
 
-/// A single-use code for the UI start URL, valid for 60 seconds, and the port to open it on. A dry run makes none.
+/// A single-use code for the UI start URL, valid for 60 seconds, and the port to open it on. A dry run makes none:
+/// its answer has the port and an empty code.
 pub(crate) async fn login_code_create(
     context: &CommandContext<'_>,
     _arguments: TokenLoginCodeCreateArgs,
 ) -> Result<CommandOutput, Vec<Diagnostic>> {
     if context.dry_run {
-        return Ok(CommandOutput::default());
+        let planned = TokenLoginCodeCreateResult {
+            code: String::new(),
+            expires_unix_ms: 0,
+            http_port: u32::from(http_port(context.server)),
+        };
+        return Ok(sync_result(result_json(&planned)));
     }
     let new_code = create_login_code(&context.server.auth, now_unix_ms()).map_err(|error| core_failure(&error))?;
     let result = TokenLoginCodeCreateResult {
@@ -59,20 +71,28 @@ pub(crate) async fn login_code_create(
     Ok(sync_result(result_json(&result)))
 }
 
-/// A new scoped token: the preset's scopes plus the listed ones. A dry run checks them and makes no token.
+/// A new scoped token: the preset's scopes plus the listed ones, each one the caller may grant. A dry run checks
+/// them and makes no token: its answer lists the scopes, with an empty id and token.
 pub(crate) async fn create(
     context: &CommandContext<'_>,
     arguments: TokenCreateArgs,
 ) -> Result<CommandOutput, Vec<Diagnostic>> {
     check_name(&arguments.name)?;
     let scopes = requested_scopes(&arguments)?;
+    check_grantable(context.principal, &scopes)?;
+    let scope_names: Vec<String> = scopes.iter().map(scope_name).collect();
     if context.dry_run {
-        return Ok(CommandOutput::default());
+        let planned = TokenCreateResult {
+            token_id: String::new(),
+            name: arguments.name,
+            scopes: scope_names,
+            token: String::new(),
+        };
+        return Ok(sync_result(result_json(&planned)));
     }
     let token_id = new_id(IdPrefix::Token).map_err(|error| core_failure(&error))?;
     let secret = random_bytes(TOKEN_SECRET_BYTES).map_err(|error| core_failure(&error))?;
     let token = lowercase_hex(&secret);
-    let scope_names: Vec<String> = scopes.iter().map(scope_name).collect();
     let row = TokenRow {
         token_id: token_id.clone(),
         name: arguments.name.clone(),
@@ -201,6 +221,34 @@ fn requested_scopes(arguments: &TokenCreateArgs) -> Result<Vec<Scope>, Vec<Diagn
     Ok(scopes)
 }
 
+/// The owner may grant every scope. Anyone else may grant only the scopes it holds: `system.admin` lets it run
+/// `token.create`, but doesn't grant `chat` (scopes.rs), so it can't make a token that has `chat`. Every scope it
+/// lacks is refused, so the caller sees them all at once.
+fn check_grantable(creator: &Principal, scopes: &[Scope]) -> Result<(), Vec<Diagnostic>> {
+    if creator.kind == PrincipalKind::Owner {
+        return Ok(());
+    }
+    let label = principal_label(creator);
+    let refusals: Vec<Diagnostic> = scopes
+        .iter()
+        .filter(|scope| !scopes_allow(&creator.scopes, scope))
+        .map(|scope| scope_not_granted(scope, &label))
+        .collect();
+    if refusals.is_empty() { Ok(()) } else { Err(refusals) }
+}
+
+fn scope_not_granted(scope: &Scope, creator_label: &str) -> Diagnostic {
+    let name = scope_name(scope);
+    diagnostic(
+        CODE_SCOPE_NOT_GRANTED,
+        &[
+            ("command_id", CREATE_COMMAND_ID),
+            ("scope", &name),
+            ("principal", creator_label),
+        ],
+    )
+}
+
 fn read_tokens(server: &Server) -> Result<Vec<TokenRow>, Vec<Diagnostic>> {
     // A small table on a pooled read-only connection; it never waits on the writer (WAL).
     let reader = open_index_reader(&server.store.index_readers).map_err(|error| store_failure(&error))?;
@@ -284,6 +332,29 @@ mod tests {
             ("RRS-C0002", NAME_PATH)
         );
         check_name("claude-desktop").unwrap();
+    }
+
+    fn token_holding(scopes: Vec<Scope>) -> Principal {
+        Principal {
+            kind: PrincipalKind::Token,
+            id: "tok_admin".to_string(),
+            scopes,
+        }
+    }
+
+    #[test]
+    fn only_the_owner_grants_scopes_it_was_not_given() {
+        let wanted = vec![Scope::Read, Scope::Chat, Scope::Secrets];
+        check_grantable(&rastai_core::principal::owner_principal(), &wanted).unwrap();
+        let admin = token_holding(vec![Scope::SystemAdmin, Scope::Read]);
+        let refusals = check_grantable(&admin, &wanted).unwrap_err();
+        let codes: Vec<&str> = refusals.iter().map(|item| item.code.as_str()).collect();
+        assert_eq!(codes, ["RRS-C1005", "RRS-C1005"]);
+        assert!(refusals[0].message.contains("chat"), "{}", refusals[0].message);
+        assert!(refusals[0].message.contains("tok_admin"), "{}", refusals[0].message);
+        assert!(refusals[1].message.contains("secrets"), "{}", refusals[1].message);
+        // What it holds, it may pass on, its own system.admin included.
+        check_grantable(&admin, &[Scope::Read, Scope::SystemAdmin]).unwrap();
     }
 
     #[test]

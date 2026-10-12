@@ -2255,7 +2255,9 @@ crates/rastai-server/
       journal.rs              journal rows, secret redaction, idempotency lookup
       undo.rs                 undoable edits, document.undo and document.redo (flows/platform.md 3.4)
       handlers/
-        system.rs             system.*, settings.*, token.*, secret.*, hf.*, storage.*
+        system.rs             system.*, secret.*, hf.*, storage.*
+        settings.rs           settings.*
+        token.rs              token.*
         archive.rs            (M11) archive.configure, status, sync, restore, verify, purge
         artifact.rs           artifact.*
         project.rs            project.*, file.*, document.*, workspace.*
