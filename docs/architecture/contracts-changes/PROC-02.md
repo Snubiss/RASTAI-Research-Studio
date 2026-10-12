@@ -1,0 +1,1 @@
+- **PROC-02:** One change entry per file. The entries after v1.2 item 10 move, word for word, from this file into `docs/architecture/contracts-changes/`, one file per task id, so parallel PRs never edit the same lines; a task's entries keep their original order in its file (15.8).

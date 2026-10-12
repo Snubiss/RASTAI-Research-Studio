@@ -7,6 +7,7 @@ Open-source studio to design, train, serve and study neural networks. Rust backe
 - `docs/architecture/README.md`: the map of the design docs and the reading order. Read it first.
 - `docs/spec/rastai_spec_v5.md`: the scope (v5.4). Part II is the architecture, §27 the dependency allowlist, §29 the repo layout.
 - `docs/architecture/contracts.md`: the shared names (components, processes, protobuf services, commands, events, tables, error codes, states). Use these names exactly. It is the only list of shared names; a wire, document or command shape goes there first in its own contract PR; any other new name goes there in the same PR as the code that uses it (ADR-0038).
+- `docs/architecture/contracts-changes/`: the contracts change entries, one file per task id (`M1-25.md`). A PR that changes contracts adds its entry to its own task's file (a new file for the task's first PR, the end of that file after it) and never edits another task's file.
 - `docs/architecture/layout/`: code layout per crate and package. `docs/architecture/flows/`: logic flow diagrams.
 - `docs/adr/`: decisions already made; don't re-litigate them without a new ADR.
 - `docs/plan/`: the implementation plan and backlog.
