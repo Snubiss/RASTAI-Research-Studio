@@ -1,8 +1,8 @@
 //! Run-log indexing through a running daemon (layout 13.1 and 8.6, flows/platform.md 6.1 and 6.2): a fake node
 //! streams a run's records and the ack commits with the rows; a restart re-indexes nothing twice; a remote run's
 //! mirror is written before the index and a restart re-indexes from it once; a refused record and the node's report
-//! stop the tail; a broken stream is watched again after the ack; and the daemon log's records after the cursor are
-//! indexed before the listener opens.
+//! stop the tail; a broken stream is watched again after the ack; a reconnect never starts a second tail of a run;
+//! and the daemon log's records after the cursor are indexed before the listener opens.
 
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
@@ -46,16 +46,21 @@ const EMBEDDED_NODE_ID: &str = "node_local";
 const REMOTE_NODE_ID: &str = "node_01JA2B3C4D5E6F7G8H9J0K1M2N";
 const CONTENT_HASH: &str = "blake3:0101010101010101010101010101010101010101010101010101010101010101";
 const RECORD_TIME_UNIX_MS: i64 = 1_791_700_000_000;
+/// How long a test waits for a tail running on its own task: up to 200 steps of 25 ms.
+const WAIT_ATTEMPTS: usize = 200;
+const WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(25);
 
 /// A node that streams the records it was given. `ignore_after` makes it re-send everything whatever the daemon
 /// asks for, like a node that lost its place; `break_after` ends the first watch with a broken stream after that
-/// many records.
+/// many records; `hold_open` keeps every stream open, as for a run still writing, until `open_streams` is cleared.
 struct FakeNode {
     node_id: String,
     remote: bool,
     records: Vec<EventRecord>,
     ignore_after: bool,
     break_after: Option<usize>,
+    hold_open: bool,
+    open_streams: Mutex<Vec<mpsc::Sender<Result<EventRecord, Diagnostic>>>>,
     watches: Mutex<Vec<u64>>,
 }
 
@@ -90,6 +95,9 @@ impl RunEventSource for FakeNode {
             sent += 1;
         }
         // Dropping the sender ends the stream: the run's writer is gone.
+        if self.hold_open {
+            self.open_streams.lock().unwrap().push(sender);
+        }
         receiver
     }
 }
@@ -101,6 +109,8 @@ fn fake_node(node_id: &str, remote: bool, records: Vec<EventRecord>) -> FakeNode
         records,
         ignore_after: false,
         break_after: None,
+        hold_open: false,
+        open_streams: Mutex::new(Vec::new()),
         watches: Mutex::new(Vec::new()),
     }
 }
@@ -435,6 +445,67 @@ async fn a_broken_stream_is_watched_again_after_the_ack() {
     assert_eq!(table_rows(&running, "run_metrics").len(), 3);
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reconnect_never_starts_a_second_tail_of_a_run() {
+    let paths = test_paths("tail-one-per-run");
+    let running = start_test_daemon(&paths).await;
+    add_run(&running, EMBEDDED_NODE_ID).await;
+    let mut live = subscribe(&running.server.bus);
+    // The run is still writing: its stream stays open after its first three records.
+    let mut node = fake_node(EMBEDDED_NODE_ID, false, whole_run()[..3].to_vec());
+    node.hold_open = true;
+    let node = Arc::new(node);
+    let source: Arc<dyn RunEventSource> = node.clone();
+
+    let first = start_run_tails(&running.server, &source);
+    assert_eq!(first.len(), 1);
+    // The node link reconnects and calls start_run_tails again while the first tail still watches: no second tail.
+    assert!(start_run_tails(&running.server, &source).is_empty());
+    tail_run(running.server.clone(), source.clone(), RUN_ID.to_string()).await;
+    wait_for_ack(&running, 3).await;
+    assert_eq!(*node.watches.lock().unwrap(), [0]);
+    assert_eq!(record_sequences(&published(&mut live), &whole_run()), [1, 2, 3]);
+
+    // The node ends the stream; the tail ends and frees the run, so the next connect tails it again.
+    node.open_streams.lock().unwrap().clear();
+    for task in first {
+        task.await.unwrap();
+    }
+    let again = start_run_tails(&running.server, &source);
+    assert_eq!(again.len(), 1);
+    wait_for_watches(&node, 2).await;
+    node.open_streams.lock().unwrap().clear();
+    for task in again {
+        task.await.unwrap();
+    }
+    assert_eq!(*node.watches.lock().unwrap(), [0, 3]);
+    assert_eq!(table_rows(&running, "run_metrics").len(), 2);
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+/// Waits, a little at a time, until the run's ack reaches `acked_sequence`.
+async fn wait_for_ack(running: &RunningDaemon, acked_sequence: u64) {
+    for _ in 0..WAIT_ATTEMPTS {
+        if run_row(running).acked_sequence >= acked_sequence {
+            return;
+        }
+        tokio::time::sleep(WAIT_STEP).await;
+    }
+    panic!("the run's ack never reached {acked_sequence}");
+}
+
+/// Waits until the node has been asked to watch `count` times.
+async fn wait_for_watches(node: &FakeNode, count: usize) {
+    for _ in 0..WAIT_ATTEMPTS {
+        if node.watches.lock().unwrap().len() >= count {
+            return;
+        }
+        tokio::time::sleep(WAIT_STEP).await;
+    }
+    panic!("the node was never asked to watch {count} times");
 }
 
 /// A `command.finished` record for `journal_id`, as `record_daemon_event` writes it.

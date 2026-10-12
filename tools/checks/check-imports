@@ -210,6 +210,7 @@ RUST_LIBRARY_FILES = {
     "tokio_rustls": ["crates/rastai-transport/src/http_client.rs"],
     "webpki_roots": ["crates/rastai-transport/src/http_client.rs"],
     "tower": ["crates/rastai-transport/src/grpc_channel.rs"],
+    "http_body": ["crates/rastai-server/src/http/connect.rs"],
     "rusqlite": ["crates/rastai-store/src/sqlite.rs"],
     "libc": ["crates/rastai-store/src/disk_space.rs"],
     "blake3": ["crates/rastai-formats/src/hashing.rs"],

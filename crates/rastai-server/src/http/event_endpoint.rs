@@ -102,7 +102,7 @@ pub(crate) async fn subscribe_endpoint(
         // The server is let go before the last envelope, so a stopping daemon can close its store once the
         // listeners are done.
         drop(server);
-        let _ = sender.send(Ok(end_of_stream_envelope(end.as_ref()))).await;
+        let _ = sender.send(end_of_stream_envelope(end.as_ref())).await;
     });
     stream_response(envelopes)
 }
@@ -179,7 +179,7 @@ async fn send_event(subscription: &mut Subscription, event: &BusEvent, sender: &
         return true;
     }
     subscription.last_sent_sequence = event.bus_sequence;
-    sender.send(Ok(bus_event_envelope(event))).await.is_ok()
+    sender.send(bus_event_envelope(event)).await.is_ok()
 }
 
 /// After the last one sent, matching the filter, and content only for a caller allowed to read it.

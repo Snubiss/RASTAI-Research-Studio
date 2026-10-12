@@ -216,6 +216,20 @@ def test_rust_wrapper_files(write_tree, run_check):
     assert "1 problem(s)" in result.stdout
 
 
+def test_http_body_is_used_only_by_the_connect_file(write_tree, run_check):
+    """The frame type of Subscribe's streamed body comes from http-body, in rastai-server's http/connect.rs alone."""
+    root = write_tree(
+        {
+            "crates/rastai-server/src/http/connect.rs": "use http_body::Frame;\n",
+            "crates/rastai-server/src/http/event_endpoint.rs": "use http_body::Frame;\n",
+        }
+    )
+    result = run_check("check-imports", "--root", str(root))
+    assert result.returncode == 1
+    assert "crates/rastai-server/src/http/event_endpoint.rs:1: uses `http_body`, which only" in result.stdout
+    assert "1 problem(s)" in result.stdout
+
+
 def test_a_rust_use_after_a_double_slash_in_a_string_fails(write_tree, run_check):
     """`//` inside a string starts no comment, so the blake3 call after it on the same line is still seen."""
     root = write_tree({"crates/rastai-formats/src/digest.rs": 'let d = "x//y"; blake3::hash(b"a");\n'})

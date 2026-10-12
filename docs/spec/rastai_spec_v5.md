@@ -899,7 +899,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Category | Dependency | Why | Replacement path |
 |---|---|---|---|
 | Foundation | Rust toolchain, tokio, axum, serde | Language runtime and HTTP | — |
-| Foundation | hyper, hyper-util, tokio-rustls, webpki-roots, tower | The HTTPS client (API adapters, HF Hub, later S3) and the Docker socket; tonic channels over Unix sockets. Same family as axum, tonic and rustls, already in the tree through them. One wrapper file per use (contracts §2) | — |
+| Foundation | hyper, hyper-util, http-body, tokio-rustls, webpki-roots, tower | The HTTPS client (API adapters, HF Hub, later S3) and the Docker socket; tonic channels over Unix sockets; the frames of the daemon's streamed Connect responses (http-body, axum's own body trait). Same family as axum, tonic and rustls, already in the tree through them. One wrapper file per use (contracts §2) | — |
 | Foundation | pyo3, wasm-bindgen | Language bindings for the two `rastai-formats` builds: the Python wheel and the browser's WASM validator | — |
 | Foundation | libc | One `statvfs` call for free disk space, the only hand-written `unsafe` (ADR-0033), in `rastai-store/src/disk_space.rs` | Run `df --output=avail -B1` |
 | Foundation | OS tools: `setsid`, `kill`, `unshare`, `df`, `nvidia-smi`, `rocm-smi` | Process groups, signals, namespaces, disk and GPU readings. Run as child processes, never linked | — |

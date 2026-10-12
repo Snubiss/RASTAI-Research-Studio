@@ -7,8 +7,8 @@
 //! - **One at a time.** The log's cursor is the last indexed sequence and only moves forward, so records must be
 //!   indexed in log order: an append and its index write happen under one lock.
 //! - **A failed index write is retried with the next record.** The record is already in the log; indexing a later
-//!   one alone would move the cursor past it, so it waits in `unindexed` and goes with the next batch. Startup's
-//!   replay catches anything a crash left behind.
+//!   one alone would move the cursor past it, so it waits in `unindexed`, goes with the next batch and is published
+//!   with it. Startup's replay catches anything a crash left behind.
 //! - **Segments.** The live file is `events.log`; at `DAEMON_LOG_SEGMENT_BYTES` it is renamed `events-<n>.log` and a
 //!   new one started. Each segment has its own sequence and its own cursor, named `daemon:<n>` from the day it is
 //!   started, so the name survives the rename: the live file is segment (rolled segments + 1). A live file that
@@ -78,9 +78,12 @@ pub async fn record_daemon_event(server: &Server, mut record: EventRecord) -> Re
         records: log.unindexed.clone(),
     };
     write_index(&server.store.index, write).await?;
-    log.unindexed.clear();
-    // Published while the lock is held, so the bus has the daemon's records in log order too.
-    publish(&server.bus, bus_event_from_record(&record, DAEMON_SOURCE));
+    // Every record of the batch that just committed is published, the ones an earlier failed write left behind
+    // too, while the lock is held, so the bus has the daemon's records in log order.
+    let committed = std::mem::take(&mut log.unindexed);
+    for committed_record in &committed {
+        publish(&server.bus, bus_event_from_record(committed_record, DAEMON_SOURCE));
+    }
     Ok(())
 }
 

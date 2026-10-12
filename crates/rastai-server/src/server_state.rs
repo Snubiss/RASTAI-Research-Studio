@@ -2,10 +2,11 @@
 //! std locks that are never held across an `.await`.
 //!
 //! M1-26 brought the fields startup and sign-in need; M1-27 the command registry, the settings layers that sit above
-//! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions; M1-28 the bus and the
-//! daemon's own event log. The node links and identity (M1-42, M1-47), the gateway and the rest join with the tasks
-//! that build them.
+//! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions; M1-28 the bus, the
+//! daemon's own event log and the tailed runs. The node links and identity (M1-42, M1-47), the gateway and the rest
+//! join with the tasks that build them.
 
+use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock, RwLock};
 
 use rastai_core::commands::registry::{CommandRegistry, load_core_commands};
@@ -49,6 +50,9 @@ pub struct Server {
     /// `<data>/daemon/events.log`, written by `record_daemon_event` only. A tokio mutex: it is held across the index
     /// write, so the daemon's records are indexed in log order.
     pub daemon_log: tokio::sync::Mutex<DaemonLog>,
+    /// The runs with a live tail (indexing/run_tail.rs): a run is in it from its tail's start to its end, so a
+    /// reconnect never starts a second tail of one run.
+    pub tailed_run_ids: Mutex<HashSet<String>>,
     /// One lock per (principal, idempotency key) while a command with that key runs (commands/journal.rs).
     pub idempotency_locks: Mutex<Vec<IdempotencyKeyLock>>,
     /// The open MCP sessions of `/mcp` (http/mcp_endpoint.rs), in memory only: a restart ends them all.
@@ -79,6 +83,7 @@ pub fn build_server(
         auth,
         bus: new_bus(bus_buffer_events, now_unix_ms()),
         daemon_log: tokio::sync::Mutex::new(new_daemon_log()),
+        tailed_run_ids: Mutex::new(HashSet::new()),
         idempotency_locks: Mutex::new(Vec::new()),
         mcp_sessions: Mutex::new(Vec::new()),
         http_port: OnceLock::new(),

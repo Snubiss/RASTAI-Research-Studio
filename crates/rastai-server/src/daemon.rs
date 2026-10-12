@@ -151,8 +151,8 @@ fn log_settings_problem(problem: Option<&Diagnostic>) {
 }
 
 /// Journal rows started and never finished belong to commands the last daemon was running when it stopped; they
-/// are closed as interrupted (`RRS-C0005`) before anything is served. The daemon log's replay goes first, so a
-/// command whose `command.finished` record made it to the log keeps its real outcome.
+/// are closed as interrupted (`RRS-C0005`) before anything is served. A command whose `command.finished` record made
+/// it to the log keeps its real outcome whichever runs first: the replay writes that outcome over the mark.
 async fn close_interrupted_commands(store: &Store) -> Result<(), ServerError> {
     write_index(&store.index, IndexWrite::MarkUnfinishedJournalRows).await?;
     Ok(())

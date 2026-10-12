@@ -15,18 +15,21 @@
 //!   is one enveloped message; the answer is HTTP 200 with each message in a 5-byte envelope (flags, then the length
 //!   as a big-endian u32), and a last end-of-stream envelope (flag 2) whose JSON body is `{}` or
 //!   `{"error": <the error envelope>}`. A refusal after the gate, such as `RRS-C0401`, is that last envelope.
-//!   The body is fed from a channel through tokio-stream's `ReceiverStream`, which tonic re-exports (contracts 2.5:
-//!   tonic is direct in this crate), so no stream crate of its own is needed.
+//!   The body is `ChannelBody`, a few lines here that hand each envelope the channel carries to axum as one data
+//!   frame, so no stream crate is needed. `http-body` is imported only here, for that frame type (contracts 2.5).
 
 // A refusal is a `Diagnostic`, the contract type every caller renders; it is larger than clippy's default for an
 // `Err`, and refusals are rare, so it is returned as it is rather than boxed.
 #![allow(clippy::result_large_err)]
 
 use std::convert::Infallible;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use axum::body::Body;
+use axum::body::{Body, Bytes, HttpBody};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use http_body::Frame;
 use prost::Message;
 use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
@@ -34,7 +37,6 @@ use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse, ListCommandsRe
 use rastai_proto::events::v1::{BusEvent, SubscribeRequest};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 
 use crate::http::connect_json::{
     diagnostic_to_json, execute_request_from_json, execute_response_to_json, list_commands_request_from_json,
@@ -82,9 +84,32 @@ const BASE64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq
 const BASE64_GROUP_BYTES: usize = 3;
 const BASE64_SIX_BITS: u32 = 0b11_1111;
 
-/// One piece of a stream's body: an envelope's bytes. The error type is `Infallible` because a piece, once made, is
-/// always sent; a stream that fails ends with its end-of-stream envelope instead.
-pub(crate) type StreamChunk = Result<Vec<u8>, Infallible>;
+/// One piece of a stream's body: an envelope's bytes. A stream that fails ends with its end-of-stream envelope, so a
+/// piece is never an error.
+pub(crate) type StreamChunk = Vec<u8>;
+
+/// A server stream's body: each piece the channel carries is one data frame, and the body ends when the sender is
+/// dropped. axum takes any `HttpBody` through `Body::new`.
+struct ChannelBody {
+    chunks: mpsc::Receiver<StreamChunk>,
+}
+
+impl HttpBody for ChannelBody {
+    type Data = Bytes;
+    // A piece, once made, is always sent; nothing here can fail.
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
+        match self.chunks.poll_recv(context) {
+            Poll::Ready(Some(chunk)) => Poll::Ready(Some(Ok(Frame::data(Bytes::from(chunk))))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
 
 /// How a unary body is encoded, from the request's Content-Type; the answer uses the same.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +166,7 @@ pub(crate) fn bus_event_envelope(event: &BusEvent) -> Vec<u8> {
 /// HTTP 200 with a server stream's content type, its body the pieces the channel carries, in order, until the
 /// sender is dropped.
 pub(crate) fn stream_response(chunks: mpsc::Receiver<StreamChunk>) -> Response {
-    let body = Body::from_stream(ReceiverStream::new(chunks));
+    let body = Body::new(ChannelBody { chunks });
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, STREAM_PROTO_CONTENT_TYPE)],
