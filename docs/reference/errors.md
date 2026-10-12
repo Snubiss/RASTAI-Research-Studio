@@ -998,11 +998,11 @@ Source: `catalog/errors/RRS-C.json`.
 
 <a id="rrs-c1008"></a>
 
-### RRS-C1008: Owner token is readable by group or others; the daemon refuses to start
+### RRS-C1008: Owner token's mode isn't 0600; the daemon refuses to start
 
 - **Severity:** error
-- **Message:** The owner token {path} is readable by group or others, so the daemon refuses to start.
-- **In plain words:** Rastai's key file can be read by other users on this computer, so Rastai won't start.
+- **Message:** The owner token {path} has a mode other than 0600, so the daemon refuses to start.
+- **In plain words:** Rastai's key file doesn't have the permissions it needs to stay private, so Rastai won't start.
 - **Fix:** Run chmod 600 {path}, then start Rastai again.
 
 <a id="rrs-c1009"></a>

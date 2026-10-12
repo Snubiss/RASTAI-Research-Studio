@@ -20,11 +20,12 @@ const CODE_DATA_DIRECTORY_NOT_WRITABLE: &str = "RRS-S0004";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerError {
-    /// `owner.token` can be read by group or others. The daemon never rewrites it: a loose mode may mean someone
-    /// already read the token (ADR-0034 decision 8). `mode` is the file's permission bits.
+    /// `owner.token`'s mode isn't exactly 0600, such as one group or others can read or write. The daemon never
+    /// rewrites it: a loose mode may mean someone already read or replaced the token (ADR-0034 decision 8). `mode`
+    /// is the file's permission bits.
     OwnerTokenTooOpen { path: PathBuf, mode: u32 },
-    /// `owner.token` or its folder can't be read or created: a permission, a folder in the file's place, an empty
-    /// file, an I/O error. `reason` keeps the operating system's words.
+    /// `owner.token` or its folder can't be read or created: a permission, a folder in the file's place, a file
+    /// that doesn't hold 64 lowercase hex characters, an I/O error. `reason` keeps the operating system's words.
     OwnerTokenUnusable { path: PathBuf, reason: String },
     /// Every port tried was already in use on the listen address.
     NoFreePort { tried_ports: Vec<u16> },
