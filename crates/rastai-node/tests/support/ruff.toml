@@ -1,0 +1,3 @@
+# fake_worker.py is linted and formatted with the same rules as python/ (owner decision 7), so `just lint` and
+# `just fmt-check` hold it to them like the rest of the repo's Python.
+extend = "../../../../python/pyproject.toml"
