@@ -1460,12 +1460,15 @@ JOB_ENTRIES: dict[str, str] = {
     "serve_inspectable": "rastai_worker.jobs.serve_inspectable:run_job",
     "train": "rastai_worker.jobs.train:run_job",
     "gym": "rastai_worker.jobs.gym:run_job",
+    # eval and lens jobs must name JobSpec.entry; plugin_entry.py is the one place that imports and calls it
+    "eval": "rastai_worker.jobs.plugin_entry:run_job",
+    "lens": "rastai_worker.jobs.plugin_entry:run_job",
     "data_import": "rastai_worker.jobs.data_import:run_job",
     "data_check": "rastai_worker.jobs.data_check:run_job",
     "compile": "rastai_worker.jobs.compile_design:run_job",
     "export": "rastai_worker.jobs.export:run_job",
     "doctor_selftest": "rastai_worker.jobs.doctor_selftest:run_job",
-    # "eval" and "lens" always carry JobSpec.entry; "plugin_module" runs in plugin mode
+    # "plugin_module" runs in plugin mode
 }
 ```
 
@@ -1480,6 +1483,7 @@ def run_job_process(job_file: Path) -> int:
     log = EventLogWriter(launch.event_log_path, launch.run_id, launch.job_id)   # exit 5 on a held lock
     live = LiveStream()
     events = WorkerJobEvents(log, live, control, launch.job_id)
+    events.start_flusher()                         # fsyncs quiet metrics; stopped before the log closes
     # serve before Register: the node calls Hello as soon as Register arrives
     server = start_worker_server(launch, control, live, job_token)
     host = connect_to_host(launch, job_token)      # WorkerHostService.Register with the job token, with retry
@@ -1562,14 +1566,14 @@ sequenceDiagram
 - **The event log is the source of truth.** Durable events reach the daemon only through the file; a restart loses nothing. Ephemeral events (`job.progress`, live packets, peek steps) go through `LiveStream` and may be dropped.
 - **Single writer.** `EventLogWriter` takes an exclusive `fcntl.flock` on `events.log`. A second writer (a relaunch racing a live job) fails with `RRS-J3006` instead of interleaving frames: `EventLogWriter` raises it before it reads or writes the log or `events.log.reserve`, the worker prints the diagnostic as one line to `stderr.log` (which the node opens for append) and exits with `EXIT_EVENT_LOG_LOCKED` (5) before `Register`, and the node fails that job with `RRS-J3006` and leaves the running copy, its log and its run state alone (platform flow 5.1, 5.5). The node refuses a second job on a live run before it spawns one: it checks for a live job of the run and reserves the run for the new job under one lock of its job table, and writes `job.json` only after that (contracts 9.1, "One live job per run"). So this is the backstop for a writer the node doesn't know is alive, such as a worker started by hand. That writer had no live `job.json`, so the `job.json` this worker read is its own job's, and the node finalizes it with `final_state` `failed` as on any terminal state, never over another live job's. Frames are `body_length u32 LE | CRC-32 u32 LE | EventRecord`, after the 8-byte `RRSEVLG1` header; the checksum is `zlib.crc32`, the same as the Rust reader's (contracts.md §7.1).
 - **Frames are never rewritten.** A frame with a valid CRC keeps its sequence forever, so the optional long-term archive (contracts 8.7) can copy frames by `(log, sequence)` and a restore can write them back unchanged. Only a torn tail (a frame that never completed) is truncated.
-- **fsync policy.** State changes, checkpoints, diagnostics and artifacts fsync at once; `run.metrics` is batched and fsynced at least once a second.
-- **Disk-full reserve** (platform flow 6.1). At start `EventLogWriter` writes `runs/<run_id>/events.log.reserve`: `EVENT_LOG_RESERVE_BYTES` (1 MiB) of zeros, fsynced. An append that fails with ENOSPC calls `pause_for_full_disk`: the run pauses with `RRS-S3002` and the training state stays in memory until the user frees space and sends `RESUME`. The job stays `running` and keeps its lease. Only if those two pause records can't be written either does the worker exit with `EXIT_EVENT_LOG_UNWRITABLE` (4), and the node marks the job `failed` with `RRS-S3002`. The reserve is deleted on exit.
+- **fsync policy.** State changes, checkpoints, diagnostics and artifacts fsync at once; `run.metrics` is batched and fsynced at least once a second. A job can go quiet after its last metrics, so `WorkerJobEvents` runs a flusher thread that calls `EventLogWriter.flush_if_due` on a timer; the writer isn't thread-safe, so the flusher and the job's thread take one lock around it.
+- **Disk-full reserve** (platform flow 6.1). At start `EventLogWriter` writes `runs/<run_id>/events.log.reserve`: `EVENT_LOG_RESERVE_BYTES` (1 MiB) of zeros, fsynced. An append that fails with ENOSPC calls `pause_for_full_disk`: the run pauses with `RRS-S3002` and the training state stays in memory until the user frees space and sends `RESUME`. The job stays `running` and keeps its lease. Only if those two pause records can't be written either does the worker exit with `EXIT_EVENT_LOG_UNWRITABLE` (4), and the node marks the job `failed` with `RRS-S3002`. A job already asked to end (STOP, CANCEL or SIGINT, SIGTERM) doesn't pause: it frees the reserve and tries the record once more, so it still ends `completed`, `cancelled` or `preempted`, and exits 4 only if that try fails too. The reserve is deleted on exit.
 - **Failure reporting.** On any exception the edge writes `diagnostic.reported` (a coded `Diagnostic`, never a bare traceback) and a final `run.state_changed`, fsyncs, prints the traceback to stderr.log, and exits 1. Two cases can't use the log: an event log that can't be written exits 4 (`EXIT_EVENT_LOG_UNWRITABLE`, above), and an event log another process holds exits 5 (`EXIT_EVENT_LOG_LOCKED`, single writer above) with the diagnostic in stderr.log only, because the log isn't this worker's to write. The node builds `job.state_changed` from the exit code and the last diagnostic. OOM maps to RRS-H3xxx with the requested and leased bytes; an unexpected exception (one that carries no catalog code) maps to `RRS-J1005`, with the error's type in the message and the traceback in stderr.log only.
 - **Host outages.** `WorkerHost` calls retry with backoff for up to `HOST_RECONNECT_TIMEOUT_SECONDS`. Training keeps running meanwhile; only calls that need the host (gateway, sandboxes, blobs) wait.
 
 ### 7.6 Threads, signals and multi-GPU
 
-- **Threads.** The main thread is the model thread. gRPC handler threads (grpcio's pool) do three things only: answer `Hello` from cached data, flip `JobControl` flags, and move requests or stream items through queues. `Generate` handlers put a request on the serve queue and stream results back from a per-request queue.
+- **Threads.** The main thread is the model thread. The metrics flusher (`job_events.py`) only fsyncs the event log, under the writer's lock. gRPC handler threads (grpcio's pool) do three things only: answer `Hello` from cached data, flip `JobControl` flags, and move requests or stream items through queues. `Generate` handlers put a request on the serve queue and stream results back from a per-request queue.
 - **Signals and Control values.** Handlers only set flags; each `JobSignal` has its own (contracts §4.4):
   - SIGTERM → `preempt_requested`: checkpoint if it fits the preemption budget, `train.preempted`, exit 75 for every kind, even one with nothing to save (plan §10 row 24).
   - Control `STOP` → `stop_requested`: final checkpoint, run `completed` with reason `stopped`, exit 0.

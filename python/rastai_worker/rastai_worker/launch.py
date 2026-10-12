@@ -5,7 +5,8 @@ The order matters:
 2. job.json and the job's entry: a file the worker can't use, or a kind it can't run, exits 2 before anything is
    written.
 3. The run's event log: its flock is the single-writer backstop. Another live writer means exit 5 with the
-   diagnostic in stderr.log only, before Register and before a byte of the log or its reserve is touched.
+   diagnostic in stderr.log only, before Register and before a byte of the log or its reserve is touched. The
+   metrics flusher (job_events.py) starts once the log is open and stops before it closes.
 4. WorkerService on the job socket, then Register: the node calls Hello as soon as Register arrives, so the socket
    must already answer.
 5. The entry, under the edge that writes the final records and picks the exit code (diagnostics.py).
@@ -73,15 +74,26 @@ def run_with_event_log(
 ) -> int:
     live = LiveStream()
     events = WorkerJobEvents(log, live, control, launch.job_id)
+    # The flusher fsyncs batched metrics while the job is quiet; it stops before the log closes.
+    events.start_flusher()
     try:
-        report_torn_tail(log, events)
-        server = start_worker_server(launch, control, live, job_token)
+        return serve_and_run(launch, entry, control, events, job_token)
+    finally:
+        events.stop_flusher()
+
+
+def serve_and_run(
+    launch: WorkerLaunch, entry: JobEntry, control: JobControl, events: WorkerJobEvents, job_token: str
+) -> int:
+    try:
+        report_torn_tail(events.log, events)
+        server = start_worker_server(launch, control, events.live, job_token)
     except WorkerError as error:
         return report_start_failure(error, exit_code_for_start_error(error))
     try:
         return run_registered(launch, entry, control, events, job_token)
     finally:
-        stop_worker_server(server, live)
+        stop_worker_server(server, events.live)
 
 
 def run_registered(

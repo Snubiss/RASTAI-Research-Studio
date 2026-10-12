@@ -23,6 +23,10 @@ pytestmark = pytest.mark.posix_only
 SIGNAL_WAIT_SECONDS = 2.0
 SIGNAL_POLL_SECONDS = 0.01
 HANDLED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+# STEPs sent at once, as the node's Control calls can arrive on several gRPC threads.
+CONCURRENT_STEPS = 8
+# How long SlowStepBudget takes to read the budget: long enough for every other STEP thread to run meanwhile.
+SLOW_READ_SECONDS = 0.05
 
 
 @pytest.fixture
@@ -90,6 +94,39 @@ def test_step_runs_one_more_step_each_time() -> None:
     assert (control.paused, control.step_budget) == (False, 1)
     apply_control_action(control, "STEP")
     assert control.step_budget == 2
+
+
+class SlowStepBudget:
+    """A JobControl whose step_budget is slow to read, so a STEP that read it and then wrote it without the lock
+    would overwrite the other STEPs' counts."""
+
+    def __init__(self) -> None:
+        self.paused = True
+        self.stored_step_budget = None
+
+    @property
+    def step_budget(self) -> int | None:
+        value = self.stored_step_budget
+        time.sleep(SLOW_READ_SECONDS)
+        return value
+
+    @step_budget.setter
+    def step_budget(self, value: int | None) -> None:
+        self.stored_step_budget = value
+
+
+def test_steps_sent_at_once_all_count() -> None:
+    control = SlowStepBudget()
+    senders = [
+        threading.Thread(target=apply_control_action, args=(control, "STEP"), daemon=True)
+        for _ in range(CONCURRENT_STEPS)
+    ]
+    for sender in senders:
+        sender.start()
+    for sender in senders:
+        sender.join(timeout=SIGNAL_WAIT_SECONDS * CONCURRENT_STEPS)
+    assert control.stored_step_budget == CONCURRENT_STEPS
+    assert not control.paused
 
 
 @pytest.mark.parametrize("action", ["TERMINATE", "KILL", "UNSPECIFIED", "number 42"])

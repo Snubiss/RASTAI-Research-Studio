@@ -3,7 +3,9 @@
 
 A fake file that raises ENOSPC stands in for the full disk: the reserve is freed, diagnostic.reported (RRS-S3002)
 and run.state_changed paused are written, the job waits for RESUME and the reserve comes back, then the event that
-failed is written. When the pause records fail too, or the log fails for any other reason, the exit code is 4.
+failed is written. A job asked to end doesn't pause: it frees the reserve and tries once more, so it still ends with
+its final record. When the pause records fail too, the record fails after the reserve was freed, or the log fails
+for any other reason, the exit code is 4.
 """
 
 import errno
@@ -15,12 +17,18 @@ from pathlib import Path
 
 import pytest
 from rastai_plugin.catalog.generated import RRS_S3002, RRS_S3005
-from rastai_proto.common.v1.states_pb2 import RUN_STATE_CANCELLED, RUN_STATE_PAUSED, RUN_STATE_RUNNING
+from rastai_proto.common.v1.states_pb2 import (
+    RUN_STATE_CANCELLED,
+    RUN_STATE_COMPLETED,
+    RUN_STATE_PAUSED,
+    RUN_STATE_PREEMPTED,
+    RUN_STATE_RUNNING,
+)
 from rastai_proto.events.v1.event_record_pb2 import EventRecord
 from rastai_worker.control import apply_control_action
 from rastai_worker.diagnostics import run_entry_with_diagnostics
 from rastai_worker.event_log import EVENT_LOG_HEADER, EVENT_LOG_RESERVE_BYTES, FRAME_HEADER_BYTES, EventLogWriter
-from rastai_worker.exit_codes import EXIT_CANCELLED, EXIT_EVENT_LOG_UNWRITABLE, EXIT_OK
+from rastai_worker.exit_codes import EXIT_CANCELLED, EXIT_EVENT_LOG_UNWRITABLE, EXIT_OK, EXIT_PREEMPTED
 from rastai_worker.job_events import WorkerJobEvents
 from rastai_worker.job_file import read_job_file
 from rastai_worker.live_stream import LiveStream
@@ -171,6 +179,58 @@ def test_a_cancel_while_the_disk_stays_full_exits_4(tmp_path: Path, monkeypatch:
     canceller.join()
     assert exit_code == EXIT_EVENT_LOG_UNWRITABLE
     assert read_records(tmp_path / "events.log")[-1].payload.run_state_changed.run_state == RUN_STATE_PAUSED
+    events.log.close()
+
+
+@pytest.mark.parametrize(
+    ("flag_name", "expected_exit", "expected_state"),
+    [
+        ("preempt_requested", EXIT_PREEMPTED, (RUN_STATE_PREEMPTED, "")),
+        ("cancel_requested", EXIT_CANCELLED, (RUN_STATE_CANCELLED, "")),
+        ("stop_requested", EXIT_OK, (RUN_STATE_COMPLETED, "stopped")),
+    ],
+)
+def test_an_ending_job_whose_final_record_meets_a_full_disk_frees_the_reserve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag_name: str, expected_exit: int, expected_state: tuple
+) -> None:
+    """A job asked to end doesn't pause for RESUME: its final record fails once on the full disk, the reserve is
+    freed, and the record lands in that room (platform flow 6.1; exit 4 only after the reserve was freed)."""
+    control = JobControl()
+    events = open_events(tmp_path, control)
+    launch = write_launch(tmp_path)
+    monkeypatch.setattr(event_log, "write_all_at", FullDisk({1}).write_all_at)
+
+    def ending_entry(job, host, entry_events, entry_control) -> None:
+        setattr(entry_control, flag_name, True)
+
+    exit_code = run_entry_with_diagnostics(ending_entry, launch, None, events, control)
+    assert exit_code == expected_exit
+    records = read_records(tmp_path / "events.log")
+    assert [record.event_type for record in records] == ["run.state_changed"]
+    final = records[0].payload.run_state_changed
+    assert (final.run_state, final.reason) == expected_state
+    assert not control.paused
+    assert not events.log.reserve_path.exists()
+    assert not events.log_is_unwritable
+    events.log.close()
+
+
+def test_an_ending_job_whose_final_record_fails_after_the_reserve_is_freed_exits_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    control = JobControl()
+    events = open_events(tmp_path, control)
+    launch = write_launch(tmp_path)
+    # The final record fails, and so does its one more try once the reserve is gone.
+    monkeypatch.setattr(event_log, "write_all_at", FullDisk({1, 2}).write_all_at)
+
+    def preempted_entry(job, host, entry_events, entry_control) -> None:
+        entry_control.preempt_requested = True
+
+    assert run_entry_with_diagnostics(preempted_entry, launch, None, events, control) == EXIT_EVENT_LOG_UNWRITABLE
+    assert read_records(tmp_path / "events.log") == []
+    assert not events.log.reserve_path.exists()
+    assert capsys.readouterr().err.strip().splitlines()[-1].startswith(f"{RRS_S3002}: ")
     events.log.close()
 
 

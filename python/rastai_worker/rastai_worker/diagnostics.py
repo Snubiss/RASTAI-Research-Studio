@@ -10,7 +10,7 @@ the node and the daemon learn the outcome from the log even when they are down a
 | returned, after CANCEL or SIGINT | run cancelled | 3 |
 | returned, after STOP | run completed, reason "stopped" | 0 |
 | returned | run completed | 0 |
-| raised | diagnostic.reported, then run failed | 1 |
+| raised, or called sys.exit() | diagnostic.reported, then run failed | 1 |
 | the log can't be written | none (stderr.log only) | 4 |
 
 Entries never write the final run state themselves; this edge is its one writer.
@@ -63,12 +63,16 @@ def run_entry_with_diagnostics(
         # A job asked to end before it began (SIGTERM during the start) ends without running.
         if not (control.preempt_requested or control.cancel_requested):
             entry(launch.job_spec, host, events, control)
-    except Exception as error:
+    except (Exception, SystemExit) as error:
+        # sys.exit() in an entry is a failure too: the job must still end with its final record, not leave the node
+        # an exit with none (RRS-J1004).
         failure = error
     return finish_job(launch, events, control, failure)
 
 
-def finish_job(launch: WorkerLaunch, events: WorkerJobEvents, control: JobControl, failure: Exception | None) -> int:
+def finish_job(
+    launch: WorkerLaunch, events: WorkerJobEvents, control: JobControl, failure: BaseException | None
+) -> int:
     """Writes the final records. When the log can't take them (it failed during the job, or fails now), stderr.log
     is the only place left for the reason, and the exit code is 4."""
     if failure is not None:
@@ -84,7 +88,7 @@ def finish_job(launch: WorkerLaunch, events: WorkerJobEvents, control: JobContro
         return EXIT_EVENT_LOG_UNWRITABLE
 
 
-def report_failure(launch: WorkerLaunch, events: WorkerJobEvents, failure: Exception) -> int:
+def report_failure(launch: WorkerLaunch, events: WorkerJobEvents, failure: BaseException) -> int:
     """The coded diagnostic and the failed run state to the log; the traceback is already in stderr.log."""
     diagnostic = diagnostic_from_error(failure, launch.job_id)
     events.emit_durable(DIAGNOSTIC_REPORTED, {"diagnostic": diagnostic, "subject_id": launch.job_id})
