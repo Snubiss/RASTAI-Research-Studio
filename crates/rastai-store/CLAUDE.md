@@ -31,6 +31,9 @@ are in `docs/architecture/contracts.md` §8.2 (tables and columns) and §15.1 (c
   `apply_event_record` (`indexer.rs`), whose writes are upserts or updates keyed by ids. `ApplyRunEvents` and
   `ApplyDaemonEvents` skip records at or below the ack and commit the rows with the ack in one transaction, so each
   record is applied exactly once.
+- **A run's log is untrusted** (contracts 7.1): the job writes it. `ApplyRunEvents` refuses (`RRS-S2004`) a record
+  that names another run, carries an event only the daemon's log carries, takes another run's checkpoint id or
+  rewrites an existing artifact, and commits nothing of that batch; the log counts as damaged there.
 - **Blobs are named by their BLAKE3** (`blobs/`): written to `.incoming/`, fsynced, renamed into `ab/<hash>`; a
   mismatch is moved to `.quarantine/` (`RRS-S1001`). A hash is checked for `blake3:<64 lowercase hex>` before it
   becomes a path.

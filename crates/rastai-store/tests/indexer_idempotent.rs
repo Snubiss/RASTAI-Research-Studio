@@ -1,6 +1,8 @@
 //! The indexer applies each event record exactly once (layout rust-control-plane.md 6.4 and 6.7, flows/platform.md
 //! 6.1): the same batch applied twice gives the same rows, the ack only moves forward, and the rows and the ack
 //! commit in one transaction. Run logs move `runs.acked_sequence`, the daemon log `log_cursors.acked_sequence`.
+//! A run's log is untrusted (contracts 7.1): a record of another run, an event only the daemon's log carries, another
+//! run's checkpoint id or a rewritten artifact is refused with `RRS-S2004` and changes nothing.
 
 #![allow(clippy::unwrap_used)]
 
@@ -10,8 +12,9 @@ use rastai_proto::common::v1::{Diagnostic, EventClass, JobState, NodeState, Plug
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::run_state_changed::State;
 use rastai_proto::events::v1::{
-    ArtifactCreated, ArtifactParent, CheckpointSaved, CommandFinished, DocumentChanged, EventPayload, EventRecord,
-    JobStateChanged, NodeStateChanged, PinChanged, PluginStateChanged, RunMetrics, RunStateChanged, RunTagsChanged,
+    ArtifactCreated, ArtifactParent, CheckpointSaved, CommandFinished, DiagnosticReported, DocumentChanged,
+    EventPayload, EventRecord, JobStateChanged, NodeStateChanged, PinChanged, PluginEventPayload, PluginStateChanged,
+    RunMetrics, RunStateChanged, RunTagsChanged,
 };
 use rastai_store::index::documents::{DocumentRow, get_document};
 use rastai_store::index::journal::{JournalStartedRow, get_journal};
@@ -28,6 +31,10 @@ mod common;
 use common::{remove_test_folder, test_paths};
 
 const RUN_ID: &str = "run_01JA2B3C4D5E6F7G8H9J0K1M2N";
+// A second run, whose rows a record in the first run's log must never reach.
+const OTHER_RUN_ID: &str = "run_01JB2B3C4D5E6F7G8H9J0K1M2N";
+const OTHER_CHECKPOINT_ID: &str = "ckpt_01JB2B3C4D5E6F7G8H9J0K1M2N";
+const RUN_LOG_RECORD_REFUSED: &str = "RRS-S2004";
 const JOB_ID: &str = "job_01JA2B3C4D5E6F7G8H9J0K1M2N";
 const NODE_ID: &str = "node_local";
 const CHECKPOINT_ID: &str = "ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N";
@@ -59,11 +66,15 @@ fn record(sequence: u64, run_id: &str, event_type: &str, payload: Payload) -> Ev
 }
 
 fn run_state(sequence: u64, state: RunState) -> EventRecord {
+    run_state_of(sequence, RUN_ID, state)
+}
+
+fn run_state_of(sequence: u64, run_id: &str, state: RunState) -> EventRecord {
     let change = RunStateChanged {
         reason: String::new(),
         state: Some(State::RunState(state as i32)),
     };
-    record(sequence, RUN_ID, "run.state_changed", Payload::RunStateChanged(change))
+    record(sequence, run_id, "run.state_changed", Payload::RunStateChanged(change))
 }
 
 fn metrics(sequence: u64, step: u64, loss: f64) -> EventRecord {
@@ -74,20 +85,13 @@ fn metrics(sequence: u64, step: u64, loss: f64) -> EventRecord {
     record(sequence, RUN_ID, "run.metrics", Payload::RunMetrics(metrics))
 }
 
-/// A whole run: the job starts, the run trains, saves its best checkpoint, exports an artifact and completes.
+/// A whole run: it prepares, trains, saves its best checkpoint, exports an artifact, completes, and the job's plugin
+/// code reports an event of its own. Job states aren't here: the daemon makes them from heartbeats (contracts 7.1).
 fn run_log_batch() -> Vec<EventRecord> {
-    let job_running = JobStateChanged {
-        job_id: JOB_ID.to_string(),
-        from_state: JobState::Starting as i32,
-        to_state: JobState::Running as i32,
-        ..Default::default()
-    };
-    let job_succeeded = JobStateChanged {
-        job_id: JOB_ID.to_string(),
-        from_state: JobState::Running as i32,
-        to_state: JobState::Succeeded as i32,
-        exit_code: Some(0),
-        ..Default::default()
+    let plugin_event = PluginEventPayload {
+        plugin_id: PLUGIN_ID.to_string(),
+        schema: "EvalNote".to_string(),
+        payload_json: "{}".to_string(),
     };
     let checkpoint = CheckpointSaved {
         checkpoint_id: CHECKPOINT_ID.to_string(),
@@ -108,7 +112,7 @@ fn run_log_batch() -> Vec<EventRecord> {
         }],
     };
     vec![
-        record(1, RUN_ID, "job.state_changed", Payload::JobStateChanged(job_running)),
+        run_state(1, RunState::Preparing),
         run_state(2, RunState::Running),
         metrics(3, 1, 2.5),
         // A diverging run still logs its step: the NaN is stored as NULL.
@@ -116,7 +120,7 @@ fn run_log_batch() -> Vec<EventRecord> {
         record(5, RUN_ID, "checkpoint.saved", Payload::CheckpointSaved(checkpoint)),
         record(6, RUN_ID, "artifact.created", Payload::ArtifactCreated(artifact)),
         run_state(7, RunState::Completed),
-        record(8, RUN_ID, "job.state_changed", Payload::JobStateChanged(job_succeeded)),
+        record(8, RUN_ID, "acme.eval.note", Payload::PluginEvent(plugin_event)),
     ]
 }
 
@@ -338,12 +342,8 @@ fn a_run_batch_writes_the_rows_of_its_records() {
     let run = get_run(&reader, RUN_ID).unwrap().unwrap();
     assert_eq!(run.state, "completed");
     assert_eq!(run.finished_unix_ms, Some(RECORD_TIME_UNIX_MS + 7));
-    let job = get_job(&reader, JOB_ID).unwrap().unwrap();
-    assert_eq!(job.state, "succeeded");
-    assert_eq!(job.exit_code, Some(0));
-    // The job's own columns, written by the daemon, are kept.
-    assert_eq!(job.pid, Some(4242));
-    assert_eq!(job.node_id, NODE_ID);
+    // A run's log carries no job state, so the job keeps the state the daemon wrote.
+    assert_eq!(get_job(&reader, JOB_ID).unwrap().unwrap().state, "starting");
     let checkpoint = &rows_of(&store, "checkpoints")[0];
     assert_eq!(checkpoint[0], format!("{CHECKPOINT_ID:?}"));
     // node_id comes from the run; is_best is 1.
@@ -402,15 +402,9 @@ fn a_failed_record_leaves_neither_rows_nor_ack() {
     let store = open_store(&paths).unwrap();
     write_starting_rows(&runtime, &store);
     let rows_before = every_row(&store);
-    // The third record's checkpoint belongs to a run the index doesn't know, which its foreign key refuses.
+    // The third record's step is past SQLite's largest integer, so its write fails.
     let mut batch = run_log_batch();
-    let orphan = CheckpointSaved {
-        checkpoint_id: "ckpt_orphan".to_string(),
-        step: 1,
-        folder: "checkpoints/step-00000001".to_string(),
-        ..Default::default()
-    };
-    batch[2] = record(3, "run_unknown", "checkpoint.saved", Payload::CheckpointSaved(orphan));
+    batch[2] = metrics(3, u64::MAX, 2.5);
     let write = IndexWrite::ApplyRunEvents {
         run_id: RUN_ID.to_string(),
         records: batch,
@@ -565,7 +559,8 @@ fn a_failed_job_keeps_its_error_code() {
         }),
         ..Default::default()
     };
-    apply_run_batch(
+    // The daemon makes job states from the node's heartbeats and logs them in its own log (contracts 7.1).
+    apply_daemon_batch(
         &runtime,
         &store,
         vec![record(1, RUN_ID, "job.state_changed", Payload::JobStateChanged(failed))],
@@ -576,7 +571,291 @@ fn a_failed_job_keeps_its_error_code() {
     assert_eq!(job.state, "failed");
     assert_eq!(job.exit_code, Some(4));
     assert_eq!(job.error_code, "RRS-S3002");
+    // The job's own columns, written by the daemon when it started the job, are kept.
+    assert_eq!(job.pid, Some(4242));
+    assert_eq!(job.node_id, NODE_ID);
     drop(reader);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+// ---- A run's log is untrusted (contracts 7.1) ----
+
+/// A second run with a checkpoint of its own, indexed from its own log.
+fn write_other_run(runtime: &Runtime, store: &Store) {
+    let run = RunRow {
+        run_id: OTHER_RUN_ID.to_string(),
+        kind: "train".to_string(),
+        state: "created".to_string(),
+        project_id: "prj_a".to_string(),
+        node_id: NODE_ID.to_string(),
+        parent_run_id: String::new(),
+        record_hash: CONTENT_HASH.to_string(),
+        acked_sequence: 0,
+        created_unix_ms: 11,
+        finished_unix_ms: None,
+        pinned: false,
+        archive_state: "local".to_string(),
+    };
+    runtime
+        .block_on(write_index(&store.index, IndexWrite::UpsertRun(run)))
+        .unwrap();
+    let checkpoint = CheckpointSaved {
+        checkpoint_id: OTHER_CHECKPOINT_ID.to_string(),
+        step: 5,
+        folder: "checkpoints/step-00000005".to_string(),
+        is_best: true,
+        ..Default::default()
+    };
+    let records = vec![
+        run_state_of(1, OTHER_RUN_ID, RunState::Running),
+        record(
+            2,
+            OTHER_RUN_ID,
+            "checkpoint.saved",
+            Payload::CheckpointSaved(checkpoint),
+        ),
+    ];
+    let write = IndexWrite::ApplyRunEvents {
+        run_id: OTHER_RUN_ID.to_string(),
+        records,
+    };
+    runtime.block_on(write_index(&store.index, write)).unwrap();
+}
+
+/// Applies `records` as `RUN_ID`'s log and expects the refusal, with nothing changed anywhere.
+fn assert_run_batch_refused(runtime: &Runtime, store: &Store, records: Vec<EventRecord>, refused_sequence: u64) {
+    let rows_before = every_row(store);
+    let acked_before = run_acked_sequence(store);
+    let write = IndexWrite::ApplyRunEvents {
+        run_id: RUN_ID.to_string(),
+        records,
+    };
+
+    let error = runtime.block_on(write_index(&store.index, write)).unwrap_err();
+
+    assert_eq!(error.code(), RUN_LOG_RECORD_REFUSED);
+    match error {
+        rastai_store::error::StoreError::RunLogRecordRefused { run_id, sequence, .. } => {
+            assert_eq!(run_id, RUN_ID);
+            assert_eq!(sequence, refused_sequence);
+        }
+        other => panic!("expected a refused record, got {other:?}"),
+    }
+    assert_eq!(every_row(store), rows_before);
+    assert_eq!(run_acked_sequence(store), acked_before);
+}
+
+#[test]
+fn a_run_log_record_of_another_run_changes_nothing() {
+    let paths = test_paths("indexer-other-run");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+    // The job of RUN_ID writes a record that fails OTHER_RUN_ID, after one of its own.
+    let batch = vec![
+        run_state(1, RunState::Running),
+        run_state_of(2, OTHER_RUN_ID, RunState::Failed),
+        metrics(3, 1, 2.5),
+    ];
+
+    assert_run_batch_refused(&runtime, &store, batch.clone(), 2);
+
+    // The tail sends the records before the refused one again and stops there: they index, the other run doesn't
+    // move, and the ack stays before the refused record.
+    apply_run_batch(&runtime, &store, batch[..1].to_vec());
+    assert_run_batch_refused(&runtime, &store, batch, 2);
+    let reader = open_index_reader(&store.index_readers).unwrap();
+    assert_eq!(get_run(&reader, RUN_ID).unwrap().unwrap().state, "running");
+    let other = get_run(&reader, OTHER_RUN_ID).unwrap().unwrap();
+    assert_eq!(other.state, "running");
+    assert_eq!(other.finished_unix_ms, None);
+    drop(reader);
+    assert_eq!(run_acked_sequence(&store), 1);
+    assert!(rows_of(&store, "run_metrics").is_empty());
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+/// Every M1 event a run's log may not carry: the daemon's own (each of `daemon_log_batch`), the node's job state,
+/// and the ephemeral ones that are in no log. Each names the log's own run, so only its type is wrong.
+fn daemon_only_records() -> Vec<EventRecord> {
+    let job_succeeded = JobStateChanged {
+        job_id: JOB_ID.to_string(),
+        from_state: JobState::Running as i32,
+        to_state: JobState::Succeeded as i32,
+        exit_code: Some(0),
+        ..Default::default()
+    };
+    let mut records = vec![record(
+        1,
+        RUN_ID,
+        "job.state_changed",
+        Payload::JobStateChanged(job_succeeded),
+    )];
+    for daemon_record in daemon_log_batch() {
+        let mut own = daemon_record;
+        own.sequence = 1;
+        own.run_id = RUN_ID.to_string();
+        records.push(own);
+    }
+    records.push(record(
+        1,
+        RUN_ID,
+        "job.progress",
+        Payload::JobProgress(Default::default()),
+    ));
+    records.push(record(
+        1,
+        RUN_ID,
+        "job.log_line",
+        Payload::JobLogLine(Default::default()),
+    ));
+    records.push(record(
+        1,
+        RUN_ID,
+        "node.heartbeat",
+        Payload::NodeHeartbeat(Default::default()),
+    ));
+    records
+}
+
+#[test]
+fn a_run_log_carrying_a_daemon_only_event_changes_nothing() {
+    let paths = test_paths("indexer-daemon-only");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+
+    for daemon_only in daemon_only_records() {
+        assert_run_batch_refused(&runtime, &store, vec![daemon_only], 1);
+    }
+
+    // The same records from the daemon's own log are applied: the refusal is about where they come from.
+    let reader = open_index_reader(&store.index_readers).unwrap();
+    assert_eq!(get_job(&reader, JOB_ID).unwrap().unwrap().state, "starting");
+    assert!(!get_run(&reader, RUN_ID).unwrap().unwrap().pinned);
+    drop(reader);
+    apply_daemon_batch(&runtime, &store, daemon_log_batch());
+    let reader = open_index_reader(&store.index_readers).unwrap();
+    assert!(get_run(&reader, RUN_ID).unwrap().unwrap().pinned);
+    drop(reader);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+#[test]
+fn a_run_log_can_not_take_another_runs_checkpoint() {
+    let paths = test_paths("indexer-other-checkpoint");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+    let stolen = CheckpointSaved {
+        checkpoint_id: OTHER_CHECKPOINT_ID.to_string(),
+        step: 1,
+        folder: "checkpoints/step-00000001".to_string(),
+        is_best: true,
+        ..Default::default()
+    };
+
+    let batch = vec![record(1, RUN_ID, "checkpoint.saved", Payload::CheckpointSaved(stolen))];
+    assert_run_batch_refused(&runtime, &store, batch, 1);
+
+    // The other run still owns it: column 1 is run_id (contracts 8.2).
+    let checkpoints = rows_of(&store, "checkpoints");
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0][1], format!("{OTHER_RUN_ID:?}"));
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+#[test]
+fn a_run_log_can_not_rewrite_an_existing_artifact() {
+    let paths = test_paths("indexer-rewrite-artifact");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+    // The other run made the artifact.
+    let made = ArtifactCreated {
+        artifact_id: ARTIFACT_ID.to_string(),
+        kind: "exported_model".to_string(),
+        content_hash: CONTENT_HASH.to_string(),
+        size_bytes: 4096,
+        home_node_id: NODE_ID.to_string(),
+        parents: Vec::new(),
+    };
+    let write = IndexWrite::ApplyRunEvents {
+        run_id: OTHER_RUN_ID.to_string(),
+        records: vec![record(
+            3,
+            OTHER_RUN_ID,
+            "artifact.created",
+            Payload::ArtifactCreated(made.clone()),
+        )],
+    };
+    runtime.block_on(write_index(&store.index, write)).unwrap();
+    let mut rewritten = made.clone();
+    rewritten.content_hash = "blake3:0202020202020202020202020202020202020202020202020202020202020202".to_string();
+
+    let batch = vec![record(
+        1,
+        RUN_ID,
+        "artifact.created",
+        Payload::ArtifactCreated(rewritten),
+    )];
+    assert_run_batch_refused(&runtime, &store, batch, 1);
+
+    // Naming it with the same contents changes nothing, so it is accepted: a re-sent record is never refused.
+    apply_run_batch(
+        &runtime,
+        &store,
+        vec![record(1, RUN_ID, "artifact.created", Payload::ArtifactCreated(made))],
+    );
+    let artifacts = rows_of(&store, "artifacts");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0][2], format!("{CONTENT_HASH:?}"));
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+#[test]
+fn a_run_log_may_carry_a_diagnostic() {
+    let paths = test_paths("indexer-run-diagnostic");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    let rows_before = every_row(&store);
+    let reported = DiagnosticReported {
+        diagnostic: Some(Diagnostic {
+            code: "RRS-S3002".to_string(),
+            ..Default::default()
+        }),
+        subject_id: RUN_ID.to_string(),
+    };
+
+    apply_run_batch(
+        &runtime,
+        &store,
+        vec![record(
+            1,
+            RUN_ID,
+            "diagnostic.reported",
+            Payload::DiagnosticReported(reported),
+        )],
+    );
+
+    // No rows, but the ack moves past it.
+    assert_eq!(run_acked_sequence(&store), 1);
+    let mut rows_after = every_row(&store);
+    let mut expected = rows_before;
+    for tables in [&mut rows_after, &mut expected] {
+        tables.retain(|(table_name, _)| table_name != "runs");
+    }
+    assert_eq!(rows_after, expected);
     runtime.block_on(close_store(store));
     remove_test_folder(&paths);
 }

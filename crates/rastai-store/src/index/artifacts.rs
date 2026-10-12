@@ -3,7 +3,10 @@
 //! The lineage queries arrive with build step 4 (layout section 6.9); `models` with `download.finished` (M2).
 
 use crate::error::StoreError;
-use crate::sqlite::{SqliteTransaction, boolean_value, execute, integer_value, text_value, unsigned_value};
+use crate::sqlite::{
+    SqliteTransaction, boolean_value, execute, integer_value, query_rows_in_transaction, read_text, read_unsigned,
+    text_value, unsigned_value,
+};
 
 // `pinned` is left out of the update: only pin.changed moves it.
 const UPSERT_ARTIFACT: &str = "INSERT INTO artifacts (artifact_id, kind, content_hash, size_bytes, home_node_id,
@@ -15,6 +18,8 @@ const UPSERT_ARTIFACT: &str = "INSERT INTO artifacts (artifact_id, kind, content
 // A copy that is already recorded keeps its path and its last verification.
 const INSERT_ARTIFACT_COPY: &str = "INSERT INTO artifact_copies (artifact_id, node_id, path) VALUES (?1, ?2, ?3)
     ON CONFLICT (artifact_id, node_id) DO NOTHING";
+const SELECT_ARTIFACT_CONTENTS: &str = "SELECT kind, content_hash, size_bytes, home_node_id FROM artifacts
+    WHERE artifact_id = ?1";
 const SET_ARTIFACT_PINNED: &str = "UPDATE artifacts SET pinned = ?2 WHERE artifact_id = ?1";
 const INSERT_LINEAGE: &str = "INSERT INTO lineage (from_id, to_id, relation) VALUES (?1, ?2, ?3)
     ON CONFLICT (from_id, to_id, relation) DO NOTHING";
@@ -55,6 +60,29 @@ pub(crate) fn upsert_artifact(
     ];
     execute(transaction, INSERT_ARTIFACT_COPY, &copy)?;
     Ok(())
+}
+
+/// Whether the index holds `artifact.artifact_id` with other contents (kind, hash, size or home node) than
+/// `artifact`. An artifact never changes once made, so a run's log that names an existing one with other contents
+/// would overwrite what another run made; the indexer refuses that record (indexer.rs). The same record applied again
+/// finds equal contents, so this never stops a re-sent record.
+pub(crate) fn artifact_differs(
+    transaction: &SqliteTransaction<'_>,
+    artifact: &CreatedArtifact<'_>,
+) -> Result<bool, StoreError> {
+    let rows = query_rows_in_transaction(
+        transaction,
+        SELECT_ARTIFACT_CONTENTS,
+        &[text_value(artifact.artifact_id)],
+    )?;
+    let Some(row) = rows.first() else {
+        return Ok(false);
+    };
+    let same = read_text(row, 0)? == artifact.kind
+        && read_text(row, 1)? == artifact.content_hash
+        && read_unsigned(row, 2)? == artifact.size_bytes
+        && read_text(row, 3)? == artifact.home_node_id;
+    Ok(!same)
 }
 
 pub(crate) fn set_artifact_pinned(
