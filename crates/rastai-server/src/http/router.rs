@@ -2,8 +2,8 @@
 //! loopback TCP and daemon.sock (listeners.rs); the gate tells the two apart by the peer a daemon.sock connection
 //! carries.
 //!
-//! M1-26 brought `/api/health` and `POST /api/login`, M1-27 `Execute` and `ListCommands`, M1-30 `POST /mcp`.
-//! Subscribe (M1-28), blobs (M3), `/v1` (M3), plugin assets and the web app join here as they land.
+//! M1-26 brought `/api/health` and `POST /api/login`, M1-27 `Execute` and `ListCommands`, M1-30 `POST /mcp`, M1-28
+//! `Subscribe`. Blobs (M3), `/v1` (M3), plugin assets and the web app join here as they land.
 //!
 //! A gate refusal on a Connect path (`/rastai.`) comes back in the Connect error envelope (connect.rs), so a Connect
 //! client reads it as an error with its diagnostic attached; on any other path it is the diagnostic as JSON.
@@ -30,6 +30,7 @@ use serde_json::{Value, json};
 
 use crate::http::command_endpoints::{EXECUTE_PATH, LIST_COMMANDS_PATH, execute_endpoint, list_commands_endpoint};
 use crate::http::connect::connect_error_response;
+use crate::http::event_endpoint::{SUBSCRIBE_PATH, subscribe_endpoint};
 use crate::http::gate::{
     HEALTH_PATH, LOGIN_PATH, Listener, MISSING_HEADER_TEXT, RequestHead, check_request_gate, read_request_head,
 };
@@ -69,6 +70,7 @@ pub fn build_router(server: Arc<Server>) -> Router {
             MCP_PATH,
             post(mcp_endpoint).layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES)),
         )
+        .route(SUBSCRIBE_PATH, post(subscribe_endpoint))
         .fallback(not_found);
     let gated = routes.layer(middleware::from_fn_with_state(server.clone(), gate_middleware));
     gated.with_state(server)

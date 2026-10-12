@@ -12,10 +12,11 @@
 //! 6. A dry run goes to the handler with `dry_run` set: no journal, no side effects.
 //! 7. A key seen before replays the stored response, or is `RRS-C0004` for a different request (compared by a keyed
 //!    hash of the unredacted arguments, so a different secret is a different request).
-//! 8. Otherwise the journal's started row, the handler, then the finished row with the redacted result.
+//! 8. Otherwise the journal's started row, the handler, then the finished row with the redacted result, then
+//!    `command.finished` through the daemon log (`record_daemon_event`): logged, indexed, then published, so a
+//!    rebuild keeps the journal and a UI hears about every journaled command.
 //!
 //! A command that fails is `ExecuteResponse{ok: false, diagnostics}`; only the gate answers with HTTP errors.
-//! Publishing `command.finished` on the bus and in the daemon log joins with the bus (M1-28).
 
 use rastai_core::commands::output::CommandOutput;
 use rastai_core::commands::registry::{check_scope, find_command};
@@ -28,15 +29,18 @@ use rastai_diag::logger::log_warn;
 use rastai_formats::validate::meaning::plugin_manifest::{EXPECTED_PLUGIN_ID_FORM, is_plugin_id};
 use rastai_proto::commands::v1::{CommandDescriptor, ExecuteRequest, ExecuteResponse};
 use rastai_proto::common::v1::PluginState;
+use rastai_proto::events::v1::event_payload::Payload;
+use rastai_proto::events::v1::{CommandFinished, EventPayload, EventRecord};
 
 use crate::commands::arguments::check_arguments;
 use crate::commands::context::CommandContext;
 use crate::commands::dispatch::dispatch;
 use crate::commands::journal::{
-    arguments_hash, find_recent_journal_row, idempotency_key_lock, is_journaled, is_same_request, journal_finished,
-    journal_started,
+    arguments_hash, find_recent_journal_row, first_error_code, idempotency_key_lock, is_journaled, is_same_request,
+    journal_finished, journal_started,
 };
 use crate::plugin_host::load::{plugin_principal_scopes, plugin_status};
+use crate::events::daemon_events::record_daemon_event;
 use crate::server_state::Server;
 
 const CODE_UNKNOWN_COMMAND: &str = "RRS-C0001";
@@ -46,6 +50,7 @@ const CODE_KEY_REUSED: &str = "RRS-C0004";
 const CODE_RETIRED: &str = "RRS-C0007";
 /// The fix of `RRS-C0003` (M8 builds it).
 const PLUGIN_ENABLE_COMMAND_ID: &str = "plugin.enable";
+const COMMAND_FINISHED_EVENT: &str = "command.finished";
 
 /// The outcome of one request, and the journal row it has (empty when it has none).
 struct CommandOutcome {
@@ -223,7 +228,42 @@ async fn run_journaled(server: &Server, checked: &CheckedCommand, request: &Exec
             &[("journal_id", &journal_id), ("code", &code)],
         );
     }
+    // After the finished row, whose redacted result the record doesn't carry and an earlier finish would keep out.
+    let record = command_finished_record(&request.command_id, &label, &journal_id, &result);
+    if let Err(error) = record_daemon_event(server, record).await {
+        log_warn(
+            "a command's command.finished record could not be logged and indexed",
+            &[("journal_id", &journal_id), ("code", error.code())],
+        );
+    }
     CommandOutcome { journal_id, result }
+}
+
+/// The daemon-log record of a journaled command's end (contracts 4.3): its outcome and first error's code.
+fn command_finished_record(
+    command_id: &str,
+    principal_label: &str,
+    journal_id: &str,
+    result: &Result<CommandOutput, Vec<Diagnostic>>,
+) -> EventRecord {
+    let (ok, code) = match result {
+        Ok(_) => (true, String::new()),
+        Err(diagnostics) => (false, first_error_code(diagnostics)),
+    };
+    let finished = CommandFinished {
+        journal_id: journal_id.to_string(),
+        command_id: command_id.to_string(),
+        principal: principal_label.to_string(),
+        ok,
+        code,
+    };
+    EventRecord {
+        event_type: COMMAND_FINISHED_EVENT.to_string(),
+        payload: Some(EventPayload {
+            payload: Some(Payload::CommandFinished(finished)),
+        }),
+        ..EventRecord::default()
+    }
 }
 
 fn command_context<'a>(

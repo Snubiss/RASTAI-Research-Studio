@@ -5,6 +5,7 @@
 pub mod command_endpoints;
 pub mod connect;
 pub mod connect_json;
+pub mod event_endpoint;
 pub mod gate;
 pub mod health;
 pub mod listeners;

@@ -9,6 +9,8 @@
 //!   before the end is an error: appending after it would hide it.
 //! - `append_event` writes one frame with a single write, so a crash leaves at most one torn frame. If the write
 //!   itself fails (a full disk), the partial frame is cut off again before the error returns.
+//! - `append_raw_frame` writes a frame another writer made, as it is: the daemon's mirror of a remote run (layout
+//!   13.1) and, later, an archive restore. The frame must be whole and carry the log's next sequence.
 //! - fsync: `SyncPolicy::Now` after state changes and checkpoints; `SyncPolicy::Batched` for metrics, synced at
 //!   least once a second while appends continue. A writer that may go quiet calls `sync_event_log` on its own timer.
 
@@ -20,13 +22,18 @@ use std::time::{Duration, Instant};
 use rastai_proto::events::v1::EventRecord;
 
 use crate::error::{StoreError, event_log_write_error};
-use crate::event_log::frame::{EVENT_LOG_HEADER, EVENT_RECORD_FORMAT_VERSION, FIRST_SEQUENCE, encode_frame};
+use crate::event_log::frame::{
+    EVENT_LOG_HEADER, EVENT_RECORD_FORMAT_VERSION, FIRST_SEQUENCE, FRAME_HEADER_BYTES, body_matches_header,
+    decode_frame_body, decode_frame_header, encode_frame,
+};
 use crate::event_log::reader::{FrameRead, open_event_log, read_next_frame, reader_offset};
 
 /// Batched appends (metrics) are fsynced at least this often (contracts 7.1: "at least once a second"). The same
 /// name and value as the Python worker's writer (contracts 15.10).
 const METRICS_FSYNC_INTERVAL_SECONDS: u64 = 1;
 const FRAME_TOO_LARGE_REASON: &str = "the record is larger than a frame's 4 GiB length field allows";
+const NOT_A_WHOLE_FRAME_REASON: &str = "the bytes to append are not one whole frame (length and CRC-32)";
+const NOT_A_RECORD_REASON: &str = "the frame to append does not hold a version-1 EventRecord";
 
 /// When an append is made durable against a power cut. Every append survives the writer being killed either way:
 /// the bytes are in the operating system's page cache as soon as the write returns.
@@ -123,6 +130,24 @@ pub fn append_event(
     Ok(record.sequence)
 }
 
+/// Appends one frame exactly as another writer made it: length, checksum and body. It must be one whole frame whose
+/// body is a version-1 `EventRecord` with the log's next sequence (`RRS-S2003` otherwise), so a mirror keeps the 1,
+/// 2, 3 ... rule of the log it copies and a reader of it finds the same records. Not synced: the caller appends a
+/// batch, then calls `sync_event_log` once.
+pub fn append_raw_frame(writer: &mut EventLogWriter, frame_bytes: &[u8]) -> Result<(), StoreError> {
+    let record = read_whole_frame(&writer.path, frame_bytes)?;
+    if record.sequence != writer.next_sequence {
+        return Err(StoreError::EventSequenceGap {
+            path: writer.path.clone(),
+            expected_sequence: writer.next_sequence,
+            found_sequence: record.sequence,
+        });
+    }
+    write_frame_at_end(writer, frame_bytes)?;
+    writer.next_sequence += 1;
+    Ok(())
+}
+
 /// fsyncs whatever was appended since the last fsync.
 pub fn sync_event_log(writer: &mut EventLogWriter) -> Result<(), StoreError> {
     if writer.has_unsynced_bytes {
@@ -176,6 +201,29 @@ fn find_end_of_whole_frames(path: &Path) -> Result<(u64, u64), StoreError> {
                 });
             }
         }
+    }
+}
+
+/// The record in `frame_bytes`, when they are exactly one whole frame: a header, then a body of the declared length
+/// whose CRC-32 matches and which decodes as a version-1 record.
+fn read_whole_frame(path: &Path, frame_bytes: &[u8]) -> Result<EventRecord, StoreError> {
+    let Some((header_bytes, body)) = frame_bytes.split_first_chunk::<FRAME_HEADER_BYTES>() else {
+        return Err(frame_refused(path, NOT_A_WHOLE_FRAME_REASON));
+    };
+    if !body_matches_header(&decode_frame_header(header_bytes), body) {
+        return Err(frame_refused(path, NOT_A_WHOLE_FRAME_REASON));
+    }
+    match decode_frame_body(body) {
+        Some(record) => Ok(record),
+        None => Err(frame_refused(path, NOT_A_RECORD_REASON)),
+    }
+}
+
+/// A frame `append_raw_frame` won't write. Nothing reached the file, but the write the caller asked for failed.
+fn frame_refused(path: &Path, reason: &str) -> StoreError {
+    StoreError::EventLogWriteFailed {
+        path: path.to_path_buf(),
+        reason: reason.to_string(),
     }
 }
 

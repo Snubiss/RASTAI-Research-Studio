@@ -20,7 +20,8 @@ use rastai_store::error::StoreError;
 use rastai_store::event_log::frame::{EVENT_LOG_HEADER, FRAME_HEADER_BYTES, encode_frame};
 use rastai_store::event_log::reader::{FrameRead, open_event_log, open_event_log_at, read_next_frame, reader_offset};
 use rastai_store::event_log::writer::{
-    SyncPolicy, append_event, create_event_log, open_event_log_for_append, sync_event_log, truncated_tail_bytes,
+    SyncPolicy, append_event, append_raw_frame, create_event_log, open_event_log_for_append, sync_event_log,
+    truncated_tail_bytes,
 };
 
 const FIXTURES_FOLDER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/event-logs");
@@ -418,6 +419,51 @@ fn creating_a_log_never_overwrites_one() {
     let error = create_event_log(&path).unwrap_err();
     assert_eq!(error.code(), "RRS-S3005");
     assert_eq!(std::fs::read(&path).unwrap(), good_log());
+}
+
+#[test]
+fn raw_frames_are_copied_byte_for_byte() {
+    // The daemon's mirror of a remote run (layout 13.1): another writer's frames, appended as they are, make the
+    // same file that writer made.
+    let scratch = ScratchFolder::new("append_raw");
+    let path = scratch.file("events.log");
+    let mut writer = create_event_log(&path).unwrap();
+    for frame in frames_of(&good_records()) {
+        append_raw_frame(&mut writer, &frame).unwrap();
+    }
+    sync_event_log(&mut writer).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), good_log());
+}
+
+#[test]
+fn a_raw_frame_out_of_sequence_or_damaged_is_refused_and_changes_nothing() {
+    let scratch = ScratchFolder::new("append_raw_refused");
+    let path = scratch.file("events.log");
+    let mut writer = create_event_log(&path).unwrap();
+    let frames = frames_of(&good_records());
+    append_raw_frame(&mut writer, &frames[0]).unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    // Sequence 3 after 1: a mirror must keep its source's 1, 2, 3 ... rule.
+    let error = append_raw_frame(&mut writer, &frames[2]).unwrap_err();
+    assert_eq!(error.code(), "RRS-S2003");
+    // A flipped body byte, a cut-off frame, and a header alone.
+    let mut flipped = frames[1].clone();
+    let last = flipped.len() - 1;
+    flipped[last] ^= 0xff;
+    for damaged in [
+        flipped,
+        frames[1][..frames[1].len() - 1].to_vec(),
+        frames[1][..FRAME_HEADER_BYTES].to_vec(),
+    ] {
+        let error = append_raw_frame(&mut writer, &damaged).unwrap_err();
+        assert_eq!(error.code(), "RRS-S3005");
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+
+    // The next frame in sequence still goes on.
+    append_raw_frame(&mut writer, &frames[1]).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), log_of(&frames[..2]));
 }
 
 #[test]

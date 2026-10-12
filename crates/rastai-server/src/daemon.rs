@@ -3,7 +3,8 @@
 //!
 //! The order matters: the daemon lock first, so two daemons never share a data directory; then the owner token, so
 //! a too-open or unusable token (`RRS-C1008`, `RRS-C1010`) refuses the start before a database opens or a listener
-//! binds; the listeners last, so `/api/health` answers only once everything behind it is ready.
+//! binds; the daemon log's replay before the listeners, so the first request sees every record the daemon logged;
+//! the listeners last, so `/api/health` answers only once everything behind it is ready.
 //!
 //! `start_daemon` is everything up to serving, and `wait_for_shutdown` (shutdown.rs) the rest, so tests can start a
 //! daemon on temporary folders and stop it again without signals.
@@ -35,6 +36,7 @@ use crate::http::listeners::{FIRST_DEFAULT_PORT, LOOPBACK_ADDRESS, listen_http};
 use crate::http::sessions::{AuthState, ScopedToken, add_scoped_token, new_auth_state};
 use crate::plugin_host::discovery::discover_plugins;
 use crate::plugin_host::load::load_all_plugins;
+use crate::indexing::daemon_log_replay::replay_daemon_log;
 use crate::server_state::{Server, build_server};
 use crate::shutdown::{stop_on_signals, wait_for_shutdown};
 
@@ -98,13 +100,14 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
     log_settings_problem(settings.user_file_problem.as_ref());
     let owner_token_hash = ensure_owner_token(&paths)?; // RRS-C1008, RRS-C1010: before any database or listener
     let store = open_store(&paths)?; // migrations, writer thread
-    close_interrupted_commands(&store).await?; // RRS-C0005 on the rows a crash left unfinished
     start_embedded_node();
     let auth = new_auth_state(owner_token_hash.clone(), &daemon_id_prefix(&owner_token_hash));
     load_scoped_tokens(&store, &auth)?;
     let preferred_port = preferred_port(options, &settings.resolved);
     let listen_address = listen_address(&settings.resolved);
     let server = Arc::new(build_server(paths, settings.resolved, settings.overrides, store, auth));
+    replay_daemon_log(&server).await?; // index the daemon-log records after the cursor, before anything is served
+    close_interrupted_commands(&server.store).await?; // RRS-C0005 on the rows a crash left unfinished
     discover_plugins(&server)?; // manifests and saved states only; nothing starts
     load_all_plugins(&server).await; // failures disable or fail a plugin, never the daemon
     let http = listen_http(&server, preferred_port, listen_address).await?; // writes daemon.port; health ok from here
@@ -148,8 +151,8 @@ fn log_settings_problem(problem: Option<&Diagnostic>) {
 }
 
 /// Journal rows started and never finished belong to commands the last daemon was running when it stopped; they
-/// are closed as interrupted (`RRS-C0005`) before anything is served. The daemon log's replay (M1-28) goes first,
-/// so a command whose `command.finished` record made it to the log keeps its real outcome.
+/// are closed as interrupted (`RRS-C0005`) before anything is served. The daemon log's replay goes first, so a
+/// command whose `command.finished` record made it to the log keeps its real outcome.
 async fn close_interrupted_commands(store: &Store) -> Result<(), ServerError> {
     write_index(&store.index, IndexWrite::MarkUnfinishedJournalRows).await?;
     Ok(())

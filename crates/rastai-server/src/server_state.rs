@@ -2,14 +2,16 @@
 //! std locks that are never held across an `.await`.
 //!
 //! M1-26 brought the fields startup and sign-in need; M1-27 the command registry, the settings layers that sit above
-//! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions. The bus (M1-28), the
-//! node links and identity (M1-42, M1-47), the gateway and the rest join with the tasks that build them.
+//! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions; M1-28 the bus and the
+//! daemon's own event log. The node links and identity (M1-42, M1-47), the gateway and the rest join with the tasks
+//! that build them.
 
 use std::sync::{Mutex, OnceLock, RwLock};
 
 use rastai_core::commands::registry::{CommandRegistry, load_core_commands};
 use rastai_core::paths::DataPaths;
-use rastai_core::settings::{ResolvedSettings, SettingsLayer};
+use rastai_core::settings::{ResolvedSettings, SettingsLayer, setting_u64};
+use rastai_core::time::now_unix_ms;
 use rastai_formats::commands::{describe_arguments, describe_result};
 use rastai_formats::describe::json_schema::json_schema_for;
 use rastai_formats::describe::registry::describe_all_types;
@@ -20,8 +22,13 @@ use rastai_store::store::Store;
 use tokio::sync::watch;
 
 use crate::commands::journal::IdempotencyKeyLock;
+use crate::events::bus::{BUS_BUFFER_EVENTS, Bus, new_bus};
+use crate::events::daemon_events::{DaemonLog, new_daemon_log};
 use crate::http::sessions::AuthState;
 use crate::plugin_host::load::PluginHost;
+
+/// How many events the bus keeps for clients that reconnect (contracts 7.2 and 11.2).
+const BUS_BUFFER_SETTING: &str = "daemon.bus_buffer_events";
 
 pub struct Server {
     pub paths: DataPaths,
@@ -37,6 +44,11 @@ pub struct Server {
     pub plugins: RwLock<PluginHost>,
     /// Login codes, sessions, the owner token's hash and the scoped tokens' hashes.
     pub auth: AuthState,
+    /// The daemon-wide bus: the last `daemon.bus_buffer_events` events and every `Subscribe` stream's source.
+    pub bus: Bus,
+    /// `<data>/daemon/events.log`, written by `record_daemon_event` only. A tokio mutex: it is held across the index
+    /// write, so the daemon's records are indexed in log order.
+    pub daemon_log: tokio::sync::Mutex<DaemonLog>,
     /// One lock per (principal, idempotency key) while a command with that key runs (commands/journal.rs).
     pub idempotency_locks: Mutex<Vec<IdempotencyKeyLock>>,
     /// The open MCP sessions of `/mcp` (http/mcp_endpoint.rs), in memory only: a restart ends them all.
@@ -56,6 +68,7 @@ pub fn build_server(
     auth: AuthState,
 ) -> Server {
     let (shutdown, _first_receiver) = watch::channel(false);
+    let bus_buffer_events = usize::try_from(setting_u64(&settings, BUS_BUFFER_SETTING)).unwrap_or(BUS_BUFFER_EVENTS);
     Server {
         paths,
         settings: RwLock::new(settings),
@@ -64,6 +77,8 @@ pub fn build_server(
         registry: RwLock::new(core_command_registry()),
         plugins: RwLock::new(PluginHost::default()),
         auth,
+        bus: new_bus(bus_buffer_events, now_unix_ms()),
+        daemon_log: tokio::sync::Mutex::new(new_daemon_log()),
         idempotency_locks: Mutex::new(Vec::new()),
         mcp_sessions: Mutex::new(Vec::new()),
         http_port: OnceLock::new(),

@@ -18,8 +18,9 @@ use rastai_proto::commands::v1::ListCommandsResponse;
 use crate::commands::execute::execute_command;
 use crate::commands::handlers::command::filtered_commands;
 use crate::http::connect::{
-    codec_for_content_type, connect_error_response, decode_execute_request, decode_list_commands_request,
-    encode_execute_response, encode_list_commands_response, unary_response, unsupported_content_type_response,
+    UNARY_CONTENT_TYPES, codec_for_content_type, connect_error_response, decode_execute_request,
+    decode_list_commands_request, encode_execute_response, encode_list_commands_response, unary_response,
+    unsupported_content_type_response,
 };
 use crate::server_state::Server;
 
@@ -40,7 +41,7 @@ pub(crate) async fn execute_endpoint(
     };
     let content_type = content_type_of(&headers);
     let Some(codec) = content_type.and_then(codec_for_content_type) else {
-        return unsupported_content_type_response(content_type);
+        return unsupported_content_type_response(content_type, UNARY_CONTENT_TYPES);
     };
     let request = match decode_execute_request(codec, &body) {
         Ok(request) => request,
@@ -63,7 +64,7 @@ pub(crate) async fn list_commands_endpoint(
     }
     let content_type = content_type_of(&headers);
     let Some(codec) = content_type.and_then(codec_for_content_type) else {
-        return unsupported_content_type_response(content_type);
+        return unsupported_content_type_response(content_type, UNARY_CONTENT_TYPES);
     };
     let request = match decode_list_commands_request(codec, &body) {
         Ok(request) => request,

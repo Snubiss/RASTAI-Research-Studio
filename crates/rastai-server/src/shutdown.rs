@@ -1,13 +1,14 @@
 //! A clean stop (flows/platform.md 2.1): SIGTERM, SIGINT or `system.shutdown` set the server's shutdown flag; the
 //! listeners stop taking requests and finish the open ones, daemon.port and daemon.sock are removed, the store's
 //! writer commits what is queued, and the daemon lock is released last, so a new daemon can't start while this one
-//! still writes. Stopping the daemon never stops jobs; `job.cancel` does. (Detaching from workers and closing event
-//! streams join with the node links, M1-47, and the bus, M1-28.)
+//! still writes. Stopping the daemon never stops jobs; `job.cancel` does. Open `Subscribe` streams and run tails end
+//! on the shutdown flag (http/event_endpoint.rs, indexing/run_tail.rs). (Detaching from workers joins with the node
+//! links, M1-47.)
 //!
 //! Aborting a listener after the grace period doesn't end the connection tasks axum spawned for it, and those still
 //! hold the server, so its store can't be closed. Then the lock is kept until the process exits (`run_daemon`
-//! returns straight after), never released while a handler may still write. M1-28's Subscribe streams are the first
-//! handlers that can outlive the grace period; they should end on the shutdown flag so this path stays rare.
+//! returns straight after), never released while a handler may still write. Streams end on the flag and let the
+//! server go before their last envelope, so this path stays rare.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,7 +67,13 @@ pub async fn wait_for_shutdown(running: RunningDaemon) -> Result<(), ServerError
 }
 
 async fn wait_for_flag(mut flag: watch::Receiver<bool>) {
-    let _ = flag.wait_for(|stopping| *stopping).await;
+    wait_until_stopping(&mut flag).await;
+}
+
+/// Returns once a stop is asked for: what streams and run tails wait on beside their work. It holds nothing across
+/// its own return, so a task that selects on it stays `Send`.
+pub async fn wait_until_stopping(shutdown: &mut watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|stopping| *stopping).await;
 }
 
 /// Waits for the listeners to finish their open requests, up to the grace period, then drops whatever is left.
