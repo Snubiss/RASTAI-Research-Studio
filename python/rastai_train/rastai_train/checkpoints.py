@@ -18,6 +18,7 @@ the loop removes the rest after each save, so a run's disk use stays at keep_las
 """
 
 import errno
+import math
 import os
 import re
 import shutil
@@ -197,7 +198,9 @@ def restore_best_checkpoint(run_folder: Path, context: TrainingContext) -> None:
 
 
 def recorded_validation_loss(folder: Path) -> float | None:
-    """The validation.loss in a checkpoint's weights metadata; None when it has none or the file is damaged."""
+    """The validation.loss in a checkpoint's weights metadata; None when it has none, the file is damaged or the
+    value isn't finite. A NaN written before the loop left non-finite losses out would otherwise become a best that
+    nothing can beat (NaN compares false with everything)."""
     try:
         with SafetensorsFile(folder / WEIGHTS_FILE) as weights_file:
             text = weights_file.metadata.get(VALIDATION_LOSS_KEY)
@@ -206,9 +209,12 @@ def recorded_validation_loss(folder: Path) -> float | None:
     if text is None:
         return None
     try:
-        return float(text)
+        loss = float(text)
     except ValueError:
         return None
+    if not math.isfinite(loss):
+        return None
+    return loss
 
 
 # ---- Retention ----

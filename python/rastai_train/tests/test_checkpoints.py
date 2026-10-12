@@ -4,6 +4,7 @@ damaged checkpoint."""
 
 import errno
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -334,6 +335,21 @@ def test_the_best_after_a_fallback_is_never_the_damaged_newer_checkpoint(repo_ro
     assert resume_from_latest_checkpoint(context.run_folder, resumed).step == 10
     assert resumed.progress.best_step == 10
     assert resumed.progress.best_validation_loss == 0.9
+
+
+def test_a_non_finite_recorded_loss_never_becomes_the_best_on_resume(repo_root: Path, tmp_path: Path) -> None:
+    # A NaN stored as the oldest checkpoint's loss (as the loop wrote before it left non-finite losses out) would
+    # become the first best, and no later loss compares below NaN.
+    context = new_context(repo_root, tmp_path / "run")
+    nan_folder = write_at_step(context, 10, validation_loss=math.nan)
+    write_at_step(context, 20, validation_loss=0.5)
+    write_at_step(context, 30, validation_loss=math.inf)
+    assert recorded_validation_loss(nan_folder) is None
+
+    resumed = new_context(repo_root, context.run_folder)
+    assert resume_from_latest_checkpoint(context.run_folder, resumed).step == 30
+    assert resumed.progress.best_step == 20
+    assert resumed.progress.best_validation_loss == 0.5
 
 
 def test_resume_skips_a_checkpoint_whose_safetensors_header_is_damaged(repo_root: Path, tmp_path: Path) -> None:

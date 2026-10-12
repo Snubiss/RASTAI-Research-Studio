@@ -233,8 +233,10 @@ def pause_for_full_disk(log: EventLogWriter, control: JobControl) -> None:
     EXIT_EVENT_LOG_UNWRITABLE (4)."""
     log.reserve_path.unlink(missing_ok=True)
     log.append(DIAGNOSTIC_REPORTED, disk_full_payload(log), [], fsync_now=True)
-    log.append(RUN_STATE_CHANGED, run_state_payload(RUN_STATE_PAUSED), [], fsync_now=True)
+    # The flag goes up before the record: a RESUME sent as soon as the node sees `paused` must find it to clear.
+    # Raised after the record, it would overwrite that RESUME and leave the run waiting for another.
     control.paused = True
+    log.append(RUN_STATE_CHANGED, run_state_payload(RUN_STATE_PAUSED), [], fsync_now=True)
     if not wait_for_resume_with_reserve(log, control):
         return
     log.append(RUN_STATE_CHANGED, run_state_payload(RUN_STATE_RUNNING), [], fsync_now=True)

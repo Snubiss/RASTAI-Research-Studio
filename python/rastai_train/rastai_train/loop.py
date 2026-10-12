@@ -85,8 +85,10 @@ class TrainingOutcome:
 
 
 def train(context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl) -> TrainingOutcome:
-    """Prepares the run, then trains until its last step or until a flag ends it (see the table at the top)."""
+    """Prepares the run, writes `running`, then trains until its last step or until a flag ends it (see the table
+    at the top)."""
     prepare_run(context, recipe)
+    events.emit_durable(RUN_STATE_CHANGED, {"run_state": RUN_STATE_RUNNING})
     return train_from_current_step(context, recipe, events, control)
 
 
@@ -94,8 +96,11 @@ def train_from_current_step(
     context: TrainingContext, recipe: Recipe, events: JobEvents, control: JobControl
 ) -> TrainingOutcome:
     """The loop from the step the run stands at, on a run already prepared: `train`'s own loop, and how the train job
-    goes on after a full disk paused the run. A checkpoint the disk refused is written first, before the next step."""
-    events.emit_durable(RUN_STATE_CHANGED, {"run_state": RUN_STATE_RUNNING})
+    goes on after a full disk paused the run. A checkpoint the disk refused is written first, before the next step.
+
+    It doesn't write `running`: the caller does (`train` before the first step; the train job also after RESUME), and
+    only when the run really goes on. A job asked to end while paused comes back here only to end, so its run goes
+    from paused straight to its final state."""
     while True:
         wait_while_paused(control)
         if control.preempt_requested:
@@ -312,7 +317,11 @@ def report_checkpoint(events: JobEvents, context: TrainingContext, folder: Path,
 
 def compute_validation_loss(context: TrainingContext, recipe: Recipe) -> float | None:
     """The recipe's mean loss over the validation split in eval mode, or None when there is no split. The random
-    generators are put back afterwards, so how often checkpoints run can't change the training stream."""
+    generators are put back afterwards, so how often checkpoints run can't change the training stream.
+
+    A mean that isn't finite (NaN or infinite) is None too. NaN compares false with everything, so a NaN checkpoint
+    chosen as the first best could never be replaced, and retention would keep it for good; and run.metrics can't
+    carry it, because protobuf's JSON refuses NaN and infinity."""
     examples = context.validation_examples
     if not examples:
         return None
@@ -329,7 +338,10 @@ def compute_validation_loss(context: TrainingContext, recipe: Recipe) -> float |
     finally:
         context.model.train()
         restore_rng_state(saved_generators)
-    return total_loss / len(examples)
+    mean_loss = total_loss / len(examples)
+    if not math.isfinite(mean_loss):
+        return None
+    return mean_loss
 
 
 # ---- Ends ----
