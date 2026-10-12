@@ -2,8 +2,11 @@
 
 Read the root `CLAUDE.md` and `python/CLAUDE.md` first. The layout is `docs/architecture/layout/frontend-and-plugins.md` §11 (and `docs/architecture/layout/python.md` §1.6 for how engines use it).
 
-- **A skeleton for now.** M1-12 landed the package and its generated catalog; M1-37 adds the registry, the base classes, the module loader and the host client.
+- **What is here (M1-37).** `registry.py` (`PluginRegistry`, `REGISTRY_KINDS`), `extension_points.py` (`Recipe`, `Metric`), `types.py` (the plain dataclasses they pass), `job_events.py`, `job_control.py`, `errors.py` (`PluginError`), `manifest.py` (`read_manifest`, `manifest_ids`), `module_loader.py` (`load_plugin_module`), `host.py` (`PluginHost`, `WorkerHost.register`, `connect_worker_host`) and `catalog/`. The other base classes, the host calls and the reply helpers (`commands.py`) land in the build step of layout §11.6 that first uses them.
 - **Low in the stack.** Engines define their extension points on this package, so it never imports an engine or a plugin (contracts 2.4). Its only internal imports are `rastai_proto` and `rastai_formats` (`check-imports`).
-- **Base classes stay small:** a few methods each, plain dataclasses for data. No pickle.
+- **Base classes stay small:** a few methods each, plain dataclasses for data. Methods an implementation must write raise `NotImplementedError`; optional ones do nothing by default. No decorators that register things: registration is the explicit `register()` call. No pickle.
+- **The loader never installs.** `load_plugin_module` imports what the node already installed from the plugin's lock; a missing package is `RRS-P3001`. A difference between `register()` and the manifest, a missing `register()` or one that raises is `RRS-P0103`.
+- **Only `host.py` imports grpcio** (and `tests/test_host.py`, which serves a fake `WorkerHostService`). Callers never see a grpc type: a refused call raises the node's diagnostic code, an unreachable node `RRS-J2001`. The job token goes in the `rastai-job-token` metadata key on every call (contracts 4.5) and is never logged or written.
+- **Wrong arguments from calling code** (an unknown kind passed to `find` or `names`) are bugs and raise `ValueError`; everything a plugin or the node can cause is a `PluginError` with a catalog code.
 - **`rastai_plugin/catalog/generated.py` is generated** by `rastai-catalog-codegen` from `catalog/` and the first-party plugin catalogs, and never edited by hand: change the catalog JSON and run `just codegen`. `just codegen-check` fails when it differs from a fresh run. ruff skips it.
-- Tests are in `tests/test_<module>.py`.
+- Tests are in `tests/test_<module>.py`. The host test needs Unix sockets (`posix_only`).

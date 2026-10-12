@@ -355,6 +355,12 @@ wheels = [
 name = "rastai-data"
 version = "0.1.0"
 source = { editable = "../../rastai_data" }
+dependencies = [
+    { name = "rastai-plugin" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rastai-plugin", editable = "../../rastai_plugin" }]
 
 [[package]]
 name = "rastai-env-cpu"
@@ -431,6 +437,18 @@ requires-dist = [
 name = "rastai-plugin"
 version = "0.1.0"
 source = { editable = "../../rastai_plugin" }
+dependencies = [
+    { name = "grpcio" },
+    { name = "rastai-formats" },
+    { name = "rastai-proto" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "grpcio", specifier = ">=1.84.0" },
+    { name = "rastai-formats", editable = "../../rastai_formats" },
+    { name = "rastai-proto", editable = "../../rastai_proto" },
+]
 
 [[package]]
 name = "rastai-proto"

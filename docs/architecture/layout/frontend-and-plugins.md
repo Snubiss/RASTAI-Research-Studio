@@ -2658,11 +2658,13 @@ python/rastai_plugin/
     job_events.py              JobEvents: the base class jobs emit durable and ephemeral events through
     job_control.py             JobControl: plain flags the worker sets and engines poll
     commands.py                reply helpers: reply_ok, reply_with_jobs, reply_error, unknown_command
-    manifest.py                read_manifest (through the rastai_formats wheel); expected ids per kind
-    module_loader.py           load_plugin_module: import, call register(), compare names with the manifest (RRS-P0103)
+    manifest.py                read_manifest (through the rastai_formats wheel); manifest_ids: the ids per kind
+                               (ID_FIELD_BY_KIND: recipe_id, metric_id, ...)
+    module_loader.py           load_plugin_module: import, call register() into a new registry, compare names with
+                               the manifest (RRS-P0103); never installs a package (a missing one is RRS-P3001)
     errors.py                  PluginError(code, message)
     catalog/
-      __init__.py              lookups (M1-37), the plugin's own catalog/errors.json included
+      __init__.py              the lookup find_catalog_entry (M1-37); plugin catalogs join the generated tables
       generated.py             generated error-code constants (RRS_M4001, ...) and entries, from rastai-catalog-codegen
     types.py                   plain dataclasses shared by extension points (TrainingContext, Batch, StepResult,
                                EvalCase, EvalContext, ModelOutput, MetricResult, ...)
@@ -2677,6 +2679,8 @@ python/rastai_plugin/
     test_module_loader.py      id mismatch, missing register(), register() that raises
     test_host.py               WorkerHost against a fake WorkerHostService over a temp socket
     test_job_control.py        flags set from another thread are seen by the polling thread
+    test_extension_points.py   required methods raise, optional ones have safe defaults
+    test_catalog.py            the generated catalog and its lookup
 ```
 
 `types.py` holds only types that exist nowhere else. Document and wire types come from `rastai_formats` and `rastai_proto` and are never re-declared.
@@ -2879,10 +2883,10 @@ def handle_command(call: CommandCall, host: PluginHost) -> CommandReply:
 
 | Step | What lands |
 |---|---|
-| 1 (M1-37) | registry, `Recipe` and `Metric` stubs, `JobEvents`, `JobControl`, `WorkerHost.register`, `module_loader`, catalog constants, `PluginError` |
+| 1 (M1-37) | registry, `Recipe` (with `restore_state`) and `Metric` (with `prepare`), the plain types, `JobEvents`, `JobControl`, `PluginHost` (no calls yet), `WorkerHost.register` and `connect_worker_host`, `manifest`, `module_loader`, the catalog lookup, `PluginError` |
 | 3 | `Sampler` |
-| 4 | `Lens`, `SaeLoader`; `PluginHost.execute_command` and `HandleCommand` (Psychology is the first plugin module) |
-| 5 | `Metric.prepare`, `Recipe.restore_state`, `Converter`, `BenchmarkLoader`, `DataSource`; `WorkerHost.gateway_generate`, `tokenize_chat`, `put_blob`, `get_blob`, `resize_lease`, the sandbox calls |
+| 4 | `Lens`, `SaeLoader`; `PluginHost.execute_command` and `HandleCommand`, with `commands.py` (the reply helpers build `CommandReply`, which arrives with it) (Psychology is the first plugin module) |
+| 5 | `Converter`, `BenchmarkLoader`, `DataSource`; `WorkerHost.gateway_generate`, `tokenize_chat`, `put_blob`, `get_blob`, `resize_lease`, the sandbox calls, `resolve_model` |
 | 6 | `NodeType`, `Importer`, `Exporter` |
 | 7 | `RewardFunction`; `WorkerHost.list_tools`, `call_tool` |
 | 8 | the `testing/` package and the templates |
