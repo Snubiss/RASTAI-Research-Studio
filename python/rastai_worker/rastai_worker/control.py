@@ -10,10 +10,14 @@ each ends a job differently (the JobSignal table):
 - Control CANCEL, STOP, PAUSE, RESUME, CHECKPOINT_NOW and STEP set or clear their flags. TERMINATE and KILL are
   never Control values: they are OS signals, so any node version can stop any worker version.
 
-CPython assigns a bool or an int atomically, so neither side takes a lock.
+Setting a flag is one assignment, which CPython makes atomically, so the flags need no lock. STEP is different: it
+adds one to `step_budget`, a read then a write, and Control calls run on several gRPC threads at once, so two quick
+STEPs could lose one. STEP_BUDGET_LOCK guards every change of `step_budget` here; the job's thread takes it too when
+it counts a step down (step mode, M7).
 """
 
 import signal
+import threading
 import time
 
 from rastai_plugin.catalog.generated import RRS_J0004
@@ -31,6 +35,8 @@ STEP = "STEP"
 CONTROL_ACTIONS = (CANCEL, STOP, PAUSE, RESUME, CHECKPOINT_NOW, STEP)
 # How often a paused job looks at its flags again. RESUME takes effect within this time.
 PAUSE_POLL_SECONDS = 0.1
+# Guards `step_budget`, which a STEP increments on a gRPC thread (see the top of this file).
+STEP_BUDGET_LOCK = threading.Lock()
 
 
 def install_control() -> JobControl:
@@ -67,13 +73,15 @@ def apply_control_action(control: JobControl, action: str) -> None:
     elif action == PAUSE:
         control.paused = True
     elif action == RESUME:
-        control.step_budget = None
+        with STEP_BUDGET_LOCK:
+            control.step_budget = None
         control.paused = False
     elif action == CHECKPOINT_NOW:
         control.checkpoint_requested = True
     elif action == STEP:
         # One more step, then pause again. Steps add up, so two quick STEPs run two steps.
-        control.step_budget = (control.step_budget or 0) + 1
+        with STEP_BUDGET_LOCK:
+            control.step_budget = (control.step_budget or 0) + 1
         control.paused = False
     else:
         raise WorkerError(RRS_J0004, f"Signal {action} wasn't delivered to the job: it isn't a Control value")

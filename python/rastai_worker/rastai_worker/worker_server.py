@@ -80,6 +80,10 @@ class WorkerServer(worker_service_pb2_grpc.WorkerServiceServicer):
             for index, _event_type, event in self.live.read(after_index, WATCH_LIVE_WAIT_SECONDS):
                 after_index = index
                 yield event
+        # The job may have put its last events just before it closed the stream: send those too, without waiting.
+        if context.is_active():
+            for _index, _event_type, event in self.live.read(after_index, 0):
+                yield event
 
     def check_token(self, context: grpc.ServicerContext) -> None:
         """Refuses a call that doesn't carry this job's token. compare_digest takes the same time wherever the

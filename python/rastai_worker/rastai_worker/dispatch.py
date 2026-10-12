@@ -1,10 +1,15 @@
 """Dispatch: a job's kind to the function that runs it (python layout 7.4).
 
-`JOB_ENTRIES` names each core Python job kind's entry as `<module>:<function>`, the same form as `JobSpec.entry`
-(contracts 4.4), which names the entry of an `eval` or `lens` job. The module is imported only when a job of that
-kind starts, for two reasons: an engine pulls in torch and its kernels, so a job imports only its own kind's engine;
-and the job modules land one build step at a time (python layout 7.11, `jobs/train.py` with M1-46), so a kind whose
-module isn't in this worker yet is a clear bad launch, not an import error that stops every other kind.
+`JOB_ENTRIES` names each Python job kind's entry as `<module>:<function>`, the same form as `JobSpec.entry`
+(contracts 4.4). The module is imported only when a job of that kind starts, for two reasons: an engine pulls in
+torch and its kernels, so a job imports only its own kind's engine; and the job modules land one build step at a
+time (python layout 7.11, `jobs/train.py` with M1-46), so a kind whose module isn't in this worker yet is a clear
+bad launch, not an import error that stops every other kind.
+
+An `eval` or `lens` job runs a plugin's job function, which its `JobSpec.entry` names. Both kinds go through
+`jobs/plugin_entry.py` (python layout 7.4), the one place that imports `JobSpec.entry` and calls it. That module
+lands with the Psychology jobs (layout 7.11, step 4); until then such a job is a bad launch like any other kind
+whose module isn't built. Dispatch only checks that the JobSpec names an entry.
 
 Every entry has the one job entry shape (contracts 12.3; python layout 1.5):
 
@@ -19,19 +24,21 @@ from rastai_proto.node.v1.jobs_pb2 import JobKind, JobSpec
 from rastai_worker.diagnostics import JobEntry
 from rastai_worker.errors import WorkerError
 
-# Core job kind (contracts 9.1) -> its entry. "eval" and "lens" always carry JobSpec.entry instead, and
-# "plugin_module" runs in plugin mode (plugin_module.py).
+# Python job kind (contracts 9.1) -> its entry (python layout 7.4). "plugin_module" runs in plugin mode
+# (plugin_module.py) instead.
 JOB_ENTRIES = {
     "serve_inspectable": "rastai_worker.jobs.serve_inspectable:run_job",
     "train": "rastai_worker.jobs.train:run_job",
     "gym": "rastai_worker.jobs.gym:run_job",
+    "eval": "rastai_worker.jobs.plugin_entry:run_job",
+    "lens": "rastai_worker.jobs.plugin_entry:run_job",
     "data_import": "rastai_worker.jobs.data_import:run_job",
     "data_check": "rastai_worker.jobs.data_check:run_job",
     "compile": "rastai_worker.jobs.compile_design:run_job",
     "export": "rastai_worker.jobs.export:run_job",
     "doctor_selftest": "rastai_worker.jobs.doctor_selftest:run_job",
 }
-# Kinds whose entry is the JobSpec's own, a plugin's job function (python layout 7.4).
+# Kinds that run a plugin's job function through jobs/plugin_entry.py: their JobSpec must name it in `entry`.
 PLUGIN_ENTRY_KINDS = ("eval", "lens")
 PLUGIN_MODULE_KIND = "plugin_module"
 # JOB_KIND_TRAIN is the kind "train" (contracts 9.1 spells kinds in lower case without the prefix).
@@ -49,10 +56,8 @@ def job_kind_name(job_spec: JobSpec) -> str:
 def entry_name(job_spec: JobSpec) -> str:
     """The `<module>:<function>` that runs this job in run mode. A kind that doesn't run that way is RRS-J2001."""
     kind = job_kind_name(job_spec)
-    if kind in PLUGIN_ENTRY_KINDS:
-        if not job_spec.entry:
-            raise dispatch_error(job_spec, f"its {kind} job names no entry")
-        return job_spec.entry
+    if kind in PLUGIN_ENTRY_KINDS and not job_spec.entry:
+        raise dispatch_error(job_spec, f"its {kind} job names no entry")
     if kind == PLUGIN_MODULE_KIND:
         raise dispatch_error(job_spec, "a plugin_module job runs in plugin mode, not run mode")
     if kind not in JOB_ENTRIES:

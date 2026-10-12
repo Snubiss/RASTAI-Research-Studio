@@ -46,6 +46,18 @@ RUN_ID = "run_01JA2B3C4D5E6F7G8H9J0K1M2P"
 # A detail only the traceback may carry: it must never reach the run's log.
 SECRET_DETAIL = "detail-only-for-stderr"
 FRAME_HEADER_FORMAT = "<II"
+# `python -m rastai_worker` with the train kind pointing at a test entry, since no job module is built yet
+# (jobs/train.py lands with M1-46).
+LAUNCHER_MODULE_NAME = "rastai_test_worker_main"
+LAUNCHER_MODULE_SOURCE = """
+import sys
+
+from rastai_worker import dispatch
+from rastai_worker.__main__ import main
+
+dispatch.JOB_ENTRIES["train"] = "rastai_test_entries:run_job"
+sys.exit(main(sys.argv[1:]))
+"""
 
 
 def write_launch(folder: Path, kind: str = "JOB_KIND_TRAIN", entry: str = "") -> WorkerLaunch:
@@ -123,6 +135,21 @@ def test_an_unexpected_exception_is_j1005_with_the_traceback_in_stderr_only(tmp_
     assert SECRET_DETAIL in stderr
 
 
+@pytest.mark.parametrize("exit_argument", [0, 2, "a message for the user"])
+def test_an_entry_that_calls_sys_exit_fails_with_its_final_record(tmp_path: Path, exit_argument) -> None:
+    """sys.exit() raises SystemExit, which isn't an Exception: without the edge catching it the process would exit
+    with no final record and the node would see RRS-J1004."""
+    exit_code, records = run_entry(tmp_path, raising_entry(SystemExit(exit_argument)))
+    assert exit_code == EXIT_FAILED
+    assert [record.event_type for record in records] == ["run.metrics", "diagnostic.reported", "run.state_changed"]
+    diagnostic = records[1].payload.diagnostic_reported.diagnostic
+    assert (diagnostic.code, diagnostic.message) == (
+        RRS_J1005,
+        f"The worker of job {JOB_ID} stopped on an unexpected SystemExit.",
+    )
+    assert final_state(records) == (RUN_STATE_FAILED, "")
+
+
 def test_a_package_error_keeps_its_code(tmp_path: Path) -> None:
     error = PluginError(RRS_P0103, "register() of word_count raised ValueError")
     exit_code, records = run_entry(tmp_path, raising_entry(error))
@@ -195,7 +222,8 @@ def test_a_log_another_process_holds_exits_5_and_stays_unchanged(tmp_path: Path)
     entries_folder = tmp_path / "entries"
     entries_folder.mkdir()
     (entries_folder / "rastai_test_entries.py").write_text("def run_job(job, host, events, control):\n    pass\n")
-    launch = write_launch(tmp_path, "JOB_KIND_EVAL", "rastai_test_entries:run_job")
+    (entries_folder / f"{LAUNCHER_MODULE_NAME}.py").write_text(LAUNCHER_MODULE_SOURCE, encoding="utf-8")
+    launch = write_launch(tmp_path)
     running_copy = EventLogWriter(launch.event_log_path, RUN_ID, "job_running_copy")
     try:
         running_copy.append("run.metrics", running_metrics(), [], fsync_now=True)
@@ -221,7 +249,7 @@ def run_worker_process(job_file: Path, stderr_path: Path, entries_folder: Path) 
     environment = dict(os.environ, RASTAI_JOB_TOKEN="ab" * 32, PYTHONPATH=str(entries_folder))
     with open(stderr_path, "a", encoding="utf-8") as stderr_file:
         finished = subprocess.run(
-            [sys.executable, "-m", "rastai_worker", "run", "--job-file", str(job_file)],
+            [sys.executable, "-m", LAUNCHER_MODULE_NAME, "run", "--job-file", str(job_file)],
             stdin=subprocess.DEVNULL,
             stderr=stderr_file,
             env=environment,

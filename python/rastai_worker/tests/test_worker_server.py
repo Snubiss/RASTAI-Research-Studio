@@ -26,7 +26,7 @@ from rastai_plugin.catalog.generated import RRS_J0004, RRS_J2001, RRS_J2002
 from rastai_proto.common.v1.diagnostic_pb2 import SEVERITY_ERROR, Diagnostic
 from rastai_proto.common.v1.states_pb2 import RUN_STATE_COMPLETED, RUN_STATE_PREEMPTED
 from rastai_proto.events.v1.event_record_pb2 import EventRecord
-from rastai_proto.node.v1.jobs_pb2 import JOB_KIND_EVAL, JOB_KIND_TRAIN, JobSignal
+from rastai_proto.node.v1.jobs_pb2 import JOB_KIND_TRAIN, JobSignal
 from rastai_proto.node.v1.live_pb2 import WatchLiveRequest
 from rastai_proto.worker.v1 import (
     worker_host_service_pb2,
@@ -59,8 +59,8 @@ CALL_TIMEOUT_SECONDS = 5.0
 PROCESS_TIMEOUT_SECONDS = 60.0
 POLL_SECONDS = 0.02
 FRAME_HEADER_FORMAT = "<II"
-# The job entry the end-to-end tests run, as a plugin's eval entry would be: it logs one metric and streams
-# progress until it is asked to end.
+# The job entry the end-to-end tests run in place of the train job's (jobs/train.py lands with M1-46): it logs one
+# metric and streams progress until it is asked to end.
 ENTRY_MODULE_NAME = "rastai_test_server_entries"
 ENTRY_MODULE_SOURCE = """
 import time
@@ -71,6 +71,18 @@ def run_job(job, host, events, control):
     while not (control.stop_requested or control.cancel_requested or control.preempt_requested):
         events.emit_ephemeral("job.progress", {"fraction": 0.5, "message": "waiting for the test"})
         time.sleep(0.05)
+"""
+# `python -m rastai_worker` with JOB_ENTRIES pointing the train kind at the entry above, so the whole process runs
+# as the node starts it while no job module is built yet.
+LAUNCHER_MODULE_NAME = "rastai_test_worker_main"
+LAUNCHER_MODULE_SOURCE = f"""
+import sys
+
+from rastai_worker import dispatch
+from rastai_worker.__main__ import main
+
+dispatch.JOB_ENTRIES["train"] = "{ENTRY_MODULE_NAME}:run_job"
+sys.exit(main(sys.argv[1:]))
 """
 
 
@@ -214,6 +226,13 @@ def test_watch_live_ends_when_the_job_exits(served_job: ServedJob) -> None:
     assert list(stream) == []
 
 
+def test_watch_live_sends_the_events_put_just_before_the_close(served_job: ServedJob) -> None:
+    served_job.events.emit_ephemeral("job.progress", {"fraction": 1.0, "message": "done"})
+    served_job.live.close()
+    stream = served_job.stub.WatchLive(WatchLiveRequest(), metadata=token_metadata(), timeout=CALL_TIMEOUT_SECONDS)
+    assert [event.job_progress.message for event in stream] == ["done"]
+
+
 def test_a_socket_that_cant_be_bound_is_a_bad_launch(tmp_path: Path) -> None:
     launch = write_launch(tmp_path / "no-such-folder", tmp_path / "run", "JOB_KIND_TRAIN")
     with pytest.raises(WorkerError) as raised:
@@ -255,8 +274,9 @@ def fake_node(socket_folder: Path) -> Iterator[FakeNode]:
 
 
 class WorkerProcess:
-    """`python -m rastai_worker run --job-file <job.json>` as the node spawns it: its own session, stdin from
-    /dev/null, stderr appended to the run folder's stderr.log, the token in RASTAI_JOB_TOKEN."""
+    """`python -m rastai_worker run --job-file <job.json>` as the node spawns it, through the test's launcher: its
+    own session, stdin from /dev/null, stderr appended to the run folder's stderr.log, the token in
+    RASTAI_JOB_TOKEN."""
 
     def __init__(self, launch: WorkerLaunch, entries_folder: Path, job_token: str = JOB_TOKEN) -> None:
         self.launch = launch
@@ -264,7 +284,7 @@ class WorkerProcess:
         environment = dict(os.environ, RASTAI_JOB_TOKEN=job_token, PYTHONPATH=str(entries_folder))
         with open(self.stderr_path, "a", encoding="utf-8") as stderr_file:
             self.process = subprocess.Popen(
-                [sys.executable, "-m", "rastai_worker", "run", "--job-file", str(launch.job_file)],
+                [sys.executable, "-m", LAUNCHER_MODULE_NAME, "run", "--job-file", str(launch.job_file)],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_file,
@@ -294,6 +314,7 @@ def entries_folder(tmp_path: Path) -> Path:
     folder = tmp_path / "entries"
     folder.mkdir()
     (folder / f"{ENTRY_MODULE_NAME}.py").write_text(ENTRY_MODULE_SOURCE, encoding="utf-8")
+    (folder / f"{LAUNCHER_MODULE_NAME}.py").write_text(LAUNCHER_MODULE_SOURCE, encoding="utf-8")
     return folder
 
 
@@ -313,7 +334,7 @@ def start_worker(
     started_workers: list[WorkerProcess],
     job_token: str = JOB_TOKEN,
 ) -> WorkerProcess:
-    launch = write_launch(socket_folder, tmp_path / "run", "JOB_KIND_EVAL", f"{ENTRY_MODULE_NAME}:run_job")
+    launch = write_launch(socket_folder, tmp_path / "run", "JOB_KIND_TRAIN")
     worker = WorkerProcess(launch, entries_folder, job_token)
     started_workers.append(worker)
     return worker
@@ -343,7 +364,7 @@ def hello_watch_and_end(worker: WorkerProcess, end_the_job) -> None:
     channel, stub = worker_stub(worker.launch.job_socket_path)
     try:
         info = stub.Hello(worker_service_pb2.HelloRequest(), metadata=token_metadata(), timeout=CALL_TIMEOUT_SECONDS)
-        assert (info.job_id, info.pid, info.kind) == (JOB_ID, worker.process.pid, JOB_KIND_EVAL)
+        assert (info.job_id, info.pid, info.kind) == (JOB_ID, worker.process.pid, JOB_KIND_TRAIN)
         stream = stub.WatchLive(WatchLiveRequest(), metadata=token_metadata(), timeout=CALL_TIMEOUT_SECONDS)
         assert next(stream).job_progress.message == "waiting for the test"
         stream.cancel()

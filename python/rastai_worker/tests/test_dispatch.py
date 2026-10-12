@@ -28,6 +28,8 @@ PYTHON_KINDS = (
 NODE_NATIVE_KINDS = ("download", "transfer", "serve_fast", "daemon_task")
 # A module the tests put in sys.modules, so an entry can be found without a file.
 FAKE_MODULE_NAME = "rastai_test_fake_entries"
+# The one module that runs eval and lens jobs (python layout 7.4); it lands with M4.
+PLUGIN_ENTRY = "rastai_worker.jobs.plugin_entry:run_job"
 
 
 def job_spec_of(kind_name: str, entry: str = "") -> JobSpec:
@@ -51,12 +53,12 @@ def fake_entry_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
 def test_every_python_job_kind_has_an_entry() -> None:
     for kind in PYTHON_KINDS:
         assert job_kind_name(job_spec_of(kind)) == kind
-        if kind in PLUGIN_ENTRY_KINDS or kind == "plugin_module":
+        if kind == "plugin_module":
             continue
         module_name, function_name = JOB_ENTRIES[kind].split(":")
         assert module_name.startswith("rastai_worker.jobs.")
         assert function_name == "run_job"
-    assert sorted(JOB_ENTRIES) == sorted(set(PYTHON_KINDS) - set(PLUGIN_ENTRY_KINDS) - {"plugin_module"})
+    assert sorted(JOB_ENTRIES) == sorted(set(PYTHON_KINDS) - {"plugin_module"})
 
 
 @pytest.mark.parametrize("kind", NODE_NATIVE_KINDS + ("unspecified",))
@@ -81,15 +83,28 @@ def test_a_plugin_module_job_runs_only_in_plugin_mode() -> None:
 
 
 @pytest.mark.parametrize("kind", PLUGIN_ENTRY_KINDS)
-def test_eval_and_lens_jobs_use_their_own_entry(kind: str) -> None:
-    assert entry_name(job_spec_of(kind, "rastai_eval.suite_job:run_suite_job")) == "rastai_eval.suite_job:run_suite_job"
+def test_eval_and_lens_jobs_go_through_plugin_entry(kind: str) -> None:
+    """The plugin's function named in JobSpec.entry is never imported here: jobs/plugin_entry.py does that."""
+    assert entry_name(job_spec_of(kind, "rastai_eval.suite_job:run_suite_job")) == PLUGIN_ENTRY
     with pytest.raises(WorkerError) as raised:
         entry_name(job_spec_of(kind))
     assert "names no entry" in raised.value.message
 
 
-def test_the_entry_function_is_found(fake_entry_module: types.ModuleType) -> None:
-    assert find_job_entry(job_spec_of("eval", f"{FAKE_MODULE_NAME}:run_job")) is recorded_entry
+@pytest.mark.parametrize("kind", PLUGIN_ENTRY_KINDS)
+def test_eval_and_lens_jobs_are_a_bad_launch_until_plugin_entry_lands(
+    kind: str, fake_entry_module: types.ModuleType
+) -> None:
+    """Even an entry that would import is refused: plugin_entry.py lands with the Psychology jobs (layout 7.11)."""
+    with pytest.raises(WorkerError) as raised:
+        find_job_entry(job_spec_of(kind, f"{FAKE_MODULE_NAME}:run_job"))
+    assert raised.value.code == RRS_J2001
+    assert "isn't installed in this worker" in raised.value.message
+
+
+def test_the_entry_function_is_found(monkeypatch: pytest.MonkeyPatch, fake_entry_module: types.ModuleType) -> None:
+    monkeypatch.setitem(JOB_ENTRIES, "train", f"{FAKE_MODULE_NAME}:run_job")
+    assert find_job_entry(job_spec_of("train")) is recorded_entry
 
 
 def test_a_core_kind_whose_module_isnt_built_yet_is_a_bad_launch() -> None:
@@ -113,10 +128,11 @@ def test_a_core_kind_whose_module_isnt_built_yet_is_a_bad_launch() -> None:
     ],
 )
 def test_an_entry_that_cant_be_found_is_a_bad_launch(
-    fake_entry_module: types.ModuleType, entry: str, reason: str
+    monkeypatch: pytest.MonkeyPatch, fake_entry_module: types.ModuleType, entry: str, reason: str
 ) -> None:
+    monkeypatch.setitem(JOB_ENTRIES, "train", entry)
     with pytest.raises(WorkerError) as raised:
-        find_job_entry(job_spec_of("eval", entry))
+        find_job_entry(job_spec_of("train"))
     assert raised.value.code == RRS_J2001
     assert reason in raised.value.message
 
@@ -124,7 +140,8 @@ def test_an_entry_that_cant_be_found_is_a_bad_launch(
 def test_an_entry_module_that_crashes_on_import_is_a_bad_launch(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     (tmp_path / "rastai_test_crashing_entry.py").write_text("raise RuntimeError('broken at import')\n")
     monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(JOB_ENTRIES, "train", "rastai_test_crashing_entry:run_job")
     with pytest.raises(WorkerError) as raised:
-        find_job_entry(job_spec_of("lens", "rastai_test_crashing_entry:run_job"))
+        find_job_entry(job_spec_of("train"))
     assert raised.value.code == RRS_J2001
     assert "RuntimeError: broken at import" in raised.value.message
