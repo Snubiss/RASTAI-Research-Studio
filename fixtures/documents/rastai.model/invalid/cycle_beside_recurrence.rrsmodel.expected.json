@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2003",
+      "path": "cycle_beside_recurrence.rrsmodel:87:7#/graph/edges/5"
+    }
+  ]
+}
