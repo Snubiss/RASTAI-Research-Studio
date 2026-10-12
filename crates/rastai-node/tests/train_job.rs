@@ -91,6 +91,7 @@ mod on_linux {
         options.jobs = JobOptions {
             worker_register_timeout: REGISTER_TIMEOUT,
             stop_grace: STOP_GRACE,
+            host_reconnect_timeout: WAIT_LIMIT,
             environments: vec![JobEnvironment {
                 environment_id: ENVIRONMENT_ID.to_string(),
                 folder: environment_folder,
