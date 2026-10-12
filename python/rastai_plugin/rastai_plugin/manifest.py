@@ -54,8 +54,9 @@ def raise_first_error(diagnostics: list[dict]) -> None:
 
 
 def manifest_ids(manifest: PluginManifest, kind: str) -> list[str]:
-    """The ids the manifest declares under one registry kind, sorted. An entry without its id is RRS-P0001: the
-    manifest schema leaves these entries open, so the wheel can't catch it."""
+    """The ids the manifest declares under one registry kind, sorted. An entry without its id, or an id that two
+    entries share, is RRS-P0001: the manifest schema leaves these entries open, so the wheel can't catch either.
+    register() can't register a name twice, so a repeated id is always a manifest mistake."""
     if kind not in ID_FIELD_BY_KIND:
         raise ValueError(f"unknown registry kind {kind!r}")
     id_field = ID_FIELD_BY_KIND[kind]
@@ -64,6 +65,9 @@ def manifest_ids(manifest: PluginManifest, kind: str) -> list[str]:
         entry_id = entry.get(id_field)
         if not isinstance(entry_id, str) or not entry_id:
             reason = f"contributes.{kind}[{index}] has no {id_field}"
+            raise PluginError(RRS_P0001, f"the manifest of {manifest.plugin_id} is invalid: {reason}")
+        if entry_id in ids:
+            reason = f"contributes.{kind}[{index}] repeats the {id_field} {entry_id}"
             raise PluginError(RRS_P0001, f"the manifest of {manifest.plugin_id} is invalid: {reason}")
         ids.append(entry_id)
     return sorted(ids)
