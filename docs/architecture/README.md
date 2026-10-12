@@ -48,9 +48,10 @@ The design is about 28,000 lines across 13 documents and 38 ADRs. Nobody needs a
 | `flows/designer-gym-remote.md` | A: HF import, compile and parity, edits and live stats, Eject, ONNX, `rastai.load()`, layer placement. B: harnesses, gym runs, rollouts, peek, step mode, sandboxes. C: SSH pairing, handshake, remote jobs, drops, transfers, headless, node update | You build the Designer, the Agent Gym or remote nodes |
 | `docs/adr/README.md` + ADR-0001–0038 | Why each architectural decision was made, alternatives rejected, the tests that check it; notes since acceptance | You're about to change or question a decision |
 | `docs/plan/implementation-plan.md` | M1–M11 (M11, long-term storage, comes after the 90-day plan), tasks for M1 and M2, epics for M3–M11, the L0–L3 feature table, GitHub setup, schedule risks, conflicts (§10), open questions | You pick, size or review work |
+| `docs/security/threat-model.md` | Assets, attackers, the trust boundaries B1–B13 with each mitigation and the test that proves it (or the task or epic that adds it), every in-house parser against its fuzz target, open risks with owners | You add a boundary, a protocol or a parser of untrusted input, or review security (M1-56; reviewed in M8-E03, M9-E02 and M11) |
 | `docs/plan/backlog.json` | One GitHub issue per M1/M2 task and per later epic, generated from the plan's tables | You open an issue (M1-07 syncs it to GitHub) |
 
-Planned, not yet written: `docs/security/threat-model.md` (M1-56) and the generated `docs/reference/` (commands, events, error catalog, extension points, settings).
+Planned, not yet written: the generated `docs/reference/` (commands, events, error catalog, extension points, settings).
 
 ## 3. How the docs relate
 
