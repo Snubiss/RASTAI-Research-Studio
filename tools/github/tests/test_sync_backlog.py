@@ -37,6 +37,45 @@ HAND_ADDED_LABEL = "bug"
 MOVED_ITEM_ID = "M2-11"
 MOVED_ITEM_OLD_MILESTONE = "M2 Unified runtime"
 MOVED_ITEM_NEW_MILESTONE = "M10 Prototype exit"
+# Scope the follow-up triage (2026-10-12) first added to GitHub issues #155, #47, #96 and #136. The exit or
+# acceptance criteria appear in the backlog body and the plan entry it mirrors; the epics' scope bullets only in the
+# backlog, since the plan's epic tables carry no scope.
+TRIAGE_PHRASES_IN_BACKLOG_AND_PLAN = {
+    "M11-E01": [
+        "`ArchiveConfigureArgs` and its generated schema hold no password or key field",
+        "the owner's decision on threat-model open question 7 is taken before the schema contract PR",
+    ],
+    "M1-47": [
+        "`RUN_TRANSITIONS` in `crates/rastai-core/src/states.rs`",
+        "checkpointing → paused (`RRS-T2001` full disk)",
+        "resuming → cancelled (`job.cancel`) or preempted",
+        "still refuses preempted → cancelled while contracts 14 leaves it open",
+    ],
+    "M4-E07": ["after an undo, `rebuild_index` gives the same undo position (issue #188)"],
+    "M8-E02": [
+        "a dev or installed fixture with id `psychology` is refused with `RRS-P0002`",
+        "a 2 MiB manifest is `failed` with `RRS-P0001` without being read whole",
+        "a lens fixture that depends on it ends `enabled` again without a restart",
+        "a threat-model B10 row (A6, the manifest) points at these tests",
+    ],
+}
+TRIAGE_SCOPE_IN_BACKLOG = {
+    "M11-E01": [
+        "**Owner decision first** (threat-model open question 7, R13)",
+        "`ArchiveConfigureArgs` (contracts 6.5) drops `password`, `object_access_key` and `object_secret_key`",
+        'loses its "How they get there differs by doc" sentence',
+        "`ArchivePurgeArgs.admin_user` and `admin_password`",
+    ],
+    "M4-E07": [
+        "a `documents.undo_position` column added by a new migration",
+        "Then build `IndexWrite::SetUndoPosition`",
+    ],
+    "M8-E02": [
+        "**Reserve first-party plugin ids.**",
+        "**Cap the manifest.**",
+        "**Re-check on `plugin.enable`.**",
+    ],
+}
 
 
 # ---- Helpers ----
@@ -345,6 +384,38 @@ def test_issue_body_ends_with_its_dependencies() -> None:
     assert sync_backlog.issue_body(item, REPO, {"M1-04": 4}) == "Body\n\nDepends on: #4, M1-05\n"
     item.depends_on = []
     assert sync_backlog.issue_body(item, REPO, {}) == "Body\n"
+
+
+def plan_entry(plan_text: str, item_id: str) -> str:
+    """The plan's text for one item: its task section up to the next heading, or else its epic table row. A task also
+    has a row in its milestone's schedule table, but only the section holds its goal and test."""
+    heading = f"#### {item_id} "
+    start = plan_text.find(heading)
+    if start != -1:
+        end = plan_text.find("\n#### ", start + len(heading))
+        return plan_text[start:end]
+    row_start = f"| {item_id} | "
+    for line in plan_text.splitlines():
+        if line.startswith(row_start):
+            return line
+    raise AssertionError(f"{item_id} has no section or row in the plan")
+
+
+def test_scope_added_on_github_lives_in_the_backlog_and_the_plan() -> None:
+    # The sync rewrites any issue body that differs from backlog.json, so scope added to an issue by hand is erased by
+    # the next run. The follow-up triage of 2026-10-12 added scope to these four issues; it must live in the backlog
+    # (and in the plan entry each body mirrors) to survive.
+    inputs = real_inputs()
+    bodies = {item.id: item.body for item in inputs.items}
+    plan_text = sync_backlog.DEFAULT_PLAN_PATH.read_text(encoding="utf-8")
+    for item_id, phrases in TRIAGE_PHRASES_IN_BACKLOG_AND_PLAN.items():
+        entry = plan_entry(plan_text, item_id)
+        for phrase in phrases:
+            assert phrase in bodies[item_id], f"{item_id} backlog body lacks {phrase!r}"
+            assert phrase in entry, f"{item_id} plan entry lacks {phrase!r}"
+    for item_id, phrases in TRIAGE_SCOPE_IN_BACKLOG.items():
+        for phrase in phrases:
+            assert phrase in bodies[item_id], f"{item_id} backlog scope lacks {phrase!r}"
 
 
 # ---- The PR template (plan 8.5) ----
