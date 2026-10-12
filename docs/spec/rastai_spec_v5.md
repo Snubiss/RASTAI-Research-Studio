@@ -899,7 +899,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Category | Dependency | Why | Replacement path |
 |---|---|---|---|
 | Foundation | Rust toolchain, tokio, axum, serde | Language runtime and HTTP | — |
-| Foundation | hyper, hyper-util, http-body, tokio-rustls, webpki-roots, tower | The HTTPS client (API adapters, HF Hub, later S3) and the Docker socket; tonic channels over Unix sockets; the frames of the daemon's streamed Connect responses (http-body, axum's own body trait). Same family as axum, tonic and rustls, already in the tree through them. One wrapper file per use (contracts §2) | — |
+| Foundation | hyper, hyper-util, http-body, tokio-rustls, webpki-roots, tower | The HTTPS client (API adapters, HF Hub, later S3) and the Docker socket; tonic channels over Unix sockets; the frames of the daemon's streamed Connect responses (http-body, axum's own body trait; owner approval of 2026-10-12). Same family as axum, tonic and rustls, already in the tree through them. One wrapper file per use (contracts §2) | — |
 | Foundation | pyo3, wasm-bindgen | Language bindings for the two `rastai-formats` builds: the Python wheel and the browser's WASM validator | — |
 | Foundation | libc | One `statvfs` call for free disk space, the only hand-written `unsafe` (ADR-0033), in `rastai-store/src/disk_space.rs` | Run `df --output=avail -B1` |
 | Foundation | OS tools: `setsid`, `kill`, `unshare`, `df`, `nvidia-smi`, `rocm-smi` | Process groups, signals, namespaces, disk and GPU readings. Run as child processes, never linked | — |
@@ -1341,6 +1341,9 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4.3 (owner approval of 2026-10-12, M1-28; the status line stays v5.4)**
+- §27: `http-body` (MIT, from the hyper project, already in `Cargo.lock` through axum, hyper and tonic) is a direct dependency of `rastai-server`, imported only in `http/connect.rs`, for the frame type of the streamed `EventService.Subscribe` response body. Replacement path: the body trait axum re-exports has no frame type, so the alternative is a hand-written frame type for the one body.
+
 **v5.4.2 (owner decision of 2026-10-11, PROC-01; the status line stays v5.4)**
 - §0.23 / §5: the verification rule's first condition is now `just check` passing locally (the pre-push hook `tools/hooks/pre-push`) and on the verifier's fresh clone of the exact PR head, not green CI. The private repository's free GitHub Actions minutes ran out, so CI runs only when started by hand until the repository is public or a self-hosted runner takes the jobs; macOS and Windows are re-checked then. This replaces the "CI is green" wording of v5.4.1 below.
 
