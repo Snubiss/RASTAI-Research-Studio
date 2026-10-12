@@ -1,0 +1,25 @@
+{
+  "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2N",
+  "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2P",
+  "kind": "JOB_KIND_TRAIN",
+  "job_spec": {
+    "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2N",
+    "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2P",
+    "kind": "JOB_KIND_TRAIN",
+    "environment_id": "cpu",
+    "arguments_json": "{\"start_arguments\":{\"recipe\":\"classification\",\"design_path\":\"templates/designs/textcnn.rrsmodel\",\"dataset_path\":\"fixtures/datasets/textcnn_tiny.jsonl\"},\"plan\":{\"recipe\":\"classification\",\"method\":\"full\",\"dtype\":\"fp32\",\"gpu_indices\":[],\"micro_batch\":16,\"gradient_accumulation\":1,\"sequence_length\":128,\"memory_estimate_bytes\":268435456,\"time_estimate_seconds\":30},\"max_steps\":40,\"seed\":0}",
+    "data_policy": "local-only",
+    "checkpoint_policy_json": "{\"keep_last\":2,\"preemption_budget_seconds\":20}"
+  },
+  "job_socket_path": "run/jobs/job_01JA2B3C4D5E6F7G8H9J0K1M2N.sock",
+  "worker_host_socket_path": "run/worker-host.sock",
+  "run_folder": "runs/run_01JA2B3C4D5E6F7G8H9J0K1M2P",
+  "cache_folder": "",
+  "environment_id": "cpu",
+  "environment_lock_hash": "",
+  "hardware_profile": {},
+  "granted_leases": [],
+  "resolved_models": {},
+  "plugins": [],
+  "resume_from": ""
+}

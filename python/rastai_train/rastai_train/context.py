@@ -65,8 +65,7 @@ def checkpoint_policy(
     checkpoint_settings: SettingsCheckpoint | None = None, every_steps: int = 0, pinned_steps: tuple[int, ...] = ()
 ) -> CheckpointPolicy:
     """The policy for these `training.checkpoint` settings, each field they leave out at its 11.2 default. The train
-    job (M1-46) passes the settings it reads from job.json; the shape of `JobSpec.checkpoint_policy_json` lands with
-    that job's contract change, not here."""
+    job (M1-46) passes the section it reads from `JobSpec.checkpoint_policy_json` (contracts 4.4)."""
     given = checkpoint_settings
     if given is None:
         given = SettingsCheckpoint()

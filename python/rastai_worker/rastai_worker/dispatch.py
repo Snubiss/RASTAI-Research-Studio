@@ -3,8 +3,8 @@
 `JOB_ENTRIES` names each Python job kind's entry as `<module>:<function>`, the same form as `JobSpec.entry`
 (contracts 4.4). The module is imported only when a job of that kind starts, for two reasons: an engine pulls in
 torch and its kernels, so a job imports only its own kind's engine; and the job modules land one build step at a
-time (python layout 7.11, `jobs/train.py` with M1-46), so a kind whose module isn't in this worker yet is a clear
-bad launch, not an import error that stops every other kind.
+time (python layout 7.11; `jobs/train.py` first, with M1-46), so a kind whose module isn't in this worker yet is a
+clear bad launch, not an import error that stops every other kind.
 
 An `eval` or `lens` job runs a plugin's job function, which its `JobSpec.entry` names. Both kinds go through
 `jobs/plugin_entry.py` (python layout 7.4), the one place that imports `JobSpec.entry` and calls it. That module

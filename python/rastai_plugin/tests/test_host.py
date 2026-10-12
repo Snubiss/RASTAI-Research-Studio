@@ -29,6 +29,7 @@ JOB_TOKEN = "ab" * 32
 TOKEN_METADATA_KEY = "rastai-job-token"
 TOKEN_VARIABLE = "RASTAI_JOB_TOKEN"
 SOCKET_FILE_NAME = "worker-host.sock"
+JOB_FILE_NAME = "job.json"
 SERVER_THREADS = 2
 SERVER_STOP_GRACE_SECONDS = 0.5
 # A short folder: a Unix socket path must fit in 108 bytes, and pytest's tmp_path can be long.
@@ -76,7 +77,7 @@ def fake_node(socket_folder: Path) -> Iterator[tuple[FakeWorkerHostService, str]
 
 
 def write_job_file(folder: Path, fields: dict) -> Path:
-    job_file = folder / "job.json"
+    job_file = folder / JOB_FILE_NAME
     job_file.write_text(json.dumps(fields), encoding="utf-8")
     return job_file
 
@@ -95,7 +96,7 @@ def job_file_fields(socket_folder: Path, worker_host_socket_path: str) -> dict:
 def test_register_sends_the_job_its_socket_and_the_token(fake_node, socket_folder: Path) -> None:
     service, socket_path = fake_node
     job_socket_path = str(socket_folder / f"{JOB_ID}.sock")
-    host = WorkerHost(socket_path, JOB_ID, job_socket_path, JOB_TOKEN)
+    host = WorkerHost(socket_path, JOB_ID, job_socket_path, JOB_TOKEN, socket_folder / JOB_FILE_NAME)
     host.register()
     assert service.calls == [{"job_id": JOB_ID, "job_socket_path": job_socket_path, "token": JOB_TOKEN}]
 
@@ -115,14 +116,18 @@ def test_the_channel_names_localhost_as_its_authority(
 
     monkeypatch.setattr(grpc, "insecure_channel", recording_insecure_channel)
     service, socket_path = fake_node
-    WorkerHost(socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN).register()
+    WorkerHost(
+        socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN, socket_folder / JOB_FILE_NAME
+    ).register()
     assert channel_options == [[("grpc.default_authority", "localhost")]]
     assert len(service.calls) == 1
 
 
 def test_register_again_on_reattach_is_a_second_call(fake_node, socket_folder: Path) -> None:
     service, socket_path = fake_node
-    host = WorkerHost(socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN)
+    host = WorkerHost(
+        socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN, socket_folder / JOB_FILE_NAME
+    )
     host.register()
     host.register()
     assert len(service.calls) == 2
@@ -130,7 +135,9 @@ def test_register_again_on_reattach_is_a_second_call(fake_node, socket_folder: P
 
 def test_a_refused_register_raises_the_nodes_code(fake_node, socket_folder: Path) -> None:
     service, socket_path = fake_node
-    host = WorkerHost(socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), "cd" * 32)
+    host = WorkerHost(
+        socket_path, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), "cd" * 32, socket_folder / JOB_FILE_NAME
+    )
     with pytest.raises(PluginError) as caught:
         host.register()
     assert caught.value.code == RRS_J2002
@@ -139,7 +146,9 @@ def test_a_refused_register_raises_the_nodes_code(fake_node, socket_folder: Path
 
 def test_register_without_a_node_is_j2001(socket_folder: Path) -> None:
     missing_socket = str(socket_folder / SOCKET_FILE_NAME)
-    host = WorkerHost(missing_socket, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN)
+    host = WorkerHost(
+        missing_socket, JOB_ID, str(socket_folder / f"{JOB_ID}.sock"), JOB_TOKEN, socket_folder / JOB_FILE_NAME
+    )
     with pytest.raises(PluginError) as caught:
         host.register()
     assert caught.value.code == RRS_J2001
@@ -156,6 +165,8 @@ def test_connect_worker_host_reads_job_json_and_the_token(
     host = connect_worker_host(job_file)
     # Building the client makes no call; the worker registers once it serves its own socket.
     assert service.calls == []
+    # A job reads the rest of its launch from the same file.
+    assert host.job_file_path == job_file
     host.register()
     assert service.calls == [
         {"job_id": JOB_ID, "job_socket_path": str(socket_folder / f"{JOB_ID}.sock"), "token": JOB_TOKEN}

@@ -46,8 +46,8 @@ RUN_ID = "run_01JA2B3C4D5E6F7G8H9J0K1M2P"
 # A detail only the traceback may carry: it must never reach the run's log.
 SECRET_DETAIL = "detail-only-for-stderr"
 FRAME_HEADER_FORMAT = "<II"
-# `python -m rastai_worker` with the train kind pointing at a test entry, since no job module is built yet
-# (jobs/train.py lands with M1-46).
+# `python -m rastai_worker` with the train kind pointing at a test entry, so each test decides how the entry ends
+# (the real train job has its own tests: test_train_job.py and test_worker_server.py).
 LAUNCHER_MODULE_NAME = "rastai_test_worker_main"
 LAUNCHER_MODULE_SOURCE = """
 import sys
