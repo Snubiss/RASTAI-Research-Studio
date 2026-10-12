@@ -1,6 +1,6 @@
-# rastai_models: the Inspectable runtime (contracts 2.2; layout python.md section 2). M1-34 lands its safetensors
+# rastai_models: the Inspectable runtime (contracts 2.2; layout python.md section 2). M1-34 landed its safetensors
 # I/O: the reader, which reads tensor bytes only after the rastai_formats wheel accepted the header, and the writer.
-# The compiler and the TextCNN blocks join with M1-35.
+# M1-35 adds the ModelSpec compiler and the TextCNN blocks.
 
 [project]
 name = "rastai-models"
@@ -10,7 +10,7 @@ requires-python = "==3.12.*"
 # backend build.
 dependencies = [
     "torch",               # tensors from memory-mapped weight files, and the tensors the writer writes
-    "rastai-formats",      # the one safetensors header check (contracts 2.4 rule 10)
+    "rastai-formats",      # the one safetensors header check (contracts 2.4 rule 10); the ModelSpec dataclasses
     "rastai-plugin",       # rastai_plugin.catalog: the error codes ModelError carries
 ]
 
