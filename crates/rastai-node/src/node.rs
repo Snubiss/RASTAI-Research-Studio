@@ -3,8 +3,7 @@
 //! and `rastai node serve` run the same function; `NodeMode` is the only difference.
 //!
 //! The start-up order of layout 7.3 is spelled out in `run_node`. The steps later tasks build are named where they
-//! go: serving WorkerHostService (M1-43), reattaching jobs and heartbeats (M1-45), llama-server (M3) and sandboxes
-//! (M5).
+//! go: reattaching jobs and heartbeats (M1-45), llama-server (M3) and sandboxes (M5).
 
 use std::sync::{Arc, Mutex};
 
@@ -21,8 +20,10 @@ use crate::error::NodeError;
 use crate::handshake::HandshakeTable;
 use crate::hardware::{DetectedHardware, HardwareSources, detect_hardware};
 use crate::identity::{NodeIdentity, load_or_create_identity, public_key_bytes};
+use crate::jobs::supervisor::{JobOptions, JobTable};
 use crate::node_service::NodeServiceHandler;
 use crate::telemetry::start_telemetry;
+use crate::worker_host_service::serve_worker_host;
 
 /// What starts a node.
 pub struct NodeOptions {
@@ -31,6 +32,8 @@ pub struct NodeOptions {
     pub settings: NodeSettings,
     /// Where hardware detection and telemetry read: `system_hardware_sources()` on a real machine.
     pub hardware_sources: HardwareSources,
+    /// How jobs are timed and which environments they can run in: `default_job_options(...)` in the product.
+    pub jobs: JobOptions,
 }
 
 /// Where the node runs. It decides where logs go and whether UpdateNode is allowed (standalone only, M9).
@@ -50,6 +53,9 @@ pub struct NodeState {
     pub hardware: Mutex<HardwareProfile>,
     pub telemetry: Mutex<NodeTelemetry>,
     pub handshakes: Mutex<HandshakeTable>,
+    pub jobs: Mutex<JobTable>,
+    /// Fixed for the node's life, so it needs no lock.
+    pub job_options: JobOptions,
 }
 
 /// Starts the node and serves NodeService on node.sock until the server stops.
@@ -62,8 +68,9 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
     let nvidia_gpus = detected.nvidia_gpus.clone();
     let amd_gpus = detected.amd_gpus.clone();
     let state = Arc::new(build_node_state(options, identity, detected.profile));
-    // serve_worker_host (M1-43) goes here, first, so live jobs can re-Register; then reattach_jobs (M1-45),
-    // reattach_llama_servers (M3) and adopt_and_sweep_sandboxes (M5).
+    // First, so live jobs can re-Register. Serving stops when `_worker_host` is dropped, as the telemetry loops do.
+    let _worker_host = serve_worker_host(&state)?;
+    // reattach_jobs (M1-45), reattach_llama_servers (M3) and adopt_and_sweep_sandboxes (M5) go here.
     // The loops stop when `_telemetry` is dropped: when serving ends or fails, or this future is dropped.
     let _telemetry = start_telemetry(&state, &hardware_sources, nvidia_gpus, amd_gpus);
     // start_heartbeat_loop (M1-45) goes here.
@@ -85,6 +92,8 @@ pub(crate) fn build_node_state(options: NodeOptions, identity: NodeIdentity, har
         hardware: Mutex::new(hardware),
         telemetry: Mutex::new(telemetry),
         handshakes: Mutex::new(HandshakeTable::default()),
+        jobs: Mutex::new(JobTable::default()),
+        job_options: options.jobs,
     }
 }
 

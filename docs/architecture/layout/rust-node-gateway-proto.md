@@ -1164,7 +1164,8 @@ crates/rastai-node/
     gym_tools.rs             MCP tool servers inside sandboxes through rastai-mcp's client; WorkerHostService ListTools, CallTool
     self_update.rs           UpdateNode: verify the release signature, swap the binary, restart; (L2) the watchdog and rollback
   tests/
-    support/fake_worker.py        a tiny WorkerService for tests (stdlib + rastai_proto), scripted by a JSON file
+    support/fake_worker.py        a tiny WorkerService for tests (stdlib, grpcio and rastai_proto), scripted by a JSON file;
+                                  the tests that run it are #[ignore]d in a plain cargo test, and `just test-node-jobs` runs them
     support/mock_llama_server.rs  llama-server stand-in: /health, streaming /completion, /tokenize
     jobs.rs                       start, signals, cancel grace, process-group kill, exit causes
     reattach.rs                   node restart mid-run: reattach, no lost events, PID reuse refused (start ticks, process group,
@@ -1195,7 +1196,7 @@ crates/rastai-node/
 
 ```rust
 // node.rs
-pub struct NodeOptions { pub mode: NodeMode, pub paths: DataPaths, pub settings: NodeSettings, pub hardware_sources: HardwareSources }
+pub struct NodeOptions { pub mode: NodeMode, pub paths: DataPaths, pub settings: NodeSettings, pub hardware_sources: HardwareSources, pub jobs: JobOptions }
 pub enum NodeMode { Embedded, Standalone }
 
 pub struct NodeState {
@@ -1220,13 +1221,22 @@ pub struct NodeState {
 pub async fn run_node(options: NodeOptions) -> Result<(), NodeError>;
 
 // jobs/supervisor.rs
-pub struct JobRecord { pub info: JobInfo, pub spec: JobSpec, pub run_folder: PathBuf, pub token_hash: String, pub worker: Option<WorkerLink> }
+// The register timeout and stop grace (WORKER_REGISTER_TIMEOUT_SECONDS, STOP_GRACE_SECONDS; tests shorten them) and
+// the environments the node runs jobs in (uv environments replace the list in M2-16).
+pub struct JobOptions { pub worker_register_timeout: Duration, pub stop_grace: Duration, pub environments: Vec<JobEnvironment> }
+pub struct JobEnvironment { pub environment_id: String, pub folder: PathBuf }
+pub fn default_job_options(environments: Vec<JobEnvironment>) -> JobOptions;
+// Also the job's process identity, its OOM watch, why the node killed it, and whether it holds its run (7.4 step 1).
+pub struct JobRecord { pub info: JobInfo, pub spec: JobSpec, pub run_folder: PathBuf, pub token_hash: String, pub worker: Option<WorkerLink>, ... }
 pub struct WorkerLink { pub job_token: String, pub channel: tonic::transport::Channel }
-pub async fn start_job(state: &NodeState, spec: JobSpec) -> Result<JobInfo, NodeError>;
-pub async fn signal_job(state: &NodeState, job_id: &str, signal: JobSignal) -> Result<(), NodeError>;
+// A refused or failed start is the job's own failed state in the JobInfo, never a call error (contracts 4).
+pub async fn start_job(state: &Arc<NodeState>, spec: JobSpec) -> JobInfo;
+// None when delivered; else RRS-J0004 with the reason, or the worker's own ControlResponse.diagnostic.
+pub async fn signal_job(state: &Arc<NodeState>, job_id: &str, signal: JobSignal) -> Option<proto::Diagnostic>;
 pub fn list_jobs(state: &NodeState) -> Vec<JobInfo>;
-pub fn register_worker(state: &NodeState, job_token: &str, job_socket_path: &Path) -> Result<String, NodeError>;   // returns job_id
-pub fn set_job_state(state: &NodeState, job_id: &str, to: JobState, reason: &str, diagnostic: Option<Diagnostic>);
+// WorkerHostService.Register: token against job_token_hash, Hello on the job socket, then running.
+pub async fn register_worker(state: &Arc<NodeState>, job_id: &str, job_token: &str, socket_path: &Path) -> Result<(), Diagnostic>;
+pub fn set_job_state(state: &NodeState, job_id: &str, to: JobState, reason: &str, diagnostic: Option<Diagnostic>) -> bool;
 
 // run_events.rs
 pub async fn watch_run_events(state: &NodeState, run_id: &str, after_sequence: u64, sender: mpsc::Sender<EventRecord>) -> Result<(), NodeError>;

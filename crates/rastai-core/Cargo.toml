@@ -17,10 +17,11 @@ rastai-diag = { path = "../rastai-diag" }
 # since_version with its semver parser.
 rastai-formats = { path = "../rastai-formats" }
 # The state enums, Diagnostic and CommandDescriptor are rastai-proto's (one owner, contracts 2.4 rule 3). Only
-# wire.rs, states.rs, commands/descriptor.rs and commands/registry.rs, which holds descriptors, import it
-# (layout 5.3).
+# wire.rs, states.rs, proto_json.rs, commands/descriptor.rs and commands/registry.rs, which holds descriptors, import
+# it (layout 5.3).
 rastai-proto = { path = "../rastai-proto" }
-# Settings values and layers are JSON (settings.rs, settings_defaults.rs; layout 5.3).
+# Settings values and layers are JSON (settings.rs, settings_defaults.rs; layout 5.3), and so are the wire messages
+# proto_json.rs writes into files.
 serde_json = { workspace = true }
 
 [lints]
