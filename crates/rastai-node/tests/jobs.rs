@@ -114,6 +114,8 @@ while [ ! -s "$run_folder/child-ready.txt" ]; do sleep 0.02; done
 echo ready > "$run_folder/ready.txt"
 while :; do sleep 1; done
 "#;
+    /// Exits 2, a bad launch, without a word on stderr.
+    const EXITS_SILENTLY: &str = "#!/bin/sh\nexit 2\n";
     /// Exits with the code in its run folder's `exit-code`, after a line on stderr.
     const EXITS_WITH_CODE: &str = r#"#!/bin/sh
 run_folder=$(dirname "$5")
@@ -643,6 +645,24 @@ exit "$(cat "$run_folder/exit-code")"
         }
     }
 
+    // The run's stderr.log is appended to across relaunches: a job that wrote nothing there gets the fallback reason,
+    // never the earlier job's last line.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_silent_relaunch_never_quotes_the_earlier_jobs_stderr() {
+        let mut node = start_job_node(EXITS_SILENTLY, LONG_TIMEOUT, LONG_TIMEOUT).await;
+        let run_id = new_run_id();
+        let folder = run_folder(&node, &run_id);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("stderr.log"), "the earlier job's last words\n").unwrap();
+        let spec = job_spec(&run_id);
+        start_job(&mut node, spec.clone()).await;
+        let ended = wait_for_end(&mut node, &spec.job_id).await;
+        assert_eq!(error_code(&ended), "RRS-J2001");
+        let message = error_message(&ended);
+        assert!(!message.contains("the earlier job's last words"), "{message}");
+        assert!(message.contains("it reported a bad launch (exit 2)"), "{message}");
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_worker_killed_from_outside_fails_naming_sigkill() {
         let mut node = start_job_node(RECORDING_WORKER, LONG_TIMEOUT, LONG_TIMEOUT).await;
@@ -901,6 +921,83 @@ exit "$(cat "$run_folder/exit-code")"
             recorded_events(&record, "signal").is_empty(),
             "the Control call worked, so no SIGINT"
         );
+    }
+
+    /// Sends `job_signal` to a running fake-worker job that ignores it, and checks the node kills the group once the
+    /// grace runs out (layout 7.4: STOP and TERMINATE escalate to SIGKILL as CANCEL does).
+    async fn ignored_signal_is_killed_after_the_grace(script: &str, job_signal: JobSignal, expected_reason: &str) {
+        let mut node = start_fake_worker_node(script, SHORT_GRACE).await;
+        let (spec, _run_id) = running_fake_job(&mut node).await;
+        let signalled_at = Instant::now();
+        let pid = signal_and_check_alive_at_half_the_grace(&mut node, &spec.job_id, job_signal).await;
+        let ended = wait_for_end(&mut node, &spec.job_id).await;
+        assert!(signalled_at.elapsed() >= SHORT_GRACE, "killed before the grace ran out");
+        assert_eq!(ended.state(), JobState::Cancelled);
+        assert_eq!(error_code(&ended), "RRS-J1003");
+        assert!(
+            error_message(&ended).contains(expected_reason),
+            "{}",
+            error_message(&ended)
+        );
+        assert_eq!(ended.exit_code, Some(KILLED_EXIT_CODE));
+        wait_until_stopped(pid).await;
+        assert_group_is_gone(ended.process_group_id);
+    }
+
+    /// Signals the job, which moves to stopping, and checks it is still stopping and alive at half the grace.
+    /// Returns the worker's pid.
+    async fn signal_and_check_alive_at_half_the_grace(node: &mut JobNode, job_id: &str, job_signal: JobSignal) -> u32 {
+        let pid = list_job(node, job_id).await.pid;
+        assert_eq!(signal(node, job_id, job_signal).await, None);
+        assert_eq!(list_job(node, job_id).await.state(), JobState::Stopping);
+        tokio::time::sleep(SHORT_GRACE / 2).await;
+        assert_eq!(
+            list_job(node, job_id).await.state(),
+            JobState::Stopping,
+            "the worker ignored {job_signal:?}, and the grace hasn't run out"
+        );
+        assert!(!process_has_stopped(pid), "the worker still runs at half the grace");
+        pid
+    }
+
+    /// No process is left running in the group.
+    fn assert_group_is_gone(process_group_id: u32) {
+        let entries = fs::read_dir("/proc").unwrap();
+        for entry in entries.flatten() {
+            let Some((state, group)) = process_state_and_group(&entry.path()) else {
+                continue;
+            };
+            let runs_in_group = group == process_group_id && state != "Z";
+            assert!(
+                !runs_in_group,
+                "{} of group {process_group_id} still runs",
+                entry.path().display()
+            );
+        }
+    }
+
+    /// A /proc entry's state and process group (fields 3 and 5 of its stat); None for an entry that isn't a process
+    /// or one that has gone since the listing.
+    fn process_state_and_group(proc_entry: &Path) -> Option<(String, u32)> {
+        let stat = fs::read_to_string(proc_entry.join("stat")).ok()?;
+        let (_, rest) = stat.rsplit_once(')')?;
+        let fields: Vec<&str> = rest.split_whitespace().collect();
+        let group = fields.get(2)?.parse().ok()?;
+        Some((fields.first()?.to_string(), group))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the cpu environment (just env-cpu); just test-node-jobs runs it"]
+    async fn stop_is_killed_after_the_grace_when_ignored() {
+        let script = r#"{"control": {"STOP": "ignore"}}"#;
+        ignored_signal_is_killed_after_the_grace(script, JobSignal::Stop, "STOP didn't end it").await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the cpu environment (just env-cpu); just test-node-jobs runs it"]
+    async fn terminate_is_killed_after_the_grace_when_ignored() {
+        let script = r#"{"on_sigterm": "ignore"}"#;
+        ignored_signal_is_killed_after_the_grace(script, JobSignal::Terminate, "TERMINATE didn't end it").await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
