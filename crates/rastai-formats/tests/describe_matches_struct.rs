@@ -1070,6 +1070,7 @@ fn the_token_types_match_their_descriptions() {
         name: "navi".to_string(),
         scopes: vec!["chat".to_string()],
         created_unix_ms: 1_760_000_000_000,
+        created_by: "token:tok_01H".to_string(),
         revoked_unix_ms: 1_760_000_100_000,
     };
     assert_description_matches(&summary, "TokenSummary");

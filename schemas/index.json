@@ -62,7 +62,7 @@
       "schema_id": "rastai.command.token.create/1"
     },
     {
-      "content_hash": "blake3:e4e90f13c5e93774796478661384e4ed619b27e3295552dc7827b603fe4ac180",
+      "content_hash": "blake3:41a16b9a5c4fc0afa1ce037d770479c2a5597263fcd5d66736f0a28cd49a2e8b",
       "file": "commands/rastai.command.token.list/1.json",
       "schema_id": "rastai.command.token.list/1"
     },

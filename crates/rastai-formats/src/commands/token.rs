@@ -58,6 +58,10 @@ pub struct TokenSummary {
     pub name: String,
     pub scopes: Vec<String>,
     pub created_unix_ms: u64,
+    /// Who made it, as the journal names a principal: `owner`, `token:<token_id>` or `plugin:<plugin_id>`
+    /// (contracts 6.3). Revoking that token or disabling that plugin revokes this one too (contracts 8.2, R28).
+    /// Empty when nothing recorded the creator: a token made before migration 0003 with no journal row naming it.
+    pub created_by: String,
     /// 0 while the token is active.
     #[serde(default)]
     pub revoked_unix_ms: u64,
@@ -177,6 +181,12 @@ pub fn describe_token_summary() -> TypeDescription {
         field("name", FieldKind::String, REQUIRED, "The token's name."),
         field("scopes", list_of(FieldKind::String), REQUIRED, "The scopes it holds."),
         field("created_unix_ms", FieldKind::Integer, REQUIRED, "When it was made."),
+        field(
+            "created_by",
+            FieldKind::String,
+            REQUIRED,
+            "Who made it: owner, token:<token_id> or plugin:<plugin_id>; empty when no record names the creator.",
+        ),
         field(
             "revoked_unix_ms",
             FieldKind::Integer,

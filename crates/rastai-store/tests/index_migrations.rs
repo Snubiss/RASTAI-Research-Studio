@@ -25,6 +25,8 @@ const INDEX_TABLES_HEADING: &str = "### 8.2 ";
 const NEXT_HEADING: &str = "### 8.3 ";
 // A table row of 8.2 starts with its backticked table name.
 const TABLE_ROW_START: &str = "| `";
+// The milestone markers of contracts' conventions. In a list cell one covers only the name it follows (12.6).
+const MILESTONE_MARKER_STARTS: &[&str] = &["(M", "(L2)", "(Phase 2)", "(Phase 3)"];
 // The migration files the store compiles in, which sql_names.rs reads for schemas/names.json.
 // The version of the last one (0002_journal_arguments_hash.sql), which a migrated file records.
 const LAST_MIGRATION_VERSION: i64 = 2;
@@ -51,18 +53,36 @@ fn migrated_tables(test_name: &str) -> Vec<TableColumns> {
     tables
 }
 
-/// The backticked names of a contracts list cell that count as names (contracts 12.6): outside parentheses, and
-/// before the first `:`, `;` or full stop outside backticks and parentheses. Notes after them are prose.
+/// Whether a milestone marker is among the parenthesized groups right after a name: `x` (M4), `x` (`y`) (M1).
+/// Such a name is built by a later migration, as `check-names` reads it (contracts 12.6).
+fn milestone_marker_follows(rest: &str) -> bool {
+    let mut rest = rest.trim_start();
+    while rest.starts_with('(') {
+        if MILESTONE_MARKER_STARTS.iter().any(|marker| rest.starts_with(marker)) {
+            return true;
+        }
+        let Some(group_end) = rest.find(')') else {
+            return false;
+        };
+        rest = rest[group_end + 1..].trim_start();
+    }
+    false
+}
+
+/// The backticked names of a contracts list cell that count as built names (contracts 12.6): outside parentheses,
+/// before the first `:`, `;` or full stop outside backticks and parentheses, and without a milestone marker of their
+/// own. Notes after them are prose.
 fn names_in_list_cell(cell: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut current = String::new();
     let mut in_backticks = false;
     let mut parenthesis_depth = 0;
-    for character in cell.chars() {
+    for (position, character) in cell.char_indices() {
         if in_backticks {
             if character == '`' {
                 in_backticks = false;
-                if parenthesis_depth == 0 {
+                let rest = &cell[position + 1..];
+                if parenthesis_depth == 0 && !milestone_marker_follows(rest) {
                     names.push(current.clone());
                 }
                 current.clear();
@@ -210,4 +230,10 @@ fn a_file_that_is_not_a_database_is_refused_as_damaged() {
 fn list_cells_are_read_the_way_check_names_reads_them() {
     let cell = " `run_id`, `state` (`local`; 9.9), `pinned` (no `x`: y): the notes `after` ";
     assert_eq!(names_in_list_cell(cell), vec!["run_id", "state", "pinned"]);
+}
+
+#[test]
+fn a_column_with_its_own_milestone_marker_isnt_built_yet() {
+    let cell = " `token_id`, `name` (its name), `created_by` (M1) (who made it; added later), `revoked_unix_ms` ";
+    assert_eq!(names_in_list_cell(cell), vec!["token_id", "name", "revoked_unix_ms"]);
 }
