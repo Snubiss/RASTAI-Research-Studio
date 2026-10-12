@@ -14,8 +14,10 @@ so the flusher has nothing to do until RESUME.
 
 A full disk pauses the run instead of failing it (`pause_for_full_disk`), and the append is tried again after
 RESUME. A job that has been asked to end doesn't wait for RESUME: it frees the reserve and tries the append once
-more, so its final records can still land (platform flow 6.1). When the log can't be written at all (any failure
-but a full disk, the pause records failing too, or an append that fails after the reserve was freed), the writer is
+more, so its final records can still land (platform flow 6.1). Only a write that failed is tried again: when the
+frame was written and its fsync failed (even with ENOSPC), the record is already in the file, so a retry would
+repeat it. When the log can't be written at all (any failure but a full disk, a failed fsync, the pause records
+failing too, or an append that fails after the reserve was freed), the writer is
 marked unwritable and the error goes up: the job can't record anything more, so the edge (diagnostics.py) exits with
 EXIT_EVENT_LOG_UNWRITABLE (4) instead of trying to log the failure.
 
@@ -90,16 +92,23 @@ class WorkerJobEvents(JobEvents):
         return self.unwritable_error is not None
 
     def append(self, event_type: str, record_payload: EventPayload, blob_hashes: list[str], fsync_now: bool) -> None:
-        """Appends, making room on a full disk (see make_room_or_give_up) and trying again. Raises the log's
-        WorkerError, with the writer marked unwritable, when the log can't take the record."""
+        """Appends, making room on a full disk (see make_room_or_give_up) and trying again when the frame wasn't
+        written. Raises the log's WorkerError, with the writer marked unwritable, when the log can't take the record
+        or its fsync failed."""
         with self.log_lock:
             if self.unwritable_error is not None:
                 raise self.unwritable_error
             while True:
+                sequence_before = self.log.next_sequence
                 try:
                     self.log.append(event_type, record_payload, blob_hashes, fsync_now)
                     return
                 except WorkerError as error:
+                    if self.log.next_sequence != sequence_before:
+                        # The frame is in the file and only its fsync failed: appending again would write the
+                        # record twice, and after a failed fsync Linux may already have dropped the dirty pages,
+                        # so a second fsync proves nothing. Give up, the same as the flusher does.
+                        self.give_up(error)
                     self.make_room_or_give_up(error)
 
     def make_room_or_give_up(self, error: WorkerError) -> None:

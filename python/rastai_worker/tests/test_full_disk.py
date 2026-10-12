@@ -4,12 +4,13 @@
 A fake file that raises ENOSPC stands in for the full disk: the reserve is freed, diagnostic.reported (RRS-S3002)
 and run.state_changed paused are written, the job waits for RESUME and the reserve comes back, then the event that
 failed is written. A job asked to end doesn't pause: it frees the reserve and tries once more, so it still ends with
-its final record. When the pause records fail too, the record fails after the reserve was freed, or the log fails
-for any other reason, the exit code is 4.
+its final record. When the pause records fail too, the record fails after the reserve was freed, a written record's
+fsync fails (even with ENOSPC), or the log fails for any other reason, the exit code is 4.
 """
 
 import errno
 import json
+import os
 import struct
 import threading
 import time
@@ -34,7 +35,7 @@ from rastai_worker.job_file import read_job_file
 from rastai_worker.live_stream import LiveStream
 
 from rastai_plugin import JobControl
-from rastai_worker import event_log
+from rastai_worker import event_log, job_events
 
 pytestmark = pytest.mark.posix_only
 
@@ -62,6 +63,21 @@ class FullDisk:
         if self.failing_writes is None or self.write_count in self.failing_writes:
             raise OSError(self.error_number, "fake write failure")
         self.real_write_all_at(file_descriptor, data, offset)
+
+
+class FailingFsync:
+    """Replaces os.fsync: the first call after install raises ENOSPC, the others fsync as usual. The frame is
+    already written by then, so only its fsync fails."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+        self.real_fsync = os.fsync
+
+    def fsync(self, file_descriptor: int) -> None:
+        self.call_count += 1
+        if self.call_count == 1:
+            raise OSError(errno.ENOSPC, "fake fsync failure")
+        self.real_fsync(file_descriptor)
 
 
 def open_events(tmp_path: Path, control: JobControl) -> WorkerJobEvents:
@@ -232,6 +248,56 @@ def test_an_ending_job_whose_final_record_fails_after_the_reserve_is_freed_exits
     assert not events.log.reserve_path.exists()
     assert capsys.readouterr().err.strip().splitlines()[-1].startswith(f"{RRS_S3002}: ")
     events.log.close()
+
+
+def test_an_ending_job_whose_final_record_fsync_fails_writes_it_once_and_exits_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The final record is in the file and only its fsync fails with ENOSPC: freeing the reserve and appending again
+    would repeat the record under the next sequence, so the job exits 4 with one copy."""
+    control = JobControl()
+    events = open_events(tmp_path, control)
+    launch = write_launch(tmp_path)
+    failing_fsync = FailingFsync()
+    monkeypatch.setattr(os, "fsync", failing_fsync.fsync)
+
+    def preempted_entry(job, host, entry_events, entry_control) -> None:
+        entry_control.preempt_requested = True
+
+    assert run_entry_with_diagnostics(preempted_entry, launch, None, events, control) == EXIT_EVENT_LOG_UNWRITABLE
+    assert failing_fsync.call_count == 1
+    records = read_records(tmp_path / "events.log")
+    assert [record.sequence for record in records] == [1]
+    assert records[0].payload.run_state_changed.run_state == RUN_STATE_PREEMPTED
+    assert events.log_is_unwritable
+    events.log.close()
+
+
+def test_a_metrics_record_whose_fsync_fails_is_written_once_and_exits_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same mid-job: a run.metrics append whose batched fsync is due fails only in the fsync. The run doesn't
+    pause and append the step again (no repeated steps, platform flow 6), and no final record follows."""
+    control = JobControl()
+    events = open_events(tmp_path, control)
+    launch = write_launch(tmp_path)
+    # The last fsync was long ago, so this append's batched fsync is due.
+    events.log.last_sync_seconds = 0.0
+    failing_fsync = FailingFsync()
+    monkeypatch.setattr(os, "fsync", failing_fsync.fsync)
+    # A pause here would wait for a RESUME that never comes; fail at once instead (the edge reports it, exit 1).
+    monkeypatch.setattr(job_events, "pause_for_full_disk", refuse_to_pause)
+    assert run_entry_with_diagnostics(metrics_entry, launch, None, events, control) == EXIT_EVENT_LOG_UNWRITABLE
+    assert not control.paused
+    records = read_records(tmp_path / "events.log")
+    assert [record.event_type for record in records] == ["run.metrics"]
+    assert records[0].payload.run_metrics.step == METRICS["step"]
+    assert events.log.reserve_path.exists()
+    events.log.close()
+
+
+def refuse_to_pause(log, control) -> None:
+    raise AssertionError("the run paused, so the record it already wrote would be appended again")
 
 
 def cancel_once_paused(control: JobControl) -> None:
