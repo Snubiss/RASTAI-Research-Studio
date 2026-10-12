@@ -261,6 +261,7 @@ fn journal_started_row() -> JournalStartedRow {
         arguments_json: "{\"run_id\":\"run_a\"}".to_string(),
         idempotency_key: String::new(),
         started_unix_ms: 30,
+        arguments_hash: String::new(),
     }
 }
 

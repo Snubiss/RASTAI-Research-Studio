@@ -312,6 +312,7 @@ fn journal_rows_are_found_by_key_and_unfinished_ones_are_closed() {
         arguments_json: "{}".to_string(),
         idempotency_key: key.to_string(),
         started_unix_ms,
+        arguments_hash: String::new(),
     };
     write(
         &runtime,
@@ -341,6 +342,7 @@ fn journal_rows_are_found_by_key_and_unfinished_ones_are_closed() {
     assert_eq!(interrupted.code, "RRS-C0005");
     assert!(interrupted.finished_unix_ms.is_some());
     assert_eq!(interrupted.idempotency_key, "");
+    assert_eq!(interrupted.arguments_hash, "");
     drop(reader);
     runtime.block_on(close_store(store));
     remove_test_folder(&paths);
@@ -358,6 +360,7 @@ fn a_finished_row_keeps_its_result_and_its_first_finish() {
         arguments_json: "{\"name\":\"ci\"}".to_string(),
         idempotency_key: "key-1".to_string(),
         started_unix_ms: 1,
+        arguments_hash: "blake3:0a".to_string(),
     };
     let finished = |result_json: &str, finished_unix_ms: i64| JournalFinishedRow {
         journal_id: "jrn_a".to_string(),
@@ -385,6 +388,7 @@ fn a_finished_row_keeps_its_result_and_its_first_finish() {
     assert_eq!(row.result_json, "{\"token\":\"<redacted>\"}");
     assert_eq!(row.job_id, "");
     assert_eq!(row.finished_unix_ms, Some(2));
+    assert_eq!(row.arguments_hash, "blake3:0a");
     drop(reader);
     runtime.block_on(close_store(store));
     remove_test_folder(&paths);

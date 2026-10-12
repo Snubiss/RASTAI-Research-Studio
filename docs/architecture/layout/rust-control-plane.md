@@ -1605,12 +1605,14 @@ crates/rastai-store/
                                     including log_cursors, plugin_event_deliveries and runs.archive_state (default
                                     'local'); M11's migration only adds the empty archive_cursors table, so it moves no
                                     live data (plan M1-23)
+      migrations/0002_journal_arguments_hash.sql   command_journal.arguments_hash, the keyed hash the idempotency
+                                    check compares (M1-27, contracts §8.2)
       writes.rs               IndexWrite enum and apply_index_write(): one match arm per variant
       reads.rs                IndexReader, IndexReaderGuard and open_index_reader()
       runs.rs                 rows and functions for runs (with archive_state), jobs, run_metrics, run_tags, checkpoints
       artifacts.rs            artifacts, artifact_copies, lineage, models
       documents.rs            documents, undo_steps
-      journal.rs              command_journal, including idempotency_key, result_json, job_id
+      journal.rs              command_journal, including idempotency_key, result_json, job_id, arguments_hash
       kept_tables.rs          tokens, nodes, plugins, projects (the tables a rebuild copies, 13.2)
       transfers.rs            transfers
       log_cursors.rs          acked sequence of the daemon's own event log
@@ -2252,7 +2254,7 @@ crates/rastai-server/
       dispatch.rs             dispatch(): one match arm per core command; plugin ids fall through to the plugin host
       context.rs              CommandContext
       arguments.rs            check_arguments(): layer 2 against the command's description or the plugin's types.json
-      journal.rs              journal rows, secret redaction, idempotency lookup
+      journal.rs              journal rows, secret redaction, idempotency lookup by a keyed arguments hash
       undo.rs                 undoable edits, document.undo and document.redo (flows/platform.md 3.4)
       handlers/
         system.rs             system.*, secret.*, hf.*, storage.*

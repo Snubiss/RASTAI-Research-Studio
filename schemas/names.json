@@ -573,7 +573,8 @@
         "result_json",
         "job_id",
         "started_unix_ms",
-        "finished_unix_ms"
+        "finished_unix_ms",
+        "arguments_hash"
       ],
       "documents": [
         "document_id",

@@ -9,6 +9,10 @@
 //!   row; `execute.rs` decides between replaying it and `RRS-C0004`. Its stored result is the redacted one, so a
 //!   replayed `token.create` answers `<redacted>` and makes no second token. A per-key lock makes a duplicate that
 //!   arrives while the first is still running wait for it.
+//! - **Comparing requests.** The redacted arguments can't tell two requests apart that differ only in a secret, so a
+//!   row with a key also stores `arguments_hash`: BLAKE3 of the canonical, unredacted arguments, keyed with the owner
+//!   token's hash. The key never reaches disk, so a reader of `rastai.db` can't test guesses of a secret against the
+//!   hash, and the same owner token gives the same hash after a restart.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -19,6 +23,7 @@ use rastai_diag::diagnostic::{Diagnostic, Severity};
 use rastai_formats::commands::{describe_arguments, describe_result};
 use rastai_formats::describe::registry::{describe_all_types, find_description};
 use rastai_formats::describe::types::{FieldKind, TypeDescription};
+use rastai_formats::hashing::hash_bytes;
 use rastai_formats::json::canonical::canonical_json;
 use rastai_proto::commands::v1::{CommandDescriptor, ExecuteRequest};
 use rastai_store::index::journal::{
@@ -44,6 +49,9 @@ const NO_ARGUMENTS: &str = "{}";
 /// Separates the principal from the key in a lock's name; neither a principal label nor a key reaches the lock
 /// with a newline in it unchanged, and two different pairs never join to the same name.
 const LOCK_NAME_SEPARATOR: char = '\n';
+/// Goes first in what `arguments_hash` hashes, so the owner token's hash, used as the key, gives values no other use
+/// of it gives.
+const ARGUMENTS_HASH_PURPOSE: &str = "rastai command_journal.arguments_hash/1";
 
 /// The lock of one (principal, idempotency key) pair while a command with that key runs.
 pub struct IdempotencyKeyLock {
@@ -120,21 +128,29 @@ pub(crate) fn find_recent_journal_row(
     Ok(row.filter(|row| row.started_unix_ms > oldest_kept_unix_ms))
 }
 
-/// True when a request carries the same command and arguments as an earlier row. Arguments are compared as the
-/// journal holds them, redacted and in canonical form, so key order and spacing don't matter (two different
-/// secrets compare equal: the journal never had the first one to compare with). A plugin command's arguments are
-/// redacted whole, so any two of its requests compare equal; before plugin forwarding runs one (M4), the journal
-/// needs a BLAKE3 hash of the canonical arguments to compare instead, a contract change of its own.
-pub(crate) fn is_same_request(command_id: &str, arguments_json: &str, row: &JournalRow) -> bool {
-    if row.command_id != command_id {
-        return false;
-    }
-    let stored: Option<Value> = serde_json::from_str(&row.arguments_json).ok();
-    let sent: Option<Value> = serde_json::from_str(&redact_arguments(command_id, arguments_json)).ok();
-    match (stored, sent) {
-        (Some(stored), Some(sent)) => canonical_json(&stored) == canonical_json(&sent),
-        _ => false,
-    }
+/// What the idempotency check compares: BLAKE3 of the canonical, unredacted arguments, keyed with `hash_key` (the
+/// owner token's hash). Canonical, so key order and spacing don't make two requests different; unredacted, so two
+/// secrets do. Only the hash is stored, never the arguments it was made from.
+pub fn arguments_hash(hash_key: &str, arguments_json: &str) -> String {
+    let text = if arguments_json.is_empty() {
+        NO_ARGUMENTS
+    } else {
+        arguments_json
+    };
+    let canonical = match serde_json::from_str::<Value>(text) {
+        Ok(value) => canonical_json(&value),
+        // Layer 2 already read the arguments as JSON, so this is only a fallback: the text as it was sent.
+        Err(_) => text.to_string(),
+    };
+    let keyed = format!("{ARGUMENTS_HASH_PURPOSE}\n{hash_key}\n{canonical}");
+    hash_bytes(keyed.as_bytes())
+}
+
+/// True when a request carries the same command and arguments as an earlier row: the same command id and the same
+/// `arguments_hash`. A row without a hash (one written before the column existed) is never the same request, so its
+/// key is refused with `RRS-C0004` rather than replayed for arguments nobody can compare.
+pub(crate) fn is_same_request(command_id: &str, sent_arguments_hash: &str, row: &JournalRow) -> bool {
+    row.command_id == command_id && !row.arguments_hash.is_empty() && row.arguments_hash == sent_arguments_hash
 }
 
 /// Writes the started row and returns its journal id.
@@ -151,11 +167,20 @@ pub(crate) async fn journal_started(
         arguments_json: redact_arguments(&request.command_id, &request.arguments_json),
         idempotency_key: request.idempotency_key.clone(),
         started_unix_ms: now_unix_ms(),
+        arguments_hash: started_arguments_hash(server, request),
     };
     write_index(&server.store.index, IndexWrite::JournalStarted(row))
         .await
         .map_err(|error| store_failure(&error))?;
     Ok(journal_id)
+}
+
+/// Only a row with a key is ever compared, so only such a row keeps a hash.
+fn started_arguments_hash(server: &Server, request: &ExecuteRequest) -> String {
+    if request.idempotency_key.is_empty() {
+        return String::new();
+    }
+    arguments_hash(&server.auth.owner_token_hash, &request.arguments_json)
 }
 
 /// Writes the finished row: ok, the first error's code, and the redacted result.
@@ -348,13 +373,14 @@ mod tests {
         assert_eq!(redact_result("train.start", ""), "");
     }
 
-    #[test]
-    fn requests_compare_redacted_and_canonical() {
-        let row = JournalRow {
+    const HASH_KEY: &str = "blake3:0a1b";
+
+    fn keyed_row(command_id: &str, arguments_json: &str) -> JournalRow {
+        JournalRow {
             journal_id: "jrn_a".to_string(),
-            command_id: "token.create".to_string(),
+            command_id: command_id.to_string(),
             principal: "owner".to_string(),
-            arguments_json: redact_arguments("token.create", r#"{"name":"ci","scopes":["read"]}"#),
+            arguments_json: redact_json(arguments_json, Some(sample_description())),
             ok: Some(true),
             code: String::new(),
             idempotency_key: "k".to_string(),
@@ -362,17 +388,54 @@ mod tests {
             job_id: String::new(),
             started_unix_ms: 1,
             finished_unix_ms: Some(2),
-        };
-        assert!(is_same_request(
-            "token.create",
-            r#"{ "scopes": ["read"], "name": "ci" }"#,
+            arguments_hash: arguments_hash(HASH_KEY, arguments_json),
+        }
+    }
+
+    #[test]
+    fn requests_compare_by_the_hash_of_their_canonical_arguments() {
+        let row = keyed_row("token.create", r#"{"name":"ci","scopes":["read"]}"#);
+        let reordered = arguments_hash(HASH_KEY, r#"{ "scopes": ["read"], "name": "ci" }"#);
+        assert!(is_same_request("token.create", &reordered, &row));
+        let other = arguments_hash(HASH_KEY, r#"{"name":"other"}"#);
+        assert!(!is_same_request("token.create", &other, &row));
+        assert!(!is_same_request("token.revoke", &reordered, &row));
+        // No arguments and an empty object are the same request.
+        assert_eq!(arguments_hash(HASH_KEY, ""), arguments_hash(HASH_KEY, "{}"));
+    }
+
+    #[test]
+    fn two_secrets_that_redact_alike_are_different_requests() {
+        let first = r#"{"password":"hunter2","name":"n"}"#;
+        let second = r#"{"password":"hunter3","name":"n"}"#;
+        let row = keyed_row("archive.purge", first);
+        // The journal can't tell them apart: both redact to the same text.
+        assert_eq!(row.arguments_json, redact_json(second, Some(sample_description())));
+        assert!(!is_same_request(
+            "archive.purge",
+            &arguments_hash(HASH_KEY, second),
             &row
         ));
-        assert!(!is_same_request("token.create", r#"{"name":"other"}"#, &row));
+        assert!(is_same_request("archive.purge", &arguments_hash(HASH_KEY, first), &row));
+        assert!(!row.arguments_hash.contains("hunter2"));
+    }
+
+    #[test]
+    fn the_hash_depends_on_its_key_and_a_row_without_one_never_matches() {
+        let arguments = r#"{"name":"ci"}"#;
+        assert_ne!(
+            arguments_hash(HASH_KEY, arguments),
+            arguments_hash("blake3:ffff", arguments)
+        );
+        let unhashed = JournalRow {
+            arguments_hash: String::new(),
+            ..keyed_row("token.create", arguments)
+        };
+        assert!(!is_same_request("token.create", "", &unhashed));
         assert!(!is_same_request(
-            "token.revoke",
-            r#"{"name":"ci","scopes":["read"]}"#,
-            &row
+            "token.create",
+            &arguments_hash(HASH_KEY, arguments),
+            &unhashed
         ));
     }
 

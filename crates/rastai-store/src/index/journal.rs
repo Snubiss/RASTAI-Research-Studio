@@ -14,8 +14,8 @@ use crate::sqlite::{
 const CODE_INTERRUPTED_BY_RESTART: &str = "RRS-C0005";
 
 const INSERT_JOURNAL_STARTED: &str = "INSERT INTO command_journal (journal_id, command_id, principal, arguments_json,
-        idempotency_key, started_unix_ms)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
+        idempotency_key, started_unix_ms, arguments_hash)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
 // The finished columns of a row the start wrote. A row that is already finished keeps its first finish: the command
 // ran once, so its outcome is written once.
 const FINISH_JOURNAL_ROW: &str = "UPDATE command_journal SET ok = ?2, code = ?3, result_json = ?4, job_id = ?5,
@@ -36,15 +36,17 @@ const ARGUMENTS_NOT_RECORDED: &str = "{}";
 // Both selects list the columns in the order journal_from_columns reads them.
 // The newest row wins: whether it is still inside the key's 24 hours is the server's call (flows/platform.md 3.2).
 const SELECT_BY_IDEMPOTENCY_KEY: &str = "SELECT journal_id, command_id, principal, arguments_json, ok, code,
-        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms
+        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms, arguments_hash
     FROM command_journal WHERE principal = ?1 AND idempotency_key = ?2
     ORDER BY started_unix_ms DESC, journal_id DESC LIMIT 1";
 const SELECT_BY_JOURNAL_ID: &str = "SELECT journal_id, command_id, principal, arguments_json, ok, code,
-        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms
+        idempotency_key, result_json, job_id, started_unix_ms, finished_unix_ms, arguments_hash
     FROM command_journal WHERE journal_id = ?1";
 
 /// What is known when a command starts. `idempotency_key` is "" when the caller sent none. `arguments_json` must
-/// already have its `secret` and `content` fields redacted (contracts 5.1).
+/// already have its `secret` and `content` fields redacted (contracts 5.1). `arguments_hash` is what the idempotency
+/// check compares, a keyed hash of the unredacted arguments that never holds a secret itself; "" (stored as NULL) for
+/// a row without a key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JournalStartedRow {
     pub journal_id: String,
@@ -53,6 +55,7 @@ pub struct JournalStartedRow {
     pub arguments_json: String,
     pub idempotency_key: String,
     pub started_unix_ms: i64,
+    pub arguments_hash: String,
 }
 
 /// What is known when a command ends. `code` is the catalog code of its first error, "" when it succeeded;
@@ -84,6 +87,8 @@ pub struct JournalRow {
     pub job_id: String,
     pub started_unix_ms: i64,
     pub finished_unix_ms: Option<i64>,
+    /// "" for a row without an idempotency key, one a rebuild made, or one written before migration 2.
+    pub arguments_hash: String,
 }
 
 pub(crate) fn insert_journal_started(
@@ -97,6 +102,7 @@ pub(crate) fn insert_journal_started(
         text_value(&row.arguments_json),
         idempotency_key_value(&row.idempotency_key),
         integer_value(row.started_unix_ms),
+        optional_text_value(&row.arguments_hash),
     ];
     execute(transaction, INSERT_JOURNAL_STARTED, &parameters)?;
     Ok(())
@@ -205,5 +211,6 @@ fn journal_from_columns(row: &[SqlValue]) -> Result<JournalRow, StoreError> {
         job_id: read_text(row, 8)?,
         started_unix_ms: read_integer(row, 9)?,
         finished_unix_ms: read_optional_integer(row, 10)?,
+        arguments_hash: read_text(row, 11)?,
     })
 }
