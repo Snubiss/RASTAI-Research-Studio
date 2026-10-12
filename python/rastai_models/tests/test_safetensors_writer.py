@@ -142,3 +142,16 @@ def test_what_safetensors_cant_hold_is_refused_before_writing(tmp_path: Path) ->
     with pytest.raises(ValueError, match="strings to strings"):
         write_safetensors(path, {"t": torch.zeros(2)}, {"step": 3})
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_string_with_no_utf8_form_is_refused_before_writing(tmp_path: Path) -> None:
+    # A lone surrogate would reach the header as a \ud800 escape, which the wheel refuses.
+    lone_surrogate = "\ud800"
+    path = tmp_path / "refused.safetensors"
+    with pytest.raises(ValueError, match="tensor name"):
+        write_safetensors(path, {lone_surrogate: torch.zeros(1)})
+    with pytest.raises(ValueError, match="metadata key"):
+        write_safetensors(path, {"t": torch.zeros(1)}, {lone_surrogate: "x"})
+    with pytest.raises(ValueError, match="metadata value"):
+        write_safetensors(path, {"t": torch.zeros(1)}, {"x": lone_surrogate})
+    assert list(tmp_path.iterdir()) == []

@@ -7,14 +7,16 @@ name = "rastai-models"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
 requires-python = "==3.12.*"
 # torch is the foundation (§27) and carries no pin here: each environment in python/envs/ pins it, with its own
-# backend build. rastai-plugin joins with the first code that reads its catalog constants.
+# backend build.
 dependencies = [
     "torch",               # tensors from memory-mapped weight files, and the tensors the writer writes
     "rastai-formats",      # the one safetensors header check (contracts 2.4 rule 10)
+    "rastai-plugin",       # rastai_plugin.catalog: the error codes ModelError carries
 ]
 
 [tool.uv.sources]
 rastai-formats = { workspace = true }
+rastai-plugin = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14"]

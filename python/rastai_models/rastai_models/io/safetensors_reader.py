@@ -18,15 +18,13 @@ import os
 from pathlib import Path
 
 import torch
+from rastai_plugin.catalog.generated import RRS_E6011
 
 import rastai_formats
 from rastai_formats import FormatsValidationError
 from rastai_models.errors import ModelError, model_error_from_refusal
 
 LENGTH_PREFIX_BYTES = 8
-# A file that shrank after the wheel checked it no longer holds the tensors its header places: their data_offsets now
-# fall outside the data section, which is this code's meaning.
-SHRUNK_FILE_CODE = "RRS-E6011"
 
 # The torch dtype for each dtype name the wheel accepts (crates/rastai-formats/src/safetensors/dtypes.rs). The wheel
 # refuses any other name, so every accepted header maps.
@@ -124,5 +122,7 @@ def map_file(file, file_length: int, file_name: str) -> mmap.mmap:
     try:
         return mmap.mmap(file.fileno(), file_length, access=mmap.ACCESS_COPY)
     except ValueError:
+        # A file that shrank after the wheel checked it no longer holds the tensors its header places: their
+        # data_offsets now fall outside the data section, which is RRS-E6011's meaning.
         message = f"{file_name}: the file shrank below {file_length} bytes after its header was checked"
-        raise ModelError(SHRUNK_FILE_CODE, message) from None
+        raise ModelError(RRS_E6011, message) from None
