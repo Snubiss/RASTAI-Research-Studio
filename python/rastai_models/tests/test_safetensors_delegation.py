@@ -81,6 +81,17 @@ def claimed_header_end(file_name: str) -> int:
     return LENGTH_PREFIX_BYTES + int.from_bytes(data[:LENGTH_PREFIX_BYTES], "little")
 
 
+def real_length_check_code(file_name: str) -> str | None:
+    """The code the real wheel's length check refuses the file with, or None when it lets the file through. Asked
+    before any stand-in is in place."""
+    data = (CORPUS_FOLDER / file_name).read_bytes()
+    try:
+        rastai_formats.read_safetensors_header_length(data[:LENGTH_PREFIX_BYTES], len(data))
+    except FormatsValidationError as error:
+        return json.loads(error.args[0])[0]["code"]
+    return None
+
+
 @pytest.fixture
 def mappings(monkeypatch: pytest.MonkeyPatch) -> list:
     """Every memory mapping the reader asks for. Mapping a file is how it reaches tensor bytes."""
@@ -111,10 +122,16 @@ def test_the_corpus_has_its_six_valid_files() -> None:
 def test_with_the_header_check_refusing_every_file_is_refused_unread(
     file_name: str, monkeypatch: pytest.MonkeyPatch, mappings: list, reads: ReadRecorder
 ) -> None:
+    length_code = real_length_check_code(file_name)
     monkeypatch.setattr(rastai_formats._native, "check_safetensors_header", stand_in_refusal)
     with pytest.raises(ModelError) as error:
         SafetensorsFile(CORPUS_FOLDER / file_name)
-    assert error.value.code.startswith("RRS-E60")
+    if length_code is None:
+        # The real length check let the file through, so only the stand-in can have refused it.
+        assert error.value.code == STAND_IN_CODE
+        assert STAND_IN_PATH in error.value.message
+    else:
+        assert error.value.code == length_code
     assert mappings == []
     assert reads.furthest_byte <= claimed_header_end(file_name)
     assert all(file.inner.closed for file in reads.files)

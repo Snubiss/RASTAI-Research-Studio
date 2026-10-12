@@ -21,9 +21,12 @@ import torch
 
 import rastai_formats
 from rastai_formats import FormatsValidationError
-from rastai_models.errors import model_error_from_refusal
+from rastai_models.errors import ModelError, model_error_from_refusal
 
 LENGTH_PREFIX_BYTES = 8
+# A file that shrank after the wheel checked it no longer holds the tensors its header places: their data_offsets now
+# fall outside the data section, which is this code's meaning.
+SHRUNK_FILE_CODE = "RRS-E6011"
 
 # The torch dtype for each dtype name the wheel accepts (crates/rastai-formats/src/safetensors/dtypes.rs). The wheel
 # refuses any other name, so every accepted header maps.
@@ -57,7 +60,7 @@ class SafetensorsFile:
             header = read_checked_header(file, str(self.path))
             # Reached only when the wheel accepted the header. The mapping outlives the file object: mmap keeps its
             # own handle.
-            self._mapping = mmap.mmap(file.fileno(), header["file_length"], access=mmap.ACCESS_COPY)
+            self._mapping = map_file(file, header["file_length"], str(self.path))
         self.metadata: dict[str, str] = header["metadata"]
         self._data_start: int = header["data_start"]
         self._tensors: dict[str, dict] = {tensor["name"]: tensor for tensor in header["tensors"]}
@@ -109,3 +112,17 @@ def read_checked_header(file, file_name: str) -> dict:
         raise model_error_from_refusal(error, file_name) from None
     header["file_length"] = file_length
     return header
+
+
+def map_file(file, file_length: int, file_name: str) -> mmap.mmap:
+    """The whole file, mapped copy-on-write. `file_length` is the size the wheel's checks were made against.
+
+    If the file shrank since then, mmap refuses the length with a ValueError, which becomes a ModelError like every
+    other refusal. A file truncated after this point can't be caught here: reading a page past the new end raises
+    SIGBUS, as with any memory-mapped reader. Rastai's own writers never shrink a file in place (they write a
+    `.partial` file and rename it), so that takes another program truncating the file while it is open."""
+    try:
+        return mmap.mmap(file.fileno(), file_length, access=mmap.ACCESS_COPY)
+    except ValueError:
+        message = f"{file_name}: the file shrank below {file_length} bytes after its header was checked"
+        raise ModelError(SHRUNK_FILE_CODE, message) from None

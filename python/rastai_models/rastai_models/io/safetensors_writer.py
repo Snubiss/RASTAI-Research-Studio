@@ -60,7 +60,8 @@ def build_header(tensors: dict[str, torch.Tensor], metadata: dict[str, str]) -> 
         }
         offset += size
     header = json.dumps(entries, separators=(",", ":")).encode("utf-8")
-    padding = -len(header) % HEADER_ALIGNMENT_BYTES
+    # The spaces needed to reach the next multiple of 8; none when the header is already a multiple.
+    padding = (HEADER_ALIGNMENT_BYTES - len(header) % HEADER_ALIGNMENT_BYTES) % HEADER_ALIGNMENT_BYTES
     return header + b" " * padding
 
 

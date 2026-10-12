@@ -9,6 +9,7 @@ leave the header to the wheel, not for its tests.
 """
 
 import json
+import os
 import struct
 from pathlib import Path
 
@@ -115,6 +116,26 @@ def test_a_loaded_tensor_is_a_copy_that_outlives_the_file() -> None:
     reader.close()
     loaded += 1
     assert torch.equal(loaded, torch.ones((2, 3)))
+
+
+def test_a_file_that_shrinks_after_its_header_was_checked_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Truncates the file between the wheel's check and the mapping, as another program could.
+    path = tmp_path / "shrinks.safetensors"
+    path.write_bytes((CORPUS_FOLDER / "valid_two_tensors.safetensors").read_bytes())
+    real_read_checked_header = safetensors_reader.read_checked_header
+
+    def check_then_truncate(file, file_name: str) -> dict:
+        header = real_read_checked_header(file, file_name)
+        os.truncate(path, header["data_start"])
+        return header
+
+    monkeypatch.setattr(safetensors_reader, "read_checked_header", check_then_truncate)
+    with pytest.raises(ModelError) as error:
+        SafetensorsFile(path)
+    assert error.value.code == "RRS-E6011"
+    assert str(path) in error.value.message
 
 
 @pytest.mark.parametrize("file_name", sorted(EXPECTED))
