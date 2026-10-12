@@ -3,16 +3,31 @@
 // fixtures/proto-golden/<package>/: <Name>.binpb decodes and encodes back to exactly the same bytes, the <Name>.json
 // encodes to those bytes and the bytes print as that JSON.
 // The Rust and Python tests compare against the same .binpb files, so the three encoders agree byte for byte.
+// The Connect JSON cases in fixtures/proto-golden/commands/connect_json/ are checked here against protobuf-es, the
+// reference that the daemon's hand-written codec (crates/rastai-server/tests/connect_protocol.rs) must equal.
 
 // @ts-expect-error -- no Node.js type definitions in this workspace (@types/node is not in spec §27)
 import { readFileSync, readdirSync } from "node:fs";
 
-import { createRegistry, fromBinary, fromJson, toBinary, toJson } from "@bufbuild/protobuf";
+import {
+  createRegistry,
+  fromBinary,
+  fromJson,
+  fromJsonString,
+  toBinary,
+  toJson,
+  toJsonString,
+} from "@bufbuild/protobuf";
 import { describe, expect, test } from "vitest";
 
 import {
   CommandDescriptorSchema,
+  DiagnosticSchema,
   EventTypeDescriptorSchema,
+  ExecuteRequestSchema,
+  ExecuteResponseSchema,
+  ListCommandsRequestSchema,
+  ListCommandsResponseSchema,
   Stability,
   file_rastai_commands_v1_command_service,
   file_rastai_common_v1_blob,
@@ -91,6 +106,19 @@ const JSON_SUFFIX = ".json";
 const JSON_OPTIONS = { useProtoFieldName: true };
 // Like prost, drop fields the generated code doesn't know, so code that lags behind the .proto changes the bytes.
 const BINARY_OPTIONS = { readUnknownFields: false };
+// The Connect JSON cases: `encode` (a .binpb and the exact text protobuf-es writes for it), `decode` (an input it
+// accepts and the text it writes back) and `refuse` (an input it refuses; the code and path are the daemon's).
+const CONNECT_JSON_FOLDER = "commands/connect_json";
+const CONNECT_JSON_CASES_FILE = "cases.json";
+/** @type {Record<string, DescMessage>} */
+const CONNECT_JSON_SCHEMAS = {
+  ExecuteRequest: ExecuteRequestSchema,
+  ExecuteResponse: ExecuteResponseSchema,
+  Diagnostic: DiagnosticSchema,
+  ListCommandsRequest: ListCommandsRequestSchema,
+  ListCommandsResponse: ListCommandsResponseSchema,
+  CommandDescriptor: CommandDescriptorSchema,
+};
 
 /**
  * @param {string} folder
@@ -245,5 +273,62 @@ describe("stability on command and event-type descriptors", () => {
     expect(toJson(EventTypeDescriptorSchema, eventType, JSON_OPTIONS)).toEqual(
       readGoldenJson(eventFolder, "EventTypeDescriptor"),
     );
+  });
+});
+
+/**
+ * One case of fixtures/proto-golden/commands/connect_json/cases.json.
+ * @typedef {object} ConnectJsonCase
+ * @property {string} message      one of the six CommandService messages, by its short name
+ * @property {string} [binary]     encode: the .binpb file, relative to the cases folder
+ * @property {string} [input]      decode and refuse: the JSON text sent
+ * @property {string} [json]       encode and decode: the exact text protobuf-es writes
+ */
+
+/** @returns {{encode: ConnectJsonCase[], decode: ConnectJsonCase[], refuse: ConnectJsonCase[]}} */
+function readConnectJsonCases() {
+  const url = new URL(`${CONNECT_JSON_FOLDER}/${CONNECT_JSON_CASES_FILE}`, GOLDEN_ROOT);
+  return JSON.parse(readFileSync(url, "utf8"));
+}
+
+/** @param {string} messageName */
+function connectJsonSchema(messageName) {
+  const schema = CONNECT_JSON_SCHEMAS[messageName];
+  if (schema === undefined) {
+    throw new Error(`${messageName} isn't one of the six Connect JSON messages`);
+  }
+  return schema;
+}
+
+describe("Connect JSON cases agree with protobuf-es", () => {
+  const cases = readConnectJsonCases();
+
+  test.each(cases.encode)("$message from $binary is written as protobuf-es writes it", (connectCase) => {
+    const schema = connectJsonSchema(connectCase.message);
+    const bytes = new Uint8Array(readFileSync(new URL(`${CONNECT_JSON_FOLDER}/${connectCase.binary}`, GOLDEN_ROOT)));
+    const message = fromBinary(schema, bytes, BINARY_OPTIONS);
+    expect(toJsonString(schema, message, JSON_OPTIONS)).toBe(connectCase.json);
+    expect(toBinary(schema, fromJsonString(schema, connectCase.json ?? ""))).toEqual(bytes);
+  });
+
+  test.each(cases.decode)("$message accepts $input", (connectCase) => {
+    const schema = connectJsonSchema(connectCase.message);
+    const message = fromJsonString(schema, connectCase.input ?? "");
+    expect(toJsonString(schema, message, JSON_OPTIONS)).toBe(connectCase.json);
+  });
+
+  test.each(cases.refuse)("$message refuses $input", (connectCase) => {
+    const schema = connectJsonSchema(connectCase.message);
+    expect(() => fromJsonString(schema, connectCase.input ?? "")).toThrow();
+  });
+
+  test("every .binpb in the cases folder is an encode case", () => {
+    /** @type {string[]} */
+    const fileNames = readdirSync(new URL(`${CONNECT_JSON_FOLDER}/`, GOLDEN_ROOT));
+    const binaryNames = fileNames.filter((name) => name.endsWith(BINARY_SUFFIX)).sort();
+    // A case whose binary starts with "../" reuses a package golden; every other one lives in this folder.
+    const caseBinaries = cases.encode.map((connectCase) => connectCase.binary ?? "");
+    const localBinaries = caseBinaries.filter((name) => !name.startsWith("../")).sort();
+    expect(localBinaries).toEqual(binaryNames);
   });
 });
