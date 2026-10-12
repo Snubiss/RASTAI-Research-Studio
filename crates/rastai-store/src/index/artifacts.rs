@@ -4,8 +4,8 @@
 
 use crate::error::StoreError;
 use crate::sqlite::{
-    SqliteTransaction, boolean_value, execute, integer_value, query_rows_in_transaction, read_text, read_unsigned,
-    text_value, unsigned_value,
+    SqliteTransaction, boolean_value, execute, integer_value, query_rows_in_transaction, read_integer, read_text,
+    read_unsigned, text_value, unsigned_value,
 };
 
 // `pinned` is left out of the update: only pin.changed moves it.
@@ -18,11 +18,13 @@ const UPSERT_ARTIFACT: &str = "INSERT INTO artifacts (artifact_id, kind, content
 // A copy that is already recorded keeps its path and its last verification.
 const INSERT_ARTIFACT_COPY: &str = "INSERT INTO artifact_copies (artifact_id, node_id, path) VALUES (?1, ?2, ?3)
     ON CONFLICT (artifact_id, node_id) DO NOTHING";
-const SELECT_ARTIFACT_CONTENTS: &str = "SELECT kind, content_hash, size_bytes, home_node_id FROM artifacts
-    WHERE artifact_id = ?1";
+const SELECT_ARTIFACT_COLUMNS: &str = "SELECT kind, content_hash, size_bytes, home_node_id, created_unix_ms
+    FROM artifacts WHERE artifact_id = ?1";
+const SELECT_ARTIFACT_COPY: &str = "SELECT 1 FROM artifact_copies WHERE artifact_id = ?1 AND node_id = ?2";
 const SET_ARTIFACT_PINNED: &str = "UPDATE artifacts SET pinned = ?2 WHERE artifact_id = ?1";
 const INSERT_LINEAGE: &str = "INSERT INTO lineage (from_id, to_id, relation) VALUES (?1, ?2, ?3)
     ON CONFLICT (from_id, to_id, relation) DO NOTHING";
+const SELECT_LINEAGE: &str = "SELECT 1 FROM lineage WHERE from_id = ?1 AND to_id = ?2 AND relation = ?3";
 
 // The home copy's bytes are in its node's blob store, found by the content hash, so it needs no path of its own.
 // Copies elsewhere (transfer.finished, M9) record where they landed.
@@ -62,27 +64,53 @@ pub(crate) fn upsert_artifact(
     Ok(())
 }
 
-/// Whether the index holds `artifact.artifact_id` with other contents (kind, hash, size or home node) than
-/// `artifact`. An artifact never changes once made, so a run's log that names an existing one with other contents
-/// would overwrite what another run made; the indexer refuses that record (indexer.rs). The same record applied again
-/// finds equal contents, so this never stops a re-sent record.
-pub(crate) fn artifact_differs(
+/// How the index's row for an artifact compares with an `artifact.created` record's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StoredArtifact {
+    /// The index has no such artifact: the record makes it.
+    Missing,
+    /// Every column the record writes holds the record's value already, its time included.
+    Same,
+    /// At least one column differs, so the upsert would rewrite the row.
+    Different,
+}
+
+/// Compares the index's row for `artifact.artifact_id` with `artifact` in every column the upsert writes. An
+/// artifact never changes once made, so a run's log that names an existing one may only repeat it exactly; the
+/// indexer refuses anything else (indexer.rs).
+pub(crate) fn compare_stored_artifact(
     transaction: &SqliteTransaction<'_>,
     artifact: &CreatedArtifact<'_>,
-) -> Result<bool, StoreError> {
+) -> Result<StoredArtifact, StoreError> {
     let rows = query_rows_in_transaction(
         transaction,
-        SELECT_ARTIFACT_CONTENTS,
+        SELECT_ARTIFACT_COLUMNS,
         &[text_value(artifact.artifact_id)],
     )?;
     let Some(row) = rows.first() else {
-        return Ok(false);
+        return Ok(StoredArtifact::Missing);
     };
     let same = read_text(row, 0)? == artifact.kind
         && read_text(row, 1)? == artifact.content_hash
         && read_unsigned(row, 2)? == artifact.size_bytes
-        && read_text(row, 3)? == artifact.home_node_id;
-    Ok(!same)
+        && read_text(row, 3)? == artifact.home_node_id
+        && read_integer(row, 4)? == artifact.created_unix_ms;
+    if same {
+        Ok(StoredArtifact::Same)
+    } else {
+        Ok(StoredArtifact::Different)
+    }
+}
+
+/// Whether `artifact_copies` records a copy of the artifact on the node.
+pub(crate) fn has_artifact_copy(
+    transaction: &SqliteTransaction<'_>,
+    artifact_id: &str,
+    node_id: &str,
+) -> Result<bool, StoreError> {
+    let parameters = [text_value(artifact_id), text_value(node_id)];
+    let rows = query_rows_in_transaction(transaction, SELECT_ARTIFACT_COPY, &parameters)?;
+    Ok(!rows.is_empty())
 }
 
 pub(crate) fn set_artifact_pinned(
@@ -108,4 +136,16 @@ pub(crate) fn insert_lineage(
     let parameters = [text_value(from_id), text_value(to_id), text_value(relation)];
     execute(transaction, INSERT_LINEAGE, &parameters)?;
     Ok(())
+}
+
+/// Whether the lineage link is already recorded.
+pub(crate) fn has_lineage(
+    transaction: &SqliteTransaction<'_>,
+    from_id: &str,
+    to_id: &str,
+    relation: &str,
+) -> Result<bool, StoreError> {
+    let parameters = [text_value(from_id), text_value(to_id), text_value(relation)];
+    let rows = query_rows_in_transaction(transaction, SELECT_LINEAGE, &parameters)?;
+    Ok(!rows.is_empty())
 }

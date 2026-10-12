@@ -2,7 +2,8 @@
 //! 6.1): the same batch applied twice gives the same rows, the ack only moves forward, and the rows and the ack
 //! commit in one transaction. Run logs move `runs.acked_sequence`, the daemon log `log_cursors.acked_sequence`.
 //! A run's log is untrusted (contracts 7.1): a record of another run, an event only the daemon's log carries, another
-//! run's checkpoint id or a rewritten artifact is refused with `RRS-S2004` and changes nothing.
+//! run's checkpoint id, an id of the wrong kind, a changed existing artifact or a parent with a relation a run's log
+//! may not give is refused with `RRS-S2004` and changes nothing.
 
 #![allow(clippy::unwrap_used)]
 
@@ -772,21 +773,16 @@ fn a_run_log_can_not_take_another_runs_checkpoint() {
     remove_test_folder(&paths);
 }
 
-#[test]
-fn a_run_log_can_not_rewrite_an_existing_artifact() {
-    let paths = test_paths("indexer-rewrite-artifact");
-    let runtime = runtime();
-    let store = open_store(&paths).unwrap();
-    write_starting_rows(&runtime, &store);
-    write_other_run(&runtime, &store);
-    // The other run made the artifact.
+/// The other run makes `ARTIFACT_ID` at sequence 3 (so its `created_unix_ms` is `RECORD_TIME_UNIX_MS + 3`), exported
+/// from its checkpoint.
+fn write_other_run_artifact(runtime: &Runtime, store: &Store) -> ArtifactCreated {
     let made = ArtifactCreated {
         artifact_id: ARTIFACT_ID.to_string(),
         kind: "exported_model".to_string(),
         content_hash: CONTENT_HASH.to_string(),
         size_bytes: 4096,
         home_node_id: NODE_ID.to_string(),
-        parents: Vec::new(),
+        parents: vec![parent(OTHER_CHECKPOINT_ID, "exported_as")],
     };
     let write = IndexWrite::ApplyRunEvents {
         run_id: OTHER_RUN_ID.to_string(),
@@ -798,26 +794,134 @@ fn a_run_log_can_not_rewrite_an_existing_artifact() {
         )],
     };
     runtime.block_on(write_index(&store.index, write)).unwrap();
+    made
+}
+
+fn parent(id: &str, relation: &str) -> ArtifactParent {
+    ArtifactParent {
+        id: id.to_string(),
+        relation: relation.to_string(),
+    }
+}
+
+fn artifact_record(sequence: u64, artifact: ArtifactCreated) -> EventRecord {
+    record(sequence, RUN_ID, "artifact.created", Payload::ArtifactCreated(artifact))
+}
+
+fn checkpoint_record(sequence: u64, checkpoint_id: &str) -> EventRecord {
+    let saved = CheckpointSaved {
+        checkpoint_id: checkpoint_id.to_string(),
+        step: sequence,
+        folder: format!("checkpoints/step-{sequence:08}"),
+        is_best: false,
+        ..Default::default()
+    };
+    record(sequence, RUN_ID, "checkpoint.saved", Payload::CheckpointSaved(saved))
+}
+
+#[test]
+fn a_run_log_can_not_rewrite_an_existing_artifact() {
+    let paths = test_paths("indexer-rewrite-artifact");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+    let made = write_other_run_artifact(&runtime, &store);
+    let artifacts_before = rows_of(&store, "artifacts");
+    let lineage_before = rows_of(&store, "lineage");
+    let copies_before = rows_of(&store, "artifact_copies");
+
     let mut rewritten = made.clone();
     rewritten.content_hash = "blake3:0202020202020202020202020202020202020202020202020202020202020202".to_string();
+    assert_run_batch_refused(&runtime, &store, vec![artifact_record(3, rewritten)], 3);
+    // The same contents at another time would move created_unix_ms: sequences 1 and 2 give 1001 and 1002.
+    assert_run_batch_refused(&runtime, &store, vec![artifact_record(1, made.clone())], 1);
+    assert_run_batch_refused(&runtime, &store, vec![artifact_record(2, made.clone())], 2);
+    // The same contents at the same time, but with a parent more, would graft a lineage row onto the other run's
+    // artifact.
+    let mut grafted = made.clone();
+    grafted.parents.push(parent(CHECKPOINT_ID, "evaluated_by"));
+    assert_run_batch_refused(&runtime, &store, vec![artifact_record(3, grafted)], 3);
+    let mut claimed = made.clone();
+    claimed.parents = vec![parent(RUN_ID, "checkpoint_of")];
+    assert_run_batch_refused(&runtime, &store, vec![artifact_record(3, claimed)], 3);
 
-    let batch = vec![record(
-        1,
-        RUN_ID,
-        "artifact.created",
-        Payload::ArtifactCreated(rewritten),
-    )];
-    assert_run_batch_refused(&runtime, &store, batch, 1);
-
-    // Naming it with the same contents changes nothing, so it is accepted: a re-sent record is never refused.
-    apply_run_batch(
-        &runtime,
-        &store,
-        vec![record(1, RUN_ID, "artifact.created", Payload::ArtifactCreated(made))],
-    );
+    // Column 6 is created_unix_ms (contracts 8.2): still the other run's time.
     let artifacts = rows_of(&store, "artifacts");
-    assert_eq!(artifacts.len(), 1);
-    assert_eq!(artifacts[0][2], format!("{CONTENT_HASH:?}"));
+    assert_eq!(artifacts, artifacts_before);
+    assert_eq!(artifacts[0][6], (RECORD_TIME_UNIX_MS + 3).to_string());
+    assert_eq!(rows_of(&store, "lineage"), lineage_before);
+    assert_eq!(rows_of(&store, "artifact_copies"), copies_before);
+
+    // An exact repeat, time and parents included, changes no row, so it is accepted: a re-sent record is never
+    // refused. Only the run's ack moves.
+    apply_run_batch(&runtime, &store, vec![artifact_record(3, made)]);
+    assert_eq!(run_acked_sequence(&store), 3);
+    assert_eq!(rows_of(&store, "artifacts"), artifacts_before);
+    assert_eq!(rows_of(&store, "lineage"), lineage_before);
+    assert_eq!(rows_of(&store, "artifact_copies"), copies_before);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+#[test]
+fn a_run_log_can_not_give_a_parent_a_relation_outside_its_own() {
+    let paths = test_paths("indexer-parent-relation");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+    let lineage_before = rows_of(&store, "lineage");
+    let new_artifact = ArtifactCreated {
+        artifact_id: ARTIFACT_ID.to_string(),
+        kind: "exported_model".to_string(),
+        content_hash: CONTENT_HASH.to_string(),
+        size_bytes: 4096,
+        home_node_id: NODE_ID.to_string(),
+        parents: Vec::new(),
+    };
+
+    // checkpoint_of comes only from checkpoint.saved; branch_of and trained_on name a message or a run; the last is
+    // in no list.
+    for relation in ["checkpoint_of", "branch_of", "trained_on", "made_up_relation"] {
+        let mut linked = new_artifact.clone();
+        linked.parents = vec![parent(OTHER_RUN_ID, relation)];
+        assert_run_batch_refused(&runtime, &store, vec![artifact_record(1, linked)], 1);
+    }
+
+    assert!(rows_of(&store, "artifacts").is_empty());
+    assert_eq!(rows_of(&store, "lineage"), lineage_before);
+    // A parent from another run with an artifact's relation is lineage, not a graft: its child is the new artifact.
+    let mut evaluated = new_artifact;
+    evaluated.parents = vec![parent(OTHER_CHECKPOINT_ID, "evaluated_by")];
+    apply_run_batch(&runtime, &store, vec![artifact_record(1, evaluated)]);
+    assert_eq!(rows_of(&store, "lineage").len(), lineage_before.len() + 1);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+#[test]
+fn a_run_log_can_not_name_another_kind_of_id() {
+    let paths = test_paths("indexer-id-kind");
+    let runtime = runtime();
+    let store = open_store(&paths).unwrap();
+    write_starting_rows(&runtime, &store);
+    write_other_run(&runtime, &store);
+    let made = write_other_run_artifact(&runtime, &store);
+
+    // An artifact named like another run's checkpoint or like the other run would hang its lineage rows on them.
+    for subject_id in [OTHER_CHECKPOINT_ID, OTHER_RUN_ID, "art_short"] {
+        let mut misnamed = made.clone();
+        misnamed.artifact_id = subject_id.to_string();
+        assert_run_batch_refused(&runtime, &store, vec![artifact_record(1, misnamed)], 1);
+    }
+    // A checkpoint named like the other run's artifact or the other run would hang a checkpoint_of row on them.
+    for subject_id in [ARTIFACT_ID, OTHER_RUN_ID] {
+        assert_run_batch_refused(&runtime, &store, vec![checkpoint_record(1, subject_id)], 1);
+    }
+
+    assert_eq!(rows_of(&store, "artifacts").len(), 1);
+    assert_eq!(rows_of(&store, "checkpoints").len(), 1);
     runtime.block_on(close_store(store));
     remove_test_folder(&paths);
 }
