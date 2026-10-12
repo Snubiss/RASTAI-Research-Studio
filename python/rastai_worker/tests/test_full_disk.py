@@ -133,6 +133,38 @@ def test_a_full_disk_pauses_the_run_until_resume(tmp_path: Path, monkeypatch: py
     events.log.close()
 
 
+def test_a_resume_right_after_the_paused_record_is_not_lost(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The node can send RESUME as soon as it reads `paused` from the log, before the job's thread takes its next
+    step. That RESUME must end the pause: the job goes on without waiting for a second one."""
+    control = JobControl()
+    events = open_events(tmp_path, control)
+    monkeypatch.setattr(event_log, "write_all_at", FullDisk({1}).write_all_at)
+    real_append = events.log.append
+
+    def append_then_resume_on_paused(event_type, payload, blob_hashes, fsync_now):
+        sequence = real_append(event_type, payload, blob_hashes, fsync_now)
+        if event_type == "run.state_changed" and payload.run_state_changed.run_state == RUN_STATE_PAUSED:
+            apply_control_action(control, "RESUME", JOB_ID)
+        return sequence
+
+    monkeypatch.setattr(events.log, "append", append_then_resume_on_paused)
+    emitter = threading.Thread(target=events.emit_durable, args=("run.metrics", METRICS), daemon=True)
+    emitter.start()
+    emitter.join(timeout=WAIT_SECONDS)
+    # Still waiting here means the flag went up after the record and wiped the RESUME out.
+    assert not emitter.is_alive()
+    assert not control.paused
+    records = read_records(tmp_path / "events.log")
+    assert [record.event_type for record in records] == [
+        "diagnostic.reported",
+        "run.state_changed",
+        "run.state_changed",
+        "run.metrics",
+    ]
+    assert records[2].payload.run_state_changed.run_state == RUN_STATE_RUNNING
+    events.log.close()
+
+
 def test_a_resume_before_space_is_freed_keeps_the_run_paused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     control = JobControl()
     events = open_events(tmp_path, control)

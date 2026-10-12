@@ -208,6 +208,10 @@ BAD_ARGUMENT_CHANGES = {
     "lora": set_value(["plan", "method"], "lora"),
     "bf16": set_value(["plan", "dtype"], "bf16"),
     "two GPUs": set_value(["plan", "gpu_indices"], [0, 1]),
+    "a GPU index as text": set_value(["plan", "gpu_indices"], ["0"]),
+    "a GPU index as a boolean": set_value(["plan", "gpu_indices"], [True]),
+    "a negative GPU index": set_value(["plan", "gpu_indices"], [-1]),
+    "a plan for another recipe": set_value(["plan", "recipe"], "jepa"),
     "no design": set_value(["start_arguments", "design_path"], ""),
     "start arguments that aren't an object": set_value(["start_arguments"], "classification"),
     "an unknown key": set_value(["max_step"], 40),
@@ -251,12 +255,19 @@ def test_job_spec_text_that_isnt_its_shape_is_j2001_before_any_record(case: str,
     assert events.durable == []
 
 
-def test_an_unknown_recipe_is_t0002(tmp_path: Path, fields: dict) -> None:
-    host = write_job(tmp_path, with_arguments(fields, set_value(["start_arguments", "recipe"], "jepa")))
+def test_an_unknown_recipe_is_t0002_before_any_record(tmp_path: Path, fields: dict) -> None:
+    def ask_for_jepa(arguments: dict) -> None:
+        arguments["start_arguments"]["recipe"] = "jepa"
+        arguments["plan"]["recipe"] = "jepa"
+
+    host = write_job(tmp_path, with_arguments(fields, ask_for_jepa))
+    events = RecordingEvents()
     with pytest.raises(WorkerError) as caught:
-        run_fixture_job(host, RecordingEvents())
+        run_fixture_job(host, events)
     assert caught.value.code == RRS_T0002
     assert "jepa" in caught.value.message and "classification" in caught.value.message
+    # A launch the job can't run, like RRS-J2001: the run's history never says it was preparing.
+    assert events.durable == []
 
 
 def test_a_job_file_of_another_job_is_j2001(tmp_path: Path, fields: dict) -> None:
@@ -410,6 +421,29 @@ def test_a_cancel_while_paused_ends_without_training_again(
     run_fixture_job(write_job(tmp_path, fields), events, control)
     assert events.run_states()[-1] == "RUN_STATE_PAUSED"
     assert events.payloads(CHECKPOINT_SAVED) == []
+
+
+@pytest.mark.parametrize("flag_name", ["stop_requested", "preempt_requested"])
+def test_stop_or_sigterm_while_paused_writes_the_checkpoint_without_running_again(
+    flag_name: str, tmp_path: Path, fields: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """STOP or SIGTERM while a full disk paused the run: the loop writes the checkpoint the disk refused and ends.
+    The run never runs again, so its states go from paused straight to the edge's final state, with no `running`."""
+    failed_steps = full_disk_once(monkeypatch)
+    control = JobControl()
+
+    def checkpoint_now_then_end_when_paused(event_type: str, payload: dict) -> None:
+        if event_type == RUN_METRICS and payload["step"] == CHECKPOINT_NOW_AT_STEP and TRAIN_LOSS in payload["values"]:
+            control.checkpoint_requested = True
+        if event_type == RUN_STATE_CHANGED and payload["run_state"] == "RUN_STATE_PAUSED":
+            setattr(control, flag_name, True)
+
+    events = RecordingEvents(checkpoint_now_then_end_when_paused)
+    run_fixture_job(write_job(tmp_path, fields), events, control)
+    assert failed_steps == [CHECKPOINT_NOW_AT_STEP]
+    assert events.run_states() == ["RUN_STATE_PREPARING", "RUN_STATE_RUNNING", "RUN_STATE_PAUSED"]
+    assert [payload["step"] for payload in events.payloads(CHECKPOINT_SAVED)] == [CHECKPOINT_NOW_AT_STEP]
+    assert sorted(events.train_losses()) == [CHECKPOINT_NOW_AT_STEP]
 
 
 def test_a_preemption_whose_checkpoint_hits_a_full_disk_fails_instead_of_pausing(

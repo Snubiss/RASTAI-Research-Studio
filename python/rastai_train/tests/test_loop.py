@@ -10,6 +10,7 @@ import torch
 from rastai_formats.generated.command_train_start import TrainStartArgs
 from rastai_formats.generated.settings import SettingsCheckpoint
 from rastai_plugin.catalog.generated import RRS_T3001
+from rastai_train.checkpoints import recorded_validation_loss
 
 from rastai_plugin import Batch, JobControl, JobEvents, PluginRegistry, StepResult, TrainingContext
 from rastai_train import (
@@ -117,6 +118,24 @@ class NonFiniteOnSteps(ClassificationRecipe):
             return result
         self.training_steps += 1
         if self.training_steps in self.non_finite_steps:
+            return StepResult(loss=result.loss * math.nan, metrics=result.metrics)
+        return result
+
+
+class NonFiniteValidationThroughStep(ClassificationRecipe):
+    """Classification whose validation loss is NaN at every checkpoint up to training step `last_spoiled_step`, as a
+    model that diverged early and recovered would give."""
+
+    def __init__(self, last_spoiled_step: int) -> None:
+        self.last_spoiled_step = last_spoiled_step
+        self.training_steps = 0
+
+    def training_step(self, batch: Batch) -> StepResult:
+        result = super().training_step(batch)
+        if self.model.training:
+            self.training_steps += 1
+            return result
+        if self.training_steps <= self.last_spoiled_step:
             return StepResult(loss=result.loss * math.nan, metrics=result.metrics)
         return result
 
@@ -380,6 +399,27 @@ def test_one_non_finite_step_is_skipped_and_left_out_of_the_metrics(repo_root: P
     assert last_record["step"] == 10
     assert "train.grad_norm" not in last_record["values"]
     assert "train.loss" not in last_record["values"]
+
+
+def test_a_non_finite_validation_loss_is_never_the_best_and_never_recorded(repo_root: Path, tmp_path: Path) -> None:
+    context = new_context(repo_root, tmp_path / "run", 6, every_steps=2)
+    events = RecordingEvents(context.run_folder)
+
+    outcome = train(context, NonFiniteValidationThroughStep(2), events, JobControl())
+
+    assert outcome.reason == "completed"
+    saved = events.payloads("checkpoint.saved")
+    assert [(payload["step"], payload["is_best"]) for payload in saved][:2] == [(2, False), (4, True)]
+    assert context.progress.best_step in (4, 6)
+    assert math.isfinite(context.progress.best_validation_loss)
+    # The record can't carry NaN (protobuf's JSON refuses it), so step 2 has no validation.loss at all.
+    validation_steps = []
+    for payload in events.payloads("run.metrics"):
+        assert all(math.isfinite(value) for value in payload["values"].values())
+        if "validation.loss" in payload["values"]:
+            validation_steps.append(payload["step"])
+    assert validation_steps == [4, 6]
+    assert recorded_validation_loss(context.run_folder / saved[0]["folder"]) is None
 
 
 # ---- Recipes ----

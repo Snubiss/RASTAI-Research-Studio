@@ -4,23 +4,29 @@
 
 1. job.json, read through `WorkerHost.job_file_path`: the run's id and folder, and `resume_from`. The entry is
    given only the JobSpec (contracts 12.3), and the worker looks nothing else up (python/CLAUDE.md rule 3).
-2. `JobSpec.arguments_json`, a `TrainJobArgs`: what to train (`start_arguments`), how (`plan`), for how many steps
-   and from which seed; and `JobSpec.checkpoint_policy_json`, the run's `training.checkpoint` section. Text that
-   isn't those shapes is RRS-J2001, before a byte of the dataset is read.
-3. `run.state_changed preparing`, then the context (the design compiled, the dataset split, the optimizer) and the
-   recipe from the registry. With `resume_from` set, the run continues from its newest complete checkpoint that
-   loads, past damaged ones, each reported as RRS-T2002 (flow 5.2).
-4. rastai_train's loop (`prepare_run` once, then `train_from_current_step`), which writes `running`, the metrics and
-   the checkpoints, and honours every JobControl flag at a step boundary.
+   `resume_from` is a marker, not a choice: non-empty means this job continues an existing run (train.resume or
+   auto-resume), always from the run's newest complete checkpoint that loads (flow 5.2), whatever folder it names.
+   Letting the user pick a checkpoint belongs to train.resume (M5).
+2. `JobSpec.arguments_json`, a `TrainJobArgs`: what to train (`start_arguments`), how (`plan`, made for the same
+   recipe), for how many steps and from which seed; and `JobSpec.checkpoint_policy_json`, the run's
+   `training.checkpoint` section. Text that isn't those shapes is RRS-J2001, before a byte of the dataset is read.
+3. The recipe from the registry: an unknown name is RRS-T0002, which, like RRS-J2001, is a launch this job can't run
+   and fails before any record. Then `run.state_changed preparing` and the context (the design compiled, the dataset
+   split, the optimizer). With `resume_from` set, the run continues from its newest complete checkpoint that loads,
+   past damaged ones, each reported as RRS-T2002 (flow 5.2).
+4. `prepare_run` once, `run.state_changed running`, then rastai_train's loop (`train_from_current_step`), which
+   writes the metrics and the checkpoints and honours every JobControl flag at a step boundary.
 
 The job never writes the run's final state: the worker's edge (diagnostics.py) does, from how this function ended
 and the flags: completed, stopped, cancelled (exit 3), preempted (exit 75) or failed (exit 1).
 
 A checkpoint that hits a full disk (RRS-T2001) pauses the run instead of failing it (contracts 9.5): the job reports
-the code and `paused`, keeps the model, the optimizer and the loader in memory, and waits for RESUME; the loop then
-goes on from the same step without preparing the run again, writes `running` again and writes the checkpoint the disk
-refused before the next step. A job already asked to end doesn't pause: a preemption whose checkpoint doesn't fit
-fails the job (python layout 5.4), so the node doesn't relaunch it forever.
+the code and `paused`, keeps the model, the optimizer and the loader in memory, and waits for RESUME; it then writes
+`running` again and the loop goes on from the same step without preparing the run again, writing the checkpoint the
+disk refused before the next step. STOP or SIGTERM while paused also writes that checkpoint, but without `running`:
+the run goes from paused straight to the edge's final state, as an event-log pause does. A job already asked to end
+doesn't pause: a preemption whose checkpoint doesn't fit fails the job (python layout 5.4), so the node doesn't
+relaunch it forever.
 """
 
 import dataclasses
@@ -72,6 +78,7 @@ CHECKPOINT_POLICY_FIELD = "checkpoint_policy_json"
 RUN_STATE_CHANGED = "run.state_changed"
 DIAGNOSTIC_REPORTED = "diagnostic.reported"
 RUN_STATE_PREPARING = "RUN_STATE_PREPARING"
+RUN_STATE_RUNNING = "RUN_STATE_RUNNING"
 RUN_STATE_PAUSED = "RUN_STATE_PAUSED"
 
 
@@ -81,7 +88,7 @@ def run_job(job_spec: JobSpec, host: WorkerHost, events: JobEvents, control: Job
     job_arguments = read_train_job_arguments(job_spec)
     settings = training_settings(job_arguments, read_checkpoint_policy(job_spec))
     recipe = new_recipe(job_arguments.start_arguments.recipe)
-    events.emit_durable(RUN_STATE_CHANGED, {"run_state": RUN_STATE_PREPARING})
+    emit_run_state(events, RUN_STATE_PREPARING)
     device = training_device(job_arguments.plan)
     context = build_training_context(job_arguments.start_arguments, launch.run_id, launch.run_folder, settings, device)
     if launch.resume_from:
@@ -114,6 +121,7 @@ def read_train_job_arguments(job_spec: JobSpec) -> TrainJobArgs:
     check_known_keys(job_spec, ARGUMENTS_FIELD, values["start_arguments"], TrainStartArgs)
     check_known_keys(job_spec, ARGUMENTS_FIELD, values["plan"], TrainingPlan)
     check_start_arguments(job_spec, job_arguments)
+    check_plan_recipe(job_spec, job_arguments)
     check_counts(job_spec, job_arguments)
     check_plan_is_supported(job_spec, job_arguments.plan)
     return job_arguments
@@ -125,6 +133,16 @@ def check_start_arguments(job_spec: JobSpec, job_arguments: TrainJobArgs) -> Non
         value = getattr(start_arguments, name)
         if not isinstance(value, str) or not value:
             raise bad_field_error(job_spec, ARGUMENTS_FIELD, f"its start_arguments have no {name}")
+
+
+def check_plan_recipe(job_spec: JobSpec, job_arguments: TrainJobArgs) -> None:
+    """The plan was made for the recipe the run was started with. The job trains start_arguments' recipe, so a plan
+    naming another would describe a run that isn't the one trained."""
+    plan_recipe = job_arguments.plan.recipe
+    start_recipe = job_arguments.start_arguments.recipe
+    if plan_recipe != start_recipe:
+        reason = f"its plan is for recipe {plan_recipe!r}, but its start_arguments start recipe {start_recipe!r}"
+        raise bad_field_error(job_spec, ARGUMENTS_FIELD, reason)
 
 
 def check_counts(job_spec: JobSpec, job_arguments: TrainJobArgs) -> None:
@@ -152,6 +170,11 @@ def check_plan_is_supported(job_spec: JobSpec, plan: TrainingPlan) -> None:
     if not isinstance(plan.gpu_indices, list) or len(plan.gpu_indices) > MAX_GPU_COUNT:
         reason = f"its plan names the GPUs {plan.gpu_indices!r}; this worker trains on the CPU or on one GPU"
         raise bad_field_error(job_spec, ARGUMENTS_FIELD, reason)
+    # The generated reader copies the list as it is, so an entry such as "0" or true would get this far.
+    for gpu_index in plan.gpu_indices:
+        if not is_whole_number(gpu_index, 0):
+            reason = f"its plan names the GPU {gpu_index!r}, not a whole number >= 0"
+            raise bad_field_error(job_spec, ARGUMENTS_FIELD, reason)
 
 
 def read_checkpoint_policy(job_spec: JobSpec) -> CheckpointPolicy:
@@ -265,6 +288,7 @@ def train_until_done(
     (see the top). The run is prepared once: a recipe that builds modules or draws from the random generators in
     prepare would otherwise start over in the middle of the run."""
     prepare_run(context, recipe)
+    emit_run_state(events, RUN_STATE_RUNNING)
     while True:
         try:
             train_from_current_step(context, recipe, events, control)
@@ -277,6 +301,10 @@ def train_until_done(
         # SIGTERM go back into the loop, which tries the refused checkpoint again.
         if control.cancel_requested:
             return
+        # Only RESUME (or STEP) makes the run run again. STOP and SIGTERM go back into the loop only for their last
+        # checkpoint, so the run goes from paused straight to the edge's final state, as an event-log pause does.
+        if not job_is_ending(control):
+            emit_run_state(events, RUN_STATE_RUNNING)
 
 
 def pause_for_full_checkpoint_disk(error: TrainError, events: JobEvents, control: JobControl, job_id: str) -> None:
@@ -285,8 +313,12 @@ def pause_for_full_checkpoint_disk(error: TrainError, events: JobEvents, control
     report_diagnostic(events, RRS_T2001, error.message, job_id)
     # The flag goes up before the record: a RESUME sent as soon as the node sees `paused` must find it to clear.
     control.paused = True
-    events.emit_durable(RUN_STATE_CHANGED, {"run_state": RUN_STATE_PAUSED})
+    emit_run_state(events, RUN_STATE_PAUSED)
     wait_for_resume(control)
+
+
+def emit_run_state(events: JobEvents, run_state: str) -> None:
+    events.emit_durable(RUN_STATE_CHANGED, {"run_state": run_state})
 
 
 def report_diagnostic(events: JobEvents, code: str, message: str, job_id: str) -> None:
