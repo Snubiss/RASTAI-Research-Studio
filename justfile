@@ -97,14 +97,15 @@ test-node-jobs: env-cpu
     cargo test --locked -p rastai-node --test jobs -- --ignored
 
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
-# tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml and tools/github/pyproject.toml extend it), JavaScript,
-# JSON, CSS and YAML by prettier (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is
-# left as its generator wrote it: rustfmt doesn't follow include!, ruff skips the generated Python
-# (python/pyproject.toml) and prettier src/generated/.
+# tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml and
+# crates/rastai-node/tests/support/ruff.toml extend it), JavaScript, JSON, CSS and YAML by prettier
+# (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is left as its generator wrote it:
+# rustfmt doesn't follow include!, ruff skips the generated Python (python/pyproject.toml) and prettier src/generated/.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
-    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/fixtures tools/github
+    "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/fixtures tools/github \
+        crates/rastai-node/tests/support
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -116,7 +117,8 @@ wasm:
 # clippy and ruff check; every warning fails.
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/fixtures tools/github
+    "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/fixtures tools/github \
+        crates/rastai-node/tests/support
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one

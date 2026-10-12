@@ -88,10 +88,14 @@ echo $! > "$run_folder/child.pid"
 echo ready > "$run_folder/ready.txt"
 exec sleep 60
 "#;
-    /// Ignores SIGINT (and so does its sleep, which inherits the ignored signal).
+    /// Ignores SIGINT (and so do its child and its own sleep, which inherit the ignored signal). The child shows that
+    /// the kill after the grace reaches the whole group, not only the leader.
     const IGNORES_INTERRUPT: &str = r#"#!/bin/sh
+run_folder=$(dirname "$5")
 trap '' INT
-echo ready > "$(dirname "$5")/ready.txt"
+sleep 60 &
+echo $! > "$run_folder/child.pid"
+echo ready > "$run_folder/ready.txt"
 exec sleep 60
 "#;
     /// SIGINT is its cancel flag: exit 3.
@@ -477,8 +481,13 @@ exit "$(cat "$run_folder/exit-code")"
         let mut node = start_job_node(IGNORES_INTERRUPT, LONG_TIMEOUT, SHORT_GRACE).await;
         let run_id = new_run_id();
         let spec = job_spec(&run_id);
-        start_job(&mut node, spec.clone()).await;
+        let started = start_job(&mut node, spec.clone()).await;
         wait_for_file(&run_folder(&node, &run_id).join(READY_FILE)).await;
+        let child_pid: u32 = wait_for_file(&run_folder(&node, &run_id).join(CHILD_PID_FILE))
+            .await
+            .trim()
+            .parse()
+            .unwrap();
         let cancelled_at = Instant::now();
         assert_eq!(signal(&mut node, &spec.job_id, JobSignal::Cancel).await, None);
         tokio::time::sleep(SHORT_GRACE / 2).await;
@@ -497,6 +506,8 @@ exit "$(cat "$run_folder/exit-code")"
             error_message(&ended)
         );
         assert_eq!(ended.exit_code, Some(KILLED_EXIT_CODE));
+        wait_until_stopped(started.pid).await;
+        wait_until_stopped(child_pid).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

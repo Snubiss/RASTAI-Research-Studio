@@ -15,8 +15,10 @@
 //! registered within `WORKER_REGISTER_TIMEOUT_SECONDS`. A `CANCEL`, `STOP` or `TERMINATE` starts a third that kills
 //! the group if the job is still alive after `STOP_GRACE_SECONDS` (`RRS-J1003`).
 //!
-//! Not here yet: leases and sandbox reservations at admission (M3, M5), the heartbeat sent at once on every state
-//! change (M1-45), following the logs into WatchLive (M1-44), and reattach after a node restart (M1-45).
+//! Not here yet: leases and sandbox reservations at admission (M3, M5), an environment still installing that keeps
+//! the job `queued` with `RRS-H2006` (M2-16), the disk-free check at admission (`RRS-S3001`, with a job's space
+//! estimate), the heartbeat sent at once on every state change (M1-45), following the logs into WatchLive (M1-44),
+//! and reattach after a node restart (M1-45).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, MutexGuard, PoisonError};
@@ -53,7 +55,8 @@ use crate::jobs::job_file::{JobFile, job_file_path, read_job_file, write_job_fil
 use crate::jobs::log_lines::{STDERR_LOG_FILE, read_log_tail};
 use crate::jobs::signals::{GroupSignal, ProcessIdentity, is_same_process, send_control, signal_process_group};
 use crate::jobs::spawn::{
-    WorkerLaunch, WorkerVariableInputs, node_variables, prepare_job_socket_folder, spawn_worker, worker_variables,
+    SpawnedWorker, WorkerLaunch, WorkerVariableInputs, node_variables, prepare_job_socket_folder, spawn_worker,
+    worker_variables,
 };
 use crate::node::{NodeState, current_hardware};
 use crate::permissions::{JobPermissions, job_permissions};
@@ -148,6 +151,17 @@ enum Admission {
     /// A `StartJob` the node already has (the daemon retried after losing the answer): the job as it is now.
     AlreadyKnown(JobInfo),
     Refused(JobInfo),
+}
+
+/// What `finish_job` writes before it ends a job.
+enum TerminalWrite {
+    /// The job is unknown or has already ended: nothing to do.
+    AlreadyEnded,
+    /// A refused job never wrote a `job.json`, so there is none to finish.
+    NothingWritten,
+    /// The terminal `job.json` and the run folder it goes in. Boxed because a `JobFile` is far bigger than the other
+    /// two variants (clippy's large_enum_variant).
+    Write(PathBuf, Box<JobFile>),
 }
 
 /// What `signal_job` needs to know about a job, copied out of the table.
@@ -305,7 +319,8 @@ fn admit_job(state: &NodeState, spec: &JobSpec) -> Admission {
 }
 
 /// Why this node can never run the job: ids that aren't ids, a kind it doesn't run, an environment it doesn't
-/// have (contracts 9.1, queued → failed).
+/// have (contracts 9.1, queued → failed). Until M2-16 no environment is ever still installing, so one that isn't in
+/// `JobOptions.environments` is one the node can't provide (layout 7.4 step 1), not a wait.
 fn spec_refusal(state: &NodeState, spec: &JobSpec) -> Option<Diagnostic> {
     if let Some(reason) = id_problem(spec) {
         return Some(diagnostic(
@@ -434,20 +449,51 @@ async fn spawn_job_worker(state: &Arc<NodeState>, spec: &JobSpec) -> Result<Chil
     prepare_job_socket_folder(&socket_path)?;
     let job_token = new_job_token()?;
     let token_hash = hash_bytes(job_token.as_bytes());
-    let mut job_file = first_job_file(state, spec, &token_hash);
+    let job_file = first_job_file(state, spec, &token_hash);
     write_job_file(&run_folder, &job_file)?;
     record_token_hash(state, &spec.job_id, &token_hash);
     let launch = worker_launch(state, spec, &job_token, &job_file)?;
     let spawned = spawn_worker(&launch).await?;
-    let identity = spawned.identity.clone();
-    record_process(state, &spec.job_id, &identity);
+    record_spawned_worker(state, &spec.job_id, &run_folder, job_file, spawned).await
+}
+
+/// Records who the worker is, in the table and in `job.json` (layout 7.4 step 4). If that rewrite fails, the worker
+/// is killed with its group and waited on before the error returns: no exit watcher or register timer exists yet, and
+/// the failed job releases its run, so a worker left running would hold the run's event log behind the next job's
+/// back (layout 7.4 step 1: nothing is half-started).
+async fn record_spawned_worker(
+    state: &NodeState,
+    job_id: &str,
+    run_folder: &Path,
+    mut job_file: JobFile,
+    spawned: SpawnedWorker,
+) -> Result<Child, String> {
+    let identity = spawned.identity;
+    let mut child = spawned.child;
+    record_process(state, job_id, &identity);
     job_file.pid = identity.pid;
     job_file.process_group_id = identity.process_group_id;
     job_file.process_start_ticks = identity.start_ticks;
     job_file.boot_id = identity.boot_id.clone();
-    job_file.started_unix_ms = job_info(state, &spec.job_id).map_or(0, |info| info.started_unix_ms);
-    write_job_file(&run_folder, &job_file)?;
-    Ok(spawned.child)
+    job_file.started_unix_ms = job_info(state, job_id).map_or(0, |info| info.started_unix_ms);
+    if let Err(reason) = write_job_file(run_folder, &job_file) {
+        stop_unwatched_worker(job_id, &identity, &mut child).await;
+        return Err(reason);
+    }
+    Ok(child)
+}
+
+/// SIGKILL to the group of a worker that has no watchers, then a wait, so it is gone when this returns. If the group
+/// can't be signalled, the leader is still killed through its child handle.
+async fn stop_unwatched_worker(job_id: &str, identity: &ProcessIdentity, child: &mut Child) {
+    if let Err(reason) = signal_process_group(identity, GroupSignal::Kill).await {
+        log_warn(
+            "a worker that couldn't be recorded couldn't be killed with its group",
+            &[("job_id", job_id), ("reason", &reason)],
+        );
+        let _ = child.start_kill();
+    }
+    let _ = child.wait().await;
 }
 
 /// `job.json` before the spawn: everything but the process.
@@ -629,36 +675,30 @@ fn stderr_path_for_diagnostic(state: &NodeState, run_folder: &Path) -> String {
 /// daemon can start the run's next job at once. The process is gone, so its end is recorded even where 9.1's table
 /// has no arrow for it (a paused job that crashed); that is logged.
 fn finish_job(state: &NodeState, job_id: &str, outcome: JobOutcome, exit_code: Option<i32>) {
-    let Some(terminal_file) = terminal_job_file_to_write(state, job_id, outcome.state) else {
-        return;
-    };
-    if let Some((run_folder, job_file)) = terminal_file {
-        write_terminal_job_file(job_id, &run_folder, &job_file);
+    match terminal_job_file_to_write(state, job_id, outcome.state) {
+        TerminalWrite::AlreadyEnded => return,
+        TerminalWrite::NothingWritten => {}
+        TerminalWrite::Write(run_folder, job_file) => write_terminal_job_file(job_id, &run_folder, &job_file),
     }
     let _ = std::fs::remove_file(job_socket_path(&state.paths, job_id));
     apply_terminal_outcome(state, job_id, &outcome, exit_code);
     // The heartbeat that reports this end at once joins with M1-45 (heartbeat.rs).
 }
 
-/// The terminal `job.json` to write, if the job wrote one (a refused job never did). None when the job is unknown
-/// or has already ended.
-fn terminal_job_file_to_write(
-    state: &NodeState,
-    job_id: &str,
-    final_state: JobState,
-) -> Option<Option<(PathBuf, JobFile)>> {
+/// The terminal `job.json` to write, if the job wrote one (a refused job never did).
+fn terminal_job_file_to_write(state: &NodeState, job_id: &str, final_state: JobState) -> TerminalWrite {
     let table = lock_jobs(state);
-    let record = find_record(&table, job_id)?;
+    let Some(record) = find_record(&table, job_id) else {
+        return TerminalWrite::AlreadyEnded;
+    };
     if is_terminal_job_state(record.info.state()) {
-        return None;
+        return TerminalWrite::AlreadyEnded;
     }
     if !record.holds_run {
-        return Some(None);
+        return TerminalWrite::NothingWritten;
     }
-    Some(Some((
-        record.run_folder.clone(),
-        terminal_job_file(state, record, final_state),
-    )))
+    let job_file = terminal_job_file(state, record, final_state);
+    TerminalWrite::Write(record.run_folder.clone(), Box::new(job_file))
 }
 
 /// A terminal `job.json` that can't be written leaves the last one in place, with no `final_state`; a restarted node
@@ -825,18 +865,33 @@ fn begin_stopping(state: &Arc<NodeState>, job_id: &str, signal: JobSignal) {
 }
 
 /// SIGKILL to the job's group. The cause is recorded first, so the exit watcher, which may see the exit before
-/// this returns, already knows the node did it.
+/// this returns, already knows the node did it. When no SIGKILL went out, the cause this call recorded is cleared
+/// again, so a later crash isn't read as the node's kill (`RRS-J1003`, cancelled).
 async fn kill_job_group(state: &NodeState, job_id: &str, cause: NodeKill) -> Result<(), String> {
-    let process = {
+    let (process, recorded_cause) = {
         let mut table = lock_jobs(state);
         let record = find_record_mut(&mut table, job_id).ok_or("the node has no job with this id")?;
-        if record.node_kill.is_none() {
+        let recorded_cause = record.node_kill.is_none();
+        if recorded_cause {
             record.node_kill = Some(cause);
         }
-        record.process.clone()
+        (record.process.clone(), recorded_cause)
     };
-    let process = process.ok_or("the job has no process yet")?;
-    signal_process_group(&process, GroupSignal::Kill).await
+    let signalled = match process {
+        Some(process) => signal_process_group(&process, GroupSignal::Kill).await,
+        None => Err("the job has no process yet".to_string()),
+    };
+    if signalled.is_err() && recorded_cause {
+        clear_node_kill(state, job_id);
+    }
+    signalled
+}
+
+fn clear_node_kill(state: &NodeState, job_id: &str) {
+    let mut table = lock_jobs(state);
+    if let Some(record) = find_record_mut(&mut table, job_id) {
+        record.node_kill = None;
+    }
 }
 
 fn not_delivered(job_id: &str, signal: JobSignal, reason: &str) -> ProtoDiagnostic {
@@ -977,6 +1032,22 @@ mod tests {
     use super::*;
     use crate::jobs::exit_cause::PREEMPTED_REASON;
     use rastai_core::ids::new_id;
+
+    /// A stand-in `bin/python` with a child in its group. `$5` is the job file (`-m rastai_worker run --job-file`).
+    #[cfg(target_os = "linux")]
+    const WORKER_WITH_CHILD: &str = r#"#!/bin/sh
+sleep 60 &
+echo $! > "$(dirname "$5")/child.pid"
+exec sleep 60
+"#;
+    #[cfg(target_os = "linux")]
+    const CHILD_PID_FILE: &str = "child.pid";
+    #[cfg(target_os = "linux")]
+    const EXECUTABLE_MODE: u32 = 0o755;
+    #[cfg(target_os = "linux")]
+    const WAIT_LIMIT: Duration = Duration::from_secs(10);
+    #[cfg(target_os = "linux")]
+    const POLL: Duration = Duration::from_millis(20);
 
     struct TestFolder {
         path: PathBuf,
@@ -1174,6 +1245,80 @@ mod tests {
         assert_eq!(table.records.len(), ENDED_JOBS_KEPT + 1);
         assert_eq!(table.records[0].info.job_id, "job_9999");
         assert_eq!(table.records[1].info.job_id, "job_3");
+    }
+
+    /// An environment folder whose `bin/python` is `script`.
+    #[cfg(target_os = "linux")]
+    fn stand_in_environment(folder: &Path, script: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let environment_folder = folder.join("env");
+        std::fs::create_dir_all(environment_folder.join("bin")).unwrap();
+        let python = environment_folder.join("bin/python");
+        std::fs::write(&python, script).unwrap();
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(EXECUTABLE_MODE)).unwrap();
+        environment_folder
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn wait_for_pid_file(path: &Path) -> u32 {
+        let started = std::time::Instant::now();
+        loop {
+            let text = std::fs::read_to_string(path).unwrap_or_default();
+            if let Ok(pid) = text.trim().parse() {
+                return pid;
+            }
+            assert!(started.elapsed() < WAIT_LIMIT, "{} didn't appear", path.display());
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
+    /// Gone, or a zombie nobody has reaped yet: either way it no longer runs.
+    #[cfg(target_os = "linux")]
+    fn process_has_stopped(pid: u32) -> bool {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat
+                .rsplit_once(')')
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z')),
+            Err(_) => true,
+        }
+    }
+
+    // The rewrite of job.json after the spawn fails: the worker and its child are killed and waited on, so nothing
+    // runs on once the job has failed and released its run.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_worker_whose_job_file_cant_be_rewritten_is_killed_with_its_group() {
+        let (folder, state) = test_state("rewrite-fails");
+        let job_id = running_job(&state);
+        let run_folder = folder.path.join("run");
+        std::fs::create_dir_all(&run_folder).unwrap();
+        let launch = WorkerLaunch {
+            environment_folder: stand_in_environment(&folder.path, WORKER_WITH_CHILD),
+            job_file: job_file_path(&run_folder),
+            run_folder: run_folder.clone(),
+            variables: node_variables()
+                .into_iter()
+                .filter(|(name, _)| name == "PATH")
+                .collect(),
+        };
+        let spawned = spawn_worker(&launch).await.unwrap();
+        let leader = spawned.identity.clone();
+        let child_pid = wait_for_pid_file(&run_folder.join(CHILD_PID_FILE)).await;
+
+        // A run folder that isn't there makes the rewrite fail.
+        let missing_folder = folder.path.join("no-run-folder");
+        let recorded = record_spawned_worker(&state, &job_id, &missing_folder, JobFile::default(), spawned).await;
+        assert!(recorded.is_err());
+        assert!(!is_same_process(&leader), "the worker was killed and waited on");
+        let started = std::time::Instant::now();
+        while !process_has_stopped(child_pid) {
+            assert!(
+                started.elapsed() < WAIT_LIMIT,
+                "the worker's child {child_pid} still runs"
+            );
+            tokio::time::sleep(POLL).await;
+        }
     }
 
     #[test]
