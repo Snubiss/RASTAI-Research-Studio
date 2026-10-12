@@ -36,6 +36,8 @@ DOCUMENT_TEXT_NAME = "document.json"
 MODEL_SPEC_NAME = "model.rrsmodel"
 NOT_UTF8_FILE = DOCUMENTS_FOLDER / "any" / "invalid" / "not_utf8.json"
 RESUME_FILE = DOCUMENTS_FOLDER / "rastai.resume" / "valid" / "resume.json"
+MODEL_FILE = DOCUMENTS_FOLDER / "rastai.model" / "valid" / "kim_textcnn.rrsmodel"
+MODEL_TYPE_NAME = "rastai.model"
 BAD_RESUME_FILE = DOCUMENTS_FOLDER / "rastai.resume" / "invalid" / "missing_dataloader.json"
 # The reference vectors from the BLAKE3 paper and the official test suite (the same as hashing.rs).
 EMPTY_HASH = "blake3:af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
@@ -182,6 +184,15 @@ def test_a_newer_document_is_not_written_or_hashed() -> None:
             refused_call(newer)
         codes = [item["code"] for item in raised_diagnostics(error)]
         assert CODE_NEWER_VERSION in codes
+
+
+def test_a_valid_model_spec_loads_as_canonical_json() -> None:
+    loaded = load_model_spec(MODEL_FILE.read_bytes())
+    model_spec = json.loads(loaded)
+    assert model_spec["type"] == MODEL_TYPE_NAME
+    # The same typed document read_document gives, written in the canonical form: sorted keys, no spaces.
+    assert model_spec == json.loads(read_outcome(MODEL_FILE)["document_json"])
+    assert loaded == json.dumps(model_spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def test_another_document_type_is_not_a_model_spec() -> None:

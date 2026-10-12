@@ -148,6 +148,7 @@ pub fn document_header_mut(document: &mut Document) -> &mut SharedHeader {
         Document::Lock(lock) => &mut lock.header,
         Document::PluginManifest(manifest) => &mut manifest.header,
         Document::Theme(theme) => &mut theme.header,
+        Document::Model(model) => &mut model.header,
     }
 }
 
