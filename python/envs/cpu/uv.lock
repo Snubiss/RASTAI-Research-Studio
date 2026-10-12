@@ -495,15 +495,19 @@ version = "0.1.0"
 source = { editable = "../../rastai_worker" }
 dependencies = [
     { name = "grpcio" },
+    { name = "rastai-formats" },
     { name = "rastai-plugin" },
     { name = "rastai-proto" },
+    { name = "rastai-train" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "grpcio", specifier = ">=1.84.0" },
+    { name = "rastai-formats", editable = "../../rastai_formats" },
     { name = "rastai-plugin", editable = "../../rastai_plugin" },
     { name = "rastai-proto", editable = "../../rastai_proto" },
+    { name = "rastai-train", editable = "../../rastai_train" },
 ]
 
 [[package]]

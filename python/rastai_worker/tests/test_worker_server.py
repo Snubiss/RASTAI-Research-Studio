@@ -1,6 +1,9 @@
 """WorkerService over a temporary Unix socket (worker_server.py; contracts 4.5; python layout 7.9): Hello, Control and
 WatchLive in process, with the job token checked on every call; then the whole job process against a fake node:
-serve, Register with the token, Hello, WatchLive, and STOP or SIGTERM ending it with exit 0 or 75.
+serve, Register with the token, Hello, WatchLive, and STOP or SIGTERM ending it with exit 0 or 75; and the train job
+(jobs/train.py) run from fixtures/jobs/textcnn_train/job.json by `python -m rastai_worker run --job-file`: TextCNN
+trains to completion with its records in order and no pickle in the run folder, SIGTERM preempts it with a checkpoint
+(exit 75), and STOP ends it with a final checkpoint (exit 0).
 
 HandleCommand joins this test with its RPC (M4).
 """
@@ -24,7 +27,12 @@ import grpc
 import pytest
 from rastai_plugin.catalog.generated import RRS_J0004, RRS_J2001, RRS_J2002
 from rastai_proto.common.v1.diagnostic_pb2 import SEVERITY_ERROR, Diagnostic
-from rastai_proto.common.v1.states_pb2 import RUN_STATE_COMPLETED, RUN_STATE_PREEMPTED
+from rastai_proto.common.v1.states_pb2 import (
+    RUN_STATE_COMPLETED,
+    RUN_STATE_PREEMPTED,
+    RUN_STATE_PREPARING,
+    RUN_STATE_RUNNING,
+)
 from rastai_proto.events.v1.event_record_pb2 import EventRecord
 from rastai_proto.node.v1.jobs_pb2 import JOB_KIND_TRAIN, JobSignal
 from rastai_proto.node.v1.live_pb2 import WatchLiveRequest
@@ -59,8 +67,17 @@ CALL_TIMEOUT_SECONDS = 5.0
 PROCESS_TIMEOUT_SECONDS = 60.0
 POLL_SECONDS = 0.02
 FRAME_HEADER_FORMAT = "<II"
-# The job entry the end-to-end tests run in place of the train job's (jobs/train.py lands with M1-46): it logs one
-# metric and streams progress until it is asked to end.
+# The worker itself, as the node starts it (contracts 3.1).
+WORKER_MODULE_NAME = "rastai_worker"
+# The train job's launch file (contracts 12.5). Its paths are relative: the tests put the run folder and the sockets
+# in their temporary folders and the design and the dataset at the repository root.
+TRAIN_JOB_FIXTURE = Path("jobs/textcnn_train/job.json")
+START_PATH_FIELDS = ("design_path", "dataset_path")
+# Long enough that a train job under SIGTERM or STOP is still training when the signal comes.
+LONG_RUN_STEPS = 100_000
+# The job entry the protocol tests run in place of the train job's: it logs one metric and streams progress until
+# it is asked to end, so each test ends the job exactly when it means to. The train job's own process tests (at the
+# end) run `python -m rastai_worker` itself.
 ENTRY_MODULE_NAME = "rastai_test_server_entries"
 ENTRY_MODULE_SOURCE = """
 import time
@@ -73,7 +90,7 @@ def run_job(job, host, events, control):
         time.sleep(0.05)
 """
 # `python -m rastai_worker` with JOB_ENTRIES pointing the train kind at the entry above, so the whole process runs
-# as the node starts it while no job module is built yet.
+# as the node starts it, with the stand-in entry.
 LAUNCHER_MODULE_NAME = "rastai_test_worker_main"
 LAUNCHER_MODULE_SOURCE = f"""
 import sys
@@ -281,13 +298,19 @@ class WorkerProcess:
     own session, stdin from /dev/null, stderr appended to the run folder's stderr.log, the token in
     RASTAI_JOB_TOKEN."""
 
-    def __init__(self, launch: WorkerLaunch, entries_folder: Path, job_token: str = JOB_TOKEN) -> None:
+    def __init__(
+        self,
+        launch: WorkerLaunch,
+        entries_folder: Path,
+        job_token: str = JOB_TOKEN,
+        module_name: str = LAUNCHER_MODULE_NAME,
+    ) -> None:
         self.launch = launch
         self.stderr_path = launch.run_folder / "stderr.log"
         environment = dict(os.environ, RASTAI_JOB_TOKEN=job_token, PYTHONPATH=str(entries_folder))
         with open(self.stderr_path, "a", encoding="utf-8") as stderr_file:
             self.process = subprocess.Popen(
-                [sys.executable, "-m", LAUNCHER_MODULE_NAME, "run", "--job-file", str(launch.job_file)],
+                [sys.executable, "-m", module_name, "run", "--job-file", str(launch.job_file)],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=stderr_file,
@@ -351,12 +374,15 @@ def wait_for_registration(node: FakeNode, worker: WorkerProcess) -> None:
 
 
 def read_records(log_path: Path) -> list[EventRecord]:
+    """The log's whole records. A frame still being written by a running job is left for the next read."""
     data = log_path.read_bytes()
     records = []
     offset = len(EVENT_LOG_HEADER)
-    while offset < len(data):
+    while offset + FRAME_HEADER_BYTES <= len(data):
         body_length, _checksum = struct.unpack_from(FRAME_HEADER_FORMAT, data, offset)
         body_start = offset + FRAME_HEADER_BYTES
+        if body_start + body_length > len(data):
+            break
         records.append(EventRecord.FromString(data[body_start : body_start + body_length]))
         offset = body_start + body_length
     return records
@@ -432,3 +458,145 @@ def test_a_refused_registration_is_a_bad_launch(
     assert worker.stderr().strip().splitlines()[-1].startswith(f"{RRS_J2002}: ")
     # The job never ran, so the log holds no record of it.
     assert read_records(worker.launch.event_log_path) == []
+
+
+# ---- The train job's process ----
+
+
+def write_train_launch(
+    socket_folder: Path, run_folder: Path, repo_root: Path, fixtures_folder: Path, max_steps: int | None = None
+) -> WorkerLaunch:
+    """fixtures/jobs/textcnn_train/job.json with this test's folders, and `max_steps` when one is given."""
+    fields = json.loads((fixtures_folder / TRAIN_JOB_FIXTURE).read_text(encoding="utf-8"))
+    assert (fields["job_id"], fields["run_id"]) == (JOB_ID, RUN_ID)
+    arguments = json.loads(fields["job_spec"]["arguments_json"])
+    for name in START_PATH_FIELDS:
+        arguments["start_arguments"][name] = str(repo_root / arguments["start_arguments"][name])
+    if max_steps is not None:
+        arguments["max_steps"] = max_steps
+    fields["job_spec"]["arguments_json"] = json.dumps(arguments)
+    fields["job_socket_path"] = str(socket_folder / "job.sock")
+    fields["worker_host_socket_path"] = str(socket_folder / "worker-host.sock")
+    fields["run_folder"] = str(run_folder)
+    run_folder.mkdir(parents=True, exist_ok=True)
+    job_file = run_folder / "job.json"
+    job_file.write_text(json.dumps(fields), encoding="utf-8")
+    return read_job_file(job_file)
+
+
+def start_train_worker(
+    socket_folder: Path,
+    tmp_path: Path,
+    paths: tuple[Path, Path],
+    started_workers: list[WorkerProcess],
+    max_steps: int | None = None,
+) -> WorkerProcess:
+    """`python -m rastai_worker run --job-file` on the train fixture, as the node starts it."""
+    repo_root, fixtures_folder = paths
+    launch = write_train_launch(socket_folder, tmp_path / "run", repo_root, fixtures_folder, max_steps)
+    worker = WorkerProcess(launch, tmp_path, module_name=WORKER_MODULE_NAME)
+    started_workers.append(worker)
+    return worker
+
+
+def wait_for_record(worker: WorkerProcess, event_type: str) -> None:
+    """Waits until the running job has logged a record of this type."""
+    deadline = time.monotonic() + PROCESS_TIMEOUT_SECONDS
+    while time.monotonic() < deadline and worker.process.poll() is None:
+        if worker.launch.event_log_path.exists():
+            if event_type in [record.event_type for record in read_records(worker.launch.event_log_path)]:
+                return
+        time.sleep(POLL_SECONDS)
+    raise AssertionError(f"no {event_type} record came; stderr.log:\n{worker.stderr()}")
+
+
+def check_records_are_one_job_in_sequence(records: list[EventRecord]) -> None:
+    assert [record.sequence for record in records] == list(range(1, len(records) + 1))
+    assert {record.job_id for record in records} == {JOB_ID}
+    assert {record.run_id for record in records} == {RUN_ID}
+
+
+def run_states(records: list[EventRecord]) -> list[int]:
+    return [
+        record.payload.run_state_changed.run_state for record in records if record.event_type == "run.state_changed"
+    ]
+
+
+@pytest.fixture
+def train_paths(repo_root: Path, fixtures_folder: Path) -> tuple[Path, Path]:
+    return repo_root, fixtures_folder
+
+
+def test_the_train_job_process_trains_textcnn_from_the_fixture(
+    socket_folder: Path,
+    tmp_path: Path,
+    fake_node: FakeNode,
+    train_paths: tuple[Path, Path],
+    started_workers: list[WorkerProcess],
+) -> None:
+    worker = start_train_worker(socket_folder, tmp_path, train_paths, started_workers)
+    assert worker.wait() == EXIT_OK, worker.stderr()
+    assert fake_node.registrations[0] == (JOB_ID, str(socket_folder / "job.sock"), JOB_TOKEN)
+    records = read_records(worker.launch.event_log_path)
+    check_records_are_one_job_in_sequence(records)
+    types = [record.event_type for record in records]
+    # preparing and running first, then metrics and the final checkpoint, and the edge's completed last.
+    assert run_states(records) == [RUN_STATE_PREPARING, RUN_STATE_RUNNING, RUN_STATE_COMPLETED]
+    assert types[:2] == ["run.state_changed", "run.state_changed"]
+    assert types[-1] == "run.state_changed"
+    metric_steps = [record.payload.run_metrics.step for record in records if record.event_type == "run.metrics"]
+    assert metric_steps == [10, 20, 30, 40, 40]
+    saved = [record.payload.checkpoint_saved for record in records if record.event_type == "checkpoint.saved"]
+    assert [checkpoint.step for checkpoint in saved] == [40]
+    assert types.index("checkpoint.saved") < len(types) - 1
+    run_folder = worker.launch.run_folder
+    assert (run_folder / saved[0].folder / "weights.safetensors").is_file()
+    assert list(run_folder.rglob("*.pt")) == []
+    assert not (run_folder / "events.log.reserve").exists()
+
+
+def test_sigterm_preempts_the_train_job_with_a_checkpoint(
+    socket_folder: Path,
+    tmp_path: Path,
+    fake_node: FakeNode,
+    train_paths: tuple[Path, Path],
+    started_workers: list[WorkerProcess],
+) -> None:
+    worker = start_train_worker(socket_folder, tmp_path, train_paths, started_workers, LONG_RUN_STEPS)
+    wait_for_record(worker, "run.metrics")
+    os.killpg(worker.process.pid, signal.SIGTERM)
+    assert worker.wait() == EXIT_PREEMPTED, worker.stderr()
+    records = read_records(worker.launch.event_log_path)
+    check_records_are_one_job_in_sequence(records)
+    assert run_states(records)[-1] == RUN_STATE_PREEMPTED
+    # The SIGTERM checkpoint, complete before the final record.
+    assert records[-2].event_type == "checkpoint.saved"
+    checkpoint = records[-2].payload.checkpoint_saved
+    assert 0 < checkpoint.step < LONG_RUN_STEPS
+    assert (worker.launch.run_folder / checkpoint.folder / "resume.json").is_file()
+    assert list(worker.launch.run_folder.rglob("*.partial")) == []
+
+
+def test_stop_ends_the_train_job_with_a_final_checkpoint(
+    socket_folder: Path,
+    tmp_path: Path,
+    fake_node: FakeNode,
+    train_paths: tuple[Path, Path],
+    started_workers: list[WorkerProcess],
+) -> None:
+    worker = start_train_worker(socket_folder, tmp_path, train_paths, started_workers, LONG_RUN_STEPS)
+    wait_for_record(worker, "run.metrics")
+    channel, stub = worker_stub(worker.launch.job_socket_path)
+    try:
+        request = worker_service_pb2.ControlRequest(action=JobSignal.JOB_SIGNAL_STOP)
+        response = stub.Control(request, metadata=token_metadata(), timeout=CALL_TIMEOUT_SECONDS)
+        assert not response.HasField("diagnostic")
+    finally:
+        channel.close()
+    assert worker.wait() == EXIT_OK, worker.stderr()
+    records = read_records(worker.launch.event_log_path)
+    check_records_are_one_job_in_sequence(records)
+    final = records[-1].payload.run_state_changed
+    assert (final.run_state, final.reason) == (RUN_STATE_COMPLETED, "stopped")
+    saved = [record.payload.checkpoint_saved for record in records if record.event_type == "checkpoint.saved"]
+    assert len(saved) == 1 and 0 < saved[0].step < LONG_RUN_STEPS

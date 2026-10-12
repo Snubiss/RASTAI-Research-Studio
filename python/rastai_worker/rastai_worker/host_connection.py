@@ -38,7 +38,7 @@ SOCKET_WATCH_INTERVAL_SECONDS = 1.0
 def connect_to_host(launch: WorkerLaunch, job_token: str) -> WorkerHost:
     """The job's WorkerHost, registered with the node. Raises the last PluginError when the node refused the job or
     stayed unreachable for REGISTER_TIMEOUT_SECONDS."""
-    host = WorkerHost(launch.worker_host_socket_path, launch.job_id, launch.job_socket_path, job_token)
+    host = WorkerHost(launch.worker_host_socket_path, launch.job_id, launch.job_socket_path, job_token, launch.job_file)
     register_with_retry(host, REGISTER_TIMEOUT_SECONDS)
     return host
 

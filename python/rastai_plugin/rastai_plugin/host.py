@@ -49,11 +49,16 @@ class PluginHost:
 class WorkerHost(PluginHost):
     """A job's client of WorkerHostService on worker-host.sock (contracts 4.5)."""
 
-    def __init__(self, worker_host_socket_path: str, job_id: str, job_socket_path: str, job_token: str) -> None:
+    def __init__(
+        self, worker_host_socket_path: str, job_id: str, job_socket_path: str, job_token: str, job_file_path: Path
+    ) -> None:
         self.worker_host_socket_path = worker_host_socket_path
         self.job_id = job_id
         self.job_socket_path = job_socket_path
         self.job_token = job_token
+        # The job's job.json on the node (contracts 8.4). A job entry is given only its JobSpec (contracts 12.3), so a
+        # job reads the rest of its launch from here: the run folder, resume_from and, later, its resolved models.
+        self.job_file_path = job_file_path
 
     def register(self) -> None:
         """Announces the job's socket to the node: the first call, on start and again on reattach. The worker serves
@@ -79,7 +84,9 @@ def connect_worker_host(job_file_path: Path) -> WorkerHost:
     job_token = os.environ.get(JOB_TOKEN_VARIABLE, "")
     if not job_token:
         raise PluginError(RRS_J2001, f"the worker of job {launch['job_id']} has no {JOB_TOKEN_VARIABLE}")
-    return WorkerHost(launch["worker_host_socket_path"], launch["job_id"], launch["job_socket_path"], job_token)
+    return WorkerHost(
+        launch["worker_host_socket_path"], launch["job_id"], launch["job_socket_path"], job_token, job_file_path
+    )
 
 
 def read_job_file_fields(job_file_path: Path) -> dict[str, str]:

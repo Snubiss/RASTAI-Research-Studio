@@ -1169,6 +1169,9 @@ crates/rastai-node/
     support/ruff.toml             python/pyproject.toml's ruff rules for fake_worker.py (`just lint` and `just fmt-check`)
     support/mock_llama_server.rs  llama-server stand-in: /health, streaming /completion, /tokenize
     jobs.rs                       start, signals, cancel grace, process-group kill, exit causes
+    train_job.rs                  the real worker's TextCNN train job on the CPU (fixtures/jobs/textcnn_train/job.json): it
+                                  ends succeeded with its records in order and no .pt file; TERMINATE preempts it with a
+                                  checkpoint, exit 75 (#[ignore]d like the fake-worker tests; `just test-node-jobs` runs it)
     reattach.rs                   node killed with -9 mid-run (the test binary runs the node as a process of its own):
                                   reattach, re-Register and Hello, no lost events; a job.json naming an unrelated process
                                   refused (start ticks, boot id, group leader) and never signalled; a gone job's end from its

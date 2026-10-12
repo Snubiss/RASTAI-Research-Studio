@@ -1,22 +1,27 @@
 # rastai_worker: the process every Python job runs in (contracts 2.2; layout python.md section 7). M1-39 lands the
-# event-log writer and the payload conversion; M1-40 the job process, WorkerService, the host connection and control.
+# event-log writer and the payload conversion; M1-40 the job process, WorkerService, the host connection and control;
+# M1-46 the train job.
 
 [project]
 name = "rastai-worker"
 version = "0.1.0"          # app, node and worker ship together under one version (§20)
 requires-python = "==3.12.*"
 # The workspace packages it imports so far, and grpcio. The environments (python/envs/) install the workspace
-# packages from their folders and pin the exact grpcio and the protobuf runtime that rastai-proto brings; torch joins
-# with the jobs.
+# packages from their folders and pin the exact grpcio and the protobuf runtime that rastai-proto brings; torch
+# arrives through rastai-train, which each environment pins with its own backend build.
 dependencies = [
     "rastai-proto",        # EventRecord, EventPayload, WorkerService and the other generated messages
     "rastai-plugin",       # the catalog codes, JobControl, JobEvents and the WorkerHost client
+    "rastai-formats",      # TrainJobArgs and SettingsCheckpoint, the train job's JobSpec fields (contracts 4.4)
+    "rastai-train",        # the train job's context, loop, recipes and resume (jobs/train.py)
     "grpcio>=1.84.0",      # the WorkerService server (worker_server.py only; contracts 2.5)
 ]
 
 [tool.uv.sources]
 rastai-proto = { workspace = true }
 rastai-plugin = { workspace = true }
+rastai-formats = { workspace = true }
+rastai-train = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14"]

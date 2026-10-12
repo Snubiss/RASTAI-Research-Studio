@@ -2794,6 +2794,8 @@ class WorkerHost(PluginHost):
     """A job's client of WorkerHostService on worker-host.sock (contracts §4.5). It converts dicts to and from
     rastai_proto messages, so engines never import rastai_proto (python layout rule 1.4.7)."""
 
+    job_file_path: Path                                                         # the job's job.json; a job entry gets only
+                                                                                # its JobSpec and reads the rest here (M1-46)
     def register(self) -> None: ...                                             # the first call, on start and on reattach
     def resize_lease(self, gpu_index: int, vram_bytes: int) -> None: ...
     def tokenize_chat(self, model_ref: str, conversations: list[dict], add_generation_prompt: bool) -> list[dict]: ...
