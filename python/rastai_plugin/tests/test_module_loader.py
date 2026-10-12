@@ -19,6 +19,12 @@ from rastai_plugin import PluginError, PluginRegistry, load_plugin_module, manif
 
 MANIFEST_FILE_NAME = "rastai-plugin.json"
 PLUGIN_ID = "word_count"
+# A valid document of another type, for the manifest reader's type check.
+PROJECT_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[3] / "fixtures" / "documents" / "rastai.project" / "valid" / "project.json"
+)
+# python.module values that aren't absolute dotted module names: relative, a path, empty, an empty or bad segment.
+MALFORMED_MODULE_NAMES = [".foo", "../../x", "", "foo..bar", "foo.", "word-count", "a b"]
 
 # A plugin module that registers one metric and one recipe, the way a real one does (layout 11.2).
 MATCHING_MODULE = """
@@ -227,6 +233,26 @@ def test_read_manifest_raises_the_wheels_own_code(tmp_path: Path) -> None:
         read_manifest(manifest_path)
     assert caught.value.code == RRS_E1003
     assert "/contributes/widgets" in caught.value.message
+
+
+def test_a_valid_document_of_another_type_is_p0001_not_a_key_error(tmp_path: Path) -> None:
+    manifest_path = tmp_path / MANIFEST_FILE_NAME
+    manifest_path.write_bytes(PROJECT_FIXTURE_PATH.read_bytes())
+    with pytest.raises(PluginError) as caught:
+        read_manifest(manifest_path)
+    assert caught.value.code == RRS_P0001
+    assert "rastai.project" in caught.value.message
+
+
+@pytest.mark.parametrize("module_name", MALFORMED_MODULE_NAMES)
+def test_a_malformed_python_module_is_p0001_not_p4001(plugin_folder: Path, module_name: str) -> None:
+    # Only the manifest is written: a module name like ../../x must never become a file path.
+    manifest_path = plugin_folder / MANIFEST_FILE_NAME
+    manifest_path.write_text(json.dumps(manifest_document(module_name, matching_contributions())), encoding="utf-8")
+    with pytest.raises(PluginError) as caught:
+        load_plugin_module(read_manifest(manifest_path))
+    assert caught.value.code == RRS_P0001
+    assert "python.module" in caught.value.message
 
 
 def test_read_manifest_of_a_missing_file_is_p0001(tmp_path: Path) -> None:
