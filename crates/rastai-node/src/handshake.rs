@@ -383,6 +383,7 @@ mod tests {
             paths,
             settings: node_settings(&resolve_settings(&[default_settings()])),
             hardware_sources: system_hardware_sources(),
+            jobs: crate::jobs::supervisor::default_job_options(Vec::new()),
         };
         let identity = load_or_create_identity(&folder.join("node.key")).unwrap();
         let node = build_node_state(options, identity, HardwareProfile::default());

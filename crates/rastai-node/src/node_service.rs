@@ -2,8 +2,8 @@
 //! (layout: rust-node-gateway-proto.md section 7.1). A refusal comes back as a `Diagnostic` in the response with
 //! gRPC status OK, because the call itself ran (contracts 4).
 //!
-//! The job and event RPCs answer UNIMPLEMENTED until their tasks land: StartJob, SignalJob and ListJobs with
-//! M1-43, WatchRunEvents and WatchLive with M1-44. Nothing calls them before then.
+//! The event RPCs answer UNIMPLEMENTED until their task lands: WatchRunEvents and WatchLive with M1-44. Nothing
+//! calls them before then.
 
 use std::sync::Arc;
 
@@ -17,9 +17,9 @@ use tonic::codegen::tokio_stream;
 use tonic::{Request, Response, Status};
 
 use crate::handshake::answer_handshake;
+use crate::jobs::supervisor::{list_jobs, signal_job, start_job};
 use crate::node::{NodeState, current_hardware, current_telemetry};
 
-const JOBS_ARRIVE_WITH: &str = "jobs arrive with M1-43";
 const STREAMS_ARRIVE_WITH: &str = "run events and live streams arrive with M1-44";
 
 /// The NodeService server's handle on the node's state.
@@ -50,16 +50,19 @@ impl NodeService for NodeServiceHandler {
         Ok(Response::new(response))
     }
 
-    async fn start_job(&self, _request: Request<JobSpec>) -> Result<Response<JobInfo>, Status> {
-        Err(Status::unimplemented(JOBS_ARRIVE_WITH))
+    async fn start_job(&self, request: Request<JobSpec>) -> Result<Response<JobInfo>, Status> {
+        Ok(Response::new(start_job(&self.state, request.into_inner()).await))
     }
 
-    async fn signal_job(&self, _request: Request<SignalJobRequest>) -> Result<Response<SignalJobResponse>, Status> {
-        Err(Status::unimplemented(JOBS_ARRIVE_WITH))
+    async fn signal_job(&self, request: Request<SignalJobRequest>) -> Result<Response<SignalJobResponse>, Status> {
+        let message = request.into_inner();
+        let diagnostic = signal_job(&self.state, &message.job_id, message.signal()).await;
+        Ok(Response::new(SignalJobResponse { diagnostic }))
     }
 
     async fn list_jobs(&self, _request: Request<ListJobsRequest>) -> Result<Response<ListJobsResponse>, Status> {
-        Err(Status::unimplemented(JOBS_ARRIVE_WITH))
+        let jobs = list_jobs(&self.state);
+        Ok(Response::new(ListJobsResponse { jobs }))
     }
 
     type WatchRunEventsStream = tokio_stream::Empty<Result<EventRecord, Status>>;

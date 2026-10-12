@@ -13,6 +13,7 @@ use rastai_core::paths::{DataPaths, node_socket_path};
 use rastai_core::settings::{default_settings, node_settings, resolve_settings};
 use rastai_node::error::NodeError;
 use rastai_node::hardware::HardwareSources;
+use rastai_node::jobs::supervisor::default_job_options;
 use rastai_node::node::{NodeMode, NodeOptions, run_node};
 use rastai_proto::node::v1::node_service_client::NodeServiceClient;
 use rastai_transport::grpc_channel::connect_grpc_channel;
@@ -126,13 +127,15 @@ pub fn machine_from_fixture(
     }
 }
 
-/// Node options for a test: an embedded node in `folder`, reading `sources`.
+/// Node options for a test: an embedded node in `folder`, reading `sources`, with the product's job times and no
+/// environments (the job tests add theirs).
 pub fn test_node_options(folder: &Path, sources: HardwareSources) -> NodeOptions {
     NodeOptions {
         mode: NodeMode::Embedded,
         paths: test_paths(folder),
         settings: node_settings(&resolve_settings(&[default_settings()])),
         hardware_sources: sources,
+        jobs: default_job_options(Vec::new()),
     }
 }
 

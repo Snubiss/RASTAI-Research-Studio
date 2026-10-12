@@ -18,6 +18,13 @@ The node agent. It runs embedded in the daemon (its own tokio runtime, serving `
   copies or changes and lets go; never across an `.await`.
 - **The edge turns errors into diagnostics.** Library functions return `NodeError`; the tonic service puts a refusal
   in the response as a `Diagnostic` with gRPC status OK (contracts 4).
+- **A job's end is a state, not an error.** `start_job` returns the job's `JobInfo` even when it refuses or fails the
+  start (its diagnostic is `last_error`), and `signal_job` returns the `RRS-J0004` diagnostic of a signal it didn't
+  deliver. Inside `jobs/`, a step that fails says why in a `String`, which becomes that diagnostic's `reason`.
+- **One live job per run.** `admit_job` checks for a live job of the run and reserves the run under one hold of
+  `NodeState.jobs`; `job.json` is written only after that, and the run is given back only after the terminal
+  `job.json` is written (contracts 9.1). A group signal goes through the `kill` tool, and only after the pid's boot
+  id, start ticks and process group were checked again (`signals.rs`).
 - **Unix first, Windows compiles.** Socket and file-mode code sits behind `#[cfg(unix)]`; `cargo clippy --target
   x86_64-pc-windows-gnu -p rastai-node` must stay clean. The integration tests are Unix only.
 - **Fixtures are recordings.** `fixtures/hardware/` holds what real machines printed. A new case says in its README
