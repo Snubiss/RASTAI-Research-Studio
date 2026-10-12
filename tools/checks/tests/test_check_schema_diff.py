@@ -10,12 +10,16 @@ from pathlib import Path
 
 import pytest
 
+# repo_files.py sits one folder up, beside the check scripts that import it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from repo_files import git_environment  # noqa: E402
+
 CHECK = "check-schema-diff"
 # This file sits in tools/checks/tests/.
 CHECKS_FOLDER = Path(__file__).resolve().parent.parent
 REPO_ROOT = CHECKS_FOLDER.parent.parent
 CONTRACTS_FILE = "docs/architecture/contracts.md"
-THIS_CHECK_FILE = "tools/checks/check-schema-diff"
 COMMAND_PATH = "schemas/commands/rastai.command.sample.get/1.json"
 OTHER_COMMAND_PATH = "schemas/commands/rastai.command.sample.list/1.json"
 EVENT_PATH = "schemas/events/sample.changed.json"
@@ -23,15 +27,9 @@ BASE_CONTRACTS = "# Contracts\n\n| `sample.get` | get one sample |\n| `sample.ch
 COMMAND_CONTRACTS_LINE = "- `sample.get`: its arguments changed.\n"
 EVENT_CONTRACTS_LINE = "- `sample.changed`: its payload changed.\n"
 AUTHOR = ["-c", "user.name=Ada Example", "-c", "user.email=ada@example.com"]
-# Variables that tell git which repository to use (set inside a hook); the scratch repository must not inherit them.
-REPOSITORY_LOCATION_VARIABLES = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-]
+# Two protobuf JSON fields as codegen writes them: the field's doc, then the sentence that names the message.
+TELEMETRY_FIELD = {"type": "object", "description": "Its telemetry. Protobuf JSON of rastai.common.v1.NodeTelemetry."}
+DIAGNOSTIC_FIELD = {"type": "object", "description": "Its telemetry. Protobuf JSON of rastai.common.v1.Diagnostic."}
 # The machine's own git settings (commit signing, hooks, a default branch name) must not change the test.
 MACHINE_CONFIG_OFF = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 # The M1 event types (contracts 7.3) that schemas/events/ must hold one file each for.
@@ -55,10 +53,8 @@ M1_EVENT_TYPES = [
 
 
 def isolated_environment(base_ref: str = "main") -> dict[str, str]:
-    environment = {}
-    for name, value in os.environ.items():
-        if name not in REPOSITORY_LOCATION_VARIABLES:
-            environment[name] = value
+    # Without the repository variables a hook sets, so the scratch repository is found from -C alone.
+    environment = git_environment()
     environment.update(MACHINE_CONFIG_OFF)
     environment["RASTAI_BASE_REF"] = base_ref
     return environment
@@ -142,14 +138,13 @@ def write_files(repository: Path, files: dict[str, str]) -> None:
         path.write_text(text)
 
 
-def new_repository(tmp_path: Path, base_files: dict[str, str], base_has_check: bool = True) -> Path:
-    """A repository whose main holds base_files and contracts.md, checked out on a new feature branch."""
+def new_repository(tmp_path: Path, base_files: dict[str, str]) -> Path:
+    """A repository whose main holds base_files and contracts.md (BASE_CONTRACTS unless base_files has its own),
+    checked out on a new feature branch."""
     repository = tmp_path / "repository"
     repository.mkdir()
     git(repository, "init", "--quiet", "--initial-branch=main")
     files = {CONTRACTS_FILE: BASE_CONTRACTS, **base_files}
-    if base_has_check:
-        files[THIS_CHECK_FILE] = "# the check, as the base commit had it\n"
     write_files(repository, files)
     git(repository, "add", "--all")
     git(repository, "commit", "--quiet", "-m", "Base")
@@ -250,6 +245,31 @@ def test_an_added_file_needs_a_contracts_change_too(tmp_path):
     assert run_schema_diff(repository).returncode == 0
 
 
+def test_a_removed_contracts_line_that_starts_with_two_dashes_counts(tmp_path):
+    # In the diff it reads `--- ...`, like a file header, but it comes after the first hunk.
+    contracts = BASE_CONTRACTS + "-- `sample.get` takes a sample id.\n"
+    head = command_file(stability="preview", argument_fields={"sample_id": {"type": "string"}})
+    repository = new_repository(tmp_path, {COMMAND_PATH: command_file(stability="preview"), CONTRACTS_FILE: contracts})
+    write_files(repository, {COMMAND_PATH: head, CONTRACTS_FILE: BASE_CONTRACTS})
+    result = run_schema_diff(repository)
+    assert result.returncode == 0, result.stdout
+
+
+def test_only_the_file_headers_before_the_first_hunk_are_skipped(load_check):
+    check = load_check(CHECK)
+    diff = (
+        "diff --git a/docs/architecture/contracts.md b/docs/architecture/contracts.md\n"
+        "--- a/docs/architecture/contracts.md\n"
+        "+++ b/docs/architecture/contracts.md\n"
+        "@@ -3 +3 @@ intro\n"
+        "--- `job.get` was here\n"
+        "+++ `job.get` is here\n"
+        "@@ -9,0 +10 @@ more\n"
+        "+- `job.list` too\n"
+    )
+    assert check.changed_lines(diff) == ["-- `job.get` was here", "++ `job.get` is here", "- `job.list` too"]
+
+
 def test_committed_changes_are_compared_like_working_tree_ones(tmp_path):
     head = command_file(stability="preview", argument_fields={"sample_id": {"type": "string"}})
     repository = changed_command_repository(tmp_path, command_file(stability="preview"), head)
@@ -295,6 +315,27 @@ def test_the_same_change_to_a_deprecated_command_fails(tmp_path, change_name, ar
     result = run_schema_diff(repository)
     assert result.returncode == 1
     assert "is deprecated, so it can't break: " + BREAKING_MESSAGES[change_name] in result.stdout
+
+
+def test_a_stable_protobuf_json_field_that_holds_another_message_fails(tmp_path):
+    base = command_file(argument_fields={"sample_id": {"type": "string"}, "telemetry": TELEMETRY_FIELD})
+    head = command_file(argument_fields={"sample_id": {"type": "string"}, "telemetry": DIAGNOSTIC_FIELD})
+    repository = changed_command_repository(tmp_path, base, head, COMMAND_CONTRACTS_LINE)
+    result = run_schema_diff(repository)
+    assert result.returncode == 1
+    assert (
+        'the field `arguments.telemetry` changed type from "object" of protobuf message '
+        'rastai.common.v1.NodeTelemetry to "object" of protobuf message rastai.common.v1.Diagnostic'
+    ) in result.stdout
+
+
+def test_a_new_doc_on_a_stable_protobuf_json_field_passes(tmp_path):
+    reworded = {"type": "object", "description": "The last telemetry. Protobuf JSON of rastai.common.v1.NodeTelemetry."}
+    base = command_file(argument_fields={"sample_id": {"type": "string"}, "telemetry": TELEMETRY_FIELD})
+    head = command_file(argument_fields={"sample_id": {"type": "string"}, "telemetry": reworded})
+    repository = changed_command_repository(tmp_path, base, head, COMMAND_CONTRACTS_LINE)
+    result = run_schema_diff(repository)
+    assert result.returncode == 0, result.stdout
 
 
 def test_a_field_removed_from_a_shared_type_of_a_stable_result_fails(tmp_path):
@@ -440,12 +481,15 @@ def test_a_missing_merge_base_fails_with_a_clear_message(tmp_path):
     assert "can't find the merge base of HEAD and origin/no-such-branch: fetch the base branch" in result.stdout
 
 
-def test_a_merge_base_from_before_this_check_is_no_baseline(tmp_path):
-    repository = new_repository(tmp_path, {COMMAND_PATH: command_file()}, base_has_check=False)
-    write_files(repository, {COMMAND_PATH: command_file(kind="job"), EVENT_PATH: event_file()})
+def test_a_base_without_schemas_events_reports_the_event_files_as_added(tmp_path):
+    repository = new_repository(tmp_path, {COMMAND_PATH: command_file()})
+    write_files(repository, {EVENT_PATH: event_file()})
+    result = run_schema_diff(repository)
+    assert result.returncode == 1
+    assert f"{EVENT_PATH} was added, but no changed line of {CONTRACTS_FILE} names `sample.changed`" in result.stdout
+    add_contracts_line(repository, EVENT_CONTRACTS_LINE)
     result = run_schema_diff(repository)
     assert result.returncode == 0, result.stdout
-    assert "predates this check, so it has no baseline yet" in result.stdout
 
 
 # ---- How names are matched ----
@@ -489,6 +533,15 @@ def test_every_checked_in_command_file_carries_its_kind_and_stability(load_check
         assert content["x-rastai-since-version"], path
         relative = path.relative_to(REPO_ROOT).as_posix()
         assert check.parse_item(relative, path.read_text()) is not None, path
+
+
+def test_the_checked_in_protobuf_json_fields_name_their_message(load_check):
+    # Ties PROTO_MESSAGE_PATTERN to the sentence the real codegen writes.
+    check = load_check(CHECK)
+    path = REPO_ROOT / "schemas/commands/rastai.command.node.status/1.json"
+    fields = check.command_fields(json.loads(path.read_text()))
+    type_texts = [field.type_text for field in fields.values()]
+    assert '"object" of protobuf message rastai.common.v1.NodeTelemetry' in type_texts
 
 
 def test_schemas_events_holds_one_file_per_m1_event_type(load_check):

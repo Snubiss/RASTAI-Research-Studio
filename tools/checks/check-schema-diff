@@ -13,7 +13,7 @@ the working tree with the same folders at the merge base of HEAD and RASTAI_BASE
   type, or a move to `preview` all fail. A `preview` item may break, with the contracts change.
 
 The base side is read with `git show`, so the check needs no network, only the base branch's history. A merge base
-from before this check existed has no baseline to compare with; the check says so and passes.
+without these folders (or without one of them) is an empty baseline: every file in the working tree counts as added.
 
 Standard library only, like every check here.
 """
@@ -34,8 +34,6 @@ COMMANDS_FOLDER = "schemas/commands/"
 EVENTS_FOLDER = "schemas/events/"
 SCHEMA_FOLDERS = (COMMANDS_FOLDER, EVENTS_FOLDER)
 SCHEMA_SUFFIX = ".json"
-# The merge base has a baseline only if it already ran this check.
-THIS_CHECK_FILE = "tools/checks/check-schema-diff"
 BASE_REF_VARIABLE = "RASTAI_BASE_REF"
 DEFAULT_BASE_REF = "origin/main"
 
@@ -48,6 +46,10 @@ REFERENCE_PREFIX = "#/$defs/"
 COMMAND_PARTS = ("arguments", "result")
 # The fields of an event file's payload that make up a field's type on the wire.
 EVENT_FIELD_SHAPE_KEYS = ("number", "type", "repeated", "optional")
+# A protobuf JSON field is `{"type": "object"}` whose description codegen ends with this sentence (rastai-formats
+# json_schema.rs, kind_schema). The message it names is part of the field's type: NodeTelemetry for Diagnostic is a
+# changed type, though both are objects. The field's own doc text comes before the sentence, so only the end counts.
+PROTO_MESSAGE_PATTERN = re.compile(r"Protobuf JSON of ([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\.$")
 
 # Items with these stabilities may not break (contracts 6.1: deprecated ones until they are retired).
 GUARDED_STABILITIES = ("stable", "deprecated")
@@ -61,7 +63,8 @@ LIST_ELEMENT_MARK = "[]"
 MAP_VALUE_MARK = "{}"
 # A name counts as named on a line only as a whole: `job.get` isn't named by `job.get_all` or `xjob.get`.
 NAME_CHARACTER = r"[A-Za-z0-9_]"
-DIFF_HEADER_PREFIXES = ("+++", "---")
+# A diff's hunks start at the first line with this prefix; the `---` and `+++` file headers come before it.
+DIFF_HUNK_PREFIX = "@@"
 DIFF_CHANGE_PREFIXES = ("+", "-")
 
 
@@ -90,9 +93,6 @@ def main() -> int:
     merge_base = find_merge_base(root, base_ref)
     if merge_base is None:
         return report(CHECK_NAME, [no_merge_base_message(base_ref)], "")
-    if not base_has_file(root, merge_base, THIS_CHECK_FILE):
-        print(f"{CHECK_NAME}: the merge base {merge_base[:12]} predates this check, so it has no baseline yet")
-        return 0
     problems = find_problems(
         read_base_files(root, merge_base), read_head_files(root), read_contracts_changes(root, merge_base)
     )
@@ -314,11 +314,27 @@ def collect_fields(
 
 
 def type_text(schema: dict) -> str:
-    """A field's type in words. An enum's values are part of its type; a schema without `type` takes any JSON."""
+    """A field's type in words. An enum's values and a protobuf JSON field's message are part of its type; a schema
+    without `type` takes any JSON."""
     text = json.dumps(schema.get("type", "any"))
     if "enum" in schema:
         text += " of " + json.dumps(sorted(str(value) for value in schema["enum"]))
+    message = proto_message(schema)
+    if message:
+        text += f" of protobuf message {message}"
     return text
+
+
+def proto_message(schema: dict) -> str:
+    """The protobuf message a field holds as JSON, from the sentence codegen ends its description with; empty for any
+    other field."""
+    description = schema.get("description")
+    if not isinstance(description, str):
+        return ""
+    match = PROTO_MESSAGE_PATTERN.search(description)
+    if match is None:
+        return ""
+    return match.group(1)
 
 
 def event_breaking_changes(base: dict, head: dict) -> list[str]:
@@ -355,10 +371,6 @@ def find_merge_base(root: Path, base_ref: str) -> str | None:
     return result.stdout.strip()
 
 
-def base_has_file(root: Path, merge_base: str, path: str) -> bool:
-    return git(root, ["cat-file", "-e", f"{merge_base}:{path}"]).returncode == 0
-
-
 def read_base_files(root: Path, merge_base: str) -> dict[str, str]:
     """{path: text} of every schema file at the merge base."""
     listing = git_output(root, ["ls-tree", "-r", "--name-only", merge_base, "--", *SCHEMA_FOLDERS])
@@ -381,11 +393,19 @@ def read_head_files(root: Path) -> dict[str, str]:
 def read_contracts_changes(root: Path, merge_base: str) -> list[str]:
     """The added and removed lines of contracts.md between the merge base and the working tree."""
     diff = git_output(root, ["diff", "--unified=0", "--no-color", merge_base, "--", CONTRACTS_FILE])
+    return changed_lines(diff)
+
+
+def changed_lines(diff: str) -> list[str]:
+    """The added and removed lines of a one-file diff, without their + or -. The file headers (`--- a/...`,
+    `+++ b/...`) come before the first hunk, so only lines after it count: a removed line that starts with `--` is
+    still a change."""
     lines = []
+    in_hunks = False
     for line in diff.splitlines():
-        if line.startswith(DIFF_HEADER_PREFIXES):
-            continue
-        if line.startswith(DIFF_CHANGE_PREFIXES):
+        if line.startswith(DIFF_HUNK_PREFIX):
+            in_hunks = True
+        elif in_hunks and line.startswith(DIFF_CHANGE_PREFIXES):
             lines.append(line[1:])
     return lines
 
