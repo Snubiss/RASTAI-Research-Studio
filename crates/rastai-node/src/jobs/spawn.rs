@@ -87,6 +87,8 @@ pub struct WorkerLaunch {
 pub struct SpawnedWorker {
     pub child: Child,
     pub identity: ProcessIdentity,
+    /// `stderr.log`'s length before this worker wrote to it: where its own output starts (log_lines.rs).
+    pub stderr_start_offset: u64,
 }
 
 /// The node's own environment variables. One that isn't UTF-8 can't be one the job is given, so it is skipped.
@@ -156,6 +158,7 @@ pub async fn spawn_worker(launch: &WorkerLaunch) -> Result<SpawnedWorker, String
     }
     let stdout = open_log_file(&launch.run_folder.join(STDOUT_LOG_FILE))?;
     let stderr = open_log_file(&launch.run_folder.join(STDERR_LOG_FILE))?;
+    let stderr_start_offset = log_file_length(&stderr);
     let mut command = worker_command(&python, launch);
     command
         .env_clear()
@@ -175,7 +178,11 @@ pub async fn spawn_worker(launch: &WorkerLaunch) -> Result<SpawnedWorker, String
         return Err("the worker ended before its process id could be read".to_string());
     };
     match wait_for_new_process_group(pid).await {
-        Ok(identity) => Ok(SpawnedWorker { child, identity }),
+        Ok(identity) => Ok(SpawnedWorker {
+            child,
+            identity,
+            stderr_start_offset,
+        }),
         Err(reason) => {
             let _ = child.start_kill();
             let _ = child.wait().await;
@@ -246,6 +253,12 @@ fn open_log_file(path: &Path) -> Result<File, String> {
     options
         .open(path)
         .map_err(|error| format!("{} can't be opened: {error}", path.display()))
+}
+
+/// A log's length, read before the worker gets it. One whose length can't be read counts from 0: the tail may then
+/// quote an earlier job, which is better than quoting nothing.
+fn log_file_length(file: &File) -> u64 {
+    file.metadata().map(|metadata| metadata.len()).unwrap_or(0)
 }
 
 #[cfg(unix)]

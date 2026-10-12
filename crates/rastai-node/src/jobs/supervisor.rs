@@ -11,9 +11,10 @@
 //! the writer holding the lock is one the node had no live `job.json` for.
 //!
 //! Each running job has two background tasks, started in `watch_job`: one waits for the process to exit and
-//! classifies the exit (exit_cause.rs), one fails the job with `RRS-J0002` and kills its group when the worker hasn't
-//! registered within `WORKER_REGISTER_TIMEOUT_SECONDS`. A `CANCEL`, `STOP` or `TERMINATE` starts a third that kills
-//! the group if the job is still alive after `STOP_GRACE_SECONDS` (`RRS-J1003`).
+//! classifies the exit (exit_cause.rs) on a blocking thread, since that reads the run's log and writes `job.json`;
+//! one fails the job with `RRS-J0002` and kills its group when the worker hasn't registered within
+//! `WORKER_REGISTER_TIMEOUT_SECONDS`. A `CANCEL`, `STOP` or `TERMINATE` starts a third that kills the group if the
+//! job is still alive after `STOP_GRACE_SECONDS` (`RRS-J1003`).
 //!
 //! Not here yet: leases and sandbox reservations at admission (M3, M5), an environment still installing that keeps
 //! the job `queued` with `RRS-H2006` (M2-16), the disk-free check at admission (`RRS-S3001`, with a job's space
@@ -128,6 +129,8 @@ pub struct JobRecord {
     pub permissions: JobPermissions,
     /// Who the worker's process is, from the spawn on.
     pub process: Option<ProcessIdentity>,
+    /// Where this job's output starts in the run's `stderr.log`, which earlier jobs of the run appended to.
+    pub stderr_start_offset: u64,
     pub oom_watch: Option<OomWatch>,
     /// Why the node killed the group itself, if it did.
     pub node_kill: Option<NodeKill>,
@@ -404,6 +407,7 @@ fn new_record(state: &NodeState, spec: &JobSpec) -> JobRecord {
         reason: String::new(),
         permissions: job_permissions(spec),
         process: None,
+        stderr_start_offset: 0,
         oom_watch: None,
         node_kill: None,
         start_refusal: None,
@@ -470,7 +474,7 @@ async fn record_spawned_worker(
 ) -> Result<Child, String> {
     let identity = spawned.identity;
     let mut child = spawned.child;
-    record_process(state, job_id, &identity);
+    record_process(state, job_id, &identity, spawned.stderr_start_offset);
     job_file.pid = identity.pid;
     job_file.process_group_id = identity.process_group_id;
     job_file.process_start_ticks = identity.start_ticks;
@@ -590,7 +594,16 @@ fn watch_job(state: &Arc<NodeState>, job_id: &str, mut child: Child) {
                 ProcessExit::Code(-1)
             }
         };
-        finish_after_exit(&exit_state, &exit_job_id, exit);
+        // The end of a job reads the run's whole event log and writes job.json with an fsync: blocking file work
+        // that must not hold a runtime thread (the rule rastai-store's blocking reads follow too).
+        let finish_job_id = exit_job_id.clone();
+        let finished = tokio::task::spawn_blocking(move || finish_after_exit(&exit_state, &finish_job_id, exit)).await;
+        if let Err(error) = finished {
+            log_warn(
+                "ending a job failed",
+                &[("job_id", &exit_job_id), ("reason", &error.to_string())],
+            );
+        }
     });
     let timer_state = Arc::clone(state);
     let timer_job_id = job_id.to_string();
@@ -617,7 +630,7 @@ fn finish_after_exit(state: &NodeState, job_id: &str, exit: ProcessExit) {
 
 /// What `classify_exit` decides from: the record's own facts, the run's log for this job, stderr's tail, free space.
 fn exit_facts(state: &NodeState, job_id: &str, exit: ProcessExit) -> Option<ExitFacts> {
-    let (record_facts, run_id, run_folder, oom_watch) = {
+    let (record_facts, run_id, run_folder, oom_watch, stderr_start_offset) = {
         let table = lock_jobs(state);
         let record = find_record(&table, job_id)?;
         let record_facts = ExitFacts {
@@ -637,6 +650,7 @@ fn exit_facts(state: &NodeState, job_id: &str, exit: ProcessExit) -> Option<Exit
             record.spec.run_id.clone(),
             record.run_folder.clone(),
             record.oom_watch.clone(),
+            record.stderr_start_offset,
         )
     };
     let event_log = run_events_log_path(&state.paths, &run_id);
@@ -651,7 +665,11 @@ fn exit_facts(state: &NodeState, job_id: &str, exit: ProcessExit) -> Option<Exit
         run_log,
         stderr: StderrTail {
             path: stderr_path_for_diagnostic(state, &run_folder),
-            lines: read_log_tail(&run_folder.join(STDERR_LOG_FILE), STDERR_TAIL_LINES),
+            lines: read_log_tail(
+                &run_folder.join(STDERR_LOG_FILE),
+                stderr_start_offset,
+                STDERR_TAIL_LINES,
+            ),
         },
         event_log_path: path_text(&event_log),
         free_bytes: rastai_store::disk_space::free_bytes(&run_folder).ok(),
@@ -988,7 +1006,7 @@ fn record_token_hash(state: &NodeState, job_id: &str, token_hash: &str) {
     }
 }
 
-fn record_process(state: &NodeState, job_id: &str, identity: &ProcessIdentity) {
+fn record_process(state: &NodeState, job_id: &str, identity: &ProcessIdentity, stderr_start_offset: u64) {
     let oom_watch = start_oom_watch(identity.pid);
     let mut table = lock_jobs(state);
     if let Some(record) = find_record_mut(&mut table, job_id) {
@@ -996,6 +1014,7 @@ fn record_process(state: &NodeState, job_id: &str, identity: &ProcessIdentity) {
         record.info.process_group_id = identity.process_group_id;
         record.info.started_unix_ms = now_unix_ms();
         record.process = Some(identity.clone());
+        record.stderr_start_offset = stderr_start_offset;
         record.oom_watch = oom_watch;
     }
 }
@@ -1224,6 +1243,7 @@ exec sleep 60
             reason: String::new(),
             permissions: JobPermissions::default(),
             process: None,
+            stderr_start_offset: 0,
             oom_watch: None,
             node_kill: None,
             start_refusal: None,

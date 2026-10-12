@@ -2,7 +2,9 @@
 //! output goes to files, not pipes, so a dead node sends no SIGPIPE and a full pipe can't block the job; the node
 //! reads the files instead.
 //!
-//! - `read_log_tail`: the last lines of a log, which a diagnostic about the job's end points at (exit causes).
+//! - `read_log_tail`: the last lines a job wrote to a log, which a diagnostic about the job's end points at (exit
+//!   causes). The logs are appended to across relaunches of a run, so it reads only after the length the log had
+//!   when the job was spawned: a job that wrote nothing never shows the previous job's last words as its own.
 //! - `read_new_log_lines` and `log_line_event`: the complete lines written since an offset, as `job.log_line`
 //!   events (ephemeral, contracts 7.3). The loop that follows a running job's logs every `TAIL_POLL_MS` and hands
 //!   the events to `WatchLive` joins with the live queues (`live.rs`, M1-44).
@@ -38,13 +40,14 @@ pub struct NewLogLines {
     pub next_offset: u64,
 }
 
-/// The last `max_lines` lines of the log at `path`, oldest first. A missing or unreadable log has none.
-pub fn read_log_tail(path: &Path, max_lines: usize) -> Vec<String> {
+/// The last `max_lines` lines of the log at `path` that come after `job_start_offset` (the log's length when the
+/// job was spawned), oldest first. A missing or unreadable log has none.
+pub fn read_log_tail(path: &Path, job_start_offset: u64, max_lines: usize) -> Vec<String> {
     let Ok(mut file) = File::open(path) else {
         return Vec::new();
     };
     let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
-    let start = length.saturating_sub(TAIL_BYTES);
+    let start = length.saturating_sub(TAIL_BYTES).max(job_start_offset);
     let mut bytes = Vec::new();
     let read = file
         .seek(SeekFrom::Start(start))
@@ -54,8 +57,9 @@ pub fn read_log_tail(path: &Path, max_lines: usize) -> Vec<String> {
     }
     let text = String::from_utf8_lossy(&bytes);
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
-    // Reading from the middle of the file starts inside a line, which would show as a cut-off first line.
-    if start > 0 && !lines.is_empty() {
+    // Reading from the middle of the job's output starts inside a line, which would show as a cut-off first line.
+    // At the job's own first byte a line begins, even when the previous job's last line had no newline.
+    if start > job_start_offset && !lines.is_empty() {
         lines.remove(0);
     }
     let skip = lines.len().saturating_sub(max_lines);
@@ -149,9 +153,24 @@ mod tests {
     #[test]
     fn the_tail_is_the_last_lines_in_order() {
         let file = test_file("tail", b"one\ntwo\nthree\nfour\n");
-        assert_eq!(read_log_tail(&file.path, 2), vec!["three", "four"]);
-        assert_eq!(read_log_tail(&file.path, 10).len(), 4);
-        assert!(read_log_tail(&file.path.with_extension("missing"), 3).is_empty());
+        assert_eq!(read_log_tail(&file.path, 0, 2), vec!["three", "four"]);
+        assert_eq!(read_log_tail(&file.path, 0, 10).len(), 4);
+        assert!(read_log_tail(&file.path.with_extension("missing"), 0, 3).is_empty());
+    }
+
+    // A relaunch appends to the run's log: the tail is only what this job wrote, and nothing when it wrote nothing.
+    #[test]
+    fn the_tail_holds_only_what_the_job_wrote() {
+        let earlier_job = b"the earlier job's last words\nand its partial line";
+        let file = test_file("relaunch", earlier_job);
+        let job_start_offset = earlier_job.len() as u64;
+        assert!(read_log_tail(&file.path, job_start_offset, 20).is_empty());
+        let mut both = earlier_job.to_vec();
+        both.extend_from_slice(b"this job's line\n");
+        std::fs::write(&file.path, &both).unwrap();
+        assert_eq!(read_log_tail(&file.path, job_start_offset, 20), vec!["this job's line"]);
+        // An offset beyond the log (it was cut since) reads nothing rather than another job's bytes.
+        assert!(read_log_tail(&file.path, both.len() as u64 + 10, 20).is_empty());
     }
 
     // The tail of a long log starts after the cut-off line, never with half of one.
@@ -162,7 +181,7 @@ mod tests {
             bytes.extend_from_slice(format!("line number {number}\n").as_bytes());
         }
         let file = test_file("long", &bytes);
-        let tail = read_log_tail(&file.path, 10_000);
+        let tail = read_log_tail(&file.path, 0, 10_000);
         assert!(tail.first().is_some_and(|line| line.starts_with("line number ")));
         assert_eq!(tail.last().map(String::as_str), Some("line number 1999"));
     }
