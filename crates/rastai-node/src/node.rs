@@ -28,7 +28,7 @@ use crate::jobs::supervisor::{JobOptions, JobTable};
 use crate::live::LiveHub;
 use crate::node_service::NodeServiceHandler;
 use crate::run_events::RunEventPositions;
-use crate::telemetry::start_telemetry;
+use crate::telemetry::{data_folder_free_bytes, start_telemetry};
 use crate::worker_host_service::serve_worker_host;
 
 /// What starts a node.
@@ -96,9 +96,16 @@ pub async fn run_node(options: NodeOptions) -> Result<(), NodeError> {
 }
 
 /// The state of a node with this identity and hardware, before any session or sample.
-pub(crate) fn build_node_state(options: NodeOptions, identity: NodeIdentity, hardware: HardwareProfile) -> NodeState {
+pub(crate) fn build_node_state(
+    options: NodeOptions,
+    identity: NodeIdentity,
+    mut hardware: HardwareProfile,
+) -> NodeState {
+    // Detection doesn't know the data folder, so free disk joins here; the telemetry loop keeps it current.
+    hardware.disk_free_bytes = data_folder_free_bytes(&options.paths);
     let telemetry = NodeTelemetry {
         ram_total_bytes: hardware.ram_total_bytes,
+        disk_free_bytes: hardware.disk_free_bytes,
         ..NodeTelemetry::default()
     };
     NodeState {

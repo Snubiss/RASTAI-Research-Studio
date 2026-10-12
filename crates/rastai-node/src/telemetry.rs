@@ -17,14 +17,16 @@
 //! Memory comes in MiB and is turned into bytes with a checked multiplication: an absurd value from a tool is a
 //! garbled row and is skipped, never a panic that would end the reader.
 //!
-//! Free disk joins `NodeTelemetry` and the profile through `rastai_store::free_bytes` once M1-25 lands it; until
-//! then `disk_free_bytes` is 0, which reads as "unknown".
+//! Free disk is `rastai_store::free_bytes` on the node's data folder (hardware.proto), sampled with RAM every 5 s into
+//! both `NodeTelemetry` and the profile, so GetHardware never shows a start-time value hours later. A failed call
+//! stores 0, which reads as "unknown".
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
+use rastai_core::paths::DataPaths;
 use rastai_core::time::now_unix_ms;
 use rastai_proto::common::v1::{GpuTelemetry, NodeTelemetry, ProcessVram};
 use serde_json::{Map, Value};
@@ -94,7 +96,7 @@ pub(crate) fn start_telemetry(
     amd_gpus: Vec<GpuAddress>,
 ) -> TelemetryTasks {
     let mut handles = Vec::new();
-    let memory = tokio::spawn(memory_loop(Arc::clone(state), sources.proc_root.clone()));
+    let memory = tokio::spawn(memory_and_disk_loop(Arc::clone(state), sources.proc_root.clone()));
     handles.push(memory.abort_handle());
     if !nvidia_gpus.is_empty() {
         let reader = tokio::spawn(nvidia_reader_loop(Arc::clone(state), sources.nvidia_smi.clone()));
@@ -264,11 +266,27 @@ fn store_memory(state: &NodeState, ram_used_bytes: u64, ram_total_bytes: u64) {
     telemetry.ram_total_bytes = ram_total_bytes;
 }
 
-async fn memory_loop(state: Arc<NodeState>, proc_root: PathBuf) {
+/// Free bytes in the node's data folder, or 0 ("unknown") when the volume can't be asked.
+pub(crate) fn data_folder_free_bytes(paths: &DataPaths) -> u64 {
+    rastai_store::disk_space::free_bytes(&paths.data).unwrap_or(0)
+}
+
+/// The profile carries free disk too, and GetHardware returns both, so the two are kept the same.
+fn store_disk_free(state: &NodeState, disk_free_bytes: u64) {
+    lock_telemetry(state).disk_free_bytes = disk_free_bytes;
+    state
+        .hardware
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .disk_free_bytes = disk_free_bytes;
+}
+
+async fn memory_and_disk_loop(state: Arc<NodeState>, proc_root: PathBuf) {
     loop {
         if let Some((used, total)) = read_memory_use(&proc_root) {
             store_memory(&state, used, total);
         }
+        store_disk_free(&state, data_folder_free_bytes(&state.paths));
         tokio::time::sleep(Duration::from_secs(TELEMETRY_INTERVAL_SECONDS)).await;
     }
 }
@@ -381,6 +399,11 @@ mod tests {
     /// Far past the short limit: a reader still running then never noticed the silence.
     #[cfg(unix)]
     const SILENCE_TEST_WAIT: Duration = Duration::from_secs(10);
+    /// The memory loop samples at once, so this is only slack for a loaded machine.
+    #[cfg(unix)]
+    const DISK_SAMPLE_WAIT: Duration = Duration::from_secs(10);
+    #[cfg(unix)]
+    const DISK_SAMPLE_POLL: Duration = Duration::from_millis(20);
 
     /// A fresh folder, removed when the test ends, also when an assertion fails.
     #[cfg(unix)]
@@ -427,7 +450,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_stream_that_goes_silent_is_stopped() {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::hardware::write_stand_in_tool;
 
         let folder = TestFolder {
             path: std::env::temp_dir().join(format!("rnts-{}", std::process::id())),
@@ -435,13 +458,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&folder.path);
         std::fs::create_dir_all(&folder.path).unwrap();
         let script = folder.path.join("nvidia-smi");
-        std::fs::write(&script, SILENT_NVIDIA_SMI).unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_stand_in_tool(&script, SILENT_NVIDIA_SMI);
         let state = test_state(&folder.path);
         let reading = read_nvidia_stream(&state, &script, SHORT_SILENCE_LIMIT);
         let finished = tokio::time::timeout(SILENCE_TEST_WAIT, reading).await;
         assert!(finished.is_ok(), "the reader kept waiting on a silent nvidia-smi");
         assert_eq!(lock_telemetry(&state).gpus.len(), 1);
+    }
+
+    // Free disk is sampled on every tick into both the telemetry and the profile (hardware.proto), not only at start.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_memory_tick_samples_free_disk_into_telemetry_and_profile() {
+        let folder = TestFolder {
+            path: std::env::temp_dir().join(format!("rntd-{}", std::process::id())),
+        };
+        let _ = std::fs::remove_dir_all(&folder.path);
+        std::fs::create_dir_all(folder.path.join("data")).unwrap();
+        let state = Arc::new(test_state(&folder.path));
+        // Start from "unknown", as a node whose data folder appeared after it started.
+        store_disk_free(&state, 0);
+        let sampling = tokio::spawn(memory_and_disk_loop(Arc::clone(&state), folder.path.join("proc")));
+        let started = std::time::Instant::now();
+        while lock_telemetry(&state).disk_free_bytes == 0 && started.elapsed() < DISK_SAMPLE_WAIT {
+            tokio::time::sleep(DISK_SAMPLE_POLL).await;
+        }
+        sampling.abort();
+        let telemetry_free = lock_telemetry(&state).disk_free_bytes;
+        let profile_free = state.hardware.lock().unwrap().disk_free_bytes;
+        assert!(telemetry_free > 0, "no free disk in the telemetry");
+        assert_eq!(profile_free, telemetry_free);
     }
 
     fn recorded_addresses() -> Vec<GpuAddress> {

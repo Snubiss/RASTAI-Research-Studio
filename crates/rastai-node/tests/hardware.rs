@@ -117,6 +117,20 @@ mod on_unix {
         node.abort();
     }
 
+    // GetHardware carries the free space of the node's data folder, in the profile and the telemetry (hardware.proto).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn get_hardware_reports_free_disk_in_the_data_folder() {
+        let folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let sources = machine_from_fixture("no_gpu", &folder.path, NvidiaSmi::Recorded, TOOL_TIMEOUT);
+        let (node, mut client) = start_node(test_node_options(&folder.path, sources)).await;
+        let answer = client.get_hardware(GetHardwareRequest {}).await.unwrap().into_inner();
+        node.abort();
+        let hardware = answer.hardware.unwrap();
+        let telemetry = answer.telemetry.unwrap();
+        assert!(hardware.disk_free_bytes > 0, "{hardware:?}");
+        assert!(telemetry.disk_free_bytes > 0, "{telemetry:?}");
+    }
+
     /// The profile and note codes in `fixtures/hardware/<case>/expected.json`.
     fn read_expected(case: &str) -> (HardwareProfile, Vec<String>) {
         let text = fs::read_to_string(fixture_folder(case).join("expected.json")).unwrap();
@@ -125,6 +139,7 @@ mod on_unix {
             cpu_model: text_field(&expected, "cpu_model"),
             cpu_count: u32::try_from(number_field(&expected, "cpu_count")).unwrap(),
             ram_total_bytes: number_field(&expected, "ram_total_bytes"),
+            // Detection doesn't know the data folder; the node adds free disk itself (the test below).
             disk_free_bytes: 0,
             gpus: expected["gpus"].as_array().unwrap().iter().map(expected_gpu).collect(),
             driver_version: text_field(&expected, "driver_version"),

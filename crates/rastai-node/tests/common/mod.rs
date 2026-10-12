@@ -5,7 +5,9 @@
 #![allow(dead_code)]
 
 use std::fs;
+use std::io::ErrorKind;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,6 +41,8 @@ pub const HUNG_TOOL_SCRIPT: &str = "#!/bin/sh\nexec sleep 600\n";
 const NODE_START_WAIT: Duration = Duration::from_secs(20);
 const NODE_START_POLL: Duration = Duration::from_millis(20);
 const EXECUTABLE_MODE: u32 = 0o755;
+/// `write_tool` writes a script here first, beside its final path.
+const STAGING_SUFFIX: &str = "staging";
 /// Where the stand-in nvidia-smi's telemetry stream writes its process id, in the machine's tools folder.
 const STREAM_PID_FILE: &str = "nvidia-smi-stream.pid";
 /// The test daemon's key, in the test folder.
@@ -197,10 +201,50 @@ fn recorded_nvidia_smi(fixture: &Path, pid_path: &Path) -> String {
     )
 }
 
+/// Writes an executable stand-in tool. The tests of one binary run on parallel threads, and a child another thread
+/// forks inherits every descriptor this process has open until its own exec. Had this process written the tool
+/// itself, such a child could still hold it open for writing when the tool runs, and the kernel refuses to run a file
+/// open for writing (ETXTBSY, issue #209). Renaming a finished file into place doesn't help: the child holds the
+/// same file. So the script is written to a staging file, and `cp`, a process of its own whose descriptors nobody
+/// else inherits, writes the tool.
 #[allow(clippy::unwrap_used)]
 pub fn write_tool(path: &Path, script: &str) {
-    fs::write(path, script).unwrap();
+    let staging = path.with_extension(STAGING_SUFFIX);
+    fs::write(&staging, script).unwrap();
+    let copied = std::process::Command::new("cp")
+        .arg(&staging)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(
+        copied.success(),
+        "cp {} {}: {copied}",
+        staging.display(),
+        path.display()
+    );
+    fs::remove_file(&staging).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(EXECUTABLE_MODE)).unwrap();
+}
+
+/// Waits until nobody listens on `socket_path`. A node stopped inside the test process lets go of its sockets from
+/// detached tasks a moment after its own task has ended (issue #233), and a node started again at once in the same
+/// folder would find them still answering and refuse to start.
+#[allow(clippy::unwrap_used)]
+pub async fn wait_until_socket_released(socket_path: &Path) {
+    let started = Instant::now();
+    loop {
+        match UnixStream::connect(socket_path) {
+            Err(error) if error.kind() == ErrorKind::ConnectionRefused => return,
+            Err(error) if error.kind() == ErrorKind::NotFound => return,
+            _ => {}
+        }
+        assert!(
+            started.elapsed() < NODE_START_WAIT,
+            "{} still answers after {NODE_START_WAIT:?}",
+            socket_path.display()
+        );
+        tokio::time::sleep(NODE_START_POLL).await;
+    }
 }
 
 #[allow(clippy::unwrap_used)]

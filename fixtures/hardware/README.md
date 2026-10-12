@@ -10,7 +10,7 @@ What real machines showed `rastai-node`'s hardware detection and telemetry (node
 | `gfx1036_igpu/` | the iGPU alone, without ROCm | one AMD GPU, `gfx1036`, named by its PCI ids, because no rocm-smi is there to name it; no notes |
 | `no_gpu/` | no display device | no GPU, backend `cpu`, `RRS-H0001` |
 
-Choosing the environment from the profile is `environments.rs` (M2-16), so `backend` is empty whenever a GPU is listed. That is also where `gfx1036` becomes "listed but not supported" (`RRS-H4004`). Free disk is 0 until `rastai_store::free_bytes` lands (M1-25).
+Choosing the environment from the profile is `environments.rs` (M2-16), so `backend` is empty whenever a GPU is listed. That is also where `gfx1036` becomes "listed but not supported" (`RRS-H4004`). Free disk is 0 here: detection doesn't know the node's data folder, and the node fills it in from `rastai_store::free_bytes`.
 
 ## What each case holds
 

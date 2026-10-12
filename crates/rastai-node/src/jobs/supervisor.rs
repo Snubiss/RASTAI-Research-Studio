@@ -1281,8 +1281,6 @@ exec sleep 60
     #[cfg(target_os = "linux")]
     const CHILD_PID_FILE: &str = "child.pid";
     #[cfg(target_os = "linux")]
-    const EXECUTABLE_MODE: u32 = 0o755;
-    #[cfg(target_os = "linux")]
     const WAIT_LIMIT: Duration = Duration::from_secs(10);
     #[cfg(target_os = "linux")]
     const POLL: Duration = Duration::from_millis(20);
@@ -1525,13 +1523,11 @@ exec sleep 60
     /// An environment folder whose `bin/python` is `script`.
     #[cfg(target_os = "linux")]
     fn stand_in_environment(folder: &Path, script: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
+        use crate::hardware::write_stand_in_tool;
 
         let environment_folder = folder.join("env");
         std::fs::create_dir_all(environment_folder.join("bin")).unwrap();
-        let python = environment_folder.join("bin/python");
-        std::fs::write(&python, script).unwrap();
-        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(EXECUTABLE_MODE)).unwrap();
+        write_stand_in_tool(&environment_folder.join("bin/python"), script);
         environment_folder
     }
 

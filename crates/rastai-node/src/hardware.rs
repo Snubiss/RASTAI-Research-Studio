@@ -38,6 +38,11 @@ const AMD_PCI_VENDOR: &str = "0x1002";
 const DISPLAY_CLASS_PREFIX: &str = "0x03";
 pub(crate) const NVIDIA_VENDOR: &str = "nvidia";
 pub(crate) const AMD_VENDOR: &str = "amd";
+/// `write_stand_in_tool` (unit tests only) writes a script here first, beside its final path, then makes it this.
+#[cfg(all(test, unix))]
+const STAND_IN_STAGING_SUFFIX: &str = "staging";
+#[cfg(all(test, unix))]
+const STAND_IN_TOOL_MODE: u32 = 0o755;
 /// The backend of a node without a usable GPU (contracts 8.6 environment ids).
 const CPU_BACKEND: &str = "cpu";
 const PCI_DEVICES_FOLDER: &str = "bus/pci/devices";
@@ -535,6 +540,34 @@ fn read_text_file(path: &Path) -> Option<String> {
 
 fn read_number_file(path: &Path) -> Option<u64> {
     read_text_file(path)?.parse().ok()
+}
+
+/// Writes an executable stand-in tool for this crate's unit tests (tests/common/mod.rs has the same for the
+/// integration tests). Tests run on parallel threads, and a child another thread forks inherits every descriptor this
+/// process has open until its own exec; had this process written the tool, that child could still hold it open for
+/// writing when the tool runs, and the kernel refuses to run it (ETXTBSY, issue #209). Renaming a finished file into
+/// place doesn't help, since the child holds the same file. So `cp`, a process of its own, writes the tool from a
+/// staging file.
+#[cfg(all(test, unix))]
+#[allow(clippy::unwrap_used)]
+pub(crate) fn write_stand_in_tool(path: &Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let staging = path.with_extension(STAND_IN_STAGING_SUFFIX);
+    fs::write(&staging, script).unwrap();
+    let copied = std::process::Command::new("cp")
+        .arg(&staging)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(
+        copied.success(),
+        "cp {} {}: {copied}",
+        staging.display(),
+        path.display()
+    );
+    fs::remove_file(&staging).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(STAND_IN_TOOL_MODE)).unwrap();
 }
 
 #[cfg(test)]

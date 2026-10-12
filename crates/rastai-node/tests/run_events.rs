@@ -29,7 +29,7 @@ mod on_linux {
     use std::time::{Duration, Instant};
 
     use rastai_core::ids::{IdPrefix, new_id};
-    use rastai_core::paths::{DataPaths, run_dir, run_events_log_path};
+    use rastai_core::paths::{DataPaths, node_socket_path, run_dir, run_events_log_path, worker_host_socket_path};
     use rastai_node::error::NodeError;
     use rastai_node::jobs::job_file::{JobFile, write_job_file};
     use rastai_node::jobs::signals::read_process_identity;
@@ -54,7 +54,7 @@ mod on_linux {
 
     use crate::common::{
         NvidiaSmi, TestFolder, machine_from_fixture, new_test_folder, start_node, test_node_options, test_paths,
-        write_tool,
+        wait_until_socket_released, write_tool,
     };
 
     const TEST_FOLDER_PREFIX: &str = "rnev";
@@ -470,6 +470,8 @@ exec sleep 60
 
         node.node.abort();
         let _ = (&mut node.node).await;
+        wait_until_socket_released(&node_socket_path(&node.paths)).await;
+        wait_until_socket_released(&worker_host_socket_path(&node.paths)).await;
         drop(stream);
         append_metrics(&mut writer, &run_id, 1501, 1600);
         let (restarted, client) = start_node_in(&node.folder.path, TALKING_WORKER).await;
