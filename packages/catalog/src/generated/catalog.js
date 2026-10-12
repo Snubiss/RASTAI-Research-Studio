@@ -250,9 +250,9 @@ export const CATALOG = [
   {
     code: "RRS-C1008",
     severity: "error",
-    title: "Owner token is readable by group or others; the daemon refuses to start",
-    message: "The owner token {path} is readable by group or others, so the daemon refuses to start.",
-    basic_text: "Rastai's key file can be read by other users on this computer, so Rastai won't start.",
+    title: "Owner token's mode isn't 0600; the daemon refuses to start",
+    message: "The owner token {path} has a mode other than 0600, so the daemon refuses to start.",
+    basic_text: "Rastai's key file doesn't have the permissions it needs to stay private, so Rastai won't start.",
     fix_text: "Run chmod 600 {path}, then start Rastai again.",
     fix_command_id: "",
     docs_anchor: "rrs-c1008",

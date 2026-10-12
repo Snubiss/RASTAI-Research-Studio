@@ -2201,8 +2201,12 @@ crates/rastai-server/
     daemon.rs                 run_daemon(): the startup steps of flows/platform.md 2.1, one call each
     server_state.rs           Server, the plain struct every handler reads (8.2)
     shutdown.rs               SIGTERM and SIGINT: close streams, detach from workers, flush writers, release the lock
-    auth_files.rs             owner.token create and 0600 check (RRS-C1008 refuses the start, plan §10 row 36); daemon.key through
-                              rastai_node::identity (load_or_create_identity, sign_challenge, verify_challenge), the one Ed25519 wrapper
+    auth_files.rs             ensure_owner_token: owner.token written atomically on the first start (owner.token.tmp opened
+                              create_new at 0600, synced, renamed); on every start its mode must be exactly 0600 (RRS-C1008
+                              refuses any other, plan §10 row 36) and its text 64 lowercase hex characters with at most one
+                              trailing newline (RRS-C1010 refuses a malformed, unreadable or uncreatable token); daemon.key
+                              through rastai_node::identity (load_or_create_identity, sign_challenge, verify_challenge), the
+                              one Ed25519 wrapper
     secrets.rs                the only keyring import: get, set, delete, list names; kernel keyring and encrypted-file fallbacks
     policy.rs                 check_data_policy(): the one data-policy check (RRS-C1009, plan §10 row 37), called by chat.*,
                               dataset.import, StartJob on a remote node, NodeHubService.GatewayGenerate, /v1 (routing.rs)
@@ -2307,8 +2311,8 @@ crates/rastai-server/
       connect_json.rs         the hand-written Connect JSON decoder on arbitrary bytes
   tests/
     gate.rs                   one request head per branch of flows/platform.md 4.2, then the same rules through a running daemon
-    startup.rs                owner.token created 0600 or refused (RRS-C1008, RRS-C1010) before anything starts; port fallback
-                              and daemon.port; healthy within 1 s; a clean stop removes the runtime files and frees the lock
+    startup.rs                owner.token created 0600 or refused (RRS-C1008 for any mode but 0600, RRS-C1010 for an unreadable
+                              or malformed token) before anything starts; port fallback and daemon.port; healthy within 1 s; a clean stop removes the runtime files and frees the lock
     connect_protocol.rs       envelopes and JSON against fixtures/proto-golden/
     execute_paths.rs          one row per branch of flows/platform.md 3.2
     dispatch_complete.rs      every core command id reaches its own arm, never the plugin fall-through
@@ -2367,8 +2371,9 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
     let settings = load_settings_layers(&paths, options)?;        // M1-26: defaults, environment, --set; the files with M1-27
     let daemon_lock = take_daemon_lock(&paths)?;                  // RRS-S0001
     start_logger(&paths, &settings);                              // after the lock: one daemon rotates the log file
-    let owner_token_hash = ensure_owner_token(&paths)?;           // RRS-C1008 when group or others can read it, RRS-C1010
-                                                                  // when it can't be read or created; never rewritten
+    let owner_token_hash = ensure_owner_token(&paths)?;           // RRS-C1008 for any mode but 0600, RRS-C1010 when it
+                                                                  // can't be read or created or isn't 64 lowercase hex
+                                                                  // characters; never rewritten
     let store = open_store(&paths)?;                              // migrations, writer threads
     let identity = load_or_create_identity(&daemon_key_path(&paths))?;   // rastai_node::identity
     let node = start_embedded_node(&paths, &settings, &identity).await?;
@@ -2394,6 +2399,13 @@ This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cl
 ### 8.3 Module APIs
 
 ```rust
+// auth_files.rs: before the store opens (8.2). Returns the token's hash; never rewrites an existing file. A missing
+// token is written to owner.token.tmp (create_new, mode 0600 at open), synced, renamed into place and the folder
+// synced (contracts 8.1, 11.1). RRS-C1008: any mode but 0600. RRS-C1010: unreadable, uncreatable, or text that isn't
+// 64 lowercase hex characters with at most one trailing newline. The auth folder must be writable only to create it.
+pub fn ensure_owner_token(paths: &DataPaths) -> Result<String, ServerError>
+pub fn lowercase_hex(bytes: &[u8]) -> String
+
 // commands/execute.rs: every caller (HTTP, daemon.sock, MCP, NodeHubService.ExecuteCommand, plugin forwards) ends here
 pub async fn execute_command(server: &Server, principal: &Principal, request: ExecuteRequest) -> ExecuteResponse
 
@@ -2613,7 +2625,7 @@ fn allowed_without_origin(request: &RequestHead) -> bool {
 - **Sessions also hold a request key** (ADR-0034 decision 10, contracts §3.2). `redeem_login_code` takes 32 bytes from `random_bytes(32)` and encodes them as 64 lowercase hex characters; that text is the key. The login response body is `{"session_key": "<64 lowercase hex>"}` (contracts §3.3). The session keeps only `hash_bytes` of the hex text as sent (`key_hash`), the same rule as job tokens, so the gate hashes the header's text without decoding it; a header of any other form simply doesn't match. Every cookie request other than `GET` or `HEAD` (`Execute`, `Subscribe`, `PUT /api/blobs`) must send the key as `Rastai-Session-Key`; a missing or wrong key is `RRS-C1002`. The cookie alone reads only static files and blobs. Bearer requests don't use the key.
 - **Bearer requests** may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed iframe) is refused.
 - **Cross-origin browser clients are refused in v1.** Two routes are designed for Phase 2 and not built: alternative UIs hosted by the daemon on its own origin, and an origin allowlist with pairing (CORS only on demand).
-- **`owner.token`** that group or others can read stops the start with `RRS-C1008` and the fix `chmod 600 <path>` (`auth_files.rs`); the daemon never rotates or rewrites it.
+- **`owner.token`** with any mode other than 0600 (one group or others can read, or write) stops the start with `RRS-C1008` and the fix `chmod 600 <path>` (`auth_files.rs`); one that can't be read, or whose text isn't 64 lowercase hex characters with at most one trailing newline, stops it with `RRS-C1010`, so a damaged or hand-edited short token never becomes a guessable owner credential. The daemon never rotates or rewrites it.
 - **Header parsing** is fuzzed (`fuzz/fuzz_targets/request_gate.rs`): a malformed header is a refusal, never a panic. `read_request_head(method, path, headers, cookie_name)` builds the `RequestHead`; a Host, Origin, `Sec-Fetch-Site`, `Rastai-Session-Key` or `Authorization` header that is sent twice or isn't visible ASCII is refused with the code of the rule it feeds (`RRS-C1003`, `RRS-C1004`, `RRS-C1002`), and two different values for this daemon's session cookie (a page on another loopback port can set a cookie of that name) are `RRS-C1002`: the gate never guesses which one is meant.
 - **Public paths are plain.** Health, `/plugins/...` and the web app are public; `/api/`, `/rastai.`, `/v1` and `/mcp` never are, and neither is any path with `..`, `//`, `%` or `\`, so a crafted path can't reach the API through the public rule. The router puts the gate in front of the fallback too, so an unknown path is refused like a known one.
 - **Refusals** are the diagnostic as JSON (`render_json`) with 401 for `RRS-C1002` and `RRS-C1007`, 403 for `RRS-C1003` and `RRS-C1004`, and 400 for a login body without a code (`RRS-C0002`); part 2 wraps them in the Connect error envelope on the Connect paths (11.3). Sign-in answers carry `Cache-Control: no-store`.
@@ -2681,7 +2693,7 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Test | Where | What |
 |---|---|---|
 | Gate | `tests/gate.rs` | the table of flows/platform.md 4.2; DNS rebinding with `Host: attacker.test`; Origin `null`; a cookie redeemed at port 47820 sent with Host and Origin on port 9000 → `RRS-C1004`; a cookie GET with no Origin and `Sec-Fetch-Site: same-origin` passes, `same-site` → `RRS-C1004`; a cookie POST with no Origin → `RRS-C1004`; a login POST without Origin → `RRS-C1004` and the code still works afterwards; a cookie POST with the right Origin and no `Rastai-Session-Key`, or a wrong one → `RRS-C1002`; a cookie GET of a blob with no key passes |
-| Startup | `tests/startup.rs` | first start writes `owner.token` 0600 (folder 0700) and `daemon.port`, healthy within 1 s; a 0644 token → `RRS-C1008` with no socket, port file or database, the file unchanged, and after it is deleted the next start writes a new 0600 token; a folder or an empty file in its place → `RRS-C1010`; a busy port falls back into 47820–47829 and `daemon.port` names it; no free port → `RRS-C1001`; a second daemon → `RRS-S0001`; a clean stop removes `daemon.port` and `daemon.sock` and frees the lock |
+| Startup | `tests/startup.rs` | first start writes `owner.token` 0600 (folder 0700) and `daemon.port`, healthy within 1 s; a 0644 token → `RRS-C1008` with no socket, port file or database, the file unchanged, and after it is deleted the next start writes a new 0600 token; a 0620 token → `RRS-C1008` too; a folder, an unreadable (0000) file, or a file that isn't 64 lowercase hex characters (empty, `3f`, truncated, uppercase) in its place → `RRS-C1010`, the file unchanged; a valid token in a read-only `auth` folder starts; unit tests in `auth_files.rs`: the temporary file is 0600 before a byte is written, the first write leaves only a 0600 `owner.token`, a leftover `owner.token.tmp` is replaced, and every mode but 0600 (0620, 0602, 0640, 0644, 0400, 0700, 04600) is `RRS-C1008`; a busy port falls back into 47820–47829 and `daemon.port` names it; no free port → `RRS-C1001`; a second daemon → `RRS-S0001`; a clean stop removes `daemon.port` and `daemon.sock` and frees the lock |
 | Blob headers | `tests/blob_headers.rs` | an uploaded HTML blob is served as an attachment with type `application/octet-stream` and the sandbox CSP; the same for SVG and an unknown type; `image/png` is inline but still carries `nosniff` and `Cross-Origin-Resource-Policy: same-origin` |
 | Fuzz | `fuzz/fuzz_targets/request_gate.rs`, `connect_json.rs` | nightly, 10 minutes each (contracts §12.5) |
 | Connect | `tests/connect_protocol.rs` | unary binary and JSON; stream envelopes and the end-of-stream trailer; JSON equals `fixtures/proto-golden/commands/*.json` |

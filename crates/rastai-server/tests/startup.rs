@@ -1,6 +1,6 @@
 //! Startup and shutdown (flows/platform.md 2.1, layout section 8.2): the owner token is created 0600 and refused
-//! when too open or unusable, before any database or listener; ports fall back and land in daemon.port; health is
-//! up within a second; a clean stop removes the runtime files and releases the lock.
+//! when its mode isn't 0600 or it is unreadable or malformed, before any database or listener; ports fall back and
+//! land in daemon.port; health is up within a second; a clean stop removes the runtime files and releases the lock.
 
 mod common;
 
@@ -25,6 +25,8 @@ mod on_unix {
     const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
     /// flows/platform.md 2.1: startup to health under 1 s.
     const HEALTHY_WITHIN: Duration = Duration::from_secs(1);
+    /// An owner token in its one valid form (contracts 8.1).
+    const VALID_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn mode_of(path: &std::path::Path) -> u32 {
         fs::metadata(path).unwrap().permissions().mode() & 0o777
@@ -97,6 +99,25 @@ mod on_unix {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_writable_token_refuses_the_start_too() {
+        let paths = test_paths("groupwrite");
+        let running = start_test_daemon(&paths).await;
+        stop_test_daemon(running).await;
+        fs::remove_file(rastai_db_path(&paths)).unwrap();
+        let token_path = owner_token_path(&paths);
+        let token = fs::read_to_string(&token_path).unwrap();
+        // Not readable by others, but writable by the group: someone may have put a token they know in its place.
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o620)).unwrap();
+
+        let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+        assert_eq!(refused.code(), "RRS-C1008");
+        assert!(nothing_was_started(&paths));
+        assert_eq!(fs::read_to_string(&token_path).unwrap(), token);
+        assert_eq!(mode_of(&token_path), 0o620, "the mode is left for the owner to fix");
+        remove_test_folder(&paths);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_token_that_cant_be_read_refuses_the_start() {
         let paths = test_paths("unusable");
         let token_path = owner_token_path(&paths);
@@ -104,13 +125,52 @@ mod on_unix {
         let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
         assert_eq!(refused.code(), "RRS-C1010");
         assert!(nothing_was_started(&paths));
-
         fs::remove_dir(&token_path).unwrap();
-        fs::write(&token_path, "").unwrap();
+
+        fs::write(&token_path, VALID_TOKEN).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads any file, so the open this test is about can't fail for it.
+        if fs::read(&token_path).is_err() {
+            let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+            assert_eq!(refused.code(), "RRS-C1010");
+            assert!(nothing_was_started(&paths));
+        }
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-        let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
-        assert_eq!(refused.code(), "RRS-C1010");
-        assert!(nothing_was_started(&paths));
+        assert_eq!(fs::read_to_string(&token_path).unwrap(), VALID_TOKEN, "never rewritten");
+        remove_test_folder(&paths);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_token_that_isnt_64_lowercase_hex_characters_refuses_the_start() {
+        let paths = test_paths("malformed");
+        let token_path = owner_token_path(&paths);
+        fs::create_dir_all(token_path.parent().unwrap()).unwrap();
+        let uppercase = VALID_TOKEN.to_uppercase();
+        let truncated = &VALID_TOKEN[..32];
+        for text in ["", "3f", "password\n", truncated, uppercase.as_str()] {
+            fs::write(&token_path, text).unwrap();
+            fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+            let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+            assert_eq!(refused.code(), "RRS-C1010", "{text:?}");
+            assert!(nothing_was_started(&paths));
+            assert_eq!(fs::read_to_string(&token_path).unwrap(), text, "never rewritten");
+        }
+        remove_test_folder(&paths);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_valid_token_in_a_read_only_auth_folder_starts() {
+        let paths = test_paths("readonly");
+        let token_path = owner_token_path(&paths);
+        let auth_folder = token_path.parent().unwrap();
+        fs::create_dir_all(auth_folder).unwrap();
+        fs::write(&token_path, format!("{VALID_TOKEN}\n")).unwrap();
+        fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::set_permissions(auth_folder, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let running = start_test_daemon(&paths).await;
+        stop_test_daemon(running).await;
+        fs::set_permissions(auth_folder, fs::Permissions::from_mode(0o700)).unwrap();
         remove_test_folder(&paths);
     }
 
