@@ -2474,18 +2474,26 @@ pub async fn apply_document_edit(context: &CommandContext<'_>, document_id: &str
 pub async fn undo_document(context: &CommandContext<'_>, document_id: &str) -> Result<CommandOutput, Vec<Diagnostic>>
 pub async fn redo_document(context: &CommandContext<'_>, document_id: &str) -> Result<CommandOutput, Vec<Diagnostic>>
 
-// events/
+// events/ (after_bus_sequence 0 is a new stream, which starts with the next event)
 pub struct BusFilter { pub event_types: Vec<String>, pub subject_ids: Vec<String> }
 pub fn publish(bus: &Bus, event: BusEvent) -> u64                          // assigns bus_sequence
 pub fn events_after(bus: &Bus, after_bus_sequence: u64, filter: &BusFilter) -> Result<Vec<BusEvent>, Diagnostic>   // RRS-C0401
 pub fn subscribe(bus: &Bus) -> tokio::sync::broadcast::Receiver<BusEvent>
 pub async fn record_daemon_event(server: &Server, record: EventRecord) -> Result<(), StoreError>   // log, index, publish, deliver handler calls
 
-// indexing/run_tail.rs
-pub async fn tail_run(server: Arc<Server>, run_id: String, node_id: String)    // one task per open run
+// indexing/run_tail.rs: the node a run's records come from. The node links (M1-47) implement it over
+// NodeService.WatchRunEvents; tests use a fake node. The channel closes when the node ends the stream; an Err item
+// means the stream broke, and the tail watches again after the ack.
+pub trait RunEventSource: Send + Sync {
+    fn node_id(&self) -> &str;
+    fn is_remote(&self) -> bool;                                                 // remote runs get a daemon mirror
+    fn watch_run_events(&self, run_id: &str, after_sequence: u64) -> mpsc::Receiver<Result<EventRecord, Diagnostic>>;
+}
+pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id: String)   // one task per open run
 // A record with sequence 0 is the node's report, never a log record (contracts 4.4, node layout 7.5): it is the stream's
 // last, is neither mirrored, indexed nor acknowledged, and marks the run's index incomplete (RRS-S2002, RRS-S2003, RRS-S0006).
-pub fn start_run_tails(server: &Arc<Server>, node_id: &str)                      // after (re)connect, for every open run
+pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<JoinHandle<()>>   // after (re)connect,
+                                                                                 // for every open run on that node
 
 // scheduler/queue.rs: the job is the generated JobSpec (contracts §2.4 rule 3); no second job struct
 pub async fn submit_job(server: &Server, spec: JobSpec, node_id: &str) -> Result<String, Vec<Diagnostic>>   // fills spec.job_id and returns it
@@ -2701,7 +2709,7 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Internal | `rastai-node` (`identity.rs`) | daemon identity and handshake signatures through the one Ed25519 wrapper | `auth_files.rs` |
 | External | axum | HTTP routing | `http/router.rs` (handlers take axum extractors only in `http/`) |
 | External | tokio | runtime, tasks, signals, broadcast | |
-| External | tonic | `NodeHubService` server, `NodeService` clients | `nodes/node_hub.rs`, `nodes/node_links.rs` |
+| External | tonic | `NodeHubService` server, `NodeService` clients; `ReceiverStream` (its `codegen` re-export) for `Subscribe`'s body | `nodes/node_hub.rs`, `nodes/node_links.rs`, `http/connect.rs` |
 | External | prost | Connect message encoding | `http/connect.rs` |
 | External | serde_json | Connect JSON, handler results | `http/connect_json.rs` |
 | External | keyring | OS keychain (§27, owner decision 1) | `secrets.rs` |
@@ -3303,7 +3311,7 @@ flowchart TD
 - **The daemon's own durable records** (`job.state_changed`, made from the node's heartbeats, `command.finished`, daemon-made `artifact.created`, `lineage.linked`, `document.changed`, `node.state_changed`, `plugin.state_changed`, `download.finished`, `transfer.finished`, `conversation.changed`, `conversation.deleted`, `run.tags_changed`, `pin.changed`, `run.deleted`, `chain.*` and the `archive.*` events) go through `record_daemon_event`: append to `<data>/daemon/events.log` with `SyncPolicy::Now`, then `ApplyDaemonEvents` (rows, handler calls and `log_cursors`), then publish, then deliver handler calls. At startup `daemon_log_replay.rs` indexes anything after the cursor before the HTTP listener opens. `conversation.changed` carries ids and flags only, never text, and incognito conversations emit none.
 - **User decisions are records,** so a rebuild keeps them: `run.tags_changed` from `run.tag`, `pin.changed` from the pin commands (without it a rebuild would forget pins and the next GC could delete pinned data), `run.deleted` from `run.delete`, and `archive.pruned` from a prune (so the stubs come back).
 - **The archiver wakes on the commit** (M11). After each committed batch the tail and `record_daemon_event` signal `server.archiver`; a signal during a pass sets one pending flag, so a burst of batches costs one extra pass, not one per batch. The archiver never runs inside the indexing transaction.
-- **Rotation:** the daemon log rolls to `events-<n>.log` at 256 MiB (flows/platform.md); each segment has its own sequence and its own `log_cursors` row.
+- **Rotation:** the daemon log rolls to `events-<n>.log` at 256 MiB (flows/platform.md); each segment has its own sequence and its own `log_cursors` row, `daemon:<n>`, numbered from 1 when the segment is started, so the name survives the roll (the live `events.log` is the rolled segments plus 1). A live file that can't be appended to (a corrupt frame, a sequence gap) is rolled the same way, so the damage stays in a closed segment.
 
 ### 13.2 Rebuild
 

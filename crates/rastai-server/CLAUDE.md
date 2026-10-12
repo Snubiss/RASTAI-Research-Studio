@@ -36,7 +36,15 @@ The daemon, and the composition root: the only crate that wires the others toget
 - **Startup order is `daemon.rs`'s.** The lock, the owner token, the store, then the listeners last, so
   `/api/health` answers only when everything behind it is ready. `start_daemon` and `wait_for_shutdown` are split so
   tests run a daemon on temporary folders and stop it with `request_shutdown`, without signals.
+- **The daemon's durable records go through `record_daemon_event`** (`events/daemon_events.rs`): appended to
+  `<data>/daemon/events.log` with an fsync, indexed, then published, under one lock so the cursor follows the log.
+  Nothing else writes that log, and nothing publishes a durable record before it is indexed.
+- **Run logs are indexed by their tail only** (`indexing/run_tail.rs`): the ack commits with the rows, a remote run's
+  mirror is written before the index, and the node is reached through `RunEventSource`, never directly.
+- **Streams end on the shutdown flag.** `Subscribe` streams and run tails select on `wait_until_stopping`, and a
+  stream lets the server go before its last envelope, so a stopping daemon can close its store.
 - **One error enum**, `ServerError` in `src/error.rs`; errors of the crates it calls keep their own code.
 - **`src/lib.rs` and `src/http/mod.rs` are lists of `pub mod` lines** (contracts §12.2). Unit tests sit at the bottom
   of the file they test; the gate table and the end-to-end requests are in `tests/gate.rs`, startup and shutdown in
-  `tests/startup.rs`, sharing `tests/common/mod.rs`. Every test removes its temporary folder at its end.
+  `tests/startup.rs`, the bus and `Subscribe` in `tests/bus_resume.rs`, run tails and the daemon log's replay in
+  `tests/run_tail.rs`, sharing `tests/common/mod.rs`. Every test removes its temporary folder at its end.

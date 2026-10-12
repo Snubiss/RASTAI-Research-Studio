@@ -11,20 +11,30 @@
 //!   `{"code": "unauthenticated", "message": ..., "details": [...]}` with the HTTP status of its code; its one detail
 //!   is the catalog `Diagnostic`, as base64 protobuf (`value`) and as JSON (`debug`), so connect-es finds it with
 //!   `findDetails` and curl shows it as text.
-//! - **Streams**: each message in a 5-byte envelope (flags, then the length as a big-endian u32), and a last
-//!   end-of-stream envelope (flag 2) whose JSON body is `{}` or `{"error": <the error envelope>}`.
+//! - **Streams** (`EventService.Subscribe`, binary only: `application/connect+proto`, layout 11.3): the request body
+//!   is one enveloped message; the answer is HTTP 200 with each message in a 5-byte envelope (flags, then the length
+//!   as a big-endian u32), and a last end-of-stream envelope (flag 2) whose JSON body is `{}` or
+//!   `{"error": <the error envelope>}`. A refusal after the gate, such as `RRS-C0401`, is that last envelope.
+//!   The body is fed from a channel through tokio-stream's `ReceiverStream`, which tonic re-exports (contracts 2.5:
+//!   tonic is direct in this crate), so no stream crate of its own is needed.
 
 // A refusal is a `Diagnostic`, the contract type every caller renders; it is larger than clippy's default for an
 // `Err`, and refusals are rare, so it is returned as it is rather than boxed.
 #![allow(clippy::result_large_err)]
 
+use std::convert::Infallible;
+
+use axum::body::Body;
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use prost::Message;
 use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse, ListCommandsRequest, ListCommandsResponse};
+use rastai_proto::events::v1::{BusEvent, SubscribeRequest};
 use serde_json::{Value, json};
+use tokio::sync::mpsc;
+use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 
 use crate::http::connect_json::{
     diagnostic_to_json, execute_request_from_json, execute_response_to_json, list_commands_request_from_json,
@@ -33,8 +43,11 @@ use crate::http::connect_json::{
 
 const PROTO_CONTENT_TYPE: &str = "application/proto";
 const JSON_CONTENT_TYPE: &str = "application/json";
-/// What `Accept-Post` lists when a request's content type is refused.
-const ACCEPTED_CONTENT_TYPES: &str = "application/proto, application/json";
+/// The one content type of a Connect server stream the daemon serves (layout 11.3).
+const STREAM_PROTO_CONTENT_TYPE: &str = "application/connect+proto";
+/// What `Accept-Post` lists when a request's content type is refused: the unary services' two, or the stream's one.
+pub(crate) const UNARY_CONTENT_TYPES: &str = "application/proto, application/json";
+pub(crate) const STREAM_CONTENT_TYPES: &str = "application/connect+proto";
 /// `application/json; charset=utf-8` is JSON: the parameters after `;` don't change the codec.
 const CONTENT_TYPE_PARAMETERS_START: char = ';';
 /// The response header that lists the content types a POST takes (RFC 7694); the http crate has no constant for it.
@@ -62,11 +75,16 @@ const FORMATS_CODE_PREFIX: &str = "RRS-E";
 const ENVELOPE_HEADER_BYTES: usize = 5;
 const MESSAGE_FLAGS: u8 = 0;
 const END_OF_STREAM_FLAGS: u8 = 0b10;
+const SUBSCRIBE_REQUEST_NAME: &str = "rastai.events.v1.SubscribeRequest";
 
 /// Standard base64 (RFC 4648 section 4). Connect writes error details without padding, and readers accept both.
 const BASE64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const BASE64_GROUP_BYTES: usize = 3;
 const BASE64_SIX_BITS: u32 = 0b11_1111;
+
+/// One piece of a stream's body: an envelope's bytes. The error type is `Infallible` because a piece, once made, is
+/// always sent; a stream that fails ends with its end-of-stream envelope instead.
+pub(crate) type StreamChunk = Result<Vec<u8>, Infallible>;
 
 /// How a unary body is encoded, from the request's Content-Type; the answer uses the same.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +108,58 @@ pub(crate) fn codec_for_content_type(content_type: &str) -> Option<ConnectCodec>
         return Some(ConnectCodec::Json);
     }
     None
+}
+
+/// True for `application/connect+proto`, compared like `codec_for_content_type` compares.
+pub(crate) fn is_stream_content_type(content_type: &str) -> bool {
+    let media_type = match content_type.split_once(CONTENT_TYPE_PARAMETERS_START) {
+        Some((media_type, _parameters)) => media_type,
+        None => content_type,
+    };
+    media_type.trim().eq_ignore_ascii_case(STREAM_PROTO_CONTENT_TYPE)
+}
+
+/// A server stream's request: exactly one uncompressed envelope holding the message. Compression isn't offered, so
+/// a compressed envelope, a cut-off one or anything after it is `RRS-C0002`.
+pub(crate) fn decode_subscribe_request(body: &[u8]) -> Result<SubscribeRequest, Diagnostic> {
+    let Some((header, message)) = body.split_first_chunk::<ENVELOPE_HEADER_BYTES>() else {
+        return Err(undecodable_stream_body());
+    };
+    let flags = header[0];
+    let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+    if flags != MESSAGE_FLAGS || message.len() != length {
+        return Err(undecodable_stream_body());
+    }
+    SubscribeRequest::decode(message).map_err(|_| undecodable_stream_body())
+}
+
+/// One bus event in its stream envelope.
+pub(crate) fn bus_event_envelope(event: &BusEvent) -> Vec<u8> {
+    stream_message_envelope(&event.encode_to_vec())
+}
+
+/// HTTP 200 with a server stream's content type, its body the pieces the channel carries, in order, until the
+/// sender is dropped.
+pub(crate) fn stream_response(chunks: mpsc::Receiver<StreamChunk>) -> Response {
+    let body = Body::from_stream(ReceiverStream::new(chunks));
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, STREAM_PROTO_CONTENT_TYPE)],
+        body,
+    )
+        .into_response()
+}
+
+/// A server stream refused before its first message: HTTP 200 and only the end-of-stream envelope with the error,
+/// as the Connect protocol answers any stream that fails.
+pub(crate) fn stream_refusal_response(refusal: &Diagnostic) -> Response {
+    let body = end_of_stream_envelope(Some(refusal));
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, STREAM_PROTO_CONTENT_TYPE)],
+        body,
+    )
+        .into_response()
 }
 
 pub(crate) fn decode_execute_request(codec: ConnectCodec, body: &[u8]) -> Result<ExecuteRequest, Diagnostic> {
@@ -142,16 +212,17 @@ pub(crate) fn connect_error_response(refusal: &Diagnostic) -> Response {
     connect_error_with_status(refusal, status)
 }
 
-/// 415 for a Content-Type the service doesn't take, with `Accept-Post` naming the two it does. The body is the
-/// Connect error envelope all the same, so a client reads one shape for every refusal.
-pub(crate) fn unsupported_content_type_response(content_type: Option<&str>) -> Response {
+/// 415 for a Content-Type the service doesn't take, with `Accept-Post` naming the ones it does (`accepted`:
+/// `UNARY_CONTENT_TYPES` or `STREAM_CONTENT_TYPES`). The body is the Connect error envelope all the same, so a client
+/// reads one shape for every refusal.
+pub(crate) fn unsupported_content_type_response(content_type: Option<&str>, accepted: &'static str) -> Response {
     let found = format!("Content-Type {}", content_type.unwrap_or(NO_CONTENT_TYPE));
-    let expected = format!("Content-Type {ACCEPTED_CONTENT_TYPES}");
+    let expected = format!("Content-Type {accepted}");
     let refusal = diagnostic(INVALID_ARGUMENT_CODE, &[("found", &found), ("expected", &expected)]);
     let mut response = connect_error_with_status(&refusal, StatusCode::UNSUPPORTED_MEDIA_TYPE);
     response.headers_mut().insert(
         HeaderName::from_static(ACCEPT_POST_HEADER),
-        HeaderValue::from_static(ACCEPTED_CONTENT_TYPES),
+        HeaderValue::from_static(accepted),
     );
     response
 }
@@ -209,6 +280,12 @@ fn connect_code(code: &str) -> (&'static str, StatusCode) {
 fn undecodable_body(message_name: &str) -> Diagnostic {
     let found = format!("a body that isn't a protobuf {message_name}");
     let expected = format!("{message_name} in protobuf binary, as {PROTO_CONTENT_TYPE}");
+    diagnostic(INVALID_ARGUMENT_CODE, &[("found", &found), ("expected", &expected)])
+}
+
+fn undecodable_stream_body() -> Diagnostic {
+    let found = format!("a body that isn't one enveloped protobuf {SUBSCRIBE_REQUEST_NAME}");
+    let expected = format!("{SUBSCRIBE_REQUEST_NAME} in one uncompressed envelope, as {STREAM_PROTO_CONTENT_TYPE}");
     diagnostic(INVALID_ARGUMENT_CODE, &[("found", &found), ("expected", &expected)])
 }
 
@@ -312,6 +389,50 @@ mod tests {
             connect_code("RRS-S3005"),
             (CONNECT_INTERNAL, StatusCode::INTERNAL_SERVER_ERROR)
         );
+    }
+
+    #[test]
+    fn a_subscribe_request_is_one_uncompressed_envelope() {
+        let request = SubscribeRequest {
+            after_bus_sequence: 7,
+            event_types: vec!["run.metrics".to_string()],
+            subject_ids: Vec::new(),
+        };
+        let body = stream_message_envelope(&request.encode_to_vec());
+        assert_eq!(decode_subscribe_request(&body).unwrap(), request);
+        // An empty message is a valid request: a new stream of every event.
+        assert_eq!(
+            decode_subscribe_request(&[0, 0, 0, 0, 0]).unwrap(),
+            SubscribeRequest::default()
+        );
+
+        let mut compressed = body.clone();
+        compressed[0] = 0b01;
+        let mut trailing = body.clone();
+        trailing.push(0);
+        let refused = [
+            Vec::new(),
+            body[..4].to_vec(),
+            body[..body.len() - 1].to_vec(),
+            compressed,
+            trailing,
+        ];
+        for bad in refused {
+            assert_eq!(
+                decode_subscribe_request(&bad).unwrap_err().code,
+                INVALID_ARGUMENT_CODE,
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_connect_proto_is_a_stream_content_type() {
+        assert!(is_stream_content_type("application/connect+proto"));
+        assert!(is_stream_content_type("Application/Connect+Proto; charset=x"));
+        for refused in ["application/proto", "application/connect+json", "application/json", ""] {
+            assert!(!is_stream_content_type(refused), "{refused}");
+        }
     }
 
     #[test]
