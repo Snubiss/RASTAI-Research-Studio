@@ -38,8 +38,6 @@
 #
 # CI installs the same versions with tools/ci/install-dev-tools (prebuilt downloads, each checked against its SHA-256);
 # it also works here, for example `tools/ci/install-dev-tools just uv node`.
-#
-# Later tasks add their recipes here: check-schema-diff (M1-58).
 
 # `deny` refuses any other cargo-deny version, so every machine reads deny.toml the same way.
 cargo_deny_version := "0.20.2"
@@ -51,9 +49,10 @@ cargo_fuzz_version := "0.13.2"
 buf_version := "1.73.0"
 protoc_gen_prost_version := "0.5.0"
 protoc_gen_tonic_version := "0.5.0"
-# The branch this one merges into. `proto-check` runs `buf breaking` against its proto files at the merge base, and
-# `codegen-check` refuses a catalog code that was there and is now gone.
-base_branch := "origin/main"
+# The branch this one merges into: RASTAI_BASE_REF when set (CI sets it to the pull request's base), else origin/main.
+# `proto-check` runs `buf breaking` against its proto files at the merge base, `codegen-check` refuses a catalog code
+# that was there and is now gone, and `check-schema-diff` diffs the command and event schemas against it.
+base_branch := env("RASTAI_BASE_REF", "origin/main")
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
 # The cpu environment's interpreter. A virtual environment keeps it in Scripts\ on Windows and bin/ elsewhere; the
@@ -73,7 +72,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
 check: fmt-check lint check-js test-rust test-python test-js wasm deny proto-check \
-    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check check-names
+    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check check-names \
+    check-schema-diff
 
 # core.hooksPath goes in this clone's own git config (never --global), so other repositories keep their hooks.
 # A relative path is read from the top of each working tree, so every worktree of this clone runs its own copy.
@@ -229,6 +229,13 @@ check-no-typescript: env-cpu
 # Every name in the code is registered in contracts.md, and every registered name is built or carries its milestone.
 check-names: env-cpu
     "{{check_python}}" tools/checks/check-names
+
+# It reads the merge base with `git show`, so it needs the base branch's history but no network. It reads the
+# checked-in schemas, which codegen-check keeps current; run `just codegen` after changing a command or event type.
+# The rules are contracts 12.6.
+# Every change to schemas/commands/ or schemas/events/ comes with a contracts.md change, and no stable one breaks.
+check-schema-diff base=base_branch: env-cpu
+    RASTAI_BASE_REF="{{base}}" "{{check_python}}" tools/checks/check-schema-diff
 
 # ---- Code generation (layout rust-control-plane.md 2.5; rust-node-gateway-proto.md 3.4) ----
 

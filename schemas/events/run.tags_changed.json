@@ -1,0 +1,24 @@
+{
+  "emitter": "daemon",
+  "event_class": "durable",
+  "event_type": "run.tags_changed",
+  "fields": [
+    {
+      "name": "run_id",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "tags",
+      "number": 2,
+      "optional": false,
+      "repeated": true,
+      "type": "string"
+    }
+  ],
+  "payload_type": "rastai.events.v1.RunTagsChanged",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

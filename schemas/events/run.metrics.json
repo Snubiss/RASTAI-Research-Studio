@@ -1,0 +1,24 @@
+{
+  "emitter": "worker",
+  "event_class": "durable",
+  "event_type": "run.metrics",
+  "fields": [
+    {
+      "name": "step",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "values",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "map<string, double>"
+    }
+  ],
+  "payload_type": "rastai.events.v1.RunMetrics",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

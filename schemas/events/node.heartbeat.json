@@ -1,0 +1,45 @@
+{
+  "emitter": "node",
+  "event_class": "ephemeral",
+  "event_type": "node.heartbeat",
+  "fields": [
+    {
+      "name": "sampled_unix_ms",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "int64"
+    },
+    {
+      "name": "gpus",
+      "number": 2,
+      "optional": false,
+      "repeated": true,
+      "type": "rastai.common.v1.GpuTelemetry"
+    },
+    {
+      "name": "ram_used_bytes",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "ram_total_bytes",
+      "number": 4,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "disk_free_bytes",
+      "number": 5,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    }
+  ],
+  "payload_type": "rastai.common.v1.NodeTelemetry",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

@@ -2,82 +2,82 @@
   "format_version": 1,
   "schemas": [
     {
-      "content_hash": "blake3:299bcd8c65d0da6313d39379f6e72263cd2c096f4d90e49a1af0631b44eb03b9",
+      "content_hash": "blake3:134a0157295a40495102c23c239a305a5b5fbabce7843e5fcec220e8616d8043",
       "file": "commands/rastai.command.command.list/1.json",
       "schema_id": "rastai.command.command.list/1"
     },
     {
-      "content_hash": "blake3:3f989f7429fd3795dc37a52ef3b99e85defb008ff22bcad5181a02a3f8029657",
+      "content_hash": "blake3:d6f27fda3ae266c5554777a70399b8dd8676144090ea04fa07f80bf7f11e44bc",
       "file": "commands/rastai.command.job.cancel/1.json",
       "schema_id": "rastai.command.job.cancel/1"
     },
     {
-      "content_hash": "blake3:50e8ba6eb4b1e3c65a7df3036d7c2b4f8a504cea3801e37d3cbd4e0991187a8a",
+      "content_hash": "blake3:67a9c128882120575c3a826082bca721262cef524f913dc9ae494b0537c585f4",
       "file": "commands/rastai.command.job.get/1.json",
       "schema_id": "rastai.command.job.get/1"
     },
     {
-      "content_hash": "blake3:72874b00cba6c864d504f925cca71b05a8ea817fd0a85180a805c72cf1dc4327",
+      "content_hash": "blake3:00ed0716db2b764055368d80224bf90cde132a7f63578bcb41b880a9992afcde",
       "file": "commands/rastai.command.job.list/1.json",
       "schema_id": "rastai.command.job.list/1"
     },
     {
-      "content_hash": "blake3:9a6f306a0f80a283552d260f3a25dd7e6dad3c601d36adb5b3bdaef3393509fb",
+      "content_hash": "blake3:2f0d91d38051785b223d304c9951f288fb0938227e666ba19072ed5d4b39667d",
       "file": "commands/rastai.command.node.list/1.json",
       "schema_id": "rastai.command.node.list/1"
     },
     {
-      "content_hash": "blake3:6b74f04b9accc2687f2c42ecad03395ff4bb0c9f4cc2f99987ccc09d54969835",
+      "content_hash": "blake3:4603b520dac3d1977c53e6986a070fb55f6b59c4ffed93d431ec6f48e999563b",
       "file": "commands/rastai.command.node.status/1.json",
       "schema_id": "rastai.command.node.status/1"
     },
     {
-      "content_hash": "blake3:89f74bc8c475ea65237255f4a69e98adc2097abf3bdb433695dbdd9acf69bcf8",
+      "content_hash": "blake3:aa697108999d875b6756a933ebbf90e6671ce1e16a15cf5e5d8d7292d5d02365",
       "file": "commands/rastai.command.plugin.list/1.json",
       "schema_id": "rastai.command.plugin.list/1"
     },
     {
-      "content_hash": "blake3:99dabeb326b345f82bd44033b10d748929c75f172d6b1ef78a26a83111d456d4",
+      "content_hash": "blake3:7083cf3348f8d33c697c7d3dfd75c337195f173777db061411d0c0cb8d98a61e",
       "file": "commands/rastai.command.settings.get/1.json",
       "schema_id": "rastai.command.settings.get/1"
     },
     {
-      "content_hash": "blake3:980bab529761dfade8920ed897a6361787822d065873b72956298f6f2ef1dafe",
+      "content_hash": "blake3:f36849cdda8782492edaf685827de3e6d09ac32ae9429e7df78434f0b14b214e",
       "file": "commands/rastai.command.settings.set/1.json",
       "schema_id": "rastai.command.settings.set/1"
     },
     {
-      "content_hash": "blake3:8681663514a5d8c1be64ea499c8ec25a2faddf913ad7a687cc462819d3908bb4",
+      "content_hash": "blake3:2d295db8d5cceed1dafe3b1be1fffafd8265c9f73b94de6f855d72d3f1ca881e",
       "file": "commands/rastai.command.system.shutdown/1.json",
       "schema_id": "rastai.command.system.shutdown/1"
     },
     {
-      "content_hash": "blake3:09e42bff035fc2318a8e8b07b882a51f54a73026bd4e0cef337e86267cba7ad0",
+      "content_hash": "blake3:be2888c815b5fe5e5b6517707b443cb59e97435a6c18e09ebf3a90e2c16e2406",
       "file": "commands/rastai.command.system.status/1.json",
       "schema_id": "rastai.command.system.status/1"
     },
     {
-      "content_hash": "blake3:25b0d57e916740338da8f6add1d1eb3171b668a98ef20e3a5259af36de651b20",
+      "content_hash": "blake3:e1b8a91caba4778bf163fb4d7af068c6f697907d08ee1c46d0eceb62ea969757",
       "file": "commands/rastai.command.token.create/1.json",
       "schema_id": "rastai.command.token.create/1"
     },
     {
-      "content_hash": "blake3:93eae39dfe455531b27393ac10aeda9d1ec6fbe6381c6ce08e3a45cc8925c8a6",
+      "content_hash": "blake3:e4e90f13c5e93774796478661384e4ed619b27e3295552dc7827b603fe4ac180",
       "file": "commands/rastai.command.token.list/1.json",
       "schema_id": "rastai.command.token.list/1"
     },
     {
-      "content_hash": "blake3:b1015eddc261011c02cd2de3045788e881e12cfdd028a08a11e1779be887bfa5",
+      "content_hash": "blake3:8b30d529864fa11c8d46e22284a508f8045b72ce38e6470d05e41bb4502c3517",
       "file": "commands/rastai.command.token.login_code.create/1.json",
       "schema_id": "rastai.command.token.login_code.create/1"
     },
     {
-      "content_hash": "blake3:4e637da0b5839adefa9d49484d8c88034485e82b4d1527b940cc19d08f25bceb",
+      "content_hash": "blake3:2debf7a517352f18e41c92e5da3c88f68ac69ee71ca100d8a8b6b4c2a47f7a17",
       "file": "commands/rastai.command.token.revoke/1.json",
       "schema_id": "rastai.command.token.revoke/1"
     },
     {
-      "content_hash": "blake3:680283652d6da77b66dede4f2f9be609ac1a6453aaff153e3a4dd01aed035236",
+      "content_hash": "blake3:bc06c6c164cb15b52b026e6db68eeff54cfb6c61f6bb25695fa0c4adb54a5da6",
       "file": "commands/rastai.command.train.start/1.json",
       "schema_id": "rastai.command.train.start/1"
     },

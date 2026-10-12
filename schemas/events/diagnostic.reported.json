@@ -1,0 +1,24 @@
+{
+  "emitter": "any",
+  "event_class": "durable",
+  "event_type": "diagnostic.reported",
+  "fields": [
+    {
+      "name": "diagnostic",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.Diagnostic"
+    },
+    {
+      "name": "subject_id",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    }
+  ],
+  "payload_type": "rastai.events.v1.DiagnosticReported",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

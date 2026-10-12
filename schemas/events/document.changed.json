@@ -1,0 +1,31 @@
+{
+  "emitter": "daemon",
+  "event_class": "durable",
+  "event_type": "document.changed",
+  "fields": [
+    {
+      "name": "document_id",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "content_hash",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "undo_position",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    }
+  ],
+  "payload_type": "rastai.events.v1.DocumentChanged",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

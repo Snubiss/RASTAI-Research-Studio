@@ -1,0 +1,45 @@
+{
+  "emitter": "worker",
+  "event_class": "durable",
+  "event_type": "checkpoint.saved",
+  "fields": [
+    {
+      "name": "checkpoint_id",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "step",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "folder",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "file_hashes",
+      "number": 4,
+      "optional": false,
+      "repeated": false,
+      "type": "map<string, string>"
+    },
+    {
+      "name": "is_best",
+      "number": 5,
+      "optional": false,
+      "repeated": false,
+      "type": "bool"
+    }
+  ],
+  "payload_type": "rastai.events.v1.CheckpointSaved",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}
