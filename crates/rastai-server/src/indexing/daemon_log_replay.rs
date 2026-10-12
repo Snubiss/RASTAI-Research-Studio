@@ -1,8 +1,8 @@
 //! At startup, before the listener opens: index every daemon-log record after its segment's cursor
 //! (`log_cursors.acked_sequence`, layout 13.1, flows/platform.md 6.4). A crash between a record's append and its
-//! index commit leaves it only in the log; this puts its rows back, so the first request already sees them. It runs
-//! before the journal rows a crash left unfinished are closed (`RRS-C0005`), so a command whose `command.finished`
-//! reached the log keeps its real outcome.
+//! index commit leaves it only in the log; this puts its rows back, so the first request already sees them. A
+//! replayed `command.finished` writes its outcome over the journal row, so a command whose record reached the log
+//! keeps its real outcome, before or after the unfinished rows are closed with `RRS-C0005`.
 //!
 //! Records are read with the store's reader and indexed in batches of `INDEX_BATCH_RECORDS`, each batch with its
 //! cursor in one transaction. Reading stops at a torn tail (the writer died mid-append; the next append cuts it off)

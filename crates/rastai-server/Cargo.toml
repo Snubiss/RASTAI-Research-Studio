@@ -10,8 +10,7 @@ publish.workspace = true
 # The composition root (layout: rust-control-plane.md section 8). M1-26 lands the startup sequence, the listeners,
 # the request gate, login codes and origin-bound sessions, /api/health and the Connect JSON of the CommandService
 # messages; M1-27 the Connect envelopes and the Execute path, with prost; M1-30 `/mcp`, with rastai-mcp; M1-28 the bus,
-# Subscribe and the run tails, with tonic's codegen re-exports. The node links (M1-47) bring tonic's channel, and
-# secrets (M2) keyring.
+# Subscribe and the run tails, with http-body. The node links (M1-47) bring tonic, and secrets (M2) keyring.
 [dependencies]
 rastai-diag = { path = "../rastai-diag" }
 # Paths, settings resolution, principals, versions, random bytes and the clock.
@@ -31,9 +30,9 @@ rastai-mcp = { path = "../rastai-mcp" }
 rastai-store = { path = "../rastai-store" }
 # daemon.sock: bind, accept with the peer's user, and the same-user check.
 rastai-transport = { path = "../rastai-transport" }
-# tokio-stream's ReceiverStream, which tonic re-exports, turns Subscribe's channel into the response body
-# (http/connect.rs). Only `codegen`: the node links (M1-47) add the channel features.
-tonic = { workspace = true, features = ["codegen"] }
+# The frame type of Subscribe's streamed body, which axum's body trait returns but doesn't re-export. Only
+# http/connect.rs uses it (contracts 2.5).
+http-body = { workspace = true }
 # HTTP/1.1 serving on loopback TCP and daemon.sock. Only files under src/http/ use it (contracts 2.5).
 axum = { workspace = true, features = ["tokio", "http1"] }
 # "signal" for SIGTERM and SIGINT (shutdown.rs), "sync" for the shutdown channel, "rt" for the serve tasks.

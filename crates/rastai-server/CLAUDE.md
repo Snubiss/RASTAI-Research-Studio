@@ -40,7 +40,8 @@ The daemon, and the composition root: the only crate that wires the others toget
   `<data>/daemon/events.log` with an fsync, indexed, then published, under one lock so the cursor follows the log.
   Nothing else writes that log, and nothing publishes a durable record before it is indexed.
 - **Run logs are indexed by their tail only** (`indexing/run_tail.rs`): the ack commits with the rows, a remote run's
-  mirror is written before the index, and the node is reached through `RunEventSource`, never directly.
+  mirror is written before the index, and the node is reached through `RunEventSource`, never directly. One tail per
+  run (`Server.tailed_run_ids`): the tail re-watches a broken stream itself, and `start_run_tails` skips live tails.
 - **Streams end on the shutdown flag.** `Subscribe` streams and run tails select on `wait_until_stopping`, and a
   stream lets the server go before its last envelope, so a stopping daemon can close its store.
 - **One error enum**, `ServerError` in `src/error.rs`; errors of the crates it calls keep their own code.

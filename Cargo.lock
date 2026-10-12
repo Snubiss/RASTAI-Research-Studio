@@ -778,6 +778,7 @@ name = "rastai-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "http-body",
  "prost",
  "rastai-core",
  "rastai-diag",
@@ -789,7 +790,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "tonic",
 ]
 
 [[package]]

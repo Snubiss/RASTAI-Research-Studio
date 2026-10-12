@@ -11,6 +11,7 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_proto::commands::v1::CommandDescriptor;
 use rastai_store::error::StoreError;
 
+use crate::error::store_error_diagnostic;
 use crate::server_state::Server;
 
 /// One running command.
@@ -37,10 +38,9 @@ pub(crate) fn sync_result(result_json: String) -> CommandOutput {
     }
 }
 
-/// A store error as the command's failure. The store's own code says what failed; its words go in the reason.
+/// A store error as the command's failure: the store's own code, its message filled from the error's fields.
 pub(crate) fn store_failure(error: &StoreError) -> Vec<Diagnostic> {
-    let reason = format!("{error:?}");
-    vec![diagnostic(error.code(), &[("reason", &reason), ("path", "")])]
+    vec![store_error_diagnostic(error)]
 }
 
 /// A rastai-core error (no random source for an id or a secret) as the command's failure.

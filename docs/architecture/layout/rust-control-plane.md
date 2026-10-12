@@ -2483,17 +2483,19 @@ pub async fn record_daemon_event(server: &Server, record: EventRecord) -> Result
 
 // indexing/run_tail.rs: the node a run's records come from. The node links (M1-47) implement it over
 // NodeService.WatchRunEvents; tests use a fake node. The channel closes when the node ends the stream; an Err item
-// means the stream broke, and the tail watches again after the ack.
+// means the stream broke, and the tail itself watches again after the ack (1 s doubling to 30 s): reconnecting to the
+// node is the node link's job, re-watching a run is the tail's.
 pub trait RunEventSource: Send + Sync {
     fn node_id(&self) -> &str;
     fn is_remote(&self) -> bool;                                                 // remote runs get a daemon mirror
     fn watch_run_events(&self, run_id: &str, after_sequence: u64) -> mpsc::Receiver<Result<EventRecord, Diagnostic>>;
 }
-pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id: String)   // one task per open run
+pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id: String)   // one task per open run;
+                                                                                 // returns at once if the run has one
 // A record with sequence 0 is the node's report, never a log record (contracts 4.4, node layout 7.5): it is the stream's
 // last, is neither mirrored, indexed nor acknowledged, and marks the run's index incomplete (RRS-S2002, RRS-S2003, RRS-S0006).
 pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<JoinHandle<()>>   // after (re)connect,
-                                                                                 // for every open run on that node
+                                    // for every open run on that node without a live tail (Server.tailed_run_ids)
 
 // scheduler/queue.rs: the job is the generated JobSpec (contracts §2.4 rule 3); no second job struct
 pub async fn submit_job(server: &Server, spec: JobSpec, node_id: &str) -> Result<String, Vec<Diagnostic>>   // fills spec.job_id and returns it
@@ -2709,7 +2711,8 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Internal | `rastai-node` (`identity.rs`) | daemon identity and handshake signatures through the one Ed25519 wrapper | `auth_files.rs` |
 | External | axum | HTTP routing | `http/router.rs` (handlers take axum extractors only in `http/`) |
 | External | tokio | runtime, tasks, signals, broadcast | |
-| External | tonic | `NodeHubService` server, `NodeService` clients; `ReceiverStream` (its `codegen` re-export) for `Subscribe`'s body | `nodes/node_hub.rs`, `nodes/node_links.rs`, `http/connect.rs` |
+| External | tonic | `NodeHubService` server, `NodeService` clients | `nodes/node_hub.rs`, `nodes/node_links.rs` |
+| External | http-body | the frame type of `Subscribe`'s streamed body (`ChannelBody`, axum's `HttpBody`) | `http/connect.rs` |
 | External | prost | Connect message encoding | `http/connect.rs` |
 | External | serde_json | Connect JSON, handler results | `http/connect_json.rs` |
 | External | keyring | OS keychain (§27, owner decision 1) | `secrets.rs` |
@@ -3296,14 +3299,15 @@ flowchart TD
   DF --> G
   W -->|"committed"| P["publish each record as a BusEvent"]
   P --> Q["deliver_handler_calls for the batch, see 12.5"]
-  Q --> T{"Terminal run state seen?"}
+  Q --> T{"Node ended the stream? (contracts 4.4)"}
   T -->|"no"| D
-  T -->|"yes"| X["stop the tail"]
-  C -->|"stream broken"| L["node link reconnects with backoff"]
+  T -->|"yes"| X["stop the tail, freeing the run in tailed_run_ids"]
+  C -->|"stream broken"| L["the tail waits 1 s, doubling to 30 s"]
   L --> B
 ```
 
 - **The ack is the cursor.** `runs.acked_sequence` is committed in the same transaction as the rows it covers, so a crash anywhere re-sends records that the upserts absorb (6.4 lists the keys).
+- **One tail per run.** A tail holds its run in `Server.tailed_run_ids` from its start to its end. The tail re-watches a broken stream itself, and `start_run_tails`, which the node link calls after every connect and reconnect, skips a run whose tail still runs, so a run never has two tails indexing it, publishing it twice or writing its mirror from two writers.
 - **Vault rows before the ack.** `gateway.request_logged` records go to `vault.db` `gateway_log` (with `run_id`, `finish_reason`, `stop_kind`), which the index writer can't reach. The tail writes them with `vault_writes_for_records` and waits for that commit before `ApplyRunEvents` commits the ack. A crash between the two re-sends the batch, and the upsert by `request_id` absorbs it.
 - **Handler calls with the ack.** The batch's `HandlerCall` rows commit in the same `ApplyRunEvents` transaction, then go out after the commit (12.5), so an indexed `checkpoint.saved` always reaches the Evaluation plugin's handler, even across a crash.
 - **Run logs are untrusted.** `ApplyRunEvents` refuses a record the run's log may not carry with `RRS-S2004` (6.4, contracts 7.1) and commits nothing of its batch. The tail then sends the records before it again, stops tailing that log and reports `RRS-S2004`; after a restart it stops at the same record. Only that run's indexing stops.

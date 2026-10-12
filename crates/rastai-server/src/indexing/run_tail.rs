@@ -15,12 +15,17 @@
 //!   records before it are indexed, the refusal is published and the tail stops there. After a restart it stops at
 //!   the same record again. Only that run's indexing stops.
 //! - **A full disk** (`RRS-S3002`) is retried every `INDEX_DISK_FULL_RETRY_SECONDS`; the records wait in the logs.
-//! - **A broken stream** reconnects after `NODE_RECONNECT_BACKOFF_SECONDS`, 1 doubling to 30. The tail ends when the
-//!   node ends the stream (the run's writer is gone and its last whole frame was sent) or the daemon stops.
+//! - **A broken stream** is watched again after `NODE_RECONNECT_BACKOFF_SECONDS`, 1 doubling to 30: the tail owns
+//!   its own reconnection. The tail ends when the node ends the stream (contracts 4.4: the run's writer is gone and
+//!   its last whole frame was sent) or the daemon stops.
+//! - **One tail per run.** A tail holds its run's place in `Server::tailed_run_ids` until it ends, so
+//!   `start_run_tails`, called again after the node link reconnects, skips the runs whose tail is still watching:
+//!   two tails of one run would index and publish its records twice and write one mirror from two writers.
 //!
 //! The node is a `RunEventSource`. The daemon's node links (M1-47) are one; the tests use a fake node.
 
-use std::sync::Arc;
+use std::collections::HashSet;
+use std::sync::{Arc, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use rastai_core::paths::{run_dir, run_events_log_path};
@@ -46,6 +51,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, timeout_at};
 
+use crate::error::store_error_diagnostic;
 use crate::events::bus::{bus_event_from_record, publish};
 use crate::events::daemon_events::DAEMON_SOURCE;
 use crate::server_state::Server;
@@ -126,7 +132,21 @@ struct RunTail<'a> {
     shutdown: watch::Receiver<bool>,
 }
 
-/// Starts a tail for every open run on `node` (after a connect or a reconnect) and returns their tasks.
+/// A run's place in `Server::tailed_run_ids` while its tail runs. Dropping it, however the tail ends (a panic too),
+/// frees the run for a new tail.
+struct TailClaim {
+    server: Arc<Server>,
+    run_id: String,
+}
+
+impl Drop for TailClaim {
+    fn drop(&mut self) {
+        tailed_run_ids(&self.server).remove(&self.run_id);
+    }
+}
+
+/// Starts a tail for every open run on `node` that has none yet (after a connect or a reconnect) and returns the
+/// new tasks.
 pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<JoinHandle<()>> {
     let run_ids = match open_run_ids(server, node.node_id()) {
         Ok(run_ids) => run_ids,
@@ -140,17 +160,46 @@ pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> 
     };
     let mut tasks = Vec::new();
     for run_id in run_ids {
-        tasks.push(tokio::spawn(tail_run(server.clone(), node.clone(), run_id)));
+        // Claimed before the task starts, so a second call right after this one already sees the run as tailed.
+        if let Some(claim) = claim_run(server, &run_id) {
+            tasks.push(tokio::spawn(tail_claimed_run(claim, node.clone())));
+        }
     }
     tasks
 }
 
 /// Tails one run until the node ends its stream, its log is found damaged, or the daemon stops. A broken stream is
-/// watched again after a pause that grows while nothing gets indexed.
+/// watched again after a pause that grows while nothing gets indexed. Returns at once if the run already has a tail.
 pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id: String) {
+    let Some(claim) = claim_run(&server, &run_id) else {
+        return;
+    };
+    tail_claimed_run(claim, node).await;
+}
+
+/// The run's claim, or None when another tail holds it.
+fn claim_run(server: &Arc<Server>, run_id: &str) -> Option<TailClaim> {
+    if !tailed_run_ids(server).insert(run_id.to_string()) {
+        return None;
+    }
+    Some(TailClaim {
+        server: server.clone(),
+        run_id: run_id.to_string(),
+    })
+}
+
+fn tailed_run_ids(server: &Server) -> MutexGuard<'_, HashSet<String>> {
+    // A panic while the lock was held leaves a plain set that is still whole, so the poison flag is ignored.
+    server.tailed_run_ids.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The tail's loop: watches, and after a broken stream waits and watches again. The claim is released on return.
+async fn tail_claimed_run(claim: TailClaim, node: Arc<dyn RunEventSource>) {
+    let server = &claim.server;
+    let run_id = &claim.run_id;
     let mut backoff_seconds = NODE_RECONNECT_FIRST_BACKOFF_SECONDS;
     loop {
-        match tail_once(&server, node.as_ref(), &run_id).await {
+        match tail_once(server, node.as_ref(), run_id).await {
             TailEnd::Finished | TailEnd::Stopped => return,
             TailEnd::Broken { indexed_any: true } => backoff_seconds = NODE_RECONNECT_FIRST_BACKOFF_SECONDS,
             TailEnd::Broken { indexed_any: false } => {}
@@ -325,8 +374,9 @@ fn last_sequence_of(records: &[EventRecord], otherwise: u64) -> u64 {
     }
 }
 
-/// Appends the batch's frames to the mirror as the node's log holds them, then one fsync: the mirror is ahead of
-/// the index, never behind it.
+/// Appends the batch's records to the mirror, then one fsync: the mirror is ahead of the index, never behind it. The
+/// frames are encoded again from the decoded records, so they hold the same records as the node's log but not
+/// always the same bytes: prost drops a field this build doesn't know.
 fn append_to_mirror(mirror: &mut EventLogWriter, records: &[EventRecord]) -> Result<(), StoreError> {
     for record in records {
         let Some(frame) = encode_frame(record) else {
@@ -499,8 +549,7 @@ fn create_mirror(tail: &RunTail<'_>) -> Result<EventLogWriter, TailEnd> {
 /// A mirror that can't be read or written: published and logged, and the tail stops, since a mirror out of step
 /// would hide records from the next restart.
 fn mirror_unusable(tail: &RunTail<'_>, error: &StoreError) -> TailEnd {
-    let reason = format!("{error:?}");
-    report_problem(tail, &diagnostic(error.code(), &[("reason", &reason), ("path", "")]));
+    report_problem(tail, &store_error_diagnostic(error));
     TailEnd::Stopped
 }
 

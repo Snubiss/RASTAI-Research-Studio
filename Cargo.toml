@@ -58,6 +58,10 @@ prost = "=0.14.4"
 # turn on only the tonic features they use: rastai-proto needs `codegen` alone (buf.gen.yaml: no_transport).
 tonic = { version = "=0.14.6", default-features = false }
 tonic-prost = "=0.14.6"
+# The frame type of a streamed HTTP response body, which axum's own body trait (axum::body::HttpBody, this crate's
+# Body) returns but doesn't re-export: rastai-server's http/connect.rs feeds EventService.Subscribe through it (M1-28).
+# The version axum, hyper and tonic already brought into Cargo.lock, so the lock gains no second copy.
+http-body = "=1.1.0"
 # HTTP/1.1 for rastai-transport's http_client.rs (M1-41). tonic's channel and server pull in the same two crates, so
 # the lock holds one copy of each. hyper is 1.11.1, not the newest 1.12.0, which was five days old when this was
 # pinned.
@@ -133,6 +137,9 @@ tonic                = { category = "compatibility", reason = "gRPC services and
 # The prost codec the generated tonic code calls (tonic_prost::ProstCodec); part of the tonic row of spec §27.
 tonic-prost          = { category = "compatibility", reason = "the prost codec of the generated gRPC code", users = [
   "rastai-proto",
+] }
+http-body            = { category = "foundation", reason = "the frame of a streamed response body (axum's body trait)", users = [
+  "rastai-server",
 ] }
 hyper                = { category = "foundation", reason = "HTTP client and the sandbox engine socket", users = [
   "rastai-transport",
