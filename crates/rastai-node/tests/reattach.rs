@@ -8,9 +8,11 @@
 //!   exactly once after the daemon's ack.
 //! - **A `job.json` that names a process that isn't the job's** (other start ticks, an earlier boot, a pid that
 //!   doesn't lead its group) ends `failed` at once, and that process is never signalled.
-//! - **A gone job's end comes from its log**, except after exit 5: a `stderr.log` that ends with the `RRS-J3006`
-//!   refusal takes nothing from the log, whose frames are the running copy's.
-//! - **A live job whose worker never registers again** is killed with its group and fails with `RRS-J3003`.
+//! - **A gone job's end comes from its log**, except after exit 5: a job that never opened the log, whose
+//!   `stderr.log` ends with the `RRS-J3006` refusal, fails with it. `stderr.log` is the run's, so the same line left
+//!   by an earlier job of the run doesn't change the end of a job that wrote its own records.
+//! - **A live job whose worker never registers again** is killed with its group and fails with `RRS-J3003`; a
+//!   `Register` with a wrong token is refused with `RRS-J2002` and the job stays `lost`.
 //! - **Heartbeats**: one at once on a handshake and on every job state change, besides the regular beat.
 //!
 //! Most tests use shell stand-ins for the worker. The one where the worker registers again after the restart and
@@ -33,12 +35,16 @@ mod on_linux {
     use std::time::{Duration, Instant};
 
     use rastai_core::ids::{IdPrefix, new_id};
-    use rastai_core::paths::{DataPaths, node_hub_socket_path, node_socket_path, run_dir, run_events_log_path};
+    use rastai_core::paths::{
+        DataPaths, job_socket_path, node_hub_socket_path, node_socket_path, run_dir, run_events_log_path,
+        worker_host_socket_path,
+    };
     use rastai_node::jobs::job_file::{JobFile, job_file_path, read_job_file, write_job_file};
     use rastai_node::jobs::signals::{ProcessIdentity, read_process_identity};
     use rastai_node::jobs::supervisor::{JobEnvironment, JobOptions};
     use rastai_node::node::{NodeOptions, run_node};
-    use rastai_proto::common::v1::{EventClass, JobState, RunState};
+    use rastai_node::worker_host_service::request_with_job_token;
+    use rastai_proto::common::v1::{Diagnostic as ProtoDiagnostic, EventClass, JobState, RunState};
     use rastai_proto::events::v1::event_payload::Payload;
     use rastai_proto::events::v1::run_state_changed::State;
     use rastai_proto::events::v1::{EventPayload, EventRecord, RunMetrics, RunStateChanged};
@@ -47,6 +53,8 @@ mod on_linux {
         HeartbeatRequest, JobInfo, JobKind, JobSignal, JobSpec, ListJobsRequest, SignalJobRequest,
         WatchRunEventsRequest,
     };
+    use rastai_proto::worker::v1::RegisterRequest;
+    use rastai_proto::worker::v1::worker_host_service_client::WorkerHostServiceClient;
     use rastai_store::event_log::reader::{FrameRead, open_event_log, read_next_frame};
     use rastai_store::event_log::writer::{EventLogWriter, SyncPolicy, append_event, create_event_log};
     use rastai_transport::grpc_channel::connect_grpc_channel;
@@ -90,6 +98,7 @@ mod on_linux {
     const SCRIPT_FILE: &str = "script.json";
     /// The line the worker prints to stderr.log before exit 5 (python diagnostics.py).
     const EVENT_LOG_LOCKED_LINE: &str = "RRS-J3006: Another process is writing the event log, so this job stopped.";
+    const STDERR_LOG: &str = "stderr.log";
 
     /// Notes it is ready, then runs until the test creates `finish` in its run folder, and exits 0. `$5` is the job
     /// file (`-m rastai_worker run --job-file <path>`). It never registers, so its job stays `starting`, or `lost`
@@ -233,27 +242,28 @@ exec sleep 600
         read_process_identity(pid).expect("the process runs")
     }
 
-    /// Still running and still the same process: never signalled.
-    fn still_runs_as(identity: &ProcessIdentity) -> bool {
-        let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", identity.pid)) else {
+    /// Listed in /proc and not a zombie (field 3 of `/proc/<pid>/stat` is `Z` for one that exited and that nobody
+    /// has reaped yet).
+    fn is_running(pid: u32) -> bool {
+        let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
             return false;
         };
         let is_zombie = stat
             .rsplit_once(')')
             .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z'));
-        !is_zombie && read_process_identity(identity.pid).as_ref() == Some(identity)
+        !is_zombie
+    }
+
+    /// Still running and still the same process: never signalled.
+    fn still_runs_as(identity: &ProcessIdentity) -> bool {
+        is_running(identity.pid) && read_process_identity(identity.pid).as_ref() == Some(identity)
     }
 
     /// Gone, or a zombie nobody has reaped yet: either way it no longer runs.
     async fn wait_until_stopped(pid: u32) {
         let started = Instant::now();
         loop {
-            let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
-            let stopped = stat.is_empty()
-                || stat
-                    .rsplit_once(')')
-                    .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z'));
-            if stopped {
+            if !is_running(pid) {
                 return;
             }
             assert!(started.elapsed() < WAIT_LIMIT, "process {pid} still runs");
@@ -354,6 +364,37 @@ exec sleep 600
             .final_state
     }
 
+    /// The terminal `job.json` is the one the node read back, with only its state and final state changed: the pid,
+    /// boot id, start ticks and hardware the job started on stay.
+    fn assert_terminal_file_keeps(paths: &DataPaths, written: &JobFile, final_state: &str) {
+        let on_disk = read_job_file(&job_file_path(&run_dir(paths, &written.run_id))).unwrap();
+        let expected = JobFile {
+            state: final_state.to_string(),
+            final_state: final_state.to_string(),
+            ..written.clone()
+        };
+        assert_eq!(on_disk, expected);
+    }
+
+    /// The run's `stderr.log` as an earlier job left it: refused the run's log (exit 5).
+    fn write_earlier_refusal(paths: &DataPaths, run_id: &str) {
+        let run_folder = run_dir(paths, run_id);
+        fs::create_dir_all(&run_folder).unwrap();
+        fs::write(run_folder.join(STDERR_LOG), format!("{EVENT_LOG_LOCKED_LINE}\n")).unwrap();
+    }
+
+    /// Calls `Register` on worker-host.sock for `job_id` with `job_token`, and returns the node's refusal, if any.
+    async fn register_with_token(paths: &DataPaths, job_id: &str, job_token: &str) -> Option<ProtoDiagnostic> {
+        let channel = connect_grpc_channel(&worker_host_socket_path(paths)).await.unwrap();
+        let mut client = WorkerHostServiceClient::new(channel);
+        let message = RegisterRequest {
+            job_id: job_id.to_string(),
+            job_socket_path: job_socket_path(paths, job_id).display().to_string(),
+        };
+        let request = request_with_job_token(message, job_token).unwrap();
+        client.register(request).await.unwrap().into_inner().diagnostic
+    }
+
     /// A new events.log for the run, as a worker creates it.
     fn new_run_log(paths: &DataPaths, run_id: &str) -> EventLogWriter {
         fs::create_dir_all(run_dir(paths, run_id)).unwrap();
@@ -444,7 +485,8 @@ exec sleep 600
     // Platform flow 6.5 row 14 with a worker that never registers: the node is SIGKILLed while the job runs, the
     // worker keeps running and writing its log, and the restarted node takes the job back as `lost` with its pid.
     // When the worker then finishes, the node sees its process gone and takes the job's end from its log, and the
-    // daemon's watch gets every record exactly once.
+    // daemon's watch gets every record exactly once. An earlier job of the run was refused the log, and its
+    // RRS-J3006 line is still the last of the run's stderr.log: it isn't this job's, which wrote its own records.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_node_killed_mid_run_takes_the_running_job_back_and_its_end_from_the_log() {
         let folder = new_test_folder(TEST_FOLDER_PREFIX);
@@ -452,6 +494,7 @@ exec sleep 600
         install_worker(&folder.path, WAITING_WORKER);
         let mut node = start_node_process(&folder.path).await;
         let run_id = new_run_id();
+        write_earlier_refusal(&paths, &run_id);
         let spec = job_spec(&run_id);
         let job_id = spec.job_id.clone();
         let started = node.client.start_job(spec).await.unwrap().into_inner();
@@ -561,9 +604,10 @@ exec sleep 600
     // ---- A gone job's end ----
 
     // The node was down when these jobs' processes ended, so it saw no exit code: each job's end is its last run
-    // state in the log, or RRS-J3002 when it left none. The exit-5 edge (#199): a job whose stderr.log ends with the
-    // RRS-J3006 refusal wrote nothing to the log, so even a completed record under its own id (a copy started by hand
-    // from the same job.json) isn't its outcome.
+    // state in the log, or RRS-J3002 when it left none. The exit-5 edge (#199): a job that wrote nothing to the log,
+    // whose stderr.log ends with the RRS-J3006 refusal, fails with RRS-J3006 and never takes the running copy's
+    // completed run as its own. stderr.log is the run's: a job that completed after an earlier job's refusal still
+    // succeeds. Each terminal job.json keeps what the node read back.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_gone_jobs_end_comes_from_its_log_but_never_after_exit_five() {
         let folder = new_test_folder(TEST_FOLDER_PREFIX);
@@ -583,33 +627,47 @@ exec sleep 600
         let mut writer = new_run_log(&paths, &silent_run);
         append_metrics(&mut writer, &silent_run, &silent.job_id, 1, 3);
         fs::write(
-            run_dir(&paths, &silent_run).join("stderr.log"),
+            run_dir(&paths, &silent_run).join(STDERR_LOG),
             "Traceback (most recent call last):\n",
         )
         .unwrap();
 
+        // Refused the log while the running copy, a job the node didn't know, wrote it and completed.
         let refused_run = new_run_id();
         let refused = write_live_job_file(&paths, &refused_run, &gone);
+        let running_copy = new_id(IdPrefix::Job).unwrap();
         let mut writer = new_run_log(&paths, &refused_run);
-        append_metrics(&mut writer, &refused_run, &refused.job_id, 1, 3);
-        append_run_state(&mut writer, &refused_run, &refused.job_id, RunState::Completed);
+        append_metrics(&mut writer, &refused_run, &running_copy, 1, 3);
+        append_run_state(&mut writer, &refused_run, &running_copy, RunState::Completed);
         let stderr = format!("starting\n{EVENT_LOG_LOCKED_LINE}\n");
-        fs::write(run_dir(&paths, &refused_run).join("stderr.log"), stderr).unwrap();
+        fs::write(run_dir(&paths, &refused_run).join(STDERR_LOG), stderr).unwrap();
+
+        // An earlier job of the run was refused the log; this one then ran, printed nothing and completed.
+        let rerun_run = new_run_id();
+        write_earlier_refusal(&paths, &rerun_run);
+        let rerun = write_live_job_file(&paths, &rerun_run, &gone);
+        let mut writer = new_run_log(&paths, &rerun_run);
+        append_metrics(&mut writer, &rerun_run, &rerun.job_id, 1, 3);
+        append_run_state(&mut writer, &rerun_run, &rerun.job_id, RunState::Completed);
 
         let (node, mut client) = start_node(node_options_in(&folder.path, LONG_TIMEOUT)).await;
         let succeeded = wait_for_state(&mut client, &completed.job_id, JobState::Succeeded).await;
         assert_eq!(succeeded.last_error, None);
-        assert_eq!(final_state_on_disk(&paths, &completed_run), "succeeded");
+        assert_terminal_file_keeps(&paths, &completed, "succeeded");
 
         let failed = wait_for_state(&mut client, &silent.job_id, JobState::Failed).await;
         assert_eq!(error_code(&failed), "RRS-J3002");
         let shown = failed.last_error.unwrap();
         assert!(shown.message.contains(&silent.job_id), "{}", shown.message);
-        assert!(shown.path.ends_with("stderr.log"), "{}", shown.path);
+        assert!(shown.path.ends_with(STDERR_LOG), "{}", shown.path);
 
         let locked = wait_for_state(&mut client, &refused.job_id, JobState::Failed).await;
         assert_eq!(error_code(&locked), "RRS-J3006", "{locked:?}");
         assert_eq!(final_state_on_disk(&paths, &refused_run), "failed");
+
+        let rerun_ended = wait_for_state(&mut client, &rerun.job_id, JobState::Succeeded).await;
+        assert_eq!(rerun_ended.last_error, None);
+        assert_eq!(final_state_on_disk(&paths, &rerun_run), "succeeded");
         node.abort();
     }
 
@@ -643,6 +701,34 @@ exec sleep 600
         wait_until_stopped(child_pid).await;
         assert_eq!(final_state_on_disk(&paths, &run_id), "failed");
         node.abort();
+        leader.wait().unwrap();
+    }
+
+    // A Register for a lost job with a wrong token is refused with RRS-J2002, and that is all: the job stays lost,
+    // holding its run, and its process is never signalled. Its real worker may still register.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_wrong_token_for_a_lost_job_is_refused_and_the_job_stays_lost() {
+        let folder = new_test_folder(TEST_FOLDER_PREFIX);
+        let paths = test_paths(&folder.path);
+        let mut leader = spawn_group_leader("exec sleep 600", &folder.path);
+        let _group = GroupGuard {
+            process_group_id: leader.id(),
+        };
+        let worker = identity_of(leader.id());
+        let run_id = new_run_id();
+        let job_file = write_live_job_file(&paths, &run_id, &worker);
+
+        let (node, mut client) = start_node(node_options_in(&folder.path, LONG_TIMEOUT)).await;
+        assert_eq!(list_job(&mut client, &job_file.job_id).await.state(), JobState::Lost);
+        let refusal = register_with_token(&paths, &job_file.job_id, &"cd".repeat(32)).await;
+        assert_eq!(refusal.map(|found| found.code), Some("RRS-J2002".to_string()));
+        tokio::time::sleep(AFTER_SEVERAL_POLLS).await;
+        let still_lost = list_job(&mut client, &job_file.job_id).await;
+        assert_eq!(still_lost.state(), JobState::Lost, "{still_lost:?}");
+        assert!(still_runs_as(&worker), "the job's process was signalled");
+        assert_eq!(final_state_on_disk(&paths, &run_id), "");
+        node.abort();
+        leader.kill().unwrap();
         leader.wait().unwrap();
     }
 

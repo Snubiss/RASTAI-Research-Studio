@@ -58,7 +58,7 @@ use crate::heartbeat::request_heartbeat;
 use crate::jobs::exit_cause::{
     EXIT_EVENT_LOG_LOCKED, ExitFacts, JobOutcome, NodeKill, OomWatch, ProcessExit, RunLogFacts, StderrTail,
     VanishedFacts, classify_exit, classify_vanished, exit_code_for_info, oom_kill_rose, process_exit_from_status,
-    read_run_log_facts, start_oom_watch, stderr_shows_event_log_locked,
+    read_run_log_facts, start_oom_watch,
 };
 use crate::jobs::job_file::{JobFile, job_file_path, read_job_file, recorded_process, write_job_file};
 use crate::jobs::log_lines::{JobLogs, STDERR_LOG_FILE, STDOUT_LOG_FILE, follow_job_logs, read_log_tail};
@@ -142,9 +142,13 @@ pub struct JobRecord {
     /// Who the worker's process is, from the spawn on.
     pub process: Option<ProcessIdentity>,
     /// Where this job's output starts in the run's `stdout.log` and `stderr.log`, which earlier jobs of the run
-    /// appended to.
+    /// appended to. A reattached job's are 0: `job.json` doesn't record them, so its stderr tail may hold an earlier
+    /// job's lines (exit_cause.rs reads a `RRS-J3006` line there only for a job that can't have opened the log).
     pub stdout_start_offset: u64,
     pub stderr_start_offset: u64,
+    /// The `job.json` last written with the worker's identity, or the one a restarted node read back. The terminal
+    /// `job.json` is this one with the final state. None before the spawned worker's identity is written.
+    pub job_file: Option<JobFile>,
     pub oom_watch: Option<OomWatch>,
     /// Why the node killed the group itself, if it did.
     pub node_kill: Option<NodeKill>,
@@ -443,6 +447,7 @@ fn new_record(state: &NodeState, spec: &JobSpec) -> JobRecord {
         process: None,
         stdout_start_offset: 0,
         stderr_start_offset: 0,
+        job_file: None,
         oom_watch: None,
         node_kill: None,
         start_refusal: None,
@@ -525,6 +530,7 @@ async fn record_spawned_worker(
         stop_unwatched_worker(job_id, &identity, &mut child).await;
         return Err(reason);
     }
+    record_job_file(state, job_id, job_file);
     Ok(child)
 }
 
@@ -778,14 +784,15 @@ pub(crate) fn finish_vanished_job(state: &NodeState, job_id: &str) {
     finish_job(state, job_id, classify_vanished(&facts), None);
 }
 
-/// What `classify_vanished` decides from: the node's kill and refusal, the tail of `stderr.log`, and, unless that
-/// tail shows the `RRS-J3006` refusal, what this job wrote to the run's log.
+/// What `classify_vanished` decides from: whether the worker registered, the node's kill and refusal, what this job
+/// wrote to the run's log, and the tail of `stderr.log`.
 fn vanished_facts(state: &NodeState, job_id: &str) -> Option<VanishedFacts> {
     let (record_facts, run_id, run_folder, stderr_start_offset) = {
         let table = lock_jobs(state);
         let record = find_record(&table, job_id)?;
         let record_facts = VanishedFacts {
             job_id: job_id.to_string(),
+            registered: record.worker.is_some(),
             node_kill: record.node_kill,
             start_refusal: record.start_refusal.clone(),
             run_log: RunLogFacts::default(),
@@ -809,14 +816,8 @@ fn vanished_facts(state: &NodeState, job_id: &str) -> Option<VanishedFacts> {
             STDERR_TAIL_LINES,
         ),
     };
-    // After exit 5 the log's frames are another writer's, so nothing is read from it for this job (contracts 9.1).
-    let run_log = if stderr_shows_event_log_locked(&stderr) {
-        RunLogFacts::default()
-    } else {
-        read_run_log_facts(&event_log, job_id)
-    };
     Some(VanishedFacts {
-        run_log,
+        run_log: read_run_log_facts(&event_log, job_id),
         stderr,
         event_log_path: path_text(&event_log),
         ..record_facts
@@ -898,6 +899,7 @@ pub(crate) fn adopt_reattached_job(
     record.info.started_unix_ms = job_file.started_unix_ms;
     record.token_hash = job_file.job_token_hash.clone();
     record.process = process;
+    record.job_file = Some(job_file.clone());
     record.holds_run = true;
     table.records.push(record);
     drop(table);
@@ -910,8 +912,22 @@ pub(crate) fn job_state(state: &NodeState, job_id: &str) -> Option<JobState> {
     job_info(state, job_id).map(|info| info.state())
 }
 
-/// The last `job.json` of a job: as written at the spawn, with the final state.
+/// The last `job.json` of a job: the one written with the worker's identity, or read back after a restart, with the
+/// final state. Every other field stays as it was, so a reattached job keeps its pid, boot id and the hardware it
+/// started on.
 fn terminal_job_file(state: &NodeState, record: &JobRecord, final_state: JobState) -> JobFile {
+    let mut job_file = match &record.job_file {
+        Some(last_written) => last_written.clone(),
+        None => job_file_without_identity_written(state, record),
+    };
+    job_file.state = job_state_name(final_state).to_string();
+    job_file.final_state = job_file.state.clone();
+    job_file
+}
+
+/// A job that ended before its worker's identity reached `job.json` (the spawn or that write failed): the file as it
+/// was first written, with the process if one was started.
+fn job_file_without_identity_written(state: &NodeState, record: &JobRecord) -> JobFile {
     let mut job_file = first_job_file(state, &record.spec, &record.token_hash);
     if let Some(process) = &record.process {
         job_file.pid = process.pid;
@@ -920,8 +936,6 @@ fn terminal_job_file(state: &NodeState, record: &JobRecord, final_state: JobStat
         job_file.boot_id = process.boot_id.clone();
     }
     job_file.started_unix_ms = record.info.started_unix_ms;
-    job_file.state = job_state_name(final_state).to_string();
-    job_file.final_state = job_file.state.clone();
     job_file
 }
 
@@ -1178,6 +1192,14 @@ fn record_token_hash(state: &NodeState, job_id: &str, token_hash: &str) {
     let mut table = lock_jobs(state);
     if let Some(record) = find_record_mut(&mut table, job_id) {
         record.token_hash = token_hash.to_string();
+    }
+}
+
+/// Keeps the `job.json` just written with the worker's identity, for the terminal one.
+fn record_job_file(state: &NodeState, job_id: &str, job_file: JobFile) {
+    let mut table = lock_jobs(state);
+    if let Some(record) = find_record_mut(&mut table, job_id) {
+        record.job_file = Some(job_file);
     }
 }
 
@@ -1476,6 +1498,7 @@ exec sleep 60
             process: None,
             stdout_start_offset: 0,
             stderr_start_offset: 0,
+            job_file: None,
             oom_watch: None,
             node_kill: None,
             start_refusal: None,

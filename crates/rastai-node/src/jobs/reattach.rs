@@ -12,8 +12,9 @@
 //!   `PROCESS_POLL_SECONDS`, and decided from the log (exit_cause.rs `classify_vanished`).
 //! - **The process is gone, or the pid now names another process** (a reused pid, an unrelated long-lived one, a pid
 //!   from an earlier boot): the node never signals it. The job ends at once from what it left: its last
-//!   `run.state_changed` in the run's log, `RRS-J3006` if its `stderr.log` ends with that refusal (exit 5; the log is
-//!   then another writer's), else `failed` with `RRS-J3002`. The terminal `job.json` is written as on any end.
+//!   `run.state_changed` in the run's log; `RRS-J3006` if it left no record there and the run's `stderr.log` ends with
+//!   that refusal (exit 5: the log is then another writer's); else `failed` with `RRS-J3002`. The terminal `job.json`
+//!   is the one read back, with its final state.
 //!
 //! `node.rs` runs this before it serves `worker-host.sock`, so a worker that registers the moment the socket appears
 //! always finds its job in the table: a `Register` for an unknown job is refused, and the worker takes a refusal as
@@ -233,6 +234,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    const RUN_ID: &str = "run_01JA2B3C4D5E6F7G8H9J0K1M2S";
+    const JOB_ID: &str = "job_01JA2B3C4D5E6F7G8H9J0K1M2Q";
+
     struct TestFolder {
         path: PathBuf,
     }
@@ -249,9 +253,6 @@ mod tests {
         std::fs::create_dir_all(&path).unwrap();
         TestFolder { path }
     }
-
-    const RUN_ID: &str = "run_01JA2B3C4D5E6F7G8H9J0K1M2S";
-    const JOB_ID: &str = "job_01JA2B3C4D5E6F7G8H9J0K1M2Q";
 
     fn job_file(final_state: &str) -> JobFile {
         JobFile {

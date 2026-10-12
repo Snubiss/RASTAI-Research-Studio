@@ -9,10 +9,12 @@
 //!
 //! A heartbeat that fails is not retried at once: the next tick sends a fresh snapshot. The daemon counts missed
 //! beats itself (three mark the node unreachable, contracts 9.2), and jobs never stop because the daemon is gone.
+//! The node logs the first failure after a beat that arrived, so a hub that never answers is in its log once.
 
 use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
+use rastai_diag::logger::log_warn;
 use rastai_proto::node::v1::HeartbeatRequest;
 use tokio::task::JoinHandle;
 
@@ -58,11 +60,28 @@ pub fn build_heartbeat(state: &NodeState) -> HeartbeatRequest {
 }
 
 async fn run_heartbeats(state: Arc<NodeState>) {
+    // True after a failed beat, until one arrives again: only the first failure of a run of them is logged.
+    let mut failing = false;
     loop {
         wait_for_next_beat(&state).await;
         // A failed beat is the daemon's to count (contracts 9.2); the next tick sends a fresh one.
-        let _ = send_heartbeat(&state, build_heartbeat(&state)).await;
+        let sent = send_heartbeat(&state, build_heartbeat(&state)).await;
+        failing = note_heartbeat_result(sent, failing);
         tokio::time::sleep(Duration::from_millis(HEARTBEAT_COALESCE_MS)).await;
+    }
+}
+
+/// Logs the first failed beat after a success (or after the start), so a hub that never answers leaves a trace in
+/// the node's log without a line every tick. Returns whether beats are now failing.
+fn note_heartbeat_result(sent: Result<(), String>, was_failing: bool) -> bool {
+    match sent {
+        Ok(()) => false,
+        Err(reason) => {
+            if !was_failing {
+                log_warn("a heartbeat didn't reach the daemon", &[("reason", &reason)]);
+            }
+            true
+        }
     }
 }
 
@@ -79,4 +98,19 @@ async fn wait_for_next_beat(state: &NodeState) {
 fn heartbeat_seconds(state: &NodeState) -> u64 {
     let settings = state.settings.lock().unwrap_or_else(PoisonError::into_inner);
     settings.heartbeat_seconds.max(MIN_HEARTBEAT_SECONDS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Only the first failure of a run of them is logged; a beat that arrives starts a new run.
+    #[test]
+    fn beats_are_failing_from_a_failure_until_a_success() {
+        let failure = || Err("the hub socket didn't answer".to_string());
+        assert!(!note_heartbeat_result(Ok(()), false));
+        assert!(note_heartbeat_result(failure(), false));
+        assert!(note_heartbeat_result(failure(), true));
+        assert!(!note_heartbeat_result(Ok(()), true));
+    }
 }

@@ -529,8 +529,8 @@ flowchart TD
   A["rastai-node reads one job.json"] --> K{"Node-native download or transfer?"}
   K -->|"yes"| NN["lost, then failed with info RRS-J3004<br/>rastai-server resubmits, resumes from the partial file"]
   K -->|"no"| P{"pid alive, same boot id,<br/>start ticks and process group,<br/>leading that group?"}
-  P -->|"no"| X{"stderr.log ends with RRS-J3006?<br/>(exit 5)"}
-  X -->|"yes"| LOCKED["failed, RRS-J3006<br/>nothing read from the log: its frames are another writer's"]
+  P -->|"no"| X{"No record of the job in the log,<br/>and stderr.log ends with RRS-J3006?<br/>(exit 5)"}
+  X -->|"yes"| LOCKED["failed, RRS-J3006<br/>no outcome taken from another writer's frames"]
   X -->|"no"| L{"Last log record is a final run state?"}
   L -->|"yes"| FIN["succeeded, failed or cancelled<br/>as the record says"]
   L -->|"no"| GONE["failed, RRS-J3002<br/>no final state, stderr tail attached"]
@@ -545,7 +545,7 @@ flowchart TD
 
 - The pid check uses `job.json`'s `boot_id` and `process_start_ticks` (from `/proc/<pid>/stat`), so a reused pid is never mistaken for the job. The pid must also lead its own process group, as every worker does (`setsid`), and must not have exited (a zombie is gone), so a `job.json` naming a member of another group never makes the node signal that group (layout/rust-node-gateway-proto.md 7.4).
 - **The node reads every `job.json` before it serves `worker-host.sock`.** A worker registers as soon as it sees the new socket, and a `Register` for a job the node hasn't read yet would be refused, which the worker takes as final.
-- **Exit 5 while no node watched:** a job whose `stderr.log` ends with the `RRS-J3006` line wrote nothing to the log; the log's frames are another writer's, maybe under the same job id, so the job fails with `RRS-J3006` and takes no outcome from them (contracts 9.1, "One live job per run").
+- **Exit 5 while no node watched:** a worker refused the log writes nothing to it, prints the `RRS-J3006` line to `stderr.log` and exits before `Register`. So a job with no record of its own in the log, that never registered with this node, and whose `stderr.log` ends with that line fails with `RRS-J3006`, and takes no outcome from the other writer's frames (contracts 9.1, "One live job per run"). `stderr.log` is the run's, appended to by each of its jobs, and `job.json` doesn't record where a job's part starts: a job that registered or wrote its own records opened the log, so a `RRS-J3006` line there is an earlier job's, and its end comes from its records.
 - **Only the token's hash is on disk.** `job.json` (mode 0600) holds `job_token_hash`, the BLAKE3 of the job token; the token itself lives only in the worker's `RASTAI_JOB_TOKEN` and in node memory. After a restart the node has no token to call `Hello` with, so it waits for the worker's re-`Register`, checks BLAKE3(token) against `job_token_hash`, and only then calls `Hello` (plan §10 rows 5 and 6; layout/rust-node-gateway-proto.md 7.4).
 - **How long the node waits:** the worker's host connection retries for up to `HOST_RECONNECT_TIMEOUT_SECONDS` (300, `layout/python.md` 7.2), then checkpoints and exits. A job that hasn't re-registered by then is failed with `RRS-J3003` and its group is killed after the start-ticks check.
 - `serve_fast` (llama-server) takes the same path, with a `/health` call using its saved API key instead of `Hello`. Healthy means the model stays `ready` with no reload; unhealthy means `KILL` first if the pid is still ours, then `failed` with `RRS-J3002` (layout/rust-node-gateway-proto.md 7.8).
