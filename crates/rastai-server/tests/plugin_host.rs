@@ -497,14 +497,28 @@ async fn a_dev_plugins_commands_come_and_go_with_its_state() {
     assert_eq!(response_codes(&response), ["RRS-C0001"]);
     let plugins = plugin_list(&running).await;
     assert_eq!(find_listed(&plugins, "fixture_tools")["state"], "disabled");
+    // The disable's own move is logged and published before anything else changes a state: no other enabled
+    // plugin is left to check again, so no later call would send it.
+    let disabled_move = [(PluginState::Enabled as i32, PluginState::Disabled as i32)];
+    let logged: Vec<(i32, i32)> = logged_plugin_state_changes(&paths)
+        .iter()
+        .skip(1)
+        .map(|change| (change.from_state, change.to_state))
+        .collect();
+    assert_eq!(logged, disabled_move);
+    let published: Vec<(i32, i32)> = published_plugin_state_changes(&mut live)
+        .iter()
+        .map(|change| (change.from_state, change.to_state))
+        .collect();
+    assert_eq!(published, disabled_move);
 
     assert_eq!(
         load_plugin(&running.server, "fixture_tools").await,
         PluginState::Enabled
     );
     assert_eq!(listed_command_ids(&running, &paths, "fixture_tools").await.len(), 2);
-    // Each move is in the daemon log in order; the two made after the start also reached the bus, as durable
-    // records of the daemon.
+    // Each move is in the daemon log in order; the two made after the start also reached the bus (the disable's
+    // was taken above), as durable records of the daemon.
     let moves: Vec<(i32, i32)> = logged_plugin_state_changes(&paths)
         .iter()
         .map(|change| (change.from_state, change.to_state))
@@ -519,7 +533,7 @@ async fn a_dev_plugins_commands_come_and_go_with_its_state() {
         .iter()
         .map(|change| (change.from_state, change.to_state))
         .collect();
-    assert_eq!(published, expected[1..]);
+    assert_eq!(published, expected[2..]);
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }
@@ -774,6 +788,21 @@ async fn a_dependency_cycle_names_the_dependency_held_back() {
     assert_eq!(refusal["code"], "RRS-P3001");
     let message = refusal["message"].as_str().unwrap();
     assert!(message.contains("The dependency acme_b of acme_a"), "{message}");
+    // Every discovered plugin is held back, so no load follows the refusals: each sends its own record.
+    let mut logged: Vec<(String, i32, String)> = logged_plugin_state_changes(&paths)
+        .into_iter()
+        .map(|change| {
+            let code = change.diagnostic.map(|item| item.code).unwrap_or_default();
+            (change.plugin_id, change.to_state, code)
+        })
+        .collect();
+    logged.sort();
+    let disabled = PluginState::Disabled as i32;
+    let expected = [
+        ("acme_a".to_string(), disabled, "RRS-P3001".to_string()),
+        ("acme_b".to_string(), disabled, "RRS-P3001".to_string()),
+    ];
+    assert_eq!(logged, expected);
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }

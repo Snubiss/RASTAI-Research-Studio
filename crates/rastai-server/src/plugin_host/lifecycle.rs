@@ -107,11 +107,16 @@ pub(crate) async fn record_plugin_state_changes(server: &Server) {
     }
 }
 
+/// Taking and appending are two steps. Today one task at a time changes plugin states (the start, then tests), so
+/// the log keeps the order of the moves. When `plugin.enable` and `plugin.disable` (M8) can run at once, two callers
+/// could append their takes out of order: hold the daemon log's lock across the take then, or order by sequence.
 fn take_state_changes(server: &Server) -> Vec<PluginStateChanged> {
     let mut host = write_plugin_host(server);
     std::mem::take(&mut host.state_changes)
 }
 
+/// `emitted_unix_ms` is left for `record_daemon_event` to fill at the append, which follows the move within the same
+/// call, so the gap is the lock release and nothing a reader would see.
 fn state_changed_record(change: PluginStateChanged) -> EventRecord {
     EventRecord {
         event_type: PLUGIN_STATE_CHANGED_EVENT.to_string(),
