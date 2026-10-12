@@ -508,6 +508,7 @@ name = "rastai-core"
 version = "0.1.0"
 dependencies = [
  "rastai-diag",
+ "rastai-formats",
  "rastai-proto",
  "serde_json",
 ]

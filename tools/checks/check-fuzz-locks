@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""check-fuzz-locks: every cargo-fuzz workspace's Cargo.lock is current (contracts 12.5).
+
+Each crates/<crate>/fuzz/ folder is its own workspace with its own checked-in Cargo.lock, so the fuzz targets build
+against the same dependency versions every night. The root workspace's `--locked` builds never read those locks, so
+a change to a crate's dependencies (or to a crate the fuzz workspace pulls in by path) leaves them stale without any
+other check noticing, and the next `just fuzz` rewrites the lock and leaves the tree dirty. This check asks cargo to
+resolve each fuzz workspace with `--locked`, which fails instead of changing a stale lock.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+from repo_files import REPO_ROOT, parse_root_argument, report
+
+# Every cargo-fuzz workspace sits in a crate's fuzz/ folder (contracts 12.5, ADR-0037).
+FUZZ_MANIFEST_PATTERN = "crates/*/fuzz/Cargo.toml"
+# A full resolve, not --no-deps: only a resolve compares the lock with the manifests. Without --offline, so a
+# fresh machine can fetch the registry index the same way `cargo build --locked` does.
+CARGO_METADATA_COMMAND = ["cargo", "metadata", "--format-version", "1", "--locked"]
+# The words cargo uses when --locked stops it from writing a changed lock.
+STALE_LOCK_MARKER = "because --locked was passed"
+# How many lines of an unexpected cargo error the report keeps; the first ones say what went wrong.
+ERROR_LINES_KEPT = 3
+
+
+def main() -> int:
+    root = parse_root_argument("Fails when a cargo-fuzz workspace's Cargo.lock doesn't match its manifests.")
+    problems = find_problems(root)
+    return report("check-fuzz-locks", problems, "every fuzz workspace's Cargo.lock is current")
+
+
+def find_problems(root: Path) -> list[str]:
+    problems = []
+    for manifest in sorted(root.glob(FUZZ_MANIFEST_PATTERN)):
+        problem = check_workspace(root, manifest)
+        if problem:
+            problems.append(problem)
+    return problems
+
+
+def check_workspace(root: Path, manifest: Path) -> str | None:
+    """None when cargo resolves the workspace from its lock unchanged, else the problem to report."""
+    # cargo runs from the repository, whatever --root is, so rust-toolchain.toml picks the pinned toolchain for a
+    # fixture tree too; --manifest-path still points it at the fuzz workspace and its own Cargo.lock.
+    command = CARGO_METADATA_COMMAND + ["--manifest-path", str(manifest)]
+    result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True)
+    if result.returncode == 0:
+        return None
+    lock_path = manifest.parent.relative_to(root).as_posix() + "/Cargo.lock"
+    if STALE_LOCK_MARKER in result.stderr:
+        return f"{lock_path}: out of date with its manifests; {refresh_hint(root, manifest)}"
+    return f"{lock_path}: cargo couldn't resolve the workspace: {first_lines(result.stderr)}"
+
+
+def refresh_hint(root: Path, manifest: Path) -> str:
+    # Without --locked, cargo metadata adds or removes only what the manifests changed and keeps every other
+    # version, unlike `cargo update`, which would move them all.
+    folder = manifest.parent.relative_to(root).as_posix()
+    return f"refresh it with `cargo metadata --format-version 1 --manifest-path {folder}/Cargo.toml > /dev/null`"
+
+
+def first_lines(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return " / ".join(lines[:ERROR_LINES_KEPT])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
