@@ -892,8 +892,11 @@ exit "$(cat "$run_folder/exit-code")"
         write_run_log(&node, &run_id, &spec.job_id, vec![run_completed()]);
         start_job(&mut node, spec.clone()).await;
         wait_for_state(&mut node, &spec.job_id, JobState::Running).await;
+        // The worker records its Register answer only after the node has sent it, so the job can be Running before
+        // the line is in the record.
+        let registered = wait_for_registrations(&node, &run_id, 1).await;
+        assert_eq!(registered[0]["diagnostic_code"], "");
         let record = fake_worker_record(&node, &run_id);
-        assert_eq!(recorded_events(&record, "registered")[0]["diagnostic_code"], "");
         assert_eq!(
             recorded_events(&record, "hello")[0]["token_ok"],
             true,
