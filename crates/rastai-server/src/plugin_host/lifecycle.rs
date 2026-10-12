@@ -7,24 +7,31 @@
 //!
 //! What is persisted: an installed plugin's state in its `plugins` row (`save_plugin_row`), when the user decided it
 //! (a load that enabled it, or `disable_plugin`); the host's own outcomes are decided again at every start (load.rs).
-//! A dev plugin has no row and is found again at every start. The record itself goes into the daemon log and onto the bus with M1-28
-//! (`record_daemon_event`); until then `record_state_change` logs it and keeps it in `PluginHost.state_changes`.
+//! A dev plugin has no row and is found again at every start. The `plugin.state_changed` record itself goes into the
+//! daemon log and onto the bus: `apply_state` (load.rs) keeps it in `PluginHost.state_changes` while it holds the
+//! host's lock, and `record_plugin_state_changes` sends what is kept through `record_daemon_event` once that lock is
+//! released, since an append is awaited. Every path that changes a state calls it, and the first runs after
+//! `replay_daemon_log` (daemon.rs), so a new record never lands in the log ahead of the replay.
 
 use rastai_core::states::{plugin_state_name, plugin_transition_allowed};
 use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::{Diagnostic, Severity};
 use rastai_diag::logger::{log_info, log_warn};
 use rastai_proto::common::v1::PluginState;
-use rastai_proto::events::v1::PluginStateChanged;
+use rastai_proto::events::v1::event_payload::Payload;
+use rastai_proto::events::v1::{EventPayload, EventRecord, PluginStateChanged};
 use rastai_store::index::kept_tables::PluginRow;
 use rastai_store::index::writes::IndexWrite;
 use rastai_store::writer_thread::write_index;
 
-use crate::plugin_host::load::{LoadedPlugin, PluginSource, plugin_source_name};
+use crate::events::daemon_events::record_daemon_event;
+use crate::plugin_host::load::{LoadedPlugin, PluginSource, plugin_source_name, write_plugin_host};
 use crate::server_state::Server;
 
-/// How many records `PluginHost.state_changes` keeps until the daemon log takes them (M1-28); the oldest go first.
+/// How many records `PluginHost.state_changes` keeps until `record_plugin_state_changes` takes them; the oldest go
+/// first. Each change is taken right after it is made, so the cap only bounds a caller that forgot to.
 const MAX_PENDING_STATE_CHANGES: usize = 1000;
+const PLUGIN_STATE_CHANGED_EVENT: &str = "plugin.state_changed";
 
 /// Moves the plugin to `to_state` with its reasons, and returns the record of the move. Staying in the same state
 /// only refreshes the reasons and records nothing. A move the state machine doesn't allow is a bug in the caller: it
@@ -82,6 +89,37 @@ pub(crate) fn record_state_change(state_changes: &mut Vec<PluginStateChanged>, c
         state_changes.remove(0);
     }
     state_changes.push(change);
+}
+
+/// Sends every kept `plugin.state_changed` record, oldest first, to the daemon log, which indexes and publishes it.
+/// A record that can't be logged is a warning: the plugin's state in memory is right either way, and the next start
+/// decides it again.
+pub(crate) async fn record_plugin_state_changes(server: &Server) {
+    let changes = take_state_changes(server);
+    for change in changes {
+        let plugin_id = change.plugin_id.clone();
+        if let Err(error) = record_daemon_event(server, state_changed_record(change)).await {
+            log_warn(
+                "a plugin.state_changed record could not be logged and indexed",
+                &[("plugin_id", &plugin_id), ("code", error.code())],
+            );
+        }
+    }
+}
+
+fn take_state_changes(server: &Server) -> Vec<PluginStateChanged> {
+    let mut host = write_plugin_host(server);
+    std::mem::take(&mut host.state_changes)
+}
+
+fn state_changed_record(change: PluginStateChanged) -> EventRecord {
+    EventRecord {
+        event_type: PLUGIN_STATE_CHANGED_EVENT.to_string(),
+        payload: Some(EventPayload {
+            payload: Some(Payload::PluginStateChanged(change)),
+        }),
+        ..EventRecord::default()
+    }
 }
 
 /// The `plugins` row of an installed or preinstalled plugin; None for a dev plugin, which has none.

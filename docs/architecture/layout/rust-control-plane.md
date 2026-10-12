@@ -1906,7 +1906,7 @@ A run's log is untrusted (contracts 7.1): the job writes it, and a remote run's 
 | `transfer.finished` | `transfers` |
 | `download.finished` | `models` (ref, revision, `model_hash`, `size_bytes` from the payload: the node hashes each file with BLAKE3 and computes the model hash when the download ends, flows/platform.md 1.5) |
 | `node.state_changed` | `nodes.state` |
-| `plugin.state_changed` | `plugins.state` |
+| `plugin.state_changed` | nothing: `plugins.state` is the user's decision, saved with `UpsertPlugin` when it is made (a load that enables the plugin, `disable_plugin`); the host's own outcomes are decided again at every start (12.1) |
 | `document.changed` | `documents` hash and time |
 | `command.finished` | `command_journal` finished columns |
 | `run.tags_changed` (daemon) | `run_tags` for the run, replaced |
@@ -3107,7 +3107,7 @@ flowchart TD
 ```
 
 - First-party plugins load first because they provide capabilities (`psychology.lens@1`, `eval.metric@1`) that third-party plugins require.
-- Each plugin's outcome is stored in `plugins.state` and published as `plugin.state_changed` (lifecycle.rs). A failure never stops the loop or the daemon.
+- Each plugin's outcome is recorded in the daemon log and published as `plugin.state_changed` (lifecycle.rs, through `record_daemon_event`); only the user's decisions (a load that enables it, `disable_plugin`) are saved in `plugins.state`, so an outcome the host decided is decided again at the next start. A failure never stops the loop or the daemon.
 - The module start is asynchronous: commands are registered from the manifest at once, and calls made before the module registers wait up to 30 s (flows/platform.md 2.1, `RRS-P4002`).
 - **Modules without user namespaces** (contracts §8.8). Ubuntu 23.10 and later restrict unprivileged user namespaces; the `.deb` ships an AppArmor profile (`tools/release/apparmor/rastai`) that grants `userns` to the installed binary. Where namespaces are still unavailable (AppImage, other distributions, a removed profile), the node decides per module and the host records the outcome:
   - a **trusted first-party** module (source `Preinstalled`, content hash equal to the release's) runs without the network namespace; the host shows warning `RRS-P2005` on the plugin;
