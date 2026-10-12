@@ -4,7 +4,7 @@
 
 **Superseded in part:** decision 1's "two implementations". The header contract (decision 2) has one implementation, in `rastai-formats`. Python calls `rastai_formats.check_safetensors_header` through the wheel, and `rastai_models/io/safetensors_reader.py` memory-maps the file and reads tensor bytes only after the header was accepted (ADR-0037 decision 3, contracts §2.4 rule 10). The Python writer stays. Decisions 2–5 stand; the corpus now checks one implementation from two languages.
 
-*Note since acceptance (2026-10-10): the Rust reader lives at `crates/rastai-formats/src/safetensors/reader.rs` (control-plane layout §4.1), not `src/safetensors.rs`. The decision is unchanged.*
+*Note since acceptance (2026-10-10): the Rust code lives under `crates/rastai-formats/src/safetensors/` (control-plane layout §4.1), not `src/safetensors.rs`. The header checks are in `header_check.rs` (M1-34); `reader.rs` is the reader over a `ByteSource` (M2-13). The decision is unchanged.*
 
 ## Context
 
