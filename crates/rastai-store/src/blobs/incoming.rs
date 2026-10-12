@@ -53,32 +53,53 @@ pub(crate) fn copy_into_incoming(store_root: &Path, source: &Path) -> Result<Inc
     }
 }
 
-/// Hard-links the file at `source` into `.incoming/` and fsyncs it, for a file whose hash the caller already has.
-/// `None` when the two are on different filesystems, where no hard link can exist: the caller copies instead.
-pub(crate) fn link_into_incoming(
-    store_root: &Path,
-    source: &Path,
-    hash: &str,
-    size_bytes: u64,
-) -> Result<Option<IncomingFile>, StoreError> {
+/// Hard-links the file at `source` into `.incoming/`, fsyncs the link and hashes it. `None` when no link to a plain
+/// file can be made (another filesystem, or a source that isn't a plain file): the caller copies instead.
+///
+/// - A symbolic link is followed to the file it names first. `hard_link` doesn't follow one, so the store would
+///   otherwise hold a symlink pointing outside it, whose target a deleted run folder could take away.
+/// - The hash is taken from the linked file, not the source before the link: a source swapped in between can't
+///   end up filed under another file's hash.
+pub(crate) fn link_into_incoming(store_root: &Path, source: &Path) -> Result<Option<IncomingFile>, StoreError> {
+    let target = std::fs::canonicalize(source).map_err(|error| blob_read_error(source, &error))?;
+    if !is_plain_file(&target) {
+        return Ok(None);
+    }
     let folder = incoming_folder(store_root)?;
     let path = folder.join(random_file_name(&folder)?);
-    match std::fs::hard_link(source, &path) {
+    match std::fs::hard_link(&target, &path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => return Ok(None),
         Err(error) => return Err(blob_write_error(&path, &error)),
     }
-    // The link shares the source's bytes, which its writer may never have fsynced. Without this a power cut could
-    // leave the blob's name over bytes that never reached the disk.
-    if let Err(error) = sync_file(&path) {
+    // The target may have been replaced by a symlink or something else after the check above.
+    if !is_plain_file(&path) {
         discard_incoming_file(&path);
-        return Err(blob_write_error(&path, &error));
+        return Ok(None);
     }
-    Ok(Some(IncomingFile {
-        path,
-        hash: hash.to_string(),
-        size_bytes,
-    }))
+    match sync_and_hash_file(&path) {
+        Ok((hash, size_bytes)) => Ok(Some(IncomingFile { path, hash, size_bytes })),
+        Err(error) => {
+            discard_incoming_file(&path);
+            Err(error)
+        }
+    }
+}
+
+/// The hash and size of everything left to read in `file`, read a piece at a time.
+pub(crate) fn hash_open_file(file: &mut File, path: &Path) -> Result<(String, u64), StoreError> {
+    let mut hasher = new_stream_hasher();
+    let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
+    let mut size_bytes = 0u64;
+    loop {
+        let count = file.read(&mut buffer).map_err(|error| blob_read_error(path, &error))?;
+        if count == 0 {
+            break;
+        }
+        update_stream_hasher(&mut hasher, &buffer[..count]);
+        size_bytes += count as u64;
+    }
+    Ok((finish_stream_hasher(hasher), size_bytes))
 }
 
 /// Renames a fsynced `.incoming/` file to its place in the store, creating its `ab/` folder when needed, and fsyncs
@@ -123,9 +144,9 @@ pub(crate) fn discard_incoming_file(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// Opens a file that is already there so its bytes can be fsynced or its modification time set. Unix allows both
-/// on a read-only handle, so a read-only source still works there. Windows needs write access for both
-/// (FlushFileBuffers, SetFileTime); asking for it doesn't truncate or change the bytes.
+/// Opens a file that is already there so its bytes can be read, fsynced or its modification time set. Unix allows
+/// all three on a read-only handle, so a read-only source still works there. Windows needs write access for the
+/// last two (FlushFileBuffers, SetFileTime); asking for it doesn't truncate or change the bytes.
 #[cfg(unix)]
 pub(crate) fn open_existing_file(path: &Path) -> std::io::Result<File> {
     File::open(path)
@@ -133,11 +154,23 @@ pub(crate) fn open_existing_file(path: &Path) -> std::io::Result<File> {
 
 #[cfg(not(unix))]
 pub(crate) fn open_existing_file(path: &Path) -> std::io::Result<File> {
-    OpenOptions::new().write(true).open(path)
+    OpenOptions::new().read(true).write(true).open(path)
 }
 
-fn sync_file(path: &Path) -> std::io::Result<()> {
-    open_existing_file(path)?.sync_all()
+/// Fsyncs a linked file and hashes it. The link shares the source's bytes, which its writer may never have
+/// fsynced: without the fsync a power cut could leave the blob's name over bytes that never reached the disk.
+fn sync_and_hash_file(path: &Path) -> Result<(String, u64), StoreError> {
+    let mut file = open_existing_file(path).map_err(|error| blob_read_error(path, &error))?;
+    file.sync_all().map_err(|error| blob_write_error(path, &error))?;
+    hash_open_file(&mut file, path)
+}
+
+/// Whether `path` itself is a plain file: not a symlink, a folder, a pipe or a device.
+fn is_plain_file(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata.file_type().is_file(),
+        Err(_) => false,
+    }
 }
 
 fn create_incoming_file(store_root: &Path) -> Result<(PathBuf, File), StoreError> {
