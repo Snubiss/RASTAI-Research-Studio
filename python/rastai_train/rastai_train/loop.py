@@ -7,13 +7,14 @@ loader agree, so a checkpoint is always of a whole step.
 
 | Flag | At the next step boundary | The worker's edge then |
 |---|---|---|
-| preempt_requested (SIGTERM) | a checkpoint if the last write time fits the budget | run preempted, exit 75 |
+| preempt_requested (SIGTERM) | a checkpoint (no validation) if the last write fits the budget | preempted, exit 75 |
 | cancel_requested (CANCEL, SIGINT) | nothing more | run cancelled, exit 3 |
 | stop_requested (STOP) | a final checkpoint, whatever it takes | run completed (reason stopped), exit 0 |
 | checkpoint_requested (CHECKPOINT_NOW) | a checkpoint, then training goes on | |
 | paused (PAUSE) | waits for RESUME, or for one of the flags above | |
 
 The last step of the run writes a final checkpoint too. preempt_requested is read first: only SIGTERM has a deadline.
+Its checkpoint skips the validation pass, which the budget doesn't time and which can take longer than the write.
 The loop never writes the run's final state; the worker's edge does (rastai_worker/diagnostics.py). `train.preempted`
 and `checkpoint.resumed` are worker events from M5 on (contracts 7.3); until their contract lands the edge's
 `run.state_changed preempted` and exit 75 tell the node.
@@ -46,7 +47,7 @@ STEPS_BETWEEN_METRIC_RECORDS = 10
 NON_FINITE_STEPS_TO_STOP = 3
 # The timed interval is never shorter than this many times the last checkpoint's write time, which keeps
 # checkpointing under 5% of the run (flow 5.1).
-INTERVAL_PER_WRITE_SECONDS = 20
+INTERVAL_TO_WRITE_TIME_RATIO = 20
 SECONDS_PER_MINUTE = 60
 # How often a paused run looks at its flags again.
 PAUSE_POLL_SECONDS = 0.1
@@ -227,19 +228,25 @@ def checkpoint_is_due(context: TrainingContext) -> bool:
     progress = context.progress
     if policy.every_steps > 0 and progress.step % policy.every_steps == 0:
         return True
-    if policy.interval_minutes <= 0:
+    interval_minutes = policy.checkpoint_settings.interval_minutes
+    if interval_minutes <= 0:
         return False
-    interval_seconds = policy.interval_minutes * SECONDS_PER_MINUTE
+    interval_seconds = interval_minutes * SECONDS_PER_MINUTE
     if progress.last_checkpoint_seconds is not None:
-        interval_seconds = max(interval_seconds, INTERVAL_PER_WRITE_SECONDS * progress.last_checkpoint_seconds)
+        interval_seconds = max(interval_seconds, INTERVAL_TO_WRITE_TIME_RATIO * progress.last_checkpoint_seconds)
     return time.monotonic() - progress.last_checkpoint_time >= interval_seconds
 
 
-def save_checkpoint_and_report(context: TrainingContext, recipe: Recipe, events: JobEvents) -> Path:
+def save_checkpoint_and_report(
+    context: TrainingContext, recipe: Recipe, events: JobEvents, with_validation: bool = True
+) -> Path:
     """Writes the checkpoint of the current step, then reports it: checkpoint.saved only after the rename, so the
-    daemon never indexes a half-written folder. Then the retention rule removes what it doesn't keep."""
+    daemon never indexes a half-written folder. Then the retention rule removes what it doesn't keep. Without
+    validation the checkpoint has no validation.loss, so it can't be the best one."""
     progress = context.progress
-    validation_loss = compute_validation_loss(context, recipe)
+    validation_loss = None
+    if with_validation:
+        validation_loss = compute_validation_loss(context, recipe)
     is_best = validation_loss is not None and (
         progress.best_validation_loss is None or validation_loss < progress.best_validation_loss
     )
@@ -255,7 +262,8 @@ def save_checkpoint_and_report(context: TrainingContext, recipe: Recipe, events:
     if validation_loss is not None:
         events.emit_durable(RUN_METRICS, {"step": progress.step, "values": {VALIDATION_LOSS: validation_loss}})
     policy = context.settings.checkpoint
-    remove_unkept_checkpoints(context.run_folder, policy.keep_last, progress.best_step, policy.pinned_steps)
+    keep_last = policy.checkpoint_settings.keep_last
+    remove_unkept_checkpoints(context.run_folder, keep_last, progress.best_step, policy.pinned_steps)
     return folder
 
 
@@ -297,11 +305,13 @@ def compute_validation_loss(context: TrainingContext, recipe: Recipe) -> float |
 
 def preempt_at_step_boundary(context: TrainingContext, recipe: Recipe, events: JobEvents) -> TrainingOutcome:
     """SIGTERM: a checkpoint when the last one's write time fits the preemption budget (or none was written yet in
-    this job), then return, so the worker exits 75. A checkpoint that fails here fails the job (RRS-T2001)."""
-    budget_seconds = context.settings.checkpoint.preemption_budget_seconds
+    this job), then return, so the worker exits 75. The budget times only the write, so this checkpoint skips the
+    validation pass: over a large split it alone could outlast the notice and leave only a `.partial` folder. A
+    checkpoint that fails here fails the job (RRS-T2001)."""
+    budget_seconds = context.settings.checkpoint.checkpoint_settings.preemption_budget_seconds
     last_seconds = context.progress.last_checkpoint_seconds
     if last_seconds is None or last_seconds <= budget_seconds:
-        save_checkpoint_if_new(context, recipe, events)
+        save_checkpoint_if_new(context, recipe, events, with_validation=False)
     return outcome(context, OUTCOME_PREEMPTED)
 
 
@@ -311,10 +321,12 @@ def end_with_checkpoint(context: TrainingContext, recipe: Recipe, events: JobEve
     return outcome(context, reason)
 
 
-def save_checkpoint_if_new(context: TrainingContext, recipe: Recipe, events: JobEvents) -> None:
+def save_checkpoint_if_new(
+    context: TrainingContext, recipe: Recipe, events: JobEvents, with_validation: bool = True
+) -> None:
     """A checkpoint unless this step already has one (or no step was taken at all)."""
     if context.progress.step != context.progress.last_checkpoint_step:
-        save_checkpoint_and_report(context, recipe, events)
+        save_checkpoint_and_report(context, recipe, events, with_validation)
 
 
 def outcome(context: TrainingContext, reason: str) -> TrainingOutcome:

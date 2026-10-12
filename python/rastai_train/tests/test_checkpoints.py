@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import torch
 from rastai_formats.generated.command_train_start import TrainStartArgs
+from rastai_formats.generated.settings import SettingsCheckpoint
 from rastai_plugin.catalog.generated import RRS_T2001, RRS_T2004, RRS_T2005
 from rastai_train.checkpoints import new_generated_id, recorded_validation_loss
 
@@ -21,6 +22,7 @@ from rastai_train import (
     TrainingSettings,
     build_training_context,
     checkpoint_folder,
+    checkpoint_policy,
     checkpoints_to_keep,
     find_latest_checkpoint,
     list_complete_checkpoints,
@@ -57,7 +59,7 @@ def new_context(repo_root: Path, run_folder: Path, run_id: str = RUN_ID) -> Trai
         design_path=str(repo_root / TEXTCNN_TEMPLATE),
         dataset_path=str(repo_root / TINY_DATASET),
     )
-    settings = TrainingSettings(max_steps=100, checkpoint=CheckpointPolicy(interval_minutes=0))
+    settings = TrainingSettings(max_steps=100, checkpoint=checkpoint_policy(SettingsCheckpoint(interval_minutes=0)))
     return build_training_context(arguments, run_id, run_folder, settings)
 
 
@@ -196,6 +198,32 @@ def test_removal_deletes_only_what_the_rule_doesnt_keep(repo_root: Path, tmp_pat
     assert kept_steps == [10, 30, 40, 50, 60]
 
 
+# ---- The policy ----
+
+
+def test_the_policy_fills_what_the_checkpoint_settings_leave_out() -> None:
+    policy = checkpoint_policy(SettingsCheckpoint(keep_last=5), every_steps=4, pinned_steps=(8,))
+    assert policy.checkpoint_settings == SettingsCheckpoint(
+        keep_last=5, interval_minutes=15, preemption_budget_seconds=25
+    )
+    assert policy.every_steps == 4
+    assert policy.pinned_steps == (8,)
+    assert checkpoint_policy().checkpoint_settings == SettingsCheckpoint(
+        keep_last=3, interval_minutes=15, preemption_budget_seconds=25
+    )
+
+
+def test_a_policy_with_unfilled_settings_is_a_bug_in_the_caller(repo_root: Path, tmp_path: Path) -> None:
+    arguments = TrainStartArgs(
+        recipe="classification",
+        design_path=str(repo_root / TEXTCNN_TEMPLATE),
+        dataset_path=str(repo_root / TINY_DATASET),
+    )
+    settings = TrainingSettings(max_steps=10, checkpoint=CheckpointPolicy(SettingsCheckpoint(keep_last=3)))
+    with pytest.raises(ValueError):
+        build_training_context(arguments, RUN_ID, tmp_path / "run", settings)
+
+
 # ---- Ids ----
 
 
@@ -222,6 +250,21 @@ def test_resume_skips_a_damaged_newer_checkpoint(repo_root: Path, tmp_path: Path
     assert point.step == 10
     assert len(point.damaged_checkpoints) == 1
     assert "step-00000020" in point.damaged_checkpoints[0]
+    # The run goes on from step 10, so the damaged step 20 is removed: never the run's latest or best again.
+    assert not newest.exists()
+    assert list_complete_checkpoints(context.run_folder) == [(10, checkpoint_folder(context.run_folder, 10))]
+
+
+def test_the_best_after_a_fallback_is_never_the_damaged_newer_checkpoint(repo_root: Path, tmp_path: Path) -> None:
+    context = new_context(repo_root, tmp_path / "run")
+    write_at_step(context, 10, validation_loss=0.9)
+    newest = write_at_step(context, 20, validation_loss=0.1)
+    (newest / "rng.safetensors").write_bytes(b"damaged")
+
+    resumed = new_context(repo_root, context.run_folder)
+    assert resume_from_latest_checkpoint(context.run_folder, resumed).step == 10
+    assert resumed.progress.best_step == 10
+    assert resumed.progress.best_validation_loss == 0.9
 
 
 def test_resume_skips_a_checkpoint_whose_safetensors_header_is_damaged(repo_root: Path, tmp_path: Path) -> None:

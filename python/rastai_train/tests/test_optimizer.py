@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 from rastai_formats.generated.command_train_start import TrainStartArgs
+from rastai_formats.generated.settings import SettingsCheckpoint
 from rastai_plugin.catalog.generated import RRS_T2005
 from rastai_train.optimizer import (
     build_optimizer,
@@ -19,7 +20,7 @@ from rastai_train.optimizer import (
 
 from rastai_models import SafetensorsFile, write_safetensors
 from rastai_plugin import TrainingContext
-from rastai_train import CheckpointPolicy, TrainError, TrainingSettings, build_training_context
+from rastai_train import TrainError, TrainingSettings, build_training_context, checkpoint_policy
 
 TEXTCNN_TEMPLATE = Path("templates/designs/textcnn.rrsmodel")
 TINY_DATASET = Path("fixtures/datasets/textcnn_tiny.jsonl")
@@ -47,7 +48,7 @@ def new_context(repo_root: Path, run_folder: Path) -> TrainingContext:
         design_path=str(repo_root / TEXTCNN_TEMPLATE),
         dataset_path=str(repo_root / TINY_DATASET),
     )
-    settings = TrainingSettings(max_steps=10, checkpoint=CheckpointPolicy(interval_minutes=0))
+    settings = TrainingSettings(max_steps=10, checkpoint=checkpoint_policy(SettingsCheckpoint(interval_minutes=0)))
     return build_training_context(arguments, RUN_ID, run_folder, settings)
 
 

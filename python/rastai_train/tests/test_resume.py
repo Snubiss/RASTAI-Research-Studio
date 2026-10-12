@@ -9,17 +9,19 @@ from pathlib import Path
 import pytest
 import torch
 from rastai_formats.generated.command_train_start import TrainStartArgs
+from rastai_formats.generated.settings import SettingsCheckpoint
 from rastai_plugin.catalog.generated import RRS_T2005
 from rastai_train.optimizer import optimizer_state_tensors, trainable_parameters
 
 from rastai_plugin import Batch, JobControl, JobEvents, StepResult, TrainingContext
 from rastai_train import (
-    CheckpointPolicy,
     ClassificationRecipe,
     TrainError,
     TrainingSettings,
     build_training_context,
+    checkpoint_policy,
     find_latest_checkpoint,
+    list_complete_checkpoints,
     load_resume_state,
     resume_from_latest_checkpoint,
     train,
@@ -92,7 +94,7 @@ def new_context(repo_root: Path, run_folder: Path, every_steps: int = 0) -> Trai
         warmup_steps=3,
         seed=1234,
         deterministic=True,
-        checkpoint=CheckpointPolicy(interval_minutes=0, every_steps=every_steps),
+        checkpoint=checkpoint_policy(SettingsCheckpoint(interval_minutes=0), every_steps=every_steps),
     )
     return build_training_context(arguments, RUN_ID, run_folder, settings)
 
@@ -113,6 +115,10 @@ def resume_and_finish(repo_root: Path, run_folder: Path) -> tuple[TrainingContex
     recipe = LossRecordingRecipe(control)
     assert train(context, recipe, QuietEvents(), control).reason == "completed"
     return context, recipe.losses
+
+
+def checkpoint_steps(run_folder: Path) -> list[int]:
+    return [step for step, _folder in list_complete_checkpoints(run_folder)]
 
 
 def assert_same_run_state(expected: TrainingContext, actual: TrainingContext) -> None:
@@ -177,6 +183,36 @@ def test_a_job_killed_after_a_periodic_checkpoint_resumes_from_it_bit_for_bit(re
 
     assert first_recipe.losses[:8] + resumed_losses == straight_losses
     assert_same_run_state(straight, second_job)
+
+
+def test_training_after_a_fallback_never_returns_the_damaged_newer_checkpoint(repo_root: Path, tmp_path: Path) -> None:
+    straight, straight_losses = run_uninterrupted(repo_root, tmp_path / "straight")
+
+    run_folder = tmp_path / "interrupted"
+    first_job = new_context(repo_root, run_folder, every_steps=4)
+    first_control = JobControl()
+    first_recipe = LossRecordingRecipe(first_control, flag_after_step=8)
+    assert train(first_job, first_recipe, QuietEvents(), first_control).reason == "preempted"
+    assert checkpoint_steps(run_folder) == [4, 8]
+    assert first_job.progress.best_step == 8
+    (run_folder / "checkpoints" / "step-00000008" / "rng.safetensors").write_bytes(b"damaged")
+
+    # The second job falls back to step 4 and is preempted at step 6.
+    second_job = new_context(repo_root, run_folder, every_steps=4)
+    assert resume_from_latest_checkpoint(run_folder, second_job).step == 4
+    assert second_job.progress.best_step == 4
+    second_control = JobControl()
+    second_recipe = LossRecordingRecipe(second_control, flag_after_step=2)
+    outcome = train(second_job, second_recipe, QuietEvents(), second_control)
+
+    assert outcome.step == 6
+    assert outcome.checkpoint_folder == run_folder / "checkpoints" / "step-00000006"
+    assert checkpoint_steps(run_folder) == [4, 6]
+
+    # And the run still ends exactly as the uninterrupted one.
+    third_job, third_losses = resume_and_finish(repo_root, run_folder)
+    assert first_recipe.losses[:4] + second_recipe.losses + third_losses == straight_losses
+    assert_same_run_state(straight, third_job)
 
 
 def test_resume_json_records_the_loader_position_schedule_and_recipe_state(repo_root: Path, tmp_path: Path) -> None:

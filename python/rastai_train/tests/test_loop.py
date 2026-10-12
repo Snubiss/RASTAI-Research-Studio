@@ -8,16 +8,17 @@ from pathlib import Path
 import pytest
 import torch
 from rastai_formats.generated.command_train_start import TrainStartArgs
+from rastai_formats.generated.settings import SettingsCheckpoint
 from rastai_plugin.catalog.generated import RRS_T3001
 
 from rastai_plugin import Batch, JobControl, JobEvents, PluginRegistry, StepResult, TrainingContext
 from rastai_train import (
     FIRST_PARTY_RECIPES,
-    CheckpointPolicy,
     ClassificationRecipe,
     TrainError,
     TrainingSettings,
     build_training_context,
+    checkpoint_policy,
     list_complete_checkpoints,
     register_first_party,
     train,
@@ -90,6 +91,19 @@ class FlagAfterStep(ClassificationRecipe):
         return result
 
 
+class CountingValidationBatches(FlagAfterStep):
+    """FlagAfterStep that also counts the batches it gets in eval mode: the validation pass."""
+
+    def __init__(self, control: JobControl, flag: str, after_step: int) -> None:
+        super().__init__(control, flag, after_step)
+        self.validation_batches = 0
+
+    def training_step(self, batch: Batch) -> StepResult:
+        if not self.model.training:
+            self.validation_batches += 1
+        return super().training_step(batch)
+
+
 class NonFiniteOnSteps(ClassificationRecipe):
     """Classification whose loss is NaN on the given training steps (counted from 1)."""
 
@@ -113,12 +127,12 @@ def new_context(repo_root: Path, run_folder: Path, max_steps: int, **settings) -
         design_path=str(repo_root / TEXTCNN_TEMPLATE),
         dataset_path=str(repo_root / TINY_DATASET),
     )
-    policy = CheckpointPolicy(
+    checkpoint_settings = SettingsCheckpoint(
         interval_minutes=0,
-        every_steps=settings.pop("every_steps", 0),
         keep_last=settings.pop("keep_last", 3),
-        preemption_budget_seconds=settings.pop("preemption_budget_seconds", 25.0),
+        preemption_budget_seconds=settings.pop("preemption_budget_seconds", 25),
     )
+    policy = checkpoint_policy(checkpoint_settings, every_steps=settings.pop("every_steps", 0))
     values = {"micro_batch": 16, "learning_rate": 5e-3, "warmup_steps": 2}
     values.update(settings)
     return build_training_context(
@@ -212,11 +226,41 @@ def test_sigterm_writes_a_checkpoint_when_it_fits_the_budget(repo_root: Path, tm
     assert {kind for kind, _payload in events.durable} <= M1_WORKER_EVENT_TYPES
 
 
+def test_the_sigterm_checkpoint_skips_the_validation_pass(repo_root: Path, tmp_path: Path) -> None:
+    # The budget times only the write; a validation pass over a large split could outlast a 30 s notice and leave
+    # only a .partial folder. The split here has rows, so any other checkpoint would run the pass.
+    context = new_context(repo_root, tmp_path / "run", 50)
+    assert context.validation_examples
+    control = JobControl()
+    recipe = CountingValidationBatches(control, "preempt_requested", 3)
+    events = RecordingEvents(context.run_folder)
+
+    outcome = train(context, recipe, events, control)
+
+    assert outcome.reason == "preempted"
+    assert checkpoint_steps(context) == [3]
+    assert recipe.validation_batches == 0
+    assert events.payloads("checkpoint.saved")[-1]["is_best"] is False
+    assert all("validation.loss" not in payload["values"] for payload in events.payloads("run.metrics"))
+
+
+def test_a_stop_checkpoint_still_runs_the_validation_pass(repo_root: Path, tmp_path: Path) -> None:
+    context = new_context(repo_root, tmp_path / "run", 50)
+    control = JobControl()
+    recipe = CountingValidationBatches(control, "stop_requested", 3)
+    events = RecordingEvents(context.run_folder)
+
+    train(context, recipe, events, control)
+
+    assert recipe.validation_batches > 0
+    assert events.payloads("checkpoint.saved")[-1]["is_best"] is True
+
+
 def test_sigterm_skips_the_checkpoint_when_the_last_one_took_longer_than_the_budget(
     repo_root: Path, tmp_path: Path
 ) -> None:
     # Any real write takes longer than 0 s, so after the periodic checkpoint at step 2 nothing fits the budget.
-    context = new_context(repo_root, tmp_path / "run", 50, every_steps=2, preemption_budget_seconds=0.0)
+    context = new_context(repo_root, tmp_path / "run", 50, every_steps=2, preemption_budget_seconds=0)
     control = JobControl()
 
     outcome = train(
