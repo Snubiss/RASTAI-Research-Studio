@@ -7,8 +7,15 @@ The daemon, and the composition root: the only crate that wires the others toget
 
 ## Local rules
 
-- **Handlers never see HTTP.** Only files under `src/http/` import axum (contracts §2.5). Command handlers (M1-27)
-  take `(&CommandContext, Args)` and return `Result<CommandOutput, Vec<Diagnostic>>`.
+- **Handlers never see HTTP.** Only files under `src/http/` import axum (contracts §2.5), and only `http/connect.rs`
+  imports prost. Command handlers take `(&CommandContext, Args)` and return `Result<CommandOutput, Vec<Diagnostic>>`.
+- **Every caller ends in `execute_command`** (`commands/execute.rs`, flows/platform.md 3.2): scope before arguments,
+  arguments through `check_arguments`, then the journal. A new core command adds one arm to `commands/dispatch.rs`
+  (`tests/dispatch_complete.rs` fails until it does); until its handler exists the arm is `not_available_yet`, its
+  area's code. A handler with side effects makes none on a dry run.
+- **The journal never holds a secret.** `secret` and `content` fields are redacted in `arguments_json` and
+  `result_json` alike (`commands/journal.rs`); what can't be judged is redacted whole. An idempotent replay returns
+  the stored, redacted result.
 - **The gate runs first, on every path.** `http/router.rs` puts `check_request_gate` in front of every route and the
   fallback; a new route is added inside `build_router`, never beside it. The gate is one plain function over a
   `RequestHead`; header parsing is `read_request_head`, and the `request_gate` fuzz target covers both (ADR-0037).

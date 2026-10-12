@@ -92,6 +92,9 @@ pub enum StoreError {
     BlobReadFailed { path: PathBuf, reason: String },
     /// Writing, linking, renaming or syncing a blob file failed for a reason other than a full disk.
     BlobWriteFailed { path: PathBuf, reason: String },
+    /// Writing a config file (`settings.json`, keybindings, a layout) or reading the one it replaces failed for a
+    /// reason other than a full disk. The file is left as it was (`write_config_file`).
+    ConfigFileWriteFailed { path: PathBuf, reason: String },
     /// The volume that holds `path` has `free_bytes` free, less than `needed_bytes` plus `margin_bytes`
     /// (`storage.free_space_margin_bytes`, handed in by the caller).
     NotEnoughFreeSpace {
@@ -128,6 +131,7 @@ impl StoreError {
             StoreError::BlobMissing { .. } => CODE_BLOB_MISSING,
             StoreError::BlobReadFailed { .. } => CODE_READ_FAILED,
             StoreError::BlobWriteFailed { .. } => CODE_WRITE_FAILED,
+            StoreError::ConfigFileWriteFailed { .. } => CODE_WRITE_FAILED,
             StoreError::NotEnoughFreeSpace { .. } => CODE_NOT_ENOUGH_FREE_SPACE,
             StoreError::FreeSpaceUnknown { .. } => CODE_NOT_ENOUGH_FREE_SPACE,
         }
@@ -174,6 +178,20 @@ pub(crate) fn blob_write_error(path: &std::path::Path, error: &std::io::Error) -
         };
     }
     StoreError::BlobWriteFailed {
+        path: path.to_path_buf(),
+        reason: error.to_string(),
+    }
+}
+
+/// Sorts an I/O error while writing a config file: a full disk gets its own code, everything else keeps the operating
+/// system's reason.
+pub(crate) fn config_file_write_error(path: &std::path::Path, error: &std::io::Error) -> StoreError {
+    if error.kind() == std::io::ErrorKind::StorageFull {
+        return StoreError::DiskFull {
+            reason: format!("{}: {error}", path.display()),
+        };
+    }
+    StoreError::ConfigFileWriteFailed {
         path: path.to_path_buf(),
         reason: error.to_string(),
     }
@@ -287,5 +305,14 @@ mod tests {
         assert_eq!(blob_write_error(&path, &full).code(), "RRS-S3002");
         assert_eq!(blob_write_error(&path, &denied).code(), "RRS-S3005");
         assert_eq!(blob_read_error(&path, &denied).code(), "RRS-S0006");
+    }
+
+    #[test]
+    fn config_file_errors_are_sorted_by_full_disk() {
+        let path = std::path::Path::new("settings.json");
+        let full = std::io::Error::from(std::io::ErrorKind::StorageFull);
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(config_file_write_error(path, &full).code(), "RRS-S3002");
+        assert_eq!(config_file_write_error(path, &denied).code(), "RRS-S3005");
     }
 }

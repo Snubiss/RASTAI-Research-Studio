@@ -7,9 +7,11 @@
 use std::time::{Duration, Instant};
 
 use rastai_store::index::documents::{DocumentRow, UndoStepRow, get_document, list_undo_steps};
-use rastai_store::index::journal::{JournalStartedRow, find_journal_by_idempotency_key, get_journal};
+use rastai_store::index::journal::{
+    JournalFinishedRow, JournalStartedRow, find_journal_by_idempotency_key, get_journal,
+};
 use rastai_store::index::kept_tables::{
-    NodeRow, PluginRow, ProjectRow, TokenRow, find_token_by_hash, get_node, get_plugin, get_project,
+    NodeRow, PluginRow, ProjectRow, TokenRow, find_token_by_hash, get_node, get_plugin, get_project, list_tokens,
 };
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::runs::{JobRow, RunFilter, RunRow, get_job, get_run, list_runs};
@@ -345,6 +347,50 @@ fn journal_rows_are_found_by_key_and_unfinished_ones_are_closed() {
 }
 
 #[test]
+fn a_finished_row_keeps_its_result_and_its_first_finish() {
+    let runtime = multi_thread_runtime();
+    let paths = test_paths("journal-finished");
+    let store = open_store(&paths).unwrap();
+    let started = JournalStartedRow {
+        journal_id: "jrn_a".to_string(),
+        command_id: "token.create".to_string(),
+        principal: "owner".to_string(),
+        arguments_json: "{\"name\":\"ci\"}".to_string(),
+        idempotency_key: "key-1".to_string(),
+        started_unix_ms: 1,
+    };
+    let finished = |result_json: &str, finished_unix_ms: i64| JournalFinishedRow {
+        journal_id: "jrn_a".to_string(),
+        ok: true,
+        code: String::new(),
+        result_json: result_json.to_string(),
+        job_id: String::new(),
+        finished_unix_ms,
+    };
+    write(&runtime, &store, IndexWrite::JournalStarted(started));
+    write(
+        &runtime,
+        &store,
+        IndexWrite::JournalFinished(finished("{\"token\":\"<redacted>\"}", 2)),
+    );
+    // A second finish for the same row changes nothing: the command ran once.
+    write(&runtime, &store, IndexWrite::JournalFinished(finished("{}", 3)));
+    // A restart's sweep leaves a finished row alone.
+    write(&runtime, &store, IndexWrite::MarkUnfinishedJournalRows);
+
+    let reader = open_index_reader(&store.index_readers).unwrap();
+    let row = get_journal(&reader, "jrn_a").unwrap().unwrap();
+    assert_eq!(row.ok, Some(true));
+    assert_eq!(row.code, "");
+    assert_eq!(row.result_json, "{\"token\":\"<redacted>\"}");
+    assert_eq!(row.job_id, "");
+    assert_eq!(row.finished_unix_ms, Some(2));
+    drop(reader);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
+#[test]
 fn a_new_undo_step_drops_the_redo_steps_above_it() {
     let runtime = multi_thread_runtime();
     let paths = test_paths("undo");
@@ -428,6 +474,7 @@ fn the_kept_tables_read_back() {
     assert_eq!(get_plugin(&reader, "rastai.psychology").unwrap(), Some(plugin));
     assert_eq!(token.scopes, token_row("tok_a").scopes);
     assert_eq!(token.revoked_unix_ms, Some(11));
+    assert_eq!(list_tokens(&reader).unwrap(), vec![token]);
     drop(reader);
     runtime.block_on(close_store(store));
     remove_test_folder(&paths);
