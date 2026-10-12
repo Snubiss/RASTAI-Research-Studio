@@ -21,7 +21,8 @@
 //!   kind `RRS-E1002`, an enum name the message doesn't have or a number outside 32 bits `RRS-E1004`;
 //! - `null` is the field's default; an enum is its name or any 32-bit integer (proto3 enums are open).
 //!
-//! Every refusal's path is the JSON pointer of the value refused, such as `#/diagnostics/0/severity`.
+//! Every refusal's path is the JSON pointer of the value refused, such as `#/diagnostics/0/severity`; an unknown
+//! key longer than `MAX_ECHOED_CHARACTERS` is cut in it, as in the message.
 
 // A refusal is a `Diagnostic`, the contract type every caller renders; it is larger than clippy's default for an
 // `Err`, and refusals are rare, so it is returned as it is rather than boxed.
@@ -48,8 +49,9 @@ const CODE_NOT_ALLOWED: &str = "RRS-E1004";
 
 /// The JSON pointer of the whole body (RFC 6901: the empty string).
 const WHOLE_BODY_POINTER: &str = "";
-/// Untrusted text a refusal repeats back (an unknown key, an enum name) is cut to this many characters, so a
-/// megabyte-long key doesn't come back in the diagnostic and every log line it reaches.
+/// Untrusted text a refusal repeats back (an unknown key, an enum name) is cut to this many characters, in the
+/// message and in the path alike, so a megabyte-long key doesn't come back in the diagnostic and every log line
+/// it reaches.
 const MAX_ECHOED_CHARACTERS: usize = 80;
 const ECHO_CUT_MARK: &str = "…";
 
@@ -459,7 +461,8 @@ fn read_message_fields<'a>(
     let mut values = BTreeMap::new();
     for (key, member) in object {
         let Some(field_name) = field_for_key(key, field_names) else {
-            return Err(unknown_field(key, &join_pointer(pointer, key)));
+            // The key goes into the path too, so the path repeats it cut, like the message does.
+            return Err(unknown_field(key, &join_pointer(pointer, &echoed(key))));
         };
         if values.insert(field_name, member).is_some() {
             return Err(field_given_twice(&join_pointer(pointer, field_name)));
@@ -679,6 +682,15 @@ mod tests {
         assert_eq!(refusal.code, "RRS-E1003");
         assert!(refusal.message.len() < 200, "{}", refusal.message);
         assert!(refusal.message.contains(ECHO_CUT_MARK));
+        assert!(refusal.path.len() < 200, "{}", refusal.path);
+        assert!(refusal.path.contains(ECHO_CUT_MARK));
+    }
+
+    #[test]
+    fn a_short_unknown_key_comes_back_whole_in_the_path() {
+        let refusal = execute_request_from_json(br#"{"spare":1}"#).unwrap_err();
+        assert_eq!(refusal.code, "RRS-E1003");
+        assert_eq!(refusal.path, "#/spare");
     }
 
     #[test]
