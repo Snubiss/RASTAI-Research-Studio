@@ -10,7 +10,8 @@
 //! 4. A plugin's command needs its plugin enabled (`RRS-C0003`).
 //! 5. The arguments must match the command's description (`RRS-C0002` with the `RRS-E` problems and their paths).
 //! 6. A dry run goes to the handler with `dry_run` set: no journal, no side effects.
-//! 7. A key seen before replays the stored response, or is `RRS-C0004` for a different request.
+//! 7. A key seen before replays the stored response, or is `RRS-C0004` for a different request (compared by a keyed
+//!    hash of the unredacted arguments, so a different secret is a different request).
 //! 8. Otherwise the journal's started row, the handler, then the finished row with the redacted result.
 //!
 //! A command that fails is `ExecuteResponse{ok: false, diagnostics}`; only the gate answers with HTTP errors.
@@ -31,7 +32,8 @@ use crate::commands::arguments::check_arguments;
 use crate::commands::context::CommandContext;
 use crate::commands::dispatch::dispatch;
 use crate::commands::journal::{
-    find_recent_journal_row, idempotency_key_lock, is_journaled, is_same_request, journal_finished, journal_started,
+    arguments_hash, find_recent_journal_row, idempotency_key_lock, is_journaled, is_same_request, journal_finished,
+    journal_started,
 };
 use crate::server_state::Server;
 
@@ -163,10 +165,11 @@ async fn run_checked_command(server: &Server, checked: &CheckedCommand, request:
     let key_lock = idempotency_key_lock(server, &label, &request.idempotency_key);
     // Held until the finished row is written, so a duplicate sent meanwhile waits and then finds it.
     let _key_guard = key_lock.lock().await;
+    let sent_arguments_hash = arguments_hash(&server.auth.owner_token_hash, &request.arguments_json);
     match find_recent_journal_row(server, &label, &request.idempotency_key) {
         Err(diagnostics) => unjournaled(Err(diagnostics)),
         Ok(None) => run_journaled(server, checked, request).await,
-        Ok(Some(row)) if !is_same_request(&request.command_id, &request.arguments_json, &row) => {
+        Ok(Some(row)) if !is_same_request(&request.command_id, &sent_arguments_hash, &row) => {
             let refusal = diagnostic(CODE_KEY_REUSED, &[("idempotency_key", &request.idempotency_key)]);
             unjournaled(Err(vec![refusal]))
         }

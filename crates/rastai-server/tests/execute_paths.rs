@@ -12,12 +12,16 @@ use rastai_core::commands::registry::add_plugin_commands;
 use rastai_core::ids::{IdPrefix, new_id};
 use rastai_core::paths::{rastai_db_path, user_settings_path};
 use rastai_core::principal::owner_principal;
+use rastai_core::principal::{Principal, PrincipalKind};
 use rastai_core::scopes::Scope;
 use rastai_core::time::now_unix_ms;
 use rastai_formats::hashing::hash_bytes;
 use rastai_proto::commands::v1::{CommandDescriptor, ExecuteRequest, ExecuteResponse};
+use rastai_server::commands::journal::arguments_hash;
 use rastai_server::daemon::RunningDaemon;
+use rastai_server::http::connect_json::execute_response_from_json;
 use rastai_server::http::sessions::find_scoped_token;
+use rastai_store::index::journal::JournalFinishedRow;
 use rastai_store::index::journal::{JournalRow, JournalStartedRow, get_journal};
 use rastai_store::index::kept_tables::ProjectRow;
 use rastai_store::index::reads::{list_table_columns, list_table_rows, open_index_reader};
@@ -26,11 +30,14 @@ use rastai_store::writer_thread::write_index;
 use serde_json::{Value, json};
 
 use common::{
-    execute_request, ok_result, remove_test_folder, response_codes, run_command, start_test_daemon, stop_test_daemon,
-    test_paths, token_principal,
+    execute_request, ok_result, owner_bearer, refusal_code, remove_test_folder, response_codes, run_command,
+    send_to_port, start_test_daemon, stop_test_daemon, test_paths, token_principal,
 };
 
 const REDACTED: &str = "<redacted>";
+const EXECUTE_PATH: &str = "/rastai.commands.v1.CommandService/Execute";
+const LOGIN_PATH: &str = "/api/login";
+const JSON: &str = "application/json";
 
 /// Runs one command as the owner.
 async fn run_as_owner(running: &RunningDaemon, command_id: &str, arguments: Value) -> ExecuteResponse {
@@ -332,6 +339,7 @@ async fn a_restart_closes_an_unfinished_row_as_c0005_and_its_key_runs_again() {
         arguments_json: arguments.to_string(),
         idempotency_key: "key-i".to_string(),
         started_unix_ms: now_unix_ms(),
+        arguments_hash: arguments_hash(&running.server.auth.owner_token_hash, &arguments.to_string()),
     };
     write_index(&running.server.store.index, IndexWrite::JournalStarted(started))
         .await
@@ -391,6 +399,114 @@ async fn the_same_key_with_another_request_is_c0004() {
     )
     .await;
     assert_eq!(reordered.journal_id, first.journal_id);
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+/// The finished row of an earlier `token.create` under `key`, as if it had been sent with `sent_arguments`: its stored
+/// arguments are `stored_arguments`, which is what `sent_arguments` redact to.
+async fn write_finished_row(
+    running: &RunningDaemon,
+    key: &str,
+    stored_arguments: &str,
+    sent_arguments: &str,
+) -> String {
+    let journal_id = new_id(IdPrefix::Journal).unwrap();
+    let started = JournalStartedRow {
+        journal_id: journal_id.clone(),
+        command_id: "token.create".to_string(),
+        principal: "owner".to_string(),
+        arguments_json: stored_arguments.to_string(),
+        idempotency_key: key.to_string(),
+        started_unix_ms: now_unix_ms(),
+        arguments_hash: arguments_hash(&running.server.auth.owner_token_hash, sent_arguments),
+    };
+    let finished = JournalFinishedRow {
+        journal_id: journal_id.clone(),
+        ok: true,
+        code: String::new(),
+        result_json: json!({"token_id": "tok_earlier", "token": REDACTED}).to_string(),
+        job_id: String::new(),
+        finished_unix_ms: now_unix_ms(),
+    };
+    let index = &running.server.store.index;
+    write_index(index, IndexWrite::JournalStarted(started)).await.unwrap();
+    write_index(index, IndexWrite::JournalFinished(finished)).await.unwrap();
+    journal_id
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_same_key_with_another_secret_is_c0004_not_a_replay() {
+    let paths = test_paths("x-secret");
+    let running = start_test_daemon(&paths).await;
+    // No core command takes a secret argument yet, so the earlier request is written as its row would be: arguments
+    // that redact to exactly what this request's arguments redact to, sent with another secret (the hash differs).
+    let arguments = json!({"name": "ci", "preset": "chat-only"}).to_string();
+    let earlier_secret = json!({"name": "ci", "preset": "chat-only", "password": "first"}).to_string();
+    let earlier_id = write_finished_row(&running, "key-s", &arguments, &earlier_secret).await;
+    let sent = ExecuteRequest {
+        idempotency_key: "key-s".to_string(),
+        ..execute_request("token.create", &arguments)
+    };
+    let response = run_command(&running.server, &owner_principal(), sent.clone()).await;
+    assert_eq!(response_codes(&response), ["RRS-C0004"]);
+    assert_ne!(response.journal_id, earlier_id);
+    // A row whose hash is that of these very arguments is the same request, and replays.
+    let same_id = write_finished_row(&running, "key-t", &arguments, &arguments).await;
+    let replay = run_command(
+        &running.server,
+        &owner_principal(),
+        ExecuteRequest {
+            idempotency_key: "key-t".to_string(),
+            ..sent
+        },
+    )
+    .await;
+    assert_eq!(replay.journal_id, same_id);
+    assert_eq!(ok_result(&replay)["token_id"], "tok_earlier");
+    // A row from before the hash existed can't be compared, so its key is refused rather than replayed.
+    let unhashed_id = new_id(IdPrefix::Journal).unwrap();
+    let unhashed = JournalStartedRow {
+        journal_id: unhashed_id,
+        command_id: "token.create".to_string(),
+        principal: "owner".to_string(),
+        arguments_json: arguments.clone(),
+        idempotency_key: "key-u".to_string(),
+        started_unix_ms: now_unix_ms(),
+        arguments_hash: String::new(),
+    };
+    write_index(&running.server.store.index, IndexWrite::JournalStarted(unhashed))
+        .await
+        .unwrap();
+    let old_row = run_with_key(
+        &running,
+        "token.create",
+        json!({"name": "ci", "preset": "chat-only"}),
+        "key-u",
+    )
+    .await;
+    assert_eq!(response_codes(&old_row), ["RRS-C0004"]);
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_keyed_row_stores_a_hash_and_never_the_arguments_it_was_made_from() {
+    let paths = test_paths("x-hash");
+    let running = start_test_daemon(&paths).await;
+    let keyed = run_with_key(
+        &running,
+        "token.create",
+        json!({"name": "ci", "preset": "chat-only"}),
+        "key-h",
+    )
+    .await;
+    let row = journal_row(&running, &keyed.journal_id);
+    assert!(row.arguments_hash.starts_with("blake3:"), "{}", row.arguments_hash);
+    // Keyed with the owner token's hash: a plain hash of the arguments isn't what is stored.
+    assert_ne!(row.arguments_hash, hash_bytes(row.arguments_json.as_bytes()));
+    let unkeyed = run_as_owner(&running, "token.create", json!({"name": "ci2", "preset": "chat-only"})).await;
+    assert_eq!(journal_row(&running, &unkeyed.journal_id).arguments_hash, "");
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }
@@ -478,6 +594,108 @@ async fn a_token_hands_out_only_the_scopes_it_holds() {
     )
     .await;
     assert_eq!(ok_result(&owner_made)["scopes"], json!(["chat", "secrets"]));
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+/// One Connect JSON `Execute` over loopback HTTP with a bearer credential, as a script would send it.
+async fn execute_over_http(
+    port: u16,
+    bearer: &str,
+    command_id: &str,
+    arguments: Value,
+    dry_run: bool,
+) -> ExecuteResponse {
+    let body = json!({"command_id": command_id, "arguments_json": arguments.to_string(), "dry_run": dry_run});
+    let headers = [("Authorization", bearer), ("Content-Type", JSON)];
+    let response = send_to_port(port, "POST", EXECUTE_PATH, &headers, body.to_string().as_bytes()).await;
+    assert_eq!(response.status, 200, "{}", String::from_utf8_lossy(&response.body));
+    execute_response_from_json(&response.body).unwrap()
+}
+
+/// `POST /api/login` from the daemon's own origin, the way the web app redeems a code.
+async fn log_in(port: u16, code: &str) -> rastai_transport::http_client::HttpResponse {
+    let origin = format!("http://127.0.0.1:{port}");
+    let body = json!({"code": code}).to_string();
+    send_to_port(port, "POST", LOGIN_PATH, &[("Origin", &origin)], body.as_bytes()).await
+}
+
+fn login_code_count(running: &RunningDaemon) -> usize {
+    running.server.auth.login_codes.lock().unwrap().len()
+}
+
+fn session_count(running: &RunningDaemon) -> usize {
+    running.server.auth.sessions.lock().unwrap().len()
+}
+
+/// `token.create` over HTTP with a list of scopes.
+async fn create_token_over_http(port: u16, bearer: &str, name: &str, scopes: &[&str]) -> ExecuteResponse {
+    let arguments = json!({"name": name, "scopes": scopes});
+    execute_over_http(port, bearer, "token.create", arguments, false).await
+}
+
+/// A bearer that isn't the owner asks for a login code, for real and as a dry run, and gets `RRS-C1005` and no code.
+async fn assert_login_code_refused(port: u16, bearer: &str) {
+    for dry_run in [false, true] {
+        let refused = execute_over_http(port, bearer, "token.login_code.create", json!({}), dry_run).await;
+        assert_eq!(response_codes(&refused), ["RRS-C1005"], "dry_run {dry_run}");
+        assert!(refused.diagnostics[0].message.contains("token.login_code.create"));
+        assert!(refused.result_json.is_empty());
+    }
+}
+
+/// A plugin holding every scope it could ask for, and the owner narrowed to a plugin UI, aren't the owner either.
+async fn assert_no_plugin_gets_a_login_code(running: &RunningDaemon) {
+    let plugin = Principal {
+        kind: PrincipalKind::Plugin,
+        id: "acme".to_string(),
+        scopes: vec![Scope::SystemAdmin, Scope::Secrets, Scope::Read],
+    };
+    let request = execute_request("token.login_code.create", "{}");
+    let plugin_refused = run_command(&running.server, &plugin, request.clone()).await;
+    assert_eq!(response_codes(&plugin_refused), ["RRS-C1005"]);
+    let narrowed = ExecuteRequest {
+        acting_plugin_id: "acme".to_string(),
+        ..request
+    };
+    let narrowed_refused = run_command(&running.server, &owner_principal(), narrowed).await;
+    assert_eq!(response_codes(&narrowed_refused), ["RRS-C1005"]);
+}
+
+/// The attack the final review reproduced: a token holding only `system.admin` asked for a login code, redeemed it at
+/// `/api/login`, got a session (which runs as the owner) and then made tokens with any scope. A login code is
+/// owner-only, so every step that would hand it owner rights is refused, and no code or session ever exists.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_system_admin_token_never_becomes_the_owner_through_a_login_code() {
+    let paths = test_paths("x-login-escalate");
+    let running = start_test_daemon(&paths).await;
+    let port = running.http_port;
+    let owner = owner_bearer(&paths);
+    let created = create_token_over_http(port, &owner, "admin", &["system.admin"]).await;
+    let admin_token = ok_result(&created)["token"].as_str().unwrap().to_string();
+    let admin = format!("Bearer {admin_token}");
+    // The step the attack started with.
+    assert_login_code_refused(port, &admin).await;
+    // A token it makes for itself holds no more than it does, and is refused the same way.
+    let child = create_token_over_http(port, &admin, "child", &["system.admin"]).await;
+    assert_login_code_refused(
+        port,
+        &format!("Bearer {}", ok_result(&child)["token"].as_str().unwrap()),
+    )
+    .await;
+    let wider = create_token_over_http(port, &admin, "wider", &["secrets"]).await;
+    assert_eq!(response_codes(&wider), ["RRS-C1005"]);
+    assert_no_plugin_gets_a_login_code(&running).await;
+    // Nothing it holds redeems at /api/login: not its own text, not a made-up code.
+    for guess in [admin_token.as_str(), "00".repeat(32).as_str()] {
+        let login = log_in(port, guess).await;
+        assert_eq!((login.status, refusal_code(&login).as_str()), (401, "RRS-C1007"));
+    }
+    assert_eq!((login_code_count(&running), session_count(&running)), (0, 0));
+    // The owner still signs in: a code from the owner token redeems once.
+    let code = execute_over_http(port, &owner, "token.login_code.create", json!({}), false).await;
+    let login = log_in(port, ok_result(&code)["code"].as_str().unwrap()).await;
+    assert_eq!((login.status, session_count(&running)), (200, 1));
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }

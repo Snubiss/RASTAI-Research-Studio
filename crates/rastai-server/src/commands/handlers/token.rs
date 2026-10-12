@@ -9,6 +9,10 @@
 //! Only the owner creates tokens with any scope (flows/platform.md 4.3). Any other principal that reaches
 //! `token.create` (a token or a plugin holding `system.admin`) can only hand out scopes it holds itself, so no token
 //! is ever a way to more rights than its creator had (`RRS-C1005`, the same code as a missing scope).
+//!
+//! A login code is owner-only (flows/platform.md 4.1): its session is the owner's, with every scope, so a code made
+//! for a token or a plugin, even one holding `system.admin`, would turn that principal into the owner. Every principal
+//! but the owner is refused `token.login_code.create` with `RRS-C1005`, dry runs included.
 
 use rastai_core::commands::output::CommandOutput;
 use rastai_core::ids::{IdPrefix, new_id};
@@ -39,6 +43,9 @@ const TOKEN_SECRET_BYTES: usize = 32;
 const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
 const CODE_SCOPE_NOT_GRANTED: &str = "RRS-C1005";
 const CREATE_COMMAND_ID: &str = "token.create";
+const LOGIN_CODE_COMMAND_ID: &str = "token.login_code.create";
+/// What `RRS-C1005` names as the needed scope of an owner-only command: no scope grants it.
+const OWNER_ONLY: &str = "owner";
 const NAME_PATH: &str = "#/name";
 const SCOPES_PATH: &str = "#/scopes";
 const TOKEN_ID_PATH: &str = "#/token_id";
@@ -54,6 +61,7 @@ pub(crate) async fn login_code_create(
     context: &CommandContext<'_>,
     _arguments: TokenLoginCodeCreateArgs,
 ) -> Result<CommandOutput, Vec<Diagnostic>> {
+    check_owner(context.principal, LOGIN_CODE_COMMAND_ID)?;
     if context.dry_run {
         let planned = TokenLoginCodeCreateResult {
             code: String::new(),
@@ -237,6 +245,20 @@ fn check_grantable(creator: &Principal, scopes: &[Scope]) -> Result<(), Vec<Diag
     if refusals.is_empty() { Ok(()) } else { Err(refusals) }
 }
 
+/// A login code's session runs as the owner (http/gate.rs), so only the owner may ask for one. A token or a plugin
+/// holding `system.admin` reaches the handler past the scope check and is refused here.
+fn check_owner(caller: &Principal, command_id: &str) -> Result<(), Vec<Diagnostic>> {
+    if caller.kind == PrincipalKind::Owner {
+        return Ok(());
+    }
+    let label = principal_label(caller);
+    let refusal = diagnostic(
+        CODE_SCOPE_NOT_GRANTED,
+        &[("command_id", command_id), ("scope", OWNER_ONLY), ("principal", &label)],
+    );
+    Err(vec![refusal])
+}
+
 fn scope_not_granted(scope: &Scope, creator_label: &str) -> Diagnostic {
     let name = scope_name(scope);
     diagnostic(
@@ -355,6 +377,31 @@ mod tests {
         assert!(refusals[1].message.contains("secrets"), "{}", refusals[1].message);
         // What it holds, it may pass on, its own system.admin included.
         check_grantable(&admin, &[Scope::Read, Scope::SystemAdmin]).unwrap();
+    }
+
+    #[test]
+    fn only_the_owner_may_ask_for_a_login_code() {
+        check_owner(&rastai_core::principal::owner_principal(), LOGIN_CODE_COMMAND_ID).unwrap();
+        let every_scope = vec![Scope::SystemAdmin, Scope::Read, Scope::Chat, Scope::Secrets];
+        let plugin = Principal {
+            kind: PrincipalKind::Plugin,
+            id: "acme".to_string(),
+            scopes: every_scope.clone(),
+        };
+        for caller in [token_holding(every_scope), plugin] {
+            let refusal = check_owner(&caller, LOGIN_CODE_COMMAND_ID).unwrap_err();
+            assert_eq!(refusal[0].code, CODE_SCOPE_NOT_GRANTED);
+            assert!(
+                refusal[0].message.contains(LOGIN_CODE_COMMAND_ID),
+                "{}",
+                refusal[0].message
+            );
+            assert!(
+                refusal[0].message.contains(&principal_label(&caller)),
+                "{}",
+                refusal[0].message
+            );
+        }
     }
 
     #[test]
