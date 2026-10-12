@@ -12,9 +12,9 @@
 //!   (`scoped_tokens`), loaded at startup and updated by `token.create` and `token.revoke`, so the gate stays one
 //!   plain function over this struct and a revoked token is refused on its very next request (`RRS-C1006`).
 //!
-//! Login codes and sessions live in memory only: a restart signs everyone out. Only hashes are kept (`hash_bytes` of the hex text as
-//! sent), so a memory dump of the daemon holds no usable code, cookie or key, and comparing hashes takes the same
-//! time whichever character of a guess is wrong. No HTTP types here; the login endpoint is in router.rs.
+//! Login codes and sessions live in memory only: a restart signs everyone out. Only hashes are kept (`hash_bytes`
+//! of the hex text as sent), so a memory dump of the daemon holds no usable code, cookie or key, and comparing
+//! hashes takes the same time whichever character of a guess is wrong. No HTTP types here; the login endpoint is in router.rs.
 
 // A refusal is a `Diagnostic`, the contract type every caller renders; it is larger than clippy's default for an
 // `Err`, and refusals are rare, so it is returned as it is rather than boxed.

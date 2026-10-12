@@ -914,7 +914,7 @@ sequenceDiagram
   SRV->>SRV: mark revoked, drop the cached entry, close its open streams
 ```
 
-- Presets: `chat-only` = `chat`; `mcp-default` = `read`, `chat`, `project` (contracts §6.3). Custom scope lists are allowed. Only the owner can create tokens (`system.admin`).
+- Presets: `chat-only` = `chat`; `mcp-default` = `read`, `chat`, `project` (contracts §6.3). Custom scope lists are allowed. Only the owner can create tokens (`system.admin`) with any scope; a token or plugin that holds `system.admin` can create only tokens whose scopes it holds itself, and is refused each other scope with `RRS-C1005`.
 - `rastai mcp` without `RASTAI_TOKEN` answers every request with `RRS-C3002` and a fix that runs `token.create` with `mcp-default`. It never falls back to the owner token: an agent gets scopes only when the owner grants them.
 - MCP tool names are command ids with dots replaced by `__`. Malformed JSON-RPC → `RRS-C3001`.
 - Revocation applies on the next request; open streams for that token close with `RRS-C1006`.

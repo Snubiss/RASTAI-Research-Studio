@@ -122,7 +122,9 @@ pub(crate) fn find_recent_journal_row(
 
 /// True when a request carries the same command and arguments as an earlier row. Arguments are compared as the
 /// journal holds them, redacted and in canonical form, so key order and spacing don't matter (two different
-/// secrets compare equal: the journal never had the first one to compare with).
+/// secrets compare equal: the journal never had the first one to compare with). A plugin command's arguments are
+/// redacted whole, so any two of its requests compare equal; before plugin forwarding runs one (M4), the journal
+/// needs a BLAKE3 hash of the canonical arguments to compare instead, a contract change of its own.
 pub(crate) fn is_same_request(command_id: &str, arguments_json: &str, row: &JournalRow) -> bool {
     if row.command_id != command_id {
         return false;
