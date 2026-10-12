@@ -48,9 +48,16 @@ const TRITON_CACHE_FOLDER: &str = "triton";
 const CUDA_DEVICE_ORDER: &str = "PCI_BUS_ID";
 /// "1" turns a switch on.
 const ON: &str = "1";
+/// The variable that carries the job token to the worker (contracts 3.2).
+const JOB_TOKEN_VARIABLE: &str = "RASTAI_JOB_TOKEN";
+/// What a `{:?}` prints in place of the job token. The token lets whoever holds it act as the job's worker, and a
+/// struct printed into a log or a test failure must not hand it out, so every struct that holds it has a
+/// hand-written Debug that prints this instead.
+pub(crate) const REDACTED_TOKEN: &str = "<redacted>";
 
-/// What the job's environment variables are made from, besides the node's own environment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the job's environment variables are made from, besides the node's own environment. Debug is hand-written:
+/// it never prints the token.
+#[derive(Clone, PartialEq, Eq)]
 pub struct WorkerVariableInputs {
     /// The 64 hex characters of the job token (`RASTAI_JOB_TOKEN`).
     pub job_token: String,
@@ -65,15 +72,16 @@ pub struct WorkerVariableInputs {
     pub plugin_data_folder: Option<PathBuf>,
 }
 
-/// The job's environment, and whether the node had `HSA_OVERRIDE_GFX_VERSION` set (and so left it out).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The job's environment, and whether the node had `HSA_OVERRIDE_GFX_VERSION` set (and so left it out). Debug is
+/// hand-written: it never prints the token's value.
+#[derive(Clone, PartialEq, Eq)]
 pub struct WorkerVariables {
     pub variables: Vec<(String, String)>,
     pub removed_gfx_override: bool,
 }
 
-/// Everything one launch needs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Everything one launch needs. Debug is hand-written: it never prints the token's value.
+#[derive(Clone, PartialEq, Eq)]
 pub struct WorkerLaunch {
     /// The environment folder; its interpreter is `bin/python`.
     pub environment_folder: PathBuf,
@@ -91,6 +99,55 @@ pub struct SpawnedWorker {
     pub stderr_start_offset: u64,
 }
 
+impl std::fmt::Debug for WorkerVariableInputs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkerVariableInputs")
+            .field("job_token", &REDACTED_TOKEN)
+            .field("run_id", &self.run_id)
+            .field("gpu_indices", &self.gpu_indices)
+            .field("amd_gpus", &self.amd_gpus)
+            .field("torch_cache_folder", &self.torch_cache_folder)
+            .field("plugin_data_folder", &self.plugin_data_folder)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for WorkerVariables {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkerVariables")
+            .field("variables", &redacted_variables(&self.variables))
+            .field("removed_gfx_override", &self.removed_gfx_override)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for WorkerLaunch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorkerLaunch")
+            .field("environment_folder", &self.environment_folder)
+            .field("job_file", &self.job_file)
+            .field("run_folder", &self.run_folder)
+            .field("variables", &redacted_variables(&self.variables))
+            .finish()
+    }
+}
+
+/// The variables as Debug shows them: the job token's value is replaced, every other one is kept.
+fn redacted_variables(variables: &[(String, String)]) -> Vec<(&str, &str)> {
+    let mut shown = Vec::with_capacity(variables.len());
+    for (name, value) in variables {
+        if name == JOB_TOKEN_VARIABLE {
+            shown.push((name.as_str(), REDACTED_TOKEN));
+        } else {
+            shown.push((name.as_str(), value.as_str()));
+        }
+    }
+    shown
+}
+
 /// The node's own environment variables. One that isn't UTF-8 can't be one the job is given, so it is skipped.
 pub fn node_variables() -> Vec<(String, String)> {
     std::env::vars_os()
@@ -105,7 +162,7 @@ pub fn worker_variables(node_variables: &[(String, String)], inputs: &WorkerVari
         .filter(|(name, _)| is_copied_variable(name))
         .cloned()
         .collect();
-    push_variable(&mut variables, "RASTAI_JOB_TOKEN", inputs.job_token.clone());
+    push_variable(&mut variables, JOB_TOKEN_VARIABLE, inputs.job_token.clone());
     push_variable(&mut variables, "RASTAI_RUN_ID", inputs.run_id.clone());
     push_variable(&mut variables, "CUDA_DEVICE_ORDER", CUDA_DEVICE_ORDER.to_string());
     let visible_name = visible_devices_variable(inputs.amd_gpus);
@@ -395,6 +452,35 @@ mod tests {
             Some("/d/plugin-data/evaluation")
         );
         assert!(!result.removed_gfx_override);
+    }
+
+    // A token printed with {:?} would end up in a log or a test failure, where anyone reading it could act as the
+    // job's worker.
+    #[test]
+    fn debug_never_prints_the_job_token() {
+        let inputs = inputs();
+        let token = inputs.job_token.clone();
+        let variables = worker_variables(&node(), &inputs);
+        let launch = WorkerLaunch {
+            environment_folder: PathBuf::from("/e/cpu"),
+            job_file: PathBuf::from("/r/job.json"),
+            run_folder: PathBuf::from("/r"),
+            variables: variables.variables.clone(),
+        };
+        let printed = [
+            format!("{inputs:?}"),
+            format!("{variables:?}"),
+            format!("{launch:?}"),
+            format!("{launch:#?}"),
+        ];
+        for text in printed {
+            assert!(!text.contains(&token), "{text}");
+            assert!(text.contains(REDACTED_TOKEN), "{text}");
+        }
+        assert!(
+            format!("{launch:?}").contains("RASTAI_RUN_ID"),
+            "the other variables still show"
+        );
     }
 
     #[test]
