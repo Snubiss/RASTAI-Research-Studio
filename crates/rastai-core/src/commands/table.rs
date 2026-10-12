@@ -92,14 +92,15 @@ pub const COMMANDS: &[CommandRow] = &[
         experimental: false,
         since_version: SKELETON_VERSION,
     },
-    // `read` lets the call reach the handler; contracts 6.4 gives job.cancel "the scope of the job", so the handler
-    // also checks that the caller holds the scope of the command that started the job.
+    // Never `read`: the row scope decides journaling, the update's maintenance refusal and what a read-only token
+    // reaches. `training` because a training job is M1's only job kind; the handler also checks that the caller holds
+    // the scope of the command that started the job (contracts 6.4).
     CommandRow {
         command_id: "job.cancel",
         title: "Cancel job",
         summary: "Stop a job at its next step boundary, without a new checkpoint.",
         section: "home",
-        scope: Scope::Read,
+        scope: Scope::Training,
         kind: CommandKind::Sync,
         stability: Stability::Preview,
         undoable: false,

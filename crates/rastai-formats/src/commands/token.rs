@@ -1,7 +1,8 @@
 //! The `token` area's types (contracts 6.3, 6.4): the one-time login code, and scoped API tokens.
 //!
-//! A login code and a new token's text are credentials shown once, so their fields are `secret`: the command
-//! journal writes them as `"<redacted>"` (contracts 5.1), and only the caller ever sees them.
+//! A login code and a new token's text are credentials shown once, so their result fields are `secret`: the command
+//! journal writes them as `"<redacted>"` in `result_json` (contracts 5.1), and only the caller ever sees them. An
+//! idempotent replay of `token.create` returns that redacted result, so it never makes a second token.
 
 use serde::{Deserialize, Serialize};
 

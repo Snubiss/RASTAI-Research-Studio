@@ -40,7 +40,8 @@ pub struct JournalStartedRow {
 }
 
 /// A whole journal row. Until the command finishes, `ok` and `finished_unix_ms` are `None` and the other finished
-/// columns are "".
+/// columns are "". `result_json` is written with the result's `secret` and `content` fields already redacted, like
+/// `arguments_json` (contracts 5.1), so an idempotent replay returns the redacted result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JournalRow {
     pub journal_id: String,

@@ -894,7 +894,7 @@ Lane A · size L · type task · depends on M1-26 · claims L0
 
 - **Goal:** Every caller ends in `execute_command`: registry lookup, scope check, argument check (layer 2 with paths), idempotency, the journal with secret redaction, dispatch as one `match` arm per command, plus the first handlers (system.status, system.shutdown, command.list, settings.get, settings.set, `token.*`). Adds the L0 floor test of ADR-0017.
 - **Files:** `crates/rastai-server/src/commands/{execute, dispatch, context, arguments, journal}.rs`; `src/http/command_endpoints.rs`; `src/commands/handlers/{system, command, settings, token}.rs`; `tests/{execute_paths, dispatch_complete, l0_floor}.rs`
-- **Test:** Each branch of platform flow 3.2 with its code (RRS-C0001, RRS-C0002 with paths, RRS-C1005, idempotent replay, RRS-C0004 on key reuse); secret fields redacted in the journal; dispatch_complete; l0_floor: every registered command run with dry_run returns ok or a catalog-coded diagnostic.
+- **Test:** Each branch of platform flow 3.2 with its code (RRS-C0001, RRS-C0002 with paths, RRS-C1005, idempotent replay, RRS-C0004 on key reuse); secret and content fields redacted in the journal, in `arguments_json` and `result_json` alike (contracts 5.1: `token.create`'s token never reaches rastai.db, and its idempotent replay answers `<redacted>`); dispatch_complete; l0_floor: every registered command run with dry_run returns ok or a catalog-coded diagnostic.
 - **Docs:** [Layout: Rust control plane §8.3, §10](../architecture/layout/rust-control-plane.md), [Flows: platform §3.1–3.2](../architecture/flows/platform.md), [ADR-0017](../adr/0017-definition-of-done-l0-l3.md)
 
 #### M1-28 rastai-server: event bus, Subscribe and run-log indexing
@@ -1054,7 +1054,7 @@ Lane B · size L · type task · depends on M1-28, M1-45, M1-46, M1-22 · claims
 
 - **Goal:** Wire the skeleton together: the daemon starts the embedded node and reaches it over node.sock like a remote one, serves NodeHubService (Heartbeat, ExecuteCommand), reconciles with ListJobs after a connect, and schedules jobs (queue, trivial placement on the local node, launch writes run.json and calls StartJob). Handlers for train.start (classification), job.list, job.get, job.cancel, node.list and node.status.
 - **Files:** `crates/rastai-server/src/nodes/{node_links, node_hub, reconcile}.rs`; `src/scheduler/{queue, placement, launch}.rs`; `src/commands/handlers/{job, train, node}.rs`; `src/daemon.rs` (start_embedded_node, connect_to_node)
-- **Test:** train.start returns a job_id at once; the job reaches succeeded with every metric indexed; job.cancel → cancelled; a daemon restart while the job runs reconciles through ListJobs and the run tail resumes from acked_sequence.
+- **Test:** train.start returns a job_id at once; the job reaches succeeded with every metric indexed; job.cancel → cancelled; job.cancel's row holds `training` and its handler also checks the scope of the command that started the job (contracts 6.4), so a token with only `read` gets RRS-C1005 and the train job keeps running; a daemon restart while the job runs reconciles through ListJobs and the run tail resumes from acked_sequence.
 - **Docs:** [Layout: Rust control plane §8.8](../architecture/layout/rust-control-plane.md), [Flows: platform §2.1–2.3, §5.1](../architecture/flows/platform.md)
 
 #### M1-48 Kill -9 crash suite for the skeleton (M1 exit gate)
