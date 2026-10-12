@@ -1788,6 +1788,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-J1005",
+        severity: Severity::Error,
+        title: "Worker stopped on an unexpected error",
+        message: "The worker of job {job_id} stopped on an unexpected {error_type}.",
+        basic_text: "This task stopped because of a problem inside Rastai or a plugin.",
+        fix_text: "Check the job's stderr.log for the details, then run it again; if it keeps happening, report it.",
+        fix_command_id: "",
+        docs_anchor: "rrs-j1005",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-J2001",
         severity: Severity::Error,
         title: "Worker couldn't start",
