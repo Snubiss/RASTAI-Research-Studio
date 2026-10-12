@@ -8,8 +8,9 @@ version.workspace = true
 publish.workspace = true
 
 # M1-42 lands the entry, the identity, the local handshake, GetHardware, and the hardware and telemetry readers
-# (layout: rust-node-gateway-proto.md section 7, build-order step 1); M1-43 the jobs. Run events and live streams
-# (M1-44), reattach and heartbeats (M1-45) add their files, and with them the later internal crates of contracts 2.1.
+# (layout: rust-node-gateway-proto.md section 7, build-order step 1); M1-43 the jobs; M1-44 the run-event tail and the
+# live streams. Reattach and heartbeats (M1-45) add their files, and with them the later internal crates of contracts
+# 2.1.
 [dependencies]
 rastai-diag = { path = "../rastai-diag" }
 # Paths, ids, random bytes, versions, settings and the Diagnostic conversion for the wire.
@@ -18,8 +19,8 @@ rastai-core = { path = "../rastai-core" }
 rastai-formats = { path = "../rastai-formats" }
 # NodeService and its messages. The tonic service code is behind the grpc feature.
 rastai-proto = { path = "../rastai-proto", features = ["grpc"] }
-# The event-log reader, for what a job's last records say when it exits, and free_bytes for RRS-S3002 (never the
-# databases; layout 7.10).
+# The event-log reader, for the run-event tail and for what a job's last records say when it exits, and free_bytes
+# for RRS-S3002 (never the databases; layout 7.10).
 rastai-store = { path = "../rastai-store" }
 # node.sock: bind with the same-user checks, and serve gRPC on it.
 rastai-transport = { path = "../rastai-transport" }

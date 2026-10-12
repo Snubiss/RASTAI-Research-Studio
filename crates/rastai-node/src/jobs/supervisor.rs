@@ -10,16 +10,16 @@
 //! exit 5 (another writer holds the event log's lock) that terminal write lands on the refused job's own `job.json`:
 //! the writer holding the lock is one the node had no live `job.json` for.
 //!
-//! Each running job has two background tasks, started in `watch_job`: one waits for the process to exit and
+//! Each running job has three background tasks, started in `watch_job`: one waits for the process to exit and
 //! classifies the exit (exit_cause.rs) on a blocking thread, since that reads the run's log and writes `job.json`;
 //! one fails the job with `RRS-J0002` and kills its group when the worker hasn't registered within
-//! `WORKER_REGISTER_TIMEOUT_SECONDS`. A `CANCEL`, `STOP` or `TERMINATE` starts a third that kills the group if the
-//! job is still alive after `STOP_GRACE_SECONDS` (`RRS-J1003`).
+//! `WORKER_REGISTER_TIMEOUT_SECONDS`; one follows its stdout.log and stderr.log onto the live queues (log_lines.rs).
+//! A `CANCEL`, `STOP` or `TERMINATE` starts a fourth that kills the group if the job is still alive after
+//! `STOP_GRACE_SECONDS` (`RRS-J1003`).
 //!
 //! Not here yet: leases and sandbox reservations at admission (M3, M5), an environment still installing that keeps
 //! the job `queued` with `RRS-H2006` (M2-16), the disk-free check at admission (`RRS-S3001`, with a job's space
-//! estimate), the heartbeat sent at once on every state change (M1-45), following the logs into WatchLive (M1-44),
-//! and reattach after a node restart (M1-45).
+//! estimate), the heartbeat sent at once on every state change (M1-45), and reattach after a node restart (M1-45).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, MutexGuard, PoisonError};
@@ -53,7 +53,7 @@ use crate::jobs::exit_cause::{
     classify_exit, exit_code_for_info, oom_kill_rose, process_exit_from_status, read_run_log_facts, start_oom_watch,
 };
 use crate::jobs::job_file::{JobFile, job_file_path, read_job_file, write_job_file};
-use crate::jobs::log_lines::{STDERR_LOG_FILE, read_log_tail};
+use crate::jobs::log_lines::{JobLogs, STDERR_LOG_FILE, STDOUT_LOG_FILE, follow_job_logs, read_log_tail};
 use crate::jobs::signals::{GroupSignal, ProcessIdentity, is_same_process, send_control, signal_process_group};
 use crate::jobs::spawn::{
     REDACTED_TOKEN, SpawnedWorker, WorkerLaunch, WorkerVariableInputs, node_variables, prepare_job_socket_folder,
@@ -129,7 +129,9 @@ pub struct JobRecord {
     pub permissions: JobPermissions,
     /// Who the worker's process is, from the spawn on.
     pub process: Option<ProcessIdentity>,
-    /// Where this job's output starts in the run's `stderr.log`, which earlier jobs of the run appended to.
+    /// Where this job's output starts in the run's `stdout.log` and `stderr.log`, which earlier jobs of the run
+    /// appended to.
+    pub stdout_start_offset: u64,
     pub stderr_start_offset: u64,
     pub oom_watch: Option<OomWatch>,
     /// Why the node killed the group itself, if it did.
@@ -418,6 +420,7 @@ fn new_record(state: &NodeState, spec: &JobSpec) -> JobRecord {
         reason: String::new(),
         permissions: job_permissions(spec),
         process: None,
+        stdout_start_offset: 0,
         stderr_start_offset: 0,
         oom_watch: None,
         node_kill: None,
@@ -485,7 +488,13 @@ async fn record_spawned_worker(
 ) -> Result<Child, String> {
     let identity = spawned.identity;
     let mut child = spawned.child;
-    record_process(state, job_id, &identity, spawned.stderr_start_offset);
+    record_process(
+        state,
+        job_id,
+        &identity,
+        spawned.stdout_start_offset,
+        spawned.stderr_start_offset,
+    );
     job_file.pid = identity.pid;
     job_file.process_group_id = identity.process_group_id;
     job_file.process_start_ticks = identity.start_ticks;
@@ -590,8 +599,9 @@ fn environment_folder(state: &NodeState, environment_id: &str) -> Option<PathBuf
 
 // ---- Watching a running job ----
 
-/// Starts the exit watcher and the register timer for a spawned job.
+/// Starts the exit watcher, the register timer and the log follower for a spawned job.
 fn watch_job(state: &Arc<NodeState>, job_id: &str, mut child: Child) {
+    start_log_follower(state, job_id);
     let exit_state = Arc::clone(state);
     let exit_job_id = job_id.to_string();
     tokio::spawn(async move {
@@ -628,6 +638,22 @@ fn watch_job(state: &Arc<NodeState>, job_id: &str, mut child: Child) {
             let _ = kill_job_group(&timer_state, &timer_job_id, kill).await;
         }
     });
+}
+
+/// Follows the job's stdout.log and stderr.log onto the live queues (log_lines.rs), from where its own output starts.
+fn start_log_follower(state: &Arc<NodeState>, job_id: &str) {
+    let found = {
+        let table = lock_jobs(state);
+        find_record(&table, job_id).map(|record| JobLogs {
+            stdout_path: record.run_folder.join(STDOUT_LOG_FILE),
+            stderr_path: record.run_folder.join(STDERR_LOG_FILE),
+            stdout_offset: record.stdout_start_offset,
+            stderr_offset: record.stderr_start_offset,
+        })
+    };
+    if let Some(logs) = found {
+        tokio::spawn(follow_job_logs(Arc::clone(state), job_id.to_string(), logs));
+    }
 }
 
 /// Classifies the exit and ends the job.
@@ -990,6 +1016,28 @@ async fn refuse_worker_protocol(state: &NodeState, job_id: &str, worker_version:
     refusal
 }
 
+// ---- What the event-log tail and the log follower ask ----
+
+/// True while the run has a writer that may still append to its event log (run_events.rs): a job in the table that
+/// holds the run, or a `job.json` with no `final_state` whose process is still the one it names, such as a job from
+/// before a node restart that nothing has reattached yet (M1-45). It may read that small file, so it is called off the
+/// runtime's threads.
+pub(crate) fn run_has_live_writer(state: &NodeState, run_id: &str) -> bool {
+    let held_in_table = {
+        let table = lock_jobs(state);
+        table
+            .records
+            .iter()
+            .any(|record| record.holds_run && record.spec.run_id == run_id)
+    };
+    held_in_table || job_file_is_live(&job_file_path(&run_dir(&state.paths, run_id)))
+}
+
+/// True once the job has ended, or the table no longer holds it.
+pub(crate) fn job_has_ended(state: &NodeState, job_id: &str) -> bool {
+    job_info(state, job_id).is_none_or(|info| is_terminal_job_state(info.state()))
+}
+
 // ---- Small table helpers ----
 
 fn lock_jobs(state: &NodeState) -> MutexGuard<'_, JobTable> {
@@ -1017,7 +1065,13 @@ fn record_token_hash(state: &NodeState, job_id: &str, token_hash: &str) {
     }
 }
 
-fn record_process(state: &NodeState, job_id: &str, identity: &ProcessIdentity, stderr_start_offset: u64) {
+fn record_process(
+    state: &NodeState,
+    job_id: &str,
+    identity: &ProcessIdentity,
+    stdout_start_offset: u64,
+    stderr_start_offset: u64,
+) {
     let oom_watch = start_oom_watch(identity.pid);
     let mut table = lock_jobs(state);
     if let Some(record) = find_record_mut(&mut table, job_id) {
@@ -1025,6 +1079,7 @@ fn record_process(state: &NodeState, job_id: &str, identity: &ProcessIdentity, s
         record.info.process_group_id = identity.process_group_id;
         record.info.started_unix_ms = now_unix_ms();
         record.process = Some(identity.clone());
+        record.stdout_start_offset = stdout_start_offset;
         record.stderr_start_offset = stderr_start_offset;
         record.oom_watch = oom_watch;
     }
@@ -1261,6 +1316,7 @@ exec sleep 60
             reason: String::new(),
             permissions: JobPermissions::default(),
             process: None,
+            stdout_start_offset: 0,
             stderr_start_offset: 0,
             oom_watch: None,
             node_kill: None,

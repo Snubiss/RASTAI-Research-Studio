@@ -102,6 +102,21 @@ pub fn open_event_log(path: &Path) -> Result<EventLogReader, StoreError> {
     })
 }
 
+/// Opens a log to read on from a frame an earlier reader of the same file reached: `offset` is that reader's
+/// `reader_offset` just after it read the record `next_sequence - 1`, so the frame with sequence `next_sequence` starts
+/// there. The node's tailer keeps such positions so a watch that resumes deep in a long log doesn't read it all again
+/// (node layout 7.5). The header and the frames before `offset` were checked by that earlier read, so they aren't read
+/// again; every frame from `offset` on goes through `read_next_frame` as usual. An offset inside the file header
+/// opens at the start, as `open_event_log` does.
+pub fn open_event_log_at(path: &Path, offset: u64, next_sequence: u64) -> Result<EventLogReader, StoreError> {
+    let mut reader = open_event_log(path)?;
+    if offset >= EVENT_LOG_HEADER.len() as u64 {
+        reader.offset = offset;
+        reader.next_sequence = next_sequence;
+    }
+    Ok(reader)
+}
+
 /// The byte offset just past the last whole frame read: where the next frame starts.
 pub fn reader_offset(reader: &EventLogReader) -> u64 {
     reader.offset
