@@ -1998,6 +1998,15 @@ Source: `catalog/errors/RRS-J.json`.
 - **In plain words:** This task stopped before it finished. It didn't say why.
 - **Fix:** Check the job's stderr.log, then run it again.
 
+<a id="rrs-j1005"></a>
+
+### RRS-J1005: Worker stopped on an unexpected error
+
+- **Severity:** error
+- **Message:** The worker of job {job_id} stopped on an unexpected {error_type}.
+- **In plain words:** This task stopped because of a problem inside Rastai or a plugin.
+- **Fix:** Check the job's stderr.log for the details, then run it again; if it keeps happening, report it.
+
 <a id="rrs-j2001"></a>
 
 ### RRS-J2001: Worker couldn't start

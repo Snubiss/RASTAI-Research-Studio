@@ -2187,6 +2187,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-J1002` | error | Job killed by the kernel's out-of-memory killer |
 | `RRS-J1003` | error | Job killed by the node |
 | `RRS-J1004` | error | Worker exited with no final record or diagnostic (exit code shown) |
+| `RRS-J1005` | error | Worker stopped on an unexpected error: an exception that carries no catalog code, reported by the worker's edge as `diagnostic.reported` before exit 1, with the error's type in the message and its traceback in `stderr.log` only (python layout 7.5) |
 | `RRS-J2001` | error | Worker couldn't start (bad launch) |
 | `RRS-J2002` | error | Job token rejected |
 | `RRS-J2003` | error | Worker protocol version not supported by this node; stopped with a checkpoint |
