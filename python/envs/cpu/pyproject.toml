@@ -23,7 +23,7 @@ dependencies = [
     "rastai-models",       # the Inspectable runtime: safetensors I/O so far (python/rastai_models)
     "rastai-data",         # dataset tooling: readers, word vocabulary, splits, loaders (python/rastai_data)
     "rastai-plugin",       # the plugin SDK and the generated catalog (python/rastai_plugin)
-    "rastai-worker",       # the job process: the event-log writer and payload conversion so far (python/rastai_worker)
+    "rastai-worker",       # the job process: WorkerService, the event log, control and exit codes (python/rastai_worker)
 ]
 
 [dependency-groups]
