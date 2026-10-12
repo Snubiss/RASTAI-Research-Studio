@@ -923,6 +923,7 @@ sequenceDiagram
 - `rastai mcp` without `RASTAI_TOKEN` answers every request with `RRS-C3002` and a fix that runs `token.create` with `mcp-default`. It never falls back to the owner token: an agent gets scopes only when the owner grants them.
 - MCP tool names are command ids with dots replaced by `__`. Malformed JSON-RPC → `RRS-C3001`.
 - Revocation applies on the next request; open streams for that token close with `RRS-C1006`.
+- **Revoking follows what a token made** (contracts 8.2, threat model R28). `token.create` records its caller as the new token's `created_by`. Revoking a token also revokes, in the same transaction, every live token it made, directly or through tokens it made, so a leaked `system.admin` token can't leave a successor behind; disabling a plugin does the same for the tokens that plugin made. The owner's tokens are never revoked this way.
 - "Copy as MCP" writes the client config with a placeholder, never a real token.
 
 **Persisted:** `tokens` (durable, hash only); `gateway_log` in `vault.db` with the principal; journal rows.

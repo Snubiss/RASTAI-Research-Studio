@@ -4,6 +4,10 @@
       "additionalProperties": false,
       "description": "One API token, never with its text.",
       "properties": {
+        "created_by": {
+          "description": "Who made it: owner, token:<token_id> or plugin:<plugin_id>; empty when no record names the creator.",
+          "type": "string"
+        },
         "created_unix_ms": {
           "description": "When it was made.",
           "type": "integer"
@@ -32,7 +36,8 @@
         "token_id",
         "name",
         "scopes",
-        "created_unix_ms"
+        "created_unix_ms",
+        "created_by"
       ],
       "title": "TokenSummary",
       "type": "object"

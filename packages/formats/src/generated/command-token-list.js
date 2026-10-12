@@ -20,6 +20,7 @@
  * @property {string} name The token's name.
  * @property {string[]} scopes The scopes it holds.
  * @property {number} created_unix_ms When it was made.
+ * @property {string} created_by Who made it: owner, token:<token_id> or plugin:<plugin_id>; empty when no record names the creator.
  * @property {number} [revoked_unix_ms] When it was revoked; 0 or absent while it is active.
  */
 

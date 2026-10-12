@@ -283,6 +283,8 @@ fn token_summary(row: &TokenRow) -> TokenSummary {
         name: row.name.clone(),
         scopes: row.scopes.clone(),
         created_unix_ms: u64::try_from(row.created_unix_ms).unwrap_or(0),
+        // `tokens.created_by` lands with SEC-01's code PR (contracts 8.2); until then no creator is recorded.
+        created_by: String::new(),
         revoked_unix_ms: row
             .revoked_unix_ms
             .map(|unix_ms| u64::try_from(unix_ms).unwrap_or(0))

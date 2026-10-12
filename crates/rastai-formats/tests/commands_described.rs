@@ -15,11 +15,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rastai_core::commands::table::COMMANDS;
-use rastai_formats::commands::token::{describe_token_create_result, describe_token_login_code_create_result};
+use rastai_formats::commands::token::{
+    describe_token_create_result, describe_token_login_code_create_result, describe_token_summary,
+};
 use rastai_formats::commands::{
     COMMAND_TYPES, command_schema_id, describe_arguments, describe_command_types, describe_result,
 };
-use rastai_formats::describe::types::TypeDescription;
+use rastai_formats::describe::types::{FieldKind, TypeDescription};
 use rastai_formats::json::reader::read_json;
 use rastai_formats::limits::ImportLimits;
 use serde_json::Value;
@@ -43,6 +45,10 @@ const NOT_CREDENTIALS: &[&str] = &[
     // A catalog code such as RRS-T1001, which the user is shown.
     "JobSummary.error_code",
 ];
+/// Revoking a token or disabling a plugin revokes what it made through this field (contracts 8.2, threat model R28).
+const TOKEN_CREATOR_FIELD: &str = "created_by";
+const TOKEN_LIST_COMMAND_ID: &str = "token.list";
+const TOKEN_SUMMARY_TYPE: &str = "TokenSummary";
 
 fn repository_file(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(relative)
@@ -165,4 +171,26 @@ fn every_listed_non_credential_exists() {
             "{listed}: no such field"
         );
     }
+}
+
+/// `token.list` shows who made every token, so the owner can see what a revoke will sweep (contracts 6.5, 8.2).
+#[test]
+fn a_token_summary_always_names_its_creator() {
+    let description = describe_token_summary();
+    let found = description
+        .fields
+        .iter()
+        .find(|field| field.name == TOKEN_CREATOR_FIELD);
+    let creator = found.expect("TokenSummary.created_by is described");
+    assert_eq!(creator.kind, FieldKind::String);
+    assert!(creator.required, "every token.list row carries its creator");
+    assert!(!creator.secret, "a principal label is no credential");
+
+    let schema = read_command_schema(TOKEN_LIST_COMMAND_ID);
+    let required = &schema["$defs"][TOKEN_SUMMARY_TYPE]["required"];
+    let required_names: Vec<&str> = required.as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(
+        required_names.contains(&TOKEN_CREATOR_FIELD),
+        "the checked-in token.list schema requires created_by; run `just codegen`"
+    );
 }

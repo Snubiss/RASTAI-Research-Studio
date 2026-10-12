@@ -70,6 +70,8 @@ class TokenSummary:
     scopes: list[str]
     # When it was made.
     created_unix_ms: int
+    # Who made it: owner, token:<token_id> or plugin:<plugin_id>; empty when no record names the creator.
+    created_by: str
     # When it was revoked; 0 or absent while it is active.
     revoked_unix_ms: int | None = None
 
@@ -81,6 +83,7 @@ def token_summary_from_json(data: dict[str, Any]) -> TokenSummary:
         name=data["name"],
         scopes=data["scopes"],
         created_unix_ms=data["created_unix_ms"],
+        created_by=data["created_by"],
         revoked_unix_ms=None if "revoked_unix_ms" not in data else data["revoked_unix_ms"],
     )
 
@@ -92,6 +95,7 @@ def token_summary_to_json(value: TokenSummary) -> dict[str, Any]:
     data["name"] = value.name
     data["scopes"] = value.scopes
     data["created_unix_ms"] = value.created_unix_ms
+    data["created_by"] = value.created_by
     if value.revoked_unix_ms is not None:
         data["revoked_unix_ms"] = value.revoked_unix_ms
     return data
