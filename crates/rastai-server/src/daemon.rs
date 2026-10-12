@@ -34,9 +34,9 @@ use crate::commands::handlers::settings::{read_settings_layer, resolve_with_file
 use crate::error::ServerError;
 use crate::http::listeners::{FIRST_DEFAULT_PORT, LOOPBACK_ADDRESS, listen_http};
 use crate::http::sessions::{AuthState, ScopedToken, add_scoped_token, new_auth_state};
+use crate::indexing::daemon_log_replay::replay_daemon_log;
 use crate::plugin_host::discovery::discover_plugins;
 use crate::plugin_host::load::load_all_plugins;
-use crate::indexing::daemon_log_replay::replay_daemon_log;
 use crate::server_state::{Server, build_server};
 use crate::shutdown::{stop_on_signals, wait_for_shutdown};
 

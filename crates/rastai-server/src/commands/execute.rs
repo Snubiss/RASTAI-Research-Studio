@@ -39,8 +39,8 @@ use crate::commands::journal::{
     arguments_hash, find_recent_journal_row, first_error_code, idempotency_key_lock, is_journaled, is_same_request,
     journal_finished, journal_started,
 };
-use crate::plugin_host::load::{plugin_principal_scopes, plugin_status};
 use crate::events::daemon_events::record_daemon_event;
+use crate::plugin_host::load::{plugin_principal_scopes, plugin_status};
 use crate::server_state::Server;
 
 const CODE_UNKNOWN_COMMAND: &str = "RRS-C0001";
