@@ -380,12 +380,12 @@ Contracts §15 is the only name registry, and `buf breaking` can't see inside `_
 |---|---|
 | `command_ids` | `rastai_core::commands::COMMANDS` and the `commands[]` of each first-party manifest (`plugins/*/rastai-plugin.json`) |
 | `cli_verbs` | `cli_words()` of every command id, plus `CLI_MODE_WORDS` and `ALIASES` (both in `rastai-core/src/commands/naming.rs`), so the registry and the CLI can't differ |
-| `event_types` | `rastai_core::event_types::EVENT_TYPES` (`rastai-core/src/event_types.rs`) and the event types each first-party manifest declares (`plugins/*/rastai-plugin.json`) |
+| `event_types` | `rastai_core::event_types::EVENT_TYPES` (`rastai-core/src/event_types.rs`) and the event types each first-party manifest declares (`plugins/*/rastai-plugin.json`; none yet, contracts 12.6) |
 | `error_codes` | `catalog/errors/*.json` and `plugins/*/catalog/` |
 | `tables` | per database (`rastai.db`, `vault.db`), table to columns: read from the store's migration files (`rastai-store/src/index/migrations/*.sql`, `vault/migrations/*.sql`) by a small in-house reader of `CREATE TABLE` and `ALTER TABLE ... ADD COLUMN` (`tools/codegen/src/sql_names.rs`). `rastai-store/tests/index_migrations.rs` runs the real migrations and compares `PRAGMA table_info` with the same reader, so the reader can't drift |
 | `settings_keys` | the `rastai.settings/1` type description, flattened to `<section>.<key>` (nested objects stop at the key: `training.lora`) |
 | `document_schema_ids` | `rastai_formats::describe::describe_all_types()`, document types only (command argument and result types are covered by `command_ids`) |
-| `crates`, `js_packages`, `python_packages` | `cargo metadata --no-deps --format-version 1`; the `name` of each `package.json` in the pnpm workspace; the import packages (folders with `__init__.py`) directly under `python/` and `plugins/*/python/` |
+| `crates`, `js_packages`, `python_packages` | `cargo metadata --no-deps --format-version 1`; the `name` of each `package.json` in the pnpm workspace; the import packages (folders with `__init__.py`) directly inside each Python project folder: every uv workspace member under `python/` and every `plugins/*/python/` |
 
 **`check-names`.** Reads `schemas/names.json` and parses contracts §15 plus the tables of §2.1-2.3 (crates and packages), §5.2 (document schema ids), §6.4 (commands), §7.3 (events), §8.2 and §8.3 (tables and columns), §10.3 (error codes) and §11.2 (settings keys) with a plain Markdown table reader (contracts §12.6 lists the exact columns). A heading or table that moves so the reader can't find it fails the check. It compares both ways:
 
@@ -1128,7 +1128,7 @@ tools/codegen/
     json_schema_files.rs      schemas/<type>/<version>.json, schemas/commands/*, schemas/events/*, schemas/index.json;
                               each command and event file carries `x-rastai-stability`
     names_registry.rs         NameRegistry: one sorted list per kind (2.8), collected from the tables, catalog, store
-                              migrations, settings defaults, document descriptions and workspace manifests
+                              migrations, the settings description, document descriptions and workspace manifests
     sql_names.rs              reads table and column names from the migration .sql files (CREATE TABLE, ALTER TABLE ADD COLUMN)
     descriptor_set.rs         reads the payload fields of each event type from the `buf build` descriptor set
     javascript_types.rs       packages/formats/src/generated/*.js: one JSDoc @typedef module per type (@property lines,
@@ -1938,6 +1938,7 @@ pub fn free_bytes(path: &Path) -> Result<u64, StoreError> {
 | Internal | `rastai-formats` | `hashing.rs` for blob and stream hashes, `crc32.rs` for event-log frames, run records during the rebuild | |
 | Internal | `rastai-proto` | `EventRecord`, `BlobRef`, payload messages | `event_log/frame.rs`, `indexer.rs` |
 | Internal | `rastai-diag` | diagnostics | |
+| Internal (dev only) | `rastai-codegen` | `tests/index_migrations.rs` compares `PRAGMA table_info` with what `sql_names.rs` reads from the migration files (2.8); rastai-codegen never depends on this crate | |
 | External | rusqlite (bundled SQLite) | both databases | `sqlite.rs` |
 | External | serde_json | the JSON list columns (`tokens.scopes`, `nodes.capabilities`, `plugins.granted_permissions`) | `index/kept_tables.rs` |
 | External | prost | decode and encode `EventRecord` frame bodies | `event_log/frame.rs` |

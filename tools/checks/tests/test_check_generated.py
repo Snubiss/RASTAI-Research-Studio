@@ -252,3 +252,40 @@ def test_a_failing_generator_does_not_stop_the_next_one_being_compared(write_tre
         "broken",
         "generated/notes/errors.md: differs from a fresh codegen run; never edit it, run `just codegen`",
     ]
+
+
+# A folder generator and a generator of one file inside that folder, like schemas/ and schemas/names.json.
+TWO_GENERATOR_SCRIPTS = {
+    "tools/greeting_codegen.py": GENERATOR_SCRIPT,
+    "tools/errors_page_codegen.py": SINGLE_FILE_GENERATOR_SCRIPT,
+}
+
+
+def test_a_file_another_generator_owns_is_compared_only_as_its_output(write_tree, load_check):
+    # schemas/ is the formats generator's folder and schemas/names.json the names generator's file: the folder's
+    # generator never writes that file, so without the ownership rule it would call it stale ("delete it").
+    check = load_check("check-generated")
+    generators = [make_generator(check), make_single_file_generator(check)]
+    tools = TWO_GENERATOR_SCRIPTS
+    fresh = write_tree(tools | FRESH_FILES | {"generated/notes/errors.md": "# Errors\n"})
+    assert check.find_stale_files(fresh, generators) == []
+
+
+def test_a_hand_edited_file_inside_another_generators_folder_fails_once(write_tree, load_check):
+    check = load_check("check-generated")
+    generators = [make_generator(check), make_single_file_generator(check)]
+    tools = TWO_GENERATOR_SCRIPTS
+    edited = write_tree(tools | FRESH_FILES | {"generated/notes/errors.md": "# Errors, edited by hand\n"})
+    assert check.find_stale_files(edited, generators) == [
+        "generated/notes/errors.md: differs from a fresh codegen run; never edit it, run `just codegen`"
+    ]
+
+
+def test_the_names_registry_is_generated_last_and_owns_names_json(load_check):
+    check = load_check("check-generated")
+    names = check.GENERATORS[-1]
+    assert names.command[names.command.index("--bin") + 1] == "rastai-names-codegen"
+    assert names.outputs == ["schemas/names.json"]
+    formats = next(generator for generator in check.GENERATORS if "rastai-formats-codegen" in generator.command)
+    assert "schemas" in formats.outputs
+    assert check.outputs_inside("schemas", [*formats.outputs, *names.outputs]) == {"names.json"}

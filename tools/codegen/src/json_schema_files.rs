@@ -52,8 +52,8 @@ pub struct SchemaFile {
 
 /// Writes every document and command schema and the index under `output_root`, and deletes the command schemas
 /// it no longer writes: `schemas/commands/` is this generator's alone. The rest of `schemas/` is not
-/// (`schemas/names.json` joins it in M1-57), so a document schema it stops writing is deleted by hand; check-generated
-/// names it. Returns how many files changed or were deleted.
+/// (`schemas/names.json` is rastai-names-codegen's), so a document schema it stops writing is deleted by hand;
+/// check-generated names it. Returns how many files changed or were deleted.
 pub fn write_json_schema_files(
     output_root: &Path,
     document_types: &[DocumentType],

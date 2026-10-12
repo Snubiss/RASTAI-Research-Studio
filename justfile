@@ -38,8 +38,7 @@
 # CI installs the same versions with tools/ci/install-dev-tools (prebuilt downloads, each checked against its SHA-256);
 # it also works here, for example `tools/ci/install-dev-tools just uv node`.
 #
-# Later tasks add their recipes here: check-names (M1-57) and check-schema-diff (M1-58), and rastai-names-codegen
-# joins `codegen` (M1-57).
+# Later tasks add their recipes here: check-schema-diff (M1-58).
 
 # `deny` refuses any other cargo-deny version, so every machine reads deny.toml the same way.
 cargo_deny_version := "0.20.2"
@@ -73,7 +72,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
 check: fmt-check lint check-js test-rust test-python test-js wasm deny proto-check \
-    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check
+    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript codegen-check check-names
 
 # core.hooksPath goes in this clone's own git config (never --global), so other repositories keep their hooks.
 # A relative path is read from the top of each working tree, so every worktree of this clone runs its own copy.
@@ -212,18 +211,26 @@ check-colors: env-cpu
 check-no-typescript: env-cpu
     "{{check_python}}" tools/checks/check-no-typescript
 
+# It reads the checked-in schemas/names.json, which codegen-check keeps current; run `just codegen` after changing a
+# name in code. The rules and the places it reads in contracts.md are contracts 12.6.
+# Every name in the code is registered in contracts.md, and every registered name is built or carries its milestone.
+check-names: env-cpu
+    "{{check_python}}" tools/checks/check-names
+
 # ---- Code generation (layout rust-control-plane.md 2.5; rust-node-gateway-proto.md 3.4) ----
 
 # buf.gen.yaml runs the Rust plugins from your PATH, grpcio-tools from the cpu environment and protoc-gen-es from
 # node_modules, so it needs both environments. The rastai-codegen bins run after buf, in the order of layout
 # rust-control-plane.md 4.9: the catalog first, because every other crate's build needs rastai-diag's tables, then
-# the formats generator.
-# Regenerate every generated output: the protobuf code of proto/, the error and term catalog of catalog/, then the
-# schemas, JavaScript types, typed command wrappers, Python dataclasses and commands reference of rastai-formats.
+# the formats generator, then the names registry last, because it reads the catalog, the migrations and the types.
+# Regenerate every generated output: the protobuf code of proto/, the error and term catalog of catalog/, the
+# schemas, JavaScript types, typed command wrappers, Python dataclasses and commands reference of rastai-formats, and
+# schemas/names.json.
 codegen: env-cpu env-js proto-tools
     buf generate
     cargo run --quiet --locked -p rastai-codegen --bin rastai-catalog-codegen
     cargo run --quiet --locked -p rastai-codegen --bin rastai-formats-codegen
+    cargo run --quiet --locked -p rastai-codegen --bin rastai-names-codegen
 
 # It runs the same generators as `codegen`, so it needs the same tools and both environments. Checking the tool
 # versions first means a wrong plugin shows up as an install hint, not as generated code that differs.

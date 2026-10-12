@@ -4,7 +4,11 @@
 Generated folders are never edited by hand and aren't reviewed, so CI proves them instead: every generator
 writes into a temporary tree and each of its outputs, a folder or a single file, must match the checked-in one byte
 for byte. Each codegen task adds its row to GENERATORS: buf for proto/ (M1-08), then the rastai-codegen binaries
-(the catalog in M1-12, the formats in M1-16).
+(the catalog in M1-12, the formats in M1-16, the names registry in M1-57).
+
+One generator's folder may hold another's file (schemas/ is the formats generator's, schemas/names.json the names
+generator's). Such a file is compared only as the output of the generator that names it, so each mismatch is reported
+once, against the generator that writes it.
 """
 
 import subprocess
@@ -79,7 +83,7 @@ GENERATORS: list[Generator] = [
             "says how to recover"
         ),
     ),
-    # schemas/ is owned whole for now; rastai-names-codegen's schemas/names.json joins it in M1-57.
+    # schemas/ but its names.json, which the names generator below writes.
     Generator(
         name="rastai-formats-codegen (type descriptions and commands)",
         command=[
@@ -103,6 +107,24 @@ GENERATORS: list[Generator] = [
             "docs/reference/commands.md",
         ],
     ),
+    # Last, as in `just codegen`: it reads the catalog, the migrations and the descriptions (contracts 12.6).
+    Generator(
+        name="rastai-names-codegen (schemas/names.json)",
+        command=[
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "-p",
+            "rastai-codegen",
+            "--bin",
+            "rastai-names-codegen",
+            "--",
+            "--output",
+            OUTPUT_ROOT_PLACEHOLDER,
+        ],
+        outputs=["schemas/names.json"],
+    ),
 ]
 
 
@@ -113,6 +135,7 @@ def main() -> int:
 
 
 def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
+    every_output = [output for generator in generators for output in generator.outputs]
     problems = []
     with tempfile.TemporaryDirectory(prefix="rastai-check-generated-") as temporary_folder:
         output_root = Path(temporary_folder)
@@ -124,8 +147,14 @@ def find_stale_files(root: Path, generators: list[Generator]) -> list[str]:
                 problems.extend(generator_problems)
                 continue
             for output in generator.outputs:
-                problems.extend(compare_output(root, output_root, output))
+                problems.extend(compare_output(root, output_root, output, outputs_inside(output, every_output)))
     return problems
+
+
+def outputs_inside(folder: str, every_output: list[str]) -> set[str]:
+    """The outputs that sit inside folder (another generator's file in it), relative to folder."""
+    prefix = f"{folder}/"
+    return {output[len(prefix) :] for output in every_output if output.startswith(prefix)}
 
 
 def run_generator(root: Path, generator: Generator, output_root: Path) -> list[str]:
@@ -143,11 +172,12 @@ def run_generator(root: Path, generator: Generator, output_root: Path) -> list[s
     return problems
 
 
-def compare_output(root: Path, output_root: Path, output: str) -> list[str]:
-    """Problems for one output: a single file when either side has a file there, otherwise a folder."""
+def compare_output(root: Path, output_root: Path, output: str, owned_elsewhere: set[str]) -> list[str]:
+    """Problems for one output: a single file when either side has a file there, otherwise a folder, leaving out the
+    files in it that another generator owns."""
     if (root / output).is_file() or (output_root / output).is_file():
         return compare_file(root, output_root, output)
-    return compare_folders(root, output_root, output)
+    return compare_folders(root, output_root, output, owned_elsewhere)
 
 
 def compare_file(root: Path, output_root: Path, path: str) -> list[str]:
@@ -162,11 +192,11 @@ def compare_file(root: Path, output_root: Path, path: str) -> list[str]:
     return []
 
 
-def compare_folders(root: Path, output_root: Path, folder: str) -> list[str]:
+def compare_folders(root: Path, output_root: Path, folder: str, owned_elsewhere: set[str]) -> list[str]:
     """Problems for one output folder: files codegen writes that aren't checked in, checked-in files it no longer
-    writes, and files whose bytes differ."""
-    checked_in = files_in(root / folder)
-    regenerated = files_in(output_root / folder)
+    writes, and files whose bytes differ. Files another generator owns (owned_elsewhere) are its to compare."""
+    checked_in = files_in(root / folder) - owned_elsewhere
+    regenerated = files_in(output_root / folder) - owned_elsewhere
     problems = []
     for name in sorted(regenerated - checked_in):
         problems.append(f"{folder}/{name}: missing; run `just codegen` and commit the result")

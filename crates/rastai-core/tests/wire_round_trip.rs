@@ -1,7 +1,8 @@
-//! The two in-process twins against their proto messages (layout rust-control-plane.md 5.5): rastai-diag's
-//! `Diagnostic` lists exactly the fields of `rastai.common.v1.Diagnostic`, and `CommandRow` those of
-//! `rastai.commands.v1.CommandDescriptor` minus the five registration fields. The field lists are read from the
-//! .proto files themselves, so a field added there fails this test until the twin and wire.rs follow.
+//! The three in-process twins against their proto messages (layout rust-control-plane.md 5.5): rastai-diag's
+//! `Diagnostic` lists exactly the fields of `rastai.common.v1.Diagnostic`, `CommandRow` those of
+//! `rastai.commands.v1.CommandDescriptor` minus the five registration fields, and `EventTypeRow` those of
+//! `rastai.events.v1.EventTypeDescriptor` minus `plugin_id`. The field lists are read from the .proto files
+//! themselves, so a field added there fails this test until the twin and wire.rs follow.
 //!
 //! The golden messages of fixtures/proto-golden/ then round-trip through the conversions. They are read from their
 //! `.json` form: rastai-core doesn't depend on prost, and rastai-proto's own test already checks that the `.json`
@@ -13,6 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rastai_core::commands::descriptor::CommandRow;
+use rastai_core::event_types::{EVENT_TYPES, EventTypeRow};
 use rastai_core::scopes::Scope;
 use rastai_core::wire::{descriptor_from_row, diagnostic_from_proto, diagnostic_to_proto};
 use rastai_diag::diagnostic::{Diagnostic, Severity};
@@ -22,6 +24,7 @@ use serde_json::Value;
 
 const DIAGNOSTIC_PROTO: &str = "proto/rastai/common/v1/diagnostic.proto";
 const COMMANDS_PROTO: &str = "proto/rastai/commands/v1/command_service.proto";
+const EVENTS_PROTO: &str = "proto/rastai/events/v1/event_service.proto";
 const DIAGNOSTIC_GOLDEN: &str = "fixtures/proto-golden/common/Diagnostic.json";
 const DESCRIPTOR_GOLDEN: &str = "fixtures/proto-golden/commands/CommandDescriptor.json";
 
@@ -33,6 +36,9 @@ const REGISTRATION_FIELDS: &[&str] = &[
     "arguments_schema_json",
     "result_schema_json",
 ];
+
+/// What a plugin's manifest fills in for its own event types; every core event type leaves it empty.
+const EVENT_REGISTRATION_FIELDS: &[&str] = &["plugin_id"];
 
 /// The golden descriptor's values as a core row; registration fields aside, they are the golden's.
 const GOLDEN_ROW: CommandRow = CommandRow {
@@ -137,6 +143,26 @@ fn command_row_fields(row: &CommandRow) -> Vec<&'static str> {
     ]
 }
 
+/// The event row's fields, with the same full-pattern guard.
+fn event_type_row_fields(row: &EventTypeRow) -> Vec<&'static str> {
+    let EventTypeRow {
+        event_type: _,
+        event_class: _,
+        payload_type: _,
+        emitter: _,
+        stability: _,
+        since_version: _,
+    } = row;
+    vec![
+        "event_type",
+        "event_class",
+        "payload_type",
+        "emitter",
+        "stability",
+        "since_version",
+    ]
+}
+
 fn text_field(golden: &Value, name: &str) -> String {
     golden[name]
         .as_str()
@@ -215,6 +241,23 @@ fn command_row_lists_the_proto_fields_minus_registration() {
     }
     assert_eq!(sorted(row_fields), sorted(proto_fields.clone()));
     assert_eq!(sorted(golden_keys(DESCRIPTOR_GOLDEN)), sorted(proto_fields));
+}
+
+#[test]
+fn event_type_row_lists_the_proto_fields_minus_plugin_id() {
+    let proto_fields = proto_message_fields(EVENTS_PROTO, "EventTypeDescriptor");
+    let mut row_fields: Vec<String> = event_type_row_fields(&EVENT_TYPES[0])
+        .into_iter()
+        .map(String::from)
+        .collect();
+    for registration_field in EVENT_REGISTRATION_FIELDS {
+        assert!(
+            !row_fields.iter().any(|field| field == registration_field),
+            "{registration_field}"
+        );
+        row_fields.push(registration_field.to_string());
+    }
+    assert_eq!(sorted(row_fields), sorted(proto_fields));
 }
 
 #[test]
