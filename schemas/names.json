@@ -690,7 +690,8 @@
         "token_hash",
         "scopes",
         "created_unix_ms",
-        "revoked_unix_ms"
+        "revoked_unix_ms",
+        "created_by"
       ],
       "transfers": [
         "transfer_id",

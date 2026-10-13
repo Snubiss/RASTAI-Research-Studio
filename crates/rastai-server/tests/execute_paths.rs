@@ -30,8 +30,8 @@ use rastai_store::writer_thread::write_index;
 use serde_json::{Value, json};
 
 use common::{
-    execute_request, ok_result, owner_bearer, refusal_code, remove_test_folder, response_codes, run_command,
-    send_to_port, start_test_daemon, stop_test_daemon, test_paths, token_principal,
+    created_token_principal, execute_request, ok_result, owner_bearer, refusal_code, remove_test_folder,
+    response_codes, run_command, send_to_port, start_test_daemon, stop_test_daemon, test_paths, token_principal,
 };
 
 const REDACTED: &str = "<redacted>";
@@ -314,7 +314,7 @@ async fn the_same_key_replays_the_stored_redacted_response() {
     let listed = ok_result(&run_as_owner(&running, "token.list", json!({})).await);
     assert_eq!(listed["tokens"].as_array().unwrap().len(), 1);
     // Another principal's same key is its own. It holds chat, so it may hand chat on.
-    let admin_token = token_principal(vec![Scope::SystemAdmin, Scope::Chat]);
+    let admin_token = created_token_principal(&running.server, vec![Scope::SystemAdmin, Scope::Chat]).await;
     let request = ExecuteRequest {
         idempotency_key: "key-1".to_string(),
         ..execute_request("token.create", r#"{"name": "ci", "preset": "chat-only"}"#)
@@ -570,7 +570,7 @@ async fn a_revoked_token_is_refused_and_listed_only_when_asked() {
 async fn a_token_hands_out_only_the_scopes_it_holds() {
     let paths = test_paths("x-escalate");
     let running = start_test_daemon(&paths).await;
-    let admin_only = token_principal(vec![Scope::SystemAdmin]);
+    let admin_only = created_token_principal(&running.server, vec![Scope::SystemAdmin]).await;
     let wider = execute_request("token.create", r#"{"name": "wider", "scopes": ["chat", "secrets"]}"#);
     let refused = run_command(&running.server, &admin_only, wider.clone()).await;
     assert_eq!(response_codes(&refused), ["RRS-C1005", "RRS-C1005"]);
@@ -582,8 +582,10 @@ async fn a_token_hands_out_only_the_scopes_it_holds() {
         response_codes(&run_command(&running.server, &admin_only, dry).await)[0],
         "RRS-C1005"
     );
+    // Only the owner's token for the test is there: the refused ones made nothing.
     let listed = ok_result(&run_as_owner(&running, "token.list", json!({})).await);
-    assert_eq!(listed["tokens"], json!([]));
+    assert_eq!(listed["tokens"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["tokens"][0]["token_id"], admin_only.id.as_str());
     // What it holds it may pass on; the owner may grant anything.
     let same = execute_request("token.create", r#"{"name": "same", "scopes": ["system.admin"]}"#);
     assert!(run_command(&running.server, &admin_only, same).await.ok);

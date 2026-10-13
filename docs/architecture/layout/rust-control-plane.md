@@ -1702,8 +1702,9 @@ pub enum IndexWrite {
     ClearUndoSteps { document_id: String },
     UpsertNode(NodeRow),
     UpsertPlugin(PluginRow),
-    InsertToken(TokenRow),
-    RevokeToken { token_id: String, revoked_unix_ms: i64 },
+    InsertToken(TokenRow),                              // a token:<id> creator must be live, else TokenCreatorRevoked (RRS-C1006)
+    RevokeToken { token_id: String, revoked_unix_ms: i64 },   // the token and every live token its created_by chain reaches
+    RevokePluginTokens { plugin_id: String, revoked_unix_ms: i64 },   // every live token whose chain leads to plugin:<id>
     UpsertProject(ProjectRow),
     UpsertTransfer(TransferRow),
     DeleteCollected(GcDeletion),                        // GC: rows go before files
@@ -1991,7 +1992,8 @@ There is no `blake3` here: hashing goes through `rastai_formats::hashing`, so BL
 | Config files | `tests/config_files.rs` | a write leaves the old file or the new one, never a truncated one (a test hook stops between fsync and rename); the folder is fsynced |
 | Outbox | `tests/vault_changes.rs` | with recording off no rows are added; with it on, every changed row adds exactly one `vault_changes` row in the same transaction; a `DeleteConversation` adds `delete` rows for every message; `TrimVaultChanges` keeps later rows |
 | Writer thread | `tests/writer_thread.rs`; bottom of `writer_thread.rs` and `sqlite.rs` | 256 concurrent tasks commit without convoying (p99 bound, spike 07, and far fewer transactions than writes by `writer_batch_count`); one bad write in a batch fails alone; a `Batch` lands whole or not at all; a full disk (`PRAGMA max_page_count`) fails every write of its batch with `RRS-S3002` and commits none; a reader's failure is `RRS-S0006` |
-| Migrations | `tests/index_migrations.rs`; bottom of `store.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged (in `store.rs`, because modelling the newer app takes the crate-private migration functions) |
+| Migrations | `tests/index_migrations.rs`; bottom of `store.rs` | the migrated tables and columns equal contracts 8.2's, with no `settings` table; a fresh database equals the migration chain applied to the oldest fixture (from the second migration); a newer `schema_migrations` → `RRS-S0002`, file unchanged; migration `0003` on a version-2 file fills `tokens.created_by` from the journal and revokes the tokens whose chain leads to a revoked token or a disabled plugin, keeping valid ones valid (both in `store.rs`, because an older or newer file is made with the crate-private migration functions) |
+| Token creators | `tests/token_creators.rs` | a revoke sweeps the whole `created_by` chain under a token or a plugin with one time and nothing beside it; an insert under a revoked or missing creator is `TokenCreatorRevoked` (`RRS-C1006`) and writes nothing (contracts 8.2) |
 | Event logs | `tests/event_log_fixtures.rs`, `fixtures/event-logs/` | good, torn-tail (`Incomplete`), corrupt-middle (`Corrupt`, `RRS-S2002`), sequence gap (`RRS-S2003`); append after a torn tail truncates first; a bad checksum on the last frame, a damaged length on the last frame, a zero-filled tail and a whole header with a zeroed or half-written body and zeros after it are torn tails; a damaged length (or a damaged header and body start) with whole frames after it and a checksum-valid record of another format version (last or in the middle) are corrupt, and so is a zeroed body with a record after it; a frame quoted inside a torn record's text is not proof, so that record stays a torn tail; a missing log is `RRS-S0006`; a corrupt or gapped log refuses an append and is left unchanged; the committed fixtures equal their recipes |
 | Python compatibility | `tests/python_log_compat.rs`, `fixtures/event-logs/from_python.log` | a log written by `rastai_worker` reads frame for frame |
 | Indexer | `tests/indexer_idempotent.rs` | the same batch applied twice gives the same rows and one `HandlerCall` per (handler, record); ack moves only forward; a `gateway.request_logged` applied twice leaves one `gateway_log` row |
@@ -2378,6 +2380,7 @@ pub struct Server {
     pub bus: Bus,
     pub nodes: NodeLinks,
     pub plugins: PluginHost,
+    pub plugin_host_lock: tokio::sync::Mutex<()>, // contracts 8.2: a plugin's token.create against its disable
     pub catalog: RwLock<RuntimeCatalog>,          // third-party plugin codes
     pub gateway: GatewayState,                    // from rastai-gateway
     pub auth: AuthState,                          // login codes, sessions, cached token hashes
@@ -2416,6 +2419,7 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
     replay_daemon_log(&server).await?;                            // index records after the cursor
     connect_to_node(&server, &node).await?;                       // handshake, reconcile (Register before Hello), resume run tails
     load_all_plugins(&server).await;                              // failures disable plugins, never stop the daemon
+    revoke_tokens_of_gone_plugins(&server).await?;                // contracts 8.2: tokens of a plugin gone or disabled
     resume_chains(&server).await;                                 // index unacked chain records, then next_chain_action
     start_background_tasks(&server);                              // scheduler, heartbeat watch, retention, GC timer,
                                                                   // pending plugin handler calls (12.5), (M11) the archiver
@@ -2754,6 +2758,7 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Event handlers | `tests/plugin_event_handlers.rs`, `tests/crash/` | a fixture plugin's module is down when `checkpoint.saved` is indexed: the call stays pending, and on `plugin.state_changed → enabled` it runs exactly once; a re-sent record queues no second call; a call whose command already finished is not run again (idempotency key); kill -9 the daemon between the index commit and the delivery: after restart the handler runs once (a new row for the flows/platform.md 6.5 matrix) |
 | Analysis and policy | `tests/layer_placement.rs`, `tests/data_policy.rs`, `tests/chains.rs` | placement tables on fake GPUs; every cell of the 8.3 policy table; `next_chain_action` over child outcomes, gates and optional steps |
 | MCP | `tests/mcp_endpoint.rs` | tools filtered by token scopes; a call lands in the journal with the token principal |
+| Token creators | `tests/token_creators.rs` | threat model R28 over HTTP and `/mcp`: revoking a token revokes what it made and nothing above or beside it; a create after or racing its creator's revoke leaves no live token; a token that sets `acting_plugin_id` is `RRS-C1005` and makes nothing; a dev or installed plugin's tokens die when it is disabled, and a dropped dev path's at the next start |
 | Analysis | `tests/modelspec_stats.rs` | parameter counts match `fixtures/models/<family>/expected_counts.json` (written by a Python test from the real modules); per-op parameter counts and FLOPs match `fixtures/ops/<op>.json`, the same goldens the Python compiler checks |
 | End to end | `tests/e2e/`, `tests/crash/` | the same command through HTTP, CLI and MCP; the kill -9 matrix |
 
@@ -3225,7 +3230,8 @@ pub fn discover_plugins(server: &Server) -> Result<(), ServerError>   // discove
 pub async fn load_all_plugins(server: &Server)
 pub async fn load_plugin(server: &Server, plugin_id: &str) -> PluginState
 pub async fn unload_plugin(server: &Server, plugin_id: &str)       // removes commands, file types, catalog; stops the module
-pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState   // unload, disabled, then re-check the others in load order until nothing changes
+pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState   // unload, disabled, its tokens revoked (contracts 8.2), then re-check the others in load order until nothing changes
+pub async fn revoke_tokens_of_gone_plugins(server: &Server) -> Result<(), StoreError>   // lifecycle.rs, at start: tokens of a plugin not held or held disabled (contracts 8.2)
 pub fn check_module_isolation(plugin: &LoadedPlugin, namespaces_available: bool,
                               release_content_hash: &str) -> Result<Vec<Diagnostic>, Diagnostic>   // contracts 8.8
 pub async fn forward_command(context: &CommandContext<'_>, arguments_json: &str) -> Result<CommandOutput, Vec<Diagnostic>>

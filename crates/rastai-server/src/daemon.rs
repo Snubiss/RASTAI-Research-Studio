@@ -4,7 +4,9 @@
 //! The order matters: the daemon lock first, so two daemons never share a data directory; then the owner token, so
 //! a too-open or unusable token (`RRS-C1008`, `RRS-C1010`) refuses the start before a database opens or a listener
 //! binds; the daemon log's replay before the listeners, so the first request sees every record the daemon logged;
-//! the listeners last, so `/api/health` answers only once everything behind it is ready.
+//! the sweep of tokens whose plugin is gone after the plugins load, so a dropped dev path's tokens are refused from
+//! the first request (contracts 8.2); the listeners last, so `/api/health` answers only once everything behind it is
+//! ready.
 //!
 //! `start_daemon` is everything up to serving, and `wait_for_shutdown` (shutdown.rs) the rest, so tests can start a
 //! daemon on temporary folders and stop it again without signals.
@@ -36,6 +38,7 @@ use crate::http::listeners::{FIRST_DEFAULT_PORT, LOOPBACK_ADDRESS, listen_http};
 use crate::http::sessions::{AuthState, ScopedToken, add_scoped_token, new_auth_state};
 use crate::indexing::daemon_log_replay::replay_daemon_log;
 use crate::plugin_host::discovery::discover_plugins;
+use crate::plugin_host::lifecycle::revoke_tokens_of_gone_plugins;
 use crate::plugin_host::load::load_all_plugins;
 use crate::server_state::{Server, build_server};
 use crate::shutdown::{stop_on_signals, wait_for_shutdown};
@@ -110,6 +113,7 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
     close_interrupted_commands(&server.store).await?; // RRS-C0005 on the rows a crash left unfinished
     discover_plugins(&server)?; // manifests and saved states only; nothing starts
     load_all_plugins(&server).await; // failures disable or fail a plugin, never the daemon
+    revoke_tokens_of_gone_plugins(&server).await?; // contracts 8.2: before any request, so no gone plugin's token works
     let http = listen_http(&server, preferred_port, listen_address).await?; // writes daemon.port; health ok from here
     let _ = server.http_port.set(http.tcp_port);
     log_info("daemon started", &[("port", &http.tcp_port.to_string())]);

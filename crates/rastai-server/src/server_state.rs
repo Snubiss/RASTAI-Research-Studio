@@ -3,8 +3,8 @@
 //!
 //! M1-26 brought the fields startup and sign-in need; M1-27 the command registry, the settings layers that sit above
 //! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions; M1-28 the bus, the
-//! daemon's own event log and the tailed runs. The node links and identity (M1-42, M1-47), the gateway and the rest
-//! join with the tasks that build them.
+//! daemon's own event log and the tailed runs; SEC-01 the plugin-host lock. The node links and identity (M1-42,
+//! M1-47), the gateway and the rest join with the tasks that build them.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -43,6 +43,12 @@ pub struct Server {
     pub registry: RwLock<CommandRegistry>,
     /// Every plugin discovery found, with its state and diagnostics (plugin_host/). Rebuilt at every start.
     pub plugins: RwLock<PluginHost>,
+    /// The plugin-host lock of contracts 8.2 ("Token creators and revocation"): `token.create` for a `plugin:`
+    /// creator holds it from its check that the plugin is enabled until its insert commits, and `disable_plugin`
+    /// from the state change until its tokens are revoked and marked in the gate's cache, so no plugin-made token
+    /// outlives the plugin's disable. A tokio mutex, because both hold it across a write; `plugins` stays a std lock
+    /// for the short reads in between.
+    pub plugin_host_lock: tokio::sync::Mutex<()>,
     /// Login codes, sessions, the owner token's hash and the scoped tokens' hashes.
     pub auth: AuthState,
     /// The daemon-wide bus: the last `daemon.bus_buffer_events` events and every `Subscribe` stream's source.
@@ -80,6 +86,7 @@ pub fn build_server(
         store,
         registry: RwLock::new(core_command_registry()),
         plugins: RwLock::new(PluginHost::default()),
+        plugin_host_lock: tokio::sync::Mutex::new(()),
         auth,
         bus: new_bus(bus_buffer_events, now_unix_ms()),
         daemon_log: tokio::sync::Mutex::new(new_daemon_log()),

@@ -9,8 +9,9 @@
 //!   but GET or HEAD, the request key against `key_hash`.
 //!
 //! - Scoped API tokens (`token.create`) live in `rastai.db`; the daemon keeps their hashes and scopes here too
-//!   (`scoped_tokens`), loaded at startup and updated by `token.create` and `token.revoke`, so the gate stays one
-//!   plain function over this struct and a revoked token is refused on its very next request (`RRS-C1006`).
+//!   (`scoped_tokens`), loaded at startup and updated by `token.create`, `token.revoke` and every revoke that sweeps
+//!   a chain of tokens (a disabled plugin, the start sweep; contracts 8.2), so the gate stays one plain function over
+//!   this struct and a revoked token is refused on its very next request (`RRS-C1006`).
 //!
 //! Login codes and sessions live in memory only: a restart signs everyone out. Only hashes are kept (`hash_bytes`
 //! of the hex text as sent), so a memory dump of the daemon holds no usable code, cookie or key, and comparing
@@ -190,6 +191,13 @@ pub fn add_scoped_token(auth: &AuthState, token: ScopedToken) {
     let mut tokens = lock_list(&auth.scoped_tokens);
     tokens.retain(|known| known.token_id != token.token_id);
     tokens.push(token);
+}
+
+/// Forgets a token `token.create` added before its insert, when the insert failed or was refused: nobody holds its
+/// text yet, and the database has no row for it (contracts 8.2, "The gate's cache follows the database").
+pub fn remove_scoped_token(auth: &AuthState, token_id: &str) {
+    let mut tokens = lock_list(&auth.scoped_tokens);
+    tokens.retain(|known| known.token_id != token_id);
 }
 
 /// Marks a token revoked, so its next request is refused with `RRS-C1006`. An unknown id changes nothing.

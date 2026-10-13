@@ -14,7 +14,8 @@ use crate::index::journal::{
     JournalFinishedRow, JournalStartedRow, finish_journal_row, insert_journal_started, mark_unfinished_journal_rows,
 };
 use crate::index::kept_tables::{
-    NodeRow, PluginRow, ProjectRow, TokenRow, insert_token, revoke_token, upsert_node, upsert_plugin, upsert_project,
+    NodeRow, PluginRow, ProjectRow, TokenRow, insert_token, revoke_plugin_tokens, revoke_token, upsert_node,
+    upsert_plugin, upsert_project,
 };
 use crate::index::runs::{JobRow, RunRow, upsert_job, upsert_run};
 use crate::indexer::{apply_daemon_events, apply_run_events};
@@ -52,9 +53,19 @@ pub enum IndexWrite {
     },
     UpsertNode(NodeRow),
     UpsertPlugin(PluginRow),
+    /// A new token. One made by a token is refused with `StoreError::TokenCreatorRevoked` while that creator is
+    /// revoked or gone (contracts 8.2).
     InsertToken(TokenRow),
+    /// Revokes the token and every live token whose `created_by` chain leads to it, all with this time. A token
+    /// already revoked keeps its first time.
     RevokeToken {
         token_id: String,
+        revoked_unix_ms: i64,
+    },
+    /// Revokes every live token whose `created_by` chain leads to `plugin:<plugin_id>`, all with this time: a plugin
+    /// disabled, uninstalled or gone at the start (contracts 8.2).
+    RevokePluginTokens {
+        plugin_id: String,
         revoked_unix_ms: i64,
     },
     UpsertProject(ProjectRow),
@@ -84,6 +95,10 @@ pub(crate) fn apply_index_write(transaction: &SqliteTransaction<'_>, write: &Ind
             token_id,
             revoked_unix_ms,
         } => revoke_token(transaction, token_id, *revoked_unix_ms),
+        IndexWrite::RevokePluginTokens {
+            plugin_id,
+            revoked_unix_ms,
+        } => revoke_plugin_tokens(transaction, plugin_id, *revoked_unix_ms),
         IndexWrite::UpsertProject(row) => upsert_project(transaction, row),
         IndexWrite::Batch(writes) => apply_each(transaction, writes),
     }

@@ -52,3 +52,16 @@
   - **Choices for the owner's review:**
     - The refusal reuses `RRS-C1005` (scope `owner`) rather than a code of its own, as every other owner-only refusal does.
     - The backfill takes pre-fix `plugin:` labels at face value. The other simple rule would revoke every live token whose create row has a `plugin:` label, since no UI on `main` sends the field yet; it is safer but could revoke a token the owner made by hand.
+- **SEC-01 (code):** builds 4.2's owner-only `acting_plugin_id` and 8.2's "Token creators and revocation" (threat model R28, now closed with its tests).
+  - `tokens.created_by` loses its (M1) marker: migration `0003_token_creator.sql` adds it, fills it from the journal and revokes the successors already orphaned.
+    Its test on a version-2 file is at the bottom of `crates/rastai-store/src/store.rs`, not in `tests/index_migrations.rs`: a file at an older version is made with the crate-private migration functions, as the newer-schema test already is. `tests/index_migrations.rs` checks the column against 8.2 and the version, 3.
+  - New names in 15.1: `remove_scoped_token` (`http/sessions.rs`), the `Server` field `plugin_host_lock` (the plugin-host lock 8.2 names, a tokio mutex), `revoke_tokens_of_gone_plugins` (`plugin_host/lifecycle.rs`, the start sweep), `IndexWrite::RevokePluginTokens` and `StoreError::TokenCreatorRevoked`.
+    `IndexWrite::RevokeToken` now sweeps the token's chain, and `IndexWrite::InsertToken` checks a `token:` creator in the writer's transaction.
+  - `StoreError::TokenCreatorRevoked` is the one store error whose code isn't in the `RRS-S` range: it is the gate's `RRS-C1006`, which the refused caller gets.
+  - flows/platform.md 2.1 shows the start sweep; layout rust-control-plane.md 6.2 (`IndexWrite`), 6.7, 8.2 (`Server`, `start_daemon`), 8.6 and 12.4 (`disable_plugin`, `revoke_tokens_of_gone_plugins`) say the same.
+  - No new codes, commands, events, tables or settings.
+  - **Choices for the owner's review:**
+    - A `token:` creator with no row counts as dead, so its create is refused with `RRS-C1006` too: the gate admits only tokens `rastai.db` holds, so only a principal no request could carry has one.
+    - The start sweep treats a plugin the host holds as `uninstalled` like one it doesn't hold, and a `disabled` one as gone whoever disabled it, as 8.2 says. At run time only `disable_plugin`'s own plugin is swept; a plugin its re-check turns off (`RRS-P1002`, `RRS-P3001`) keeps its tokens until the next start, and its principal holds no scope meanwhile.
+    - When a disable's write fails it is logged and the plugin stays disabled in memory (its principal holds no scope); the next start sweeps its tokens while it is still disabled or gone. `disable_plugin` keeps its signature, since `plugin.disable` (M8) decides how the command reports it.
+    - The gate's cache is brought up to date after a revoke by reading `tokens` back and marking every revoked row, rather than having the write report the ids it swept: the table is small and marking twice changes nothing.

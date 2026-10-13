@@ -6,7 +6,9 @@
 //! ordinary states the Plugins section shows with their fix.
 //!
 //! What is persisted: an installed plugin's state in its `plugins` row (`save_plugin_row`), when the user decided it
-//! (a load that enabled it, or `disable_plugin`); the host's own outcomes are decided again at every start (load.rs).
+//! (a load that enabled it, or `disable_plugin`, whose write also revokes the tokens the plugin made:
+//! `save_disabled_plugin`); the host's own outcomes are decided again at every start (load.rs). The start also revokes
+//! the tokens of plugins that are gone (`revoke_tokens_of_gone_plugins`, contracts 8.2).
 //! A dev plugin has no row and is found again at every start. The `plugin.state_changed` record itself goes into the
 //! daemon log and onto the bus: `apply_state` (load.rs) keeps it in `PluginHost.state_changes` while it holds the
 //! host's lock, and `record_plugin_state_changes` sends what is kept through `record_daemon_event` once that lock is
@@ -14,24 +16,35 @@
 //! `replay_daemon_log` (daemon.rs), so a new record never lands in the log ahead of the replay.
 
 use rastai_core::states::{plugin_state_name, plugin_transition_allowed};
+use rastai_core::time::now_unix_ms;
 use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::{Diagnostic, Severity};
 use rastai_diag::logger::{log_info, log_warn};
 use rastai_proto::common::v1::PluginState;
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::{EventPayload, EventRecord, PluginStateChanged};
-use rastai_store::index::kept_tables::PluginRow;
+use rastai_store::error::StoreError;
+use rastai_store::index::kept_tables::{PluginRow, list_tokens};
+use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::writes::IndexWrite;
 use rastai_store::writer_thread::write_index;
 
+use crate::commands::handlers::token::mark_revoked_tokens_in_cache;
 use crate::events::daemon_events::record_daemon_event;
-use crate::plugin_host::load::{LoadedPlugin, PluginSource, plugin_source_name, write_plugin_host};
+use crate::plugin_host::load::{
+    LoadedPlugin, PluginSource, find_plugin, plugin_source_name, read_plugin_host, write_plugin_host,
+};
 use crate::server_state::Server;
 
 /// How many records `PluginHost.state_changes` keeps until `record_plugin_state_changes` takes them; the oldest go
 /// first. Each change is taken right after it is made, so the cap only bounds a caller that forgot to.
 const MAX_PENDING_STATE_CHANGES: usize = 1000;
 const PLUGIN_STATE_CHANGED_EVENT: &str = "plugin.state_changed";
+/// How `tokens.created_by` names a plugin that made a token (`principal_label`, contracts 6.3).
+const PLUGIN_CREATOR_PREFIX: &str = "plugin:";
+/// The states whose plugin's tokens the start sweep revokes, as if the plugin weren't there (contracts 8.2). A plugin
+/// the host holds as `incompatible` or `failed` keeps them: that isn't the owner's decision and may undo itself.
+const GONE_STATES: &[PluginState] = &[PluginState::Disabled, PluginState::Uninstalled];
 
 /// Moves the plugin to `to_state` with its reasons, and returns the record of the move. Staying in the same state
 /// only refreshes the reasons and records nothing. A move the state machine doesn't allow is a bug in the caller: it
@@ -155,6 +168,82 @@ pub(crate) async fn save_plugin_row(server: &Server, row: Option<PluginRow>) {
             &[("plugin_id", &plugin_id), ("code", error.code())],
         );
     }
+}
+
+/// Saves a disable: the plugin's row with its new state, when it has one, and the revoke of every token whose chain
+/// leads to the plugin, in one write transaction (contracts 8.2). A dev plugin has no row, so its write is the revoke
+/// alone. Once it has committed, the swept tokens are marked in the gate's cache. A write that fails is logged, as a
+/// row's is: the plugin is disabled in memory, so its principal holds no scope, and its tokens are tried again by
+/// the next start's sweep while the plugin stays disabled or gone.
+pub(crate) async fn save_disabled_plugin(server: &Server, plugin_id: &str, row: Option<PluginRow>) {
+    let revoke = IndexWrite::RevokePluginTokens {
+        plugin_id: plugin_id.to_string(),
+        revoked_unix_ms: now_unix_ms(),
+    };
+    let write = match row {
+        Some(row) => IndexWrite::Batch(vec![IndexWrite::UpsertPlugin(row), revoke]),
+        None => revoke,
+    };
+    if let Err(error) = write_index(&server.store.index, write).await {
+        log_warn(
+            "a disabled plugin's state and tokens could not be saved",
+            &[("plugin_id", plugin_id), ("code", error.code())],
+        );
+        return;
+    }
+    if let Err(error) = mark_revoked_tokens_in_cache(server) {
+        log_warn(
+            "a disabled plugin's revoked tokens could not be read back into the gate's cache",
+            &[("plugin_id", plugin_id), ("code", error.code())],
+        );
+    }
+}
+
+/// The start sweep (contracts 8.2): after the plugins load and before the listener opens, revokes every live token
+/// whose chain leads to a plugin the host holds no plugin for, or holds as `disabled` or `uninstalled`. Dropping a
+/// dev path (owner-only, read at start) removes its plugin, so this is what revokes that plugin's tokens; it also
+/// covers a removed folder, an `uninstalled` row and a disable whose sweep a crash cut short. A dev folder whose
+/// manifest no longer reads is held under its folder's name, so its old id's tokens go when that id differs.
+pub async fn revoke_tokens_of_gone_plugins(server: &Server) -> Result<(), StoreError> {
+    let gone_plugin_ids = gone_token_creator_plugins(server)?;
+    if gone_plugin_ids.is_empty() {
+        return Ok(());
+    }
+    let revoked_unix_ms = now_unix_ms();
+    let mut revokes = Vec::new();
+    for plugin_id in &gone_plugin_ids {
+        log_info(
+            "revoking the tokens of a plugin that is gone",
+            &[("plugin_id", plugin_id)],
+        );
+        revokes.push(IndexWrite::RevokePluginTokens {
+            plugin_id: plugin_id.clone(),
+            revoked_unix_ms,
+        });
+    }
+    write_index(&server.store.index, IndexWrite::Batch(revokes)).await?;
+    mark_revoked_tokens_in_cache(server)
+}
+
+/// The plugins named as a creator in `tokens.created_by` that the host holds no plugin for, or holds as `disabled`
+/// or `uninstalled`, each once, in the order the tokens were made.
+fn gone_token_creator_plugins(server: &Server) -> Result<Vec<String>, StoreError> {
+    let tokens = {
+        let reader = open_index_reader(&server.store.index_readers)?;
+        list_tokens(&reader)?
+    };
+    let host = read_plugin_host(server);
+    let mut gone = Vec::new();
+    for row in &tokens {
+        let Some(plugin_id) = row.created_by.strip_prefix(PLUGIN_CREATOR_PREFIX) else {
+            continue;
+        };
+        let held_live = find_plugin(&host, plugin_id).is_some_and(|plugin| !GONE_STATES.contains(&plugin.state));
+        if !held_live && !gone.iter().any(|known| known == plugin_id) {
+            gone.push(plugin_id.to_string());
+        }
+    }
+    Ok(gone)
 }
 
 /// The diagnostic the record carries: the first error, else the first diagnostic of any severity.

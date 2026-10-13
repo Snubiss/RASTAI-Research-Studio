@@ -4,6 +4,8 @@
 //!
 //! The decisions, in order, each with its code:
 //! 1. `acting_plugin_id` narrows the principal to that plugin's grant (the plugin host's); it can only remove rights.
+//!    Only the owner may send it: any other caller is refused with `RRS-C1005`, its scope shown as `owner`, before
+//!    anything else and in a dry run too, so a token can't run, or make a token, as a plugin (contracts 4.2, 8.2).
 //! 2. The command must be registered (`RRS-C0001`); a retired one names its replacement (`RRS-C0007`).
 //! 3. The principal must hold its scope (`RRS-C1005`), checked before the arguments so a caller without the scope
 //!    learns nothing about their shape.
@@ -48,6 +50,9 @@ const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
 const CODE_PLUGIN_NOT_ENABLED: &str = "RRS-C0003";
 const CODE_KEY_REUSED: &str = "RRS-C0004";
 const CODE_RETIRED: &str = "RRS-C0007";
+const CODE_SCOPE_NOT_GRANTED: &str = "RRS-C1005";
+/// What `RRS-C1005` names as the needed scope of something only the owner may do: no scope grants it.
+const OWNER_ONLY: &str = "owner";
 /// The fix of `RRS-C0003` (M8 builds it).
 const PLUGIN_ENABLE_COMMAND_ID: &str = "plugin.enable";
 const COMMAND_FINISHED_EVENT: &str = "command.finished";
@@ -83,6 +88,7 @@ fn check_command(
     caller: &Principal,
     request: &ExecuteRequest,
 ) -> Result<CheckedCommand, Vec<Diagnostic>> {
+    check_owner_narrows(caller, request)?;
     let plugin_grant = plugin_principal_scopes(server, &request.acting_plugin_id);
     let principal = narrow_to_acting_plugin(caller, &request.acting_plugin_id, plugin_grant)?;
     let command = find_descriptor(server, &request.command_id)?;
@@ -90,6 +96,25 @@ fn check_command(
     check_plugin_enabled(&command, plugin_status(server, &command.plugin_id))?;
     check_arguments(&command, &request.arguments_json)?;
     Ok(CheckedCommand { principal, command })
+}
+
+/// Only the owner narrows itself to a plugin: the plugin UI bridge sends `acting_plugin_id` with the owner's cookie.
+/// From anyone else it would let a token act, and make tokens, as a plugin, which revoking the token wouldn't reach
+/// (contracts 8.2, threat model R28), so it is refused before the command is even looked up.
+fn check_owner_narrows(caller: &Principal, request: &ExecuteRequest) -> Result<(), Vec<Diagnostic>> {
+    if request.acting_plugin_id.is_empty() || caller.kind == PrincipalKind::Owner {
+        return Ok(());
+    }
+    let label = principal_label(caller);
+    let refusal = diagnostic(
+        CODE_SCOPE_NOT_GRANTED,
+        &[
+            ("command_id", &request.command_id),
+            ("scope", OWNER_ONLY),
+            ("principal", &label),
+        ],
+    );
+    Err(vec![refusal])
 }
 
 /// A plugin UI's call runs as `plugin:<plugin_id>`, with only the scopes both the caller and the plugin's grant hold.
@@ -325,17 +350,42 @@ mod tests {
         assert_eq!(principal_label(&narrowed), "plugin:acme");
         let unchanged = narrow_to_acting_plugin(&owner_principal(), "", Vec::new()).unwrap();
         assert_eq!(unchanged, owner_principal());
-        // The owner narrowed to a plugin holds the plugin's grant; a token keeps only what it holds itself.
+        // The owner narrowed to a plugin holds the plugin's grant.
         let grant = vec![Scope::Read, Scope::Plugin("acme".to_string())];
-        let as_owner = narrow_to_acting_plugin(&owner_principal(), "acme", grant.clone()).unwrap();
-        assert_eq!(as_owner.scopes, grant);
+        let as_owner = narrow_to_acting_plugin(&owner_principal(), "acme", grant).unwrap();
+        assert_eq!(as_owner.scopes, [Scope::Read, Scope::Plugin("acme".to_string())]);
+    }
+
+    #[test]
+    fn only_the_owner_may_send_an_acting_plugin_id() {
+        let request = |acting_plugin_id: &str| ExecuteRequest {
+            command_id: "token.create".to_string(),
+            acting_plugin_id: acting_plugin_id.to_string(),
+            ..ExecuteRequest::default()
+        };
+        check_owner_narrows(&owner_principal(), &request("acme")).unwrap();
+        let every_scope = vec![Scope::SystemAdmin, Scope::Read, Scope::Chat];
         let token = Principal {
             kind: PrincipalKind::Token,
             id: "tok_01J".to_string(),
-            scopes: vec![Scope::Read, Scope::SystemAdmin],
+            scopes: every_scope.clone(),
         };
-        let as_token = narrow_to_acting_plugin(&token, "acme", grant).unwrap();
-        assert_eq!(as_token.scopes, [Scope::Read]);
+        let plugin = Principal {
+            kind: PrincipalKind::Plugin,
+            id: "acme_other".to_string(),
+            scopes: every_scope,
+        };
+        for caller in [token, plugin] {
+            check_owner_narrows(&caller, &request("")).unwrap();
+            let refusal = check_owner_narrows(&caller, &request("acme")).unwrap_err();
+            assert_eq!(refusal[0].code, CODE_SCOPE_NOT_GRANTED);
+            assert!(refusal[0].message.contains(OWNER_ONLY), "{}", refusal[0].message);
+            assert!(
+                refusal[0].message.contains(&principal_label(&caller)),
+                "{}",
+                refusal[0].message
+            );
+        }
     }
 
     #[test]
