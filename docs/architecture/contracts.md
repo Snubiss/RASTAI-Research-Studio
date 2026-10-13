@@ -184,7 +184,7 @@ RASTAI/
   docs/
     spec/                    the product and technical scope
     architecture/            README.md, contracts.md (this file), layout/, flows/
-    adr/                     ADRs 0001–0037 (§30)
+    adr/                     ADRs 0001–0039 (§30)
     design/                  ui-design.md (the UI design, version 1.0; proposals in its §10)
     plan/                    implementation plan, backlog.json
     security/                threat-model.md (M1-56)
@@ -2835,6 +2835,8 @@ Each has the default to use until the owner decides. Docs and code follow the de
 
 **Decided on 2026-10-10 and removed:** row 1 (§27 additions: approved, 2.5), row 2 (logging: the in-house JSON-lines logger in `rastai-diag`, spec v5.4 §25), row 3 (generated Python types: dataclasses, §20), row 4 (JSON Schema from hand-written `describe_<type>()` tables, with the `schemars` rule in 5.4), row 6 (network-off enforcement: 8.8), row 12 (Evaluation lives in `plugins/evaluation/`, spec v5.4 §29), row 15 (pnpm, dev tooling), row 16 (settings live only in files, spec v5.4 §19).
 
+**Decided on 2026-10-13 and removed:** row 24 (a second window gets the session key: the opener hands it over by `postMessage` after the owner approves a locked prompt, and the key never goes into a URL; ADR-0039).
+
 | # | Question | Recommended default |
 |---|---|---|
 | 5 | **"Nodes always dial out" (§22) vs SSH**, where the daemon starts the SSH session. | Under SSH the daemon dials, and one SSH session carries both directions (`-L` to `NodeService`, `-R` to `NodeHubService`). With iroh (Phase 2) the node dials; the same two services run over the QUIC connection. |
@@ -2847,7 +2849,6 @@ Each has the default to use until the owner decides. Docs and code follow the de
 | 14 | **Third-party plugin ids** collide without a registry (Phase 1). | Local installs reject an id already installed; reserved core areas (6.1) are rejected always (`RRS-P0002`). The Phase 2 registry assigns ids. |
 | 17 | **Archive rows with no project** (daemon-level runs, the command journal) under the data policy. | Follow the user-level `privacy.data_policy`; with the default `local-only` they stay local until the owner changes it (8.7). |
 | 18 | **MariaDB version in the archive CI matrix** (M11-E07). | The current MariaDB LTS (11.4) beside MySQL 8.4 and 9.7, plus MinIO for the S3 target. |
-| 24 | **How a second window gets the session key** (ADR-0034 decision 10). A window from `view.window.open` shares the cookie but not the opener's memory, so without the key it can't run commands. | The opener hands the key to the window it opened with `postMessage`, targeting its own origin only; the key never goes into a URL. Settled when second windows are built (frontend layout 8.4 "Second window", 8.9 step 5 and 9.8 step 5); the desktop shell's second `WebviewWindow` must keep `window.opener`, or that window signs in again with a new code as a reload does (9.3). |
 | 25 | **Can a preempted run be abandoned without a resume** (preempted → cancelled, 9.5)? A preempted run whose user doesn't want it resumed has no way to say so. | Not yet: `preempted` stays an ended but resumable state whose only exit is `resuming`, like `failed` and `cancelled`; the run list shows it as resumable. Decided when `train.resume` and the run views land (M5). |
 
 **Gaps left to the tasks that build them** (owner, 2026-10-11). Each is small and is settled in its owning task's contract PR, not now. Each owning task lists its gap in its backlog body so it isn't lost. Until then `check-names` needs the milestone marker on any draft name below.

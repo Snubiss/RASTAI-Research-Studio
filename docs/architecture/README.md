@@ -2,7 +2,7 @@
 
 **Status:** v1.2, 2026-10-11. Pre-build. Built on spec v5.4 and contracts.md v1.2. The entry point to the design: what to read, in what order, and where each kind of decision lives. Nothing here is new; every rule below points to the doc that owns it.
 
-The design is about 28,000 lines across 14 documents and 38 ADRs. Nobody needs all of it for one task. Read the core once (section 1), then only the layout and flow docs for the part you're building.
+The design is about 28,000 lines across 15 documents and 39 ADRs. Nobody needs all of it for one task. Read the core once (section 1), then only the layout and flow docs for the part you're building.
 
 ---
 
