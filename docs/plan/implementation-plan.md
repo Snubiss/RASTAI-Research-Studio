@@ -1882,7 +1882,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.j
 
 ```json
 {
-  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-js", "test-js-macos"] },
+  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-js", "test-js-macos", "test-crash"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 1, "dismiss_stale_reviews": true },
   "required_linear_history": true,
@@ -1895,7 +1895,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.j
 
 The first contexts become available with M1-06; until then, protection without required checks still forces PRs and review.
 
-Not applied yet (found by M1-06, 2026-10-11): on the current GitHub plan, a private repository has no branch protection or rulesets. `gh api repos/Snubiss/RASTAI-Research-Studio/branches/main/protection` and `.../rulesets` return `403 Upgrade to GitHub Pro or make this repository public`. So `main` has no rule yet, and none of the ten contexts above is required. The `contexts` list already matches `ci.yml` (`tests/workspace/ci-workflows.test.js` keeps them equal), so the command above applies unchanged once the owner settles section 12 row 16.
+Not applied yet (found by M1-06, 2026-10-11): on the current GitHub plan, a private repository has no branch protection or rulesets. `gh api repos/Snubiss/RASTAI-Research-Studio/branches/main/protection` and `.../rulesets` return `403 Upgrade to GitHub Pro or make this repository public`. So `main` has no rule yet, and none of the contexts above is required (eleven since M1-48 added `test-crash`). The `contexts` list already matches `ci.yml` (`tests/workspace/ci-workflows.test.js` keeps them equal), so the command above applies unchanged once the owner settles section 12 row 16.
 
 ### 8.5 The PR template
 

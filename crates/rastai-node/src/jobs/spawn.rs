@@ -8,7 +8,8 @@
 //!
 //! The environment starts empty. Only `PATH`, `HOME`, `LANG`, `TZ` and `XDG_*` are copied from the node; the job's
 //! token, run id, GPUs and caches are added; downloads and installs are turned off. `HSA_OVERRIDE_GFX_VERSION` is
-//! never passed on: forcing ROCm on an unsupported chip gave silently wrong matmuls (spike 05).
+//! never passed on: forcing ROCm on an unsupported chip gave silently wrong matmuls (spike 05). A debug build also
+//! passes on the kill -9 tests' `RASTAI_TEST_PAUSE_AT` (pause_points.rs); a release build never does.
 
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -21,6 +22,7 @@ use tokio::process::{Child, Command};
 
 use crate::jobs::log_lines::{STDERR_LOG_FILE, STDOUT_LOG_FILE};
 use crate::jobs::signals::{ProcessIdentity, read_process_identity};
+use crate::pause_points::worker_test_pause_variable;
 
 /// The tool that starts the worker in a new session and process group.
 const SETSID_TOOL: &str = "setsid";
@@ -178,6 +180,10 @@ pub fn worker_variables(node_variables: &[(String, String)], inputs: &WorkerVari
     push_variable(&mut variables, "TRITON_CACHE_DIR", path_text(&triton));
     if let Some(folder) = &inputs.plugin_data_folder {
         push_variable(&mut variables, "RASTAI_PLUGIN_DATA_DIR", path_text(folder));
+    }
+    // The kill -9 tests' pause point, in debug builds only (pause_points.rs): a worker point stops the worker.
+    if let Some((name, point)) = worker_test_pause_variable(node_variables) {
+        push_variable(&mut variables, &name, point);
     }
     let removed_gfx_override = node_variables.iter().any(|(name, _)| name == GFX_OVERRIDE_VARIABLE);
     WorkerVariables {
@@ -456,6 +462,26 @@ mod tests {
             Some("/d/plugin-data/evaluation")
         );
         assert!(!result.removed_gfx_override);
+    }
+
+    // The kill -9 tests name a worker point in the daemon's environment; the cleared environment must still carry
+    // it to the worker (test builds are debug builds), and without it the worker gets no such variable.
+    #[test]
+    fn the_test_pause_point_reaches_the_worker() {
+        assert_eq!(
+            value_of(&worker_variables(&node(), &inputs()), "RASTAI_TEST_PAUSE_AT"),
+            None
+        );
+        let mut with_point = node();
+        with_point.push((
+            "RASTAI_TEST_PAUSE_AT".to_string(),
+            "worker.event_log.mid_metrics_frame".to_string(),
+        ));
+        let result = worker_variables(&with_point, &inputs());
+        assert_eq!(
+            value_of(&result, "RASTAI_TEST_PAUSE_AT"),
+            Some("worker.event_log.mid_metrics_frame")
+        );
     }
 
     // A token printed with {:?} would end up in a log or a test failure, where anyone reading it could act as the

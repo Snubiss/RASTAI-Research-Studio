@@ -24,6 +24,9 @@ both languages read and write.
 - **Disk-full reserve.** While it is open, `events.log.reserve` holds `EVENT_LOG_RESERVE_BYTES` of zeros, so that
   freeing it on a full disk makes room for the records that pause the run (`pause_for_full_disk`, platform flow
   6.1). `close` deletes it.
+- **Kill -9 test points.** The worker points of `pause_points.py` are here: after the first `run.metrics` frame,
+  and halfway through writing the second (the only time a frame takes two writes, and only while a test names that
+  point).
 
 How the open tells a torn tail from corruption is the Rust reader's rule (contracts 7.1, `reader.rs`), ported here
 line for line so both sides give every file a writer can produce the same verdict. A crash only damages the end of a
@@ -69,6 +72,7 @@ from rastai_worker.event_payloads import (
     encode_message,
     payload_from_dict,
 )
+from rastai_worker.pause_points import is_pause_point, pause_at
 
 # Metrics are batched and fsynced at least this often (contracts 7.1 and 15.10; the Rust writer's batched policy).
 METRICS_FSYNC_INTERVAL_SECONDS = 1.0
@@ -82,6 +86,11 @@ RUN_STATE_CHANGED = "run.state_changed"
 SEVERITY_ERROR = "SEVERITY_ERROR"
 RUN_STATE_PAUSED = "RUN_STATE_PAUSED"
 RUN_STATE_RUNNING = "RUN_STATE_RUNNING"
+RUN_METRICS = "run.metrics"
+# The kill -9 tests' points (pause_points.py; flows/platform.md 6.5 rows 11 and 13): halfway through writing the
+# second run.metrics frame, so a kill leaves a torn tail after whole metrics, and the first one written whole.
+PAUSE_MID_METRICS_FRAME = "worker.event_log.mid_metrics_frame"
+PAUSE_AFTER_METRICS_FRAME = "worker.event_log.after_metrics_frame"
 
 # The first 8 bytes of every event log.
 EVENT_LOG_HEADER = b"RRSEVLG1"
@@ -154,6 +163,8 @@ class EventLogWriter:
             os.close(self.file_descriptor)
             raise
         self.next_sequence = last_sequence + 1
+        # Counted only for the kill -9 tests' points (see append).
+        self.metrics_frames_written = 0
         self.has_unsynced_bytes = False
         self.last_sync_seconds = time.monotonic()
         self.is_closed = False
@@ -174,10 +185,16 @@ class EventLogWriter:
             payload=payload,
             blobs=[BlobRef(hash=blob_hash) for blob_hash in blob_hashes],
         )
-        self.write_frame_at_end(encode_frame(record))
+        frame = encode_frame(record)
+        if event_type == RUN_METRICS and self.metrics_frames_written > 0:
+            self.pause_mid_frame_for_tests(frame)
+        self.write_frame_at_end(frame)
         self.next_sequence += 1
         if fsync_now or batched_sync_is_due(self.last_sync_seconds, time.monotonic()):
             self.sync()
+        if event_type == RUN_METRICS:
+            self.metrics_frames_written += 1
+            pause_at(PAUSE_AFTER_METRICS_FRAME)
         return record.sequence
 
     def flush_if_due(self) -> None:
@@ -205,6 +222,14 @@ class EventLogWriter:
             self.sync()
         finally:
             delete_reserve_then_unlock(self.file_descriptor, self.reserve_path)
+
+    def pause_mid_frame_for_tests(self, frame: bytes) -> None:
+        """For the kill -9 tests only: writes the first half of the frame and stops there, so a kill leaves the torn
+        tail a crash inside the write would. Let go instead, the whole frame is written over the half."""
+        if not is_pause_point(PAUSE_MID_METRICS_FRAME):
+            return
+        write_all_at(self.file_descriptor, frame[: len(frame) // 2], self.end_offset)
+        pause_at(PAUSE_MID_METRICS_FRAME)
 
     def write_frame_at_end(self, frame: bytes) -> None:
         """One write at the end of the last whole frame. On failure the file is cut back to that point, so a failed

@@ -75,9 +75,9 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: it reads a pull request's
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
-check: fmt-check lint check-js test-rust test-node-jobs test-daemon-jobs test-python test-js wasm deny proto-check \
-    check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript check-fuzz-locks \
-    codegen-check check-names check-schema-diff
+check: fmt-check lint check-js test-rust test-node-jobs test-daemon-jobs test-crash test-python test-js wasm deny \
+    proto-check check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript \
+    check-fuzz-locks codegen-check check-names check-schema-diff
 
 # core.hooksPath goes in this clone's own git config (never --global), so other repositories keep their hooks.
 # A relative path is read from the top of each working tree, so every worktree of this clone runs its own copy.
@@ -107,16 +107,28 @@ test-node-jobs: env-cpu
 test-daemon-jobs: env-cpu
     cargo test --locked -p rastai-server --test train_jobs -- --ignored
 
+# The kill -9 matrix of flows/platform.md 6.5 (plan M1-48): rastai-crash-tests' rows kill real daemon and worker
+# processes at named points (RASTAI_TEST_PAUSE_AT), restart and check them; they run the real worker in the cpu
+# environment's Python, so they are #[ignore]d in a plain `cargo test`, and one at a time here, because every row
+# starts its own daemon and training job. Then the worker's own kill -9 tests in tests/crash/ (pytest, settings in
+# tests/crash/pyproject.toml). Linux only: the rows read /proc and signal process groups. CI runs it as its own
+# `test-crash` job; while CI is manual-only, `check` runs it too (plan 3.6), like the job tests above.
+# The kill -9 matrix: the Rust rows, then the worker's Python kill -9 tests.
+test-crash: env-cpu
+    cargo test --locked -p rastai-crash-tests -- --ignored --test-threads=1
+    cd tests/crash && "{{cpu_python}}" -m pytest
+
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
-# tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml and
-# crates/rastai-node/tests/support/ruff.toml extend it), JavaScript, JSON, CSS and YAML by prettier
-# (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is left as its generator wrote it:
-# rustfmt doesn't follow include!, ruff skips the generated Python (python/pyproject.toml) and prettier src/generated/.
+# tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml,
+# crates/rastai-node/tests/support/ruff.toml and tests/crash/pyproject.toml extend it), JavaScript, JSON, CSS and YAML
+# by prettier (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is left as its generator
+# wrote it: rustfmt doesn't follow include!, ruff skips the generated Python (python/pyproject.toml) and prettier
+# src/generated/.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
     "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/fixtures tools/github \
-        crates/rastai-node/tests/support
+        crates/rastai-node/tests/support tests/crash
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -129,7 +141,7 @@ wasm:
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
     "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/fixtures tools/github \
-        crates/rastai-node/tests/support
+        crates/rastai-node/tests/support tests/crash
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one

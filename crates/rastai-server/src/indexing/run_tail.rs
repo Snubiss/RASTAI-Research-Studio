@@ -35,6 +35,7 @@ use rastai_core::time::now_unix_ms;
 use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_diag::logger::log_warn;
+use rastai_node::pause_points::pause_at;
 use rastai_proto::common::v1::{EventClass, RunState};
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::{BusEvent, DiagnosticReported, EventPayload, EventRecord};
@@ -77,6 +78,11 @@ const DIAGNOSTIC_REPORTED_EVENT: &str = "diagnostic.reported";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_EVENT_LOG_CORRUPT: &str = "RRS-S2002";
 const CODE_RUN_LOG_RECORD_REFUSED: &str = "RRS-S2004";
+const RUN_METRICS_EVENT: &str = "run.metrics";
+/// The kill -9 tests' points (rastai_node::pause_points; flows/platform.md 6.5): a batch received and not yet
+/// committed (row 2), and a committed batch that held a `run.metrics` record, so the run is training (row 1).
+const PAUSE_BEFORE_COMMIT: &str = "daemon.run_tail.before_commit";
+const PAUSE_AFTER_METRICS_COMMIT: &str = "daemon.run_tail.after_metrics_commit";
 
 /// The node a run's records come from. The node links implement it over `NodeService.WatchRunEvents`.
 /// A source is one long-lived object per node that survives reconnects, never one per connection: a tail keeps its
@@ -397,6 +403,7 @@ fn append_to_mirror(mirror: &mut EventLogWriter, records: &[EventRecord]) -> Res
 /// Indexes the records with the run's ack in one transaction, then publishes those the index didn't have.
 async fn index_and_publish(tail: &mut RunTail<'_>, records: &[EventRecord]) -> Option<TailEnd> {
     let mut disk_full_reported = false;
+    pause_at(PAUSE_BEFORE_COMMIT);
     loop {
         let write = IndexWrite::ApplyRunEvents {
             run_id: tail.run_id.to_string(),
@@ -405,6 +412,9 @@ async fn index_and_publish(tail: &mut RunTail<'_>, records: &[EventRecord]) -> O
         match write_index(&tail.server.store.index, write).await {
             Ok(()) => {
                 publish_indexed(tail, records);
+                if records.iter().any(|record| record.event_type == RUN_METRICS_EVENT) {
+                    pause_at(PAUSE_AFTER_METRICS_COMMIT);
+                }
                 return None;
             }
             Err(StoreError::DiskFull { reason }) => {

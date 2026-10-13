@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod live;
 pub mod node;
 pub mod node_service;
+pub mod pause_points;
 pub mod permissions;
 pub mod run_events;
 pub mod telemetry;

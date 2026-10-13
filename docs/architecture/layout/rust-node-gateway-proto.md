@@ -1149,6 +1149,8 @@ crates/rastai-node/
     engines.rs               pinned llama-server builds: download, SHA-256 check, unpack, record
     hardware.rs              GPUs, driver, CPU, RAM, disk (rastai_store::free_bytes) -> HardwareProfile; hardware_profile.json (M2-20)
     telemetry.rs             long-running nvidia-smi and periodic rocm-smi readers -> NodeTelemetry
+    pause_points.rs          the kill -9 tests' RASTAI_TEST_PAUSE_AT: stop this process (SIGSTOP) at a named point, once;
+                             debug builds only; also hands the variable to workers (spawn.rs)
     vram_leases.rs           LeaseTable: decide, grant, deny, reclaim, release, resize (contracts §9.4)
     models.rs                ModelTable: LoadModel, UnloadModel, the model state machine (contracts §9.3); FastEngine (one member today)
     generation_router.rs     Generate, ForkSession, CloseSession, SetInterventions, FetchTensor -> worker or llama-server
@@ -1724,11 +1726,12 @@ flowchart TD
 
 - Unit tests at the bottom of `vram_leases.rs` (`decide_lease` table cases), `exit_cause.rs`, `environments.rs` (`pick_environment_id` table), `handshake.rs`, `run_events.rs` (position table), `hf_cache.rs`, `permissions.rs`.
 - Integration tests listed in the tree. They use `tests/support/fake_worker.py` in the CPU environment and the llama-server stand-in, so they need no GPU.
-- Crash tests in `tests/crash/` (run in every CI build, spec §29):
+- Crash tests in `tests/crash/` (run in every CI build, spec §29). Since M1-48 the M1 rows are modules of one integration test, `tests/crash/tests/kill_matrix.rs` (each file below is `tests/crash/tests/kill_matrix/<file>`), which runs the daemon as its own test binary started again (`RASTAI_TEST_DAEMON_FOLDER`) and lands each kill at a `RASTAI_TEST_PAUSE_AT` point (`pause_points.rs`); `just test-crash` runs them one at a time:
 
 | Test | Checks |
 |---|---|
 | `daemon_kill_embedded_node.rs` | kill -9 the daemon (which also kills the embedded node) during TextCNN training; restart; the job reattaches and the daemon has every sequence with no gaps. This is the weeks 3–4 exit criterion (§32). |
+| `daemon_kill_before_commit.rs`, `daemon_kill_worker_finishes.rs`, `daemon_kill_mid_command.rs`, `worker_kill_normal_run.rs` | rows 2, 3, 9 and 13 of platform flow 6.5 (M1-48) |
 | `node_kill_mid_run.rs` | the same with a standalone node over a local socket |
 | `worker_kill_mid_frame.rs` | the node stops at a torn tail, the job is `failed` with the worker's last diagnostic or `RRS-J3002` |
 | `pid_reuse.rs` | a `job.json` pointing at an unrelated live pid is never signaled and ends `failed`; so does one whose `boot_id` is from an earlier boot, even with matching start ticks |

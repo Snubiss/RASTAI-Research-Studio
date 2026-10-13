@@ -55,6 +55,7 @@ use tokio::sync::mpsc;
 
 use crate::jobs::supervisor::run_has_live_writer;
 use crate::node::NodeState;
+use crate::pause_points::pause_at;
 
 /// How often a caught-up tail looks for new frames while the writer lives (contracts 15.10). A poll of a few files
 /// costs nothing and needs no file-watch dependency.
@@ -66,6 +67,10 @@ const FRAMES_PER_READ: usize = 256;
 /// The sequence of the node's own report at the end of a damaged stream: no log record has it (logs start at 1).
 pub const NODE_REPORT_SEQUENCE: u64 = 0;
 const DIAGNOSTIC_REPORTED_EVENT_TYPE: &str = "diagnostic.reported";
+const RUN_METRICS_EVENT_TYPE: &str = "run.metrics";
+/// The kill -9 tests' point (pause_points.rs; flows/platform.md 6.5 row 3): a `run.metrics` record has gone to the
+/// daemon, so the run is training and the daemon has seen it.
+const PAUSE_AFTER_METRICS_SENT: &str = "node.run_events.after_metrics_sent";
 
 /// Where in a run's log the frame with sequence `next_sequence` starts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,8 +160,12 @@ async fn stream_run_events(
         tail = returned_tail;
         let writer_seen_gone = !read.writer_alive;
         for record in read.records {
+            let is_metrics = record.event_type == RUN_METRICS_EVENT_TYPE;
             if sender.send(record).await.is_err() {
                 return writer_seen_gone;
+            }
+            if is_metrics {
+                pause_at(PAUSE_AFTER_METRICS_SENT);
             }
         }
         match read.next {
