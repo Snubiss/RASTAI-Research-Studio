@@ -7,8 +7,9 @@ import { NumberField } from "./NumberField.jsx";
 import { Select } from "./Select.jsx";
 import { TextField } from "./TextField.jsx";
 
-// A choice field with no value shows this empty option instead of the first choice, so the form never shows a value
-// it doesn't report, and a required choice stays invalid until the user picks one.
+// A choice field whose value isn't one of the choices (no value, "", or a stale value) shows this empty option instead
+// of the first choice, so the form never shows a value it doesn't report, and a required choice stays invalid until
+// the user picks one.
 const NO_CHOICE_LABEL = "Choose…";
 
 /**
