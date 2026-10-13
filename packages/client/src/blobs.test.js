@@ -95,6 +95,23 @@ describe("uploadBlob", () => {
     const result = await uploadBlob(client, hugeFile, () => {});
     expect("code" in result && result.code).toBe("RRS-U0006");
     expect(daemon.requests.length).toBe(requestsBefore);
+    // A Blob has no name, and the client holds no English of its own for one: the catalog's placeholder stays.
+    expect("message" in result && result.message).toBe("{file_name} is too large to upload from the browser.");
+  });
+
+  test("a File above the cap is named in the RRS-U0006 message", async () => {
+    const client = await connect();
+    const hugeFile = new File(["x"], "weights.safetensors");
+    Object.defineProperty(hugeFile, "size", { value: MAX_BROWSER_UPLOAD_BYTES + 1 });
+    const result = await uploadBlob(client, hugeFile, () => {});
+    expect("message" in result && result.message).toBe("weights.safetensors is too large to upload from the browser.");
+  });
+
+  test("a success whose body isn't a BlobRef resolves to RRS-U0001 instead of throwing", async () => {
+    const client = await connect();
+    daemon.uploadAnswer = "<html>a proxy's page</html>";
+    const result = await uploadBlob(client, new Blob(["x"]), () => {});
+    expect("code" in result && result.code).toBe("RRS-U0001");
   });
 
   test("a refused session is RRS-U0003 and an unreachable daemon RRS-U0001", async () => {

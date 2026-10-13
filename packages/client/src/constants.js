@@ -6,6 +6,10 @@
 export const RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 5000];
 // After this long without a working stream the status switches from "reconnecting" to "offline".
 export const OFFLINE_AFTER_MS = 30_000;
+// A stream counts as open at its first event, or once it has stayed up this long after its headers: the daemon
+// sends its headers at once and may end the stream right after them (RRS-C0401, or a failure), and such a stream
+// must neither report "connected" nor reset the backoff.
+export const STREAM_OPEN_GRACE_MS = 500;
 // Bigger files open by path through `file.browse`, so nothing is copied (contracts 3.3).
 export const MAX_BROWSER_UPLOAD_BYTES = 256 * 1024 * 1024;
 // A key in the URL fragment's query (#login=<code>), never the real query string: a fragment never reaches a

@@ -114,6 +114,15 @@ describe("execute", () => {
     expect(daemon.executeRequests).toHaveLength(1);
   });
 
+  test("an answer whose result_json isn't JSON is not sent again and doesn't read as unreachable", async () => {
+    const client = await connect();
+    daemon.answerExecute = () => ({ ok: true, resultJson: "not json" });
+    const failure = await client.execute("system.status", {}).catch((error) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toContain("system.status");
+    expect(daemon.executeRequests).toHaveLength(1);
+  });
+
   test("the generated typed wrappers run against a DaemonClient", async () => {
     const client = await connect();
     daemon.answerExecute = () => ({ ok: true, resultJson: '{"key":"ui.theme","value":"dark","source":"user"}' });
@@ -130,6 +139,13 @@ describe("listCommands", () => {
     daemon.commands = [{ commandId: "system.status", title: "System status" }];
     const commands = await listCommands(client);
     expect(commands.map((command) => [command.commandId, command.title])).toEqual([["system.status", "System status"]]);
+  });
+
+  test("rejects with RRS-U0003 as the cause when the gate refuses the session", async () => {
+    const client = await connect();
+    daemon.refusal = SESSION_REFUSED_CODE;
+    const failure = await listCommands(client).catch((error) => error);
+    expect(failure.cause.code).toBe("RRS-U0003");
   });
 
   test("rejects with the RRS-U Diagnostic as the cause when the daemon is gone", async () => {
