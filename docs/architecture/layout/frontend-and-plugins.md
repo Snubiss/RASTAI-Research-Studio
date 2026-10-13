@@ -902,23 +902,29 @@ packages/ui/
     tokens/                    the only place in the frontend that holds color values (2.10)
       token-types.js           JSDoc @typedefs: ThemeTokens, TypographyTokens, ThemeOptions
       built-in-themes.js       the light and dark themes as rastai.theme/1 data (dark seeded from the spike's colors)
+      light.theme.json         the built-in themes as plain rastai.theme/1 files, which built-in-themes.js imports and
+      dark.theme.json          rastai-formats' theme_tokens.rs validates through read_document
       resolve-tokens.js        builtInTheme(base, options): theme data plus density, motion and colorblind settings
       palettes.js              constants: the colorblind-safe series and diverging colors
       locked.js                LOCKED_TOKENS: security-UI colors, one light and one dark set; no theme reaches them
       apply-theme.js           applyThemeTokens(root, tokens): sets the --rr-* and --rr-locked-* variables
       canvas-colors.js         canvasColors(tokens): plain RGBA arrays for @rastai/canvas
       viz-colors.js            vizColors(tokens): plain RGBA arrays and color maps for @rastai/viz
+      color-math.js            hexToRgba (the renderer color functions) and cssRgb (the browser tests)
     security/                  exported only from @rastai/ui/security; only apps/web may import it (2.10)
       index.js
       EgressBadge.jsx          "data is leaving this machine": the active {purpose, host} pairs, click for details
       TrustPrompt.jsx          a plugin's permissions in plain English; says Python modules are trusted code
       PermissionList.jsx       requested and granted permissions
       SignedOutScreen.jsx      RRS-U0003 with "open Rastai again" instructions
+      locked-styles.js         the inline styles: locked colors, and a fixed font, sizes and spacing no theme reaches
+      permission-text.js       each manifest permission in plain English, the sensitive ones marked
     styles/
       base.css                 reset, typography, focus ring, reduced-motion rules; values only through var(--rr-*)
       components.css           one block per component; class prefix rr-; values only through var(--rr-*)
     mode/
       mode-types.js            JSDoc @typedef UiMode
+      mode-context.js          the one React context (private to mode/)
       ModeProvider.jsx
       use-mode.js
       AdvancedOnly.jsx
@@ -928,6 +934,7 @@ packages/ui/
       Tooltip.jsx  Toast.jsx  show-toast.js  Banner.jsx  Badge.jsx  ProgressBar.jsx  Spinner.jsx
       EmptyState.jsx  KeyHint.jsx  Table.jsx  VirtualList.jsx  Tree.jsx  FileDropZone.jsx
       FieldForm.jsx            renders a FieldSpec list (plain data) as a form; CommandForm builds on it
+      FieldFrame.jsx           label, required mark and help around one field (private to components/)
       ChartFrame.jsx           title, chart slot, legend, "Show as table" toggle with Table
       CommandPaletteView.jsx   palette view only: filter input, list, keyboard navigation; data comes from the caller
       SidebarNav.jsx  StatusBarView.jsx   view only; apps/web's StatusBar feeds it
@@ -952,6 +959,7 @@ packages/ui/
       use-reduced-motion.js    ui.reduced_motion or the OS setting
     format/
       format-bytes.js  format-duration.js  format-number.js   (Intl based)
+    testing/                   browser-test helpers only, never exported: render.js (mount), load-styles.js
 ```
 
 ### 4.2 Public API (main items)
@@ -1079,7 +1087,7 @@ Callers: every section and plugin UI; `apps/web`'s frame (`PanelChrome`, `Comman
 
 - Internal: `@rastai/catalog` (error and term entries). `@rastai/proto`, `@rastai/canvas` and `@rastai/viz` only as JSDoc type imports (`Diagnostic`, `CanvasColors`, `VizColors`), erased at build time.
 - External: react, react-dom. No component kit, no CSS framework, no icon library, no Markdown library.
-- Modules: `tokens/` imports nothing outside itself; `mode/` imports nothing; `security/` imports `tokens/locked.js` and `components/`; `components/` imports `tokens/`, `mode/`, `hooks/`, `icons/`; `diagnostics/` and `terms/` import `components/` and the catalog; `markdown/` imports `components/CodeBlock.jsx` only.
+- Modules: `tokens/` imports nothing outside itself; `mode/` imports nothing; `security/` imports `tokens/locked.js` and the catalog (RRS-U0003's text), never `components/`, whose look follows the theme; `components/` imports `tokens/`, `mode/`, `hooks/`, `icons/`; `diagnostics/` and `terms/` import `components/` and the catalog; `markdown/` imports `components/CodeBlock.jsx` only.
 
 ### 4.4 Boundary rules
 
@@ -1096,7 +1104,7 @@ Callers: every section and plugin UI; `apps/web`'s frame (`PanelChrome`, `Comman
 - `parse-markdown.test.js`: a fixture table of Markdown → block trees, including hostile input (`<script>`, `javascript:` links are rendered as text).
 - `palettes.test.js`: every palette pair meets WCAG contrast against both built-in themes' backgrounds; categorical palettes stay distinguishable under simulated deuteranopia and protanopia.
 - `tokens.test.js` (2.10): every role key resolves in both built-ins and both densities; `applyThemeTokens` sets every documented variable; locked variables come only from `LOCKED_TOKENS`.
-- `security.test.jsx`: screenshots of the four security components under both built-in themes and under a hostile test theme that sets every role to one color; the screenshots must not change.
+- `security/security.browser.test.jsx`: screenshots of the four security components under both built-in themes and under a hostile test theme that sets every role to one color (the security surface's own) and blows up the type and spacing scales; the screenshots, taken in the same run, and the computed colors must not change.
 - Screenshot tests for `DiagnosticView` in both modes.
 
 ### 4.6 Ported code

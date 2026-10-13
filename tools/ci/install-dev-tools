@@ -4,7 +4,8 @@
 # It also works on a developer's machine, as a shortcut for the install steps in the justfile header.
 #
 # Usage: tools/ci/install-dev-tools <tool>...
-#   tools: just, uv, node (with pnpm through corepack), cargo-deny, buf, protoc-gen-prost, protoc-gen-tonic
+#   tools: just, uv, node (with pnpm through corepack), cargo-deny, buf, protoc-gen-prost, protoc-gen-tonic,
+#          browsers (the Chromium and WebKit builds Playwright runs @rastai/ui's browser tests in)
 #
 # protoc-gen-prost and protoc-gen-tonic have no prebuilt downloads, so they're built with `cargo install --locked`
 # into ~/.cargo/bin, as the justfile header says; cargo checks each crate against the crates.io index's checksum.
@@ -13,6 +14,10 @@
 #
 # cargo-fuzz isn't here: its prebuilt Linux download is a musl build, cargo-fuzz builds the fuzz targets for the
 # platform it was built for, and the sanitizers don't work on musl. The nightly job uses `cargo install` instead.
+#
+# Playwright has no checksum file for its browser builds, so their SHA-256 values were taken from the first
+# download when the pin was made (playwright 1.63.0, 2026-10-12); a later download that differs stops the install.
+# Playwright never downloads them itself here: it finds them where it would have put them (PLAYWRIGHT_BROWSERS_DIR).
 #
 # The versions are the ones the repo pins elsewhere (the justfile, package.json, python/pyproject.toml);
 # tests/workspace/ci-workflows.test.js fails if they drift apart. Each download is for the CI runners that use it:
@@ -31,6 +36,20 @@ CARGO_DENY_VERSION="0.20.2"
 BUF_VERSION="1.73.0"
 PROTOC_GEN_PROST_VERSION="0.5.0"
 PROTOC_GEN_TONIC_VERSION="0.5.0"
+# The browser builds playwright 1.63.0 (package.json devDependencies) launches, from its browsers.json: the
+# headless Chromium shell and WebKit. Playwright looks for each in <browsers dir>/<name>-<revision>/.
+PLAYWRIGHT_VERSION="1.63.0"
+CHROMIUM_VERSION="153.0.8010.12"
+CHROMIUM_HEADLESS_SHELL_REVISION="1243"
+WEBKIT_REVISION="2359"
+PLAYWRIGHT_BROWSERS_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+PLAYWRIGHT_CDN="https://cdn.playwright.dev/builds"
+# Playwright's WebKit links two Ubuntu libraries that a desktop install may lack (game controllers). Without sudo,
+# `apt-get download` fetches them (apt checks each .deb against its signed index) and they are unpacked into the
+# WebKit folders' own sys/lib, which their MiniBrowser wrappers and Playwright's host check both search.
+WEBKIT_EXTRA_LIBRARY="libmanette-0.2.so.0"
+WEBKIT_EXTRA_PACKAGES="libmanette-0.2-0 libhidapi-hidraw0"
+WEBKIT_MINIBROWSER_FOLDERS="minibrowser-gtk minibrowser-wpe"
 
 # The SHA-256 of each download, copied from the release's own checksum file when the pin was made. A download that
 # differs (a replaced release asset, a tampered mirror) stops the install.
@@ -44,9 +63,16 @@ NODE_SHA256_LINUX="fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb
 NODE_SHA256_MACOS="6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"
 CARGO_DENY_SHA256_LINUX="9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
 BUF_SHA256_LINUX="8f2986298ad08f0cc1bf999b9797b7c383adf32d7edf0f73d6f1e1a701baeac1"
+CHROMIUM_HEADLESS_SHELL_SHA256_LINUX="a9da028861a0cf789ff25c2fed45f5f1aaf969ed9247835b6a7821a4f7af9d1d"
+CHROMIUM_HEADLESS_SHELL_SHA256_MACOS="89d80a6d26ccd0ccfd51e22d9e1297283862af2b0cd91dce07459b35ca0059f2"
+# Playwright builds WebKit per Ubuntu release: 24.04 is the CI runner, 26.04 a current developer machine.
+WEBKIT_SHA256_UBUNTU_24_04="8c129d989a1c48d826ca11b45acbba919039de811623dc3819ccbd95b69eeb62"
+WEBKIT_SHA256_UBUNTU_26_04="4d5cafd101bae4755c0aba879aa7de77e55193553d76609b4258fa8355c4db7f"
+# The macOS build is per macOS release too: 15 is the CI runner (macos-15).
+WEBKIT_SHA256_MACOS_15="33902c98fc0442f916eaa1e006af775f03c65c554eacba78e446581ba2f71ffd"
 
 # Every tool this script knows, for the usage messages.
-KNOWN_TOOLS="just, uv, node, cargo-deny, buf, protoc-gen-prost, protoc-gen-tonic"
+KNOWN_TOOLS="just, uv, node, cargo-deny, buf, protoc-gen-prost, protoc-gen-tonic, browsers"
 
 main() {
     if [ "$#" -eq 0 ]; then
@@ -71,6 +97,7 @@ install_tool() {
         buf) install_buf ;;
         protoc-gen-prost) install_with_cargo protoc-gen-prost "$PROTOC_GEN_PROST_VERSION" ;;
         protoc-gen-tonic) install_with_cargo protoc-gen-tonic "$PROTOC_GEN_TONIC_VERSION" ;;
+        browsers) install_browsers ;;
         *) fail "unknown tool: $1 (tools: $KNOWN_TOOLS)" ;;
     esac
 }
@@ -189,6 +216,85 @@ install_buf() {
     cp "$file" "$INSTALL_DIR/buf"
     chmod 755 "$INSTALL_DIR/buf"
     "$INSTALL_DIR/buf" --version
+}
+
+# The JavaScript jobs run the browser tests in Chromium and WebKit: Linux (`checks`, `test-js`) and macOS
+# (`test-js-macos`). Each build is unpacked where Playwright looks for it, replacing an earlier copy of the same
+# revision. The macOS pins are checked by the first manual CI run on macOS (PROC-01).
+install_browsers() {
+    case "$PLATFORM" in
+        linux) install_browsers_linux ;;
+        macos) install_browsers_macos ;;
+        windows) fail "no pinned browser builds for Windows: only the Linux and macOS jobs run JavaScript" ;;
+    esac
+    echo "Chromium $CHROMIUM_VERSION and WebKit r$WEBKIT_REVISION for playwright $PLAYWRIGHT_VERSION are in" \
+        "$PLAYWRIGHT_BROWSERS_DIR" >&2
+}
+
+install_browsers_linux() {
+    local chromium_url="$PLAYWRIGHT_CDN/cft/$CHROMIUM_VERSION/linux64/chrome-headless-shell-linux64.zip"
+    install_browser "$chromium_url" "$CHROMIUM_HEADLESS_SHELL_SHA256_LINUX" \
+        "chromium_headless_shell-$CHROMIUM_HEADLESS_SHELL_REVISION"
+    local ubuntu_release webkit_sha256
+    ubuntu_release="$(ubuntu_release)"
+    case "$ubuntu_release" in
+        24.04) webkit_sha256="$WEBKIT_SHA256_UBUNTU_24_04" ;;
+        26.04) webkit_sha256="$WEBKIT_SHA256_UBUNTU_26_04" ;;
+        *) fail "no pinned WebKit build for Ubuntu '$ubuntu_release' (pinned: 24.04, 26.04)" ;;
+    esac
+    local webkit_url="$PLAYWRIGHT_CDN/webkit/$WEBKIT_REVISION/webkit-ubuntu-$ubuntu_release.zip"
+    install_browser "$webkit_url" "$webkit_sha256" "webkit-$WEBKIT_REVISION"
+    add_webkit_libraries "$PLAYWRIGHT_BROWSERS_DIR/webkit-$WEBKIT_REVISION"
+}
+
+install_browsers_macos() {
+    local macos_major
+    macos_major="$(sw_vers -productVersion | cut -d. -f1)"
+    if [ "$macos_major" != "15" ]; then
+        fail "no pinned WebKit build for macOS $macos_major (pinned: 15)"
+    fi
+    local chromium_url="$PLAYWRIGHT_CDN/cft/$CHROMIUM_VERSION/mac-arm64/chrome-headless-shell-mac-arm64.zip"
+    install_browser "$chromium_url" "$CHROMIUM_HEADLESS_SHELL_SHA256_MACOS" \
+        "chromium_headless_shell-$CHROMIUM_HEADLESS_SHELL_REVISION"
+    local webkit_url="$PLAYWRIGHT_CDN/webkit/$WEBKIT_REVISION/webkit-mac-15-arm64.zip"
+    install_browser "$webkit_url" "$WEBKIT_SHA256_MACOS_15" "webkit-$WEBKIT_REVISION"
+}
+
+install_browser() {
+    local url="$1" sha256="$2" folder_name="$3"
+    local folder
+    folder="$(download_and_unpack "$url" "$sha256")"
+    mkdir -p "$PLAYWRIGHT_BROWSERS_DIR"
+    rm -rf "${PLAYWRIGHT_BROWSERS_DIR:?}/$folder_name"
+    mv "$folder" "$PLAYWRIGHT_BROWSERS_DIR/$folder_name"
+}
+
+# Nothing to do when the system already has the library (a CI runner after `playwright install-deps`).
+add_webkit_libraries() {
+    local webkit_dir="$1"
+    if ldconfig -p | grep -q "$WEBKIT_EXTRA_LIBRARY"; then
+        return
+    fi
+    local package_dir="$WORK_DIR/webkit-libraries"
+    mkdir -p "$package_dir"
+    for package in $WEBKIT_EXTRA_PACKAGES; do
+        (cd "$package_dir" && apt-get download "$package")
+    done
+    for package_file in "$package_dir"/*.deb; do
+        dpkg-deb -x "$package_file" "$package_dir/unpacked"
+    done
+    for folder in $WEBKIT_MINIBROWSER_FOLDERS; do
+        mkdir -p "$webkit_dir/$folder/sys/lib"
+        cp -P "$package_dir"/unpacked/usr/lib/x86_64-linux-gnu/*.so.* "$webkit_dir/$folder/sys/lib/"
+    done
+    echo "Added $WEBKIT_EXTRA_PACKAGES to WebKit's own sys/lib" >&2
+}
+
+# The VERSION_ID of /etc/os-release on Ubuntu ("24.04"), or nothing on another distribution.
+ubuntu_release() {
+    if [ -r /etc/os-release ] && grep -q '^ID=ubuntu$' /etc/os-release; then
+        sed -n 's/^VERSION_ID="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' /etc/os-release
+    fi
 }
 
 # Builds a crate's program into ~/.cargo/bin, unless the program found on PATH already prints the pinned version

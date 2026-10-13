@@ -2,8 +2,8 @@
 //! `colors` or anywhere else in the file, is an unknown field (`RRS-E1003`), and so is a misspelled role. The color
 //! roles are struct fields, so there is no free map a locked name could slip into (layout 4.2a).
 //!
-//! The built-in light and dark themes of `@rastai/ui` join this file when they exist (M1-51), read through the same
-//! `read_document`.
+//! The built-in light and dark themes of `@rastai/ui` (M1-51) are read through the same `read_document`: the bytes
+//! the web app imports are the bytes rastai-formats validates, and each sets every color role.
 
 #![allow(clippy::unwrap_used)]
 
@@ -12,6 +12,7 @@ use std::path::Path;
 
 use rastai_diag::diagnostic::Diagnostic;
 use rastai_formats::byte_source::SliceSource;
+use rastai_formats::documents::theme::COLOR_ROLES;
 use rastai_formats::json::pretty::pretty_json;
 use rastai_formats::limits::ImportLimits;
 use rastai_formats::validate::{ReadOutcome, read_document};
@@ -19,6 +20,13 @@ use serde_json::{Value, json};
 
 const BASE_THEME: &str = "../../fixtures/documents/rastai.theme/valid/night.theme.json";
 const THEME_FILE: &str = "test.theme.json";
+/// `@rastai/ui`'s built-in themes (layout frontend-and-plugins.md 2.10), with the base each must declare.
+const BUILT_IN_THEMES: &[(&str, &str)] = &[
+    ("../../packages/ui/src/tokens/light.theme.json", "light"),
+    ("../../packages/ui/src/tokens/dark.theme.json", "dark"),
+];
+/// The spike canvas's background, which seeds the dark theme's canvas (layout frontend-and-plugins.md 4.6).
+const SPIKE_CANVAS_BACKGROUND: &str = "#101318";
 const CODE_UNKNOWN_FIELD: &str = "RRS-E1003";
 const CODE_VALUE_FORM: &str = "RRS-E2006";
 /// The locked tokens of contracts 5.6, as they are written in CSS.
@@ -34,8 +42,11 @@ const LOCKED_TOKENS: &[&str] = &[
 ];
 
 fn base_theme() -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(BASE_THEME);
-    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    serde_json::from_slice(&read_file(BASE_THEME)).unwrap()
+}
+
+fn read_file(relative_path: &str) -> Vec<u8> {
+    fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path)).unwrap()
 }
 
 fn read_theme(theme: &Value) -> ReadOutcome {
@@ -126,4 +137,28 @@ fn a_color_that_is_not_rrggbb_is_a_meaning_error_and_the_theme_still_reads() {
     );
     // Layer 3 doesn't block loading: the editor shows the document with its error (layout 4.4).
     assert!(outcome.document.is_some());
+}
+
+#[test]
+fn the_built_in_themes_are_valid_and_set_every_role() {
+    for (path, base) in BUILT_IN_THEMES {
+        let bytes = read_file(path);
+        let file_name = Path::new(path).file_name().unwrap().to_str().unwrap();
+        let outcome = read_document(file_name, &SliceSource { bytes: &bytes }, &ImportLimits::default());
+        assert_eq!(outcome.diagnostics, vec![], "{path}");
+        assert!(outcome.document.is_some(), "{path}");
+
+        let theme: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(theme["base"], json!(base), "{path}");
+        for (role, _) in COLOR_ROLES {
+            assert!(theme["colors"][*role].is_string(), "{path} leaves out the role {role}");
+        }
+    }
+}
+
+#[test]
+fn the_dark_theme_keeps_the_spike_canvas_background() {
+    let (dark_path, _) = BUILT_IN_THEMES[1];
+    let theme: Value = serde_json::from_slice(&read_file(dark_path)).unwrap();
+    assert_eq!(theme["colors"]["canvas_background"], json!(SPIKE_CANVAS_BACKGROUND));
 }

@@ -1,0 +1,86 @@
+/*
+ * Base styles for every @rastai/ui page: a small reset, the type scale and the focus ring (layout
+ * frontend-and-plugins.md 2.9 and 2.10). Every value comes from a --rr-* variable that applyThemeTokens writes;
+ * nothing here names a color, font, size or duration of its own. Reduced motion needs no rule here: the setting (or
+ * the OS preference) sets --rr-motion-fast and --rr-motion-slow to 0, and every transition uses them.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--rr-color-background);
+  color: var(--rr-color-text);
+  font-family: var(--rr-font-ui);
+  font-size: var(--rr-font-size-md);
+  font-weight: var(--rr-font-weight-regular);
+  line-height: var(--rr-line-height-body);
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0 0 var(--rr-space-2);
+  font-weight: var(--rr-font-weight-bold);
+  line-height: var(--rr-line-height-heading);
+}
+
+h1 {
+  font-size: var(--rr-font-size-xl);
+}
+
+h2 {
+  font-size: var(--rr-font-size-lg);
+}
+
+h3,
+h4 {
+  font-size: var(--rr-font-size-md);
+}
+
+p {
+  margin: 0 0 var(--rr-space-2);
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--rr-font-mono);
+  line-height: var(--rr-line-height-code);
+}
+
+a {
+  color: var(--rr-color-accent);
+}
+
+a:hover {
+  color: var(--rr-color-accent-hover);
+}
+
+::selection {
+  background: var(--rr-color-selection);
+  color: var(--rr-color-text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* The focus ring is always visible on keyboard focus (WCAG 2.2 AA; layout 2.9). */
+:focus-visible {
+  outline: var(--rr-focus-ring-width) solid var(--rr-color-focus-ring);
+  outline-offset: var(--rr-focus-ring-offset);
+}

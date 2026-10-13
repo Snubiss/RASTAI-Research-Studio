@@ -25,6 +25,10 @@
 #   Then pnpm through Node's corepack:
 #     corepack enable --install-directory ~/.local/bin pnpm
 #     package.json `packageManager` pins pnpm 12.7.0 with its sha512, and corepack refuses a download that differs.
+#   Then the browsers @rastai/ui's component tests (*.browser.test.jsx) run in: the headless Chromium and WebKit
+#   builds of the playwright version package.json pins, each checked against its SHA-256, into ~/.cache/ms-playwright:
+#     tools/ci/install-dev-tools browsers
+#   On Ubuntu it also fetches the two libraries WebKit needs that a desktop may lack, with `apt-get download` (no sudo).
 #
 # Protobuf tools for `just codegen`, `just codegen-check` and `just proto-check`, also for your user only:
 #   buf 1.73.0. Download https://github.com/bufbuild/buf/releases/download/v1.73.0/buf-Linux-x86_64,
@@ -163,7 +167,8 @@ test-python: env-cpu
 test-python-portable: env-cpu
     cd python && "{{cpu_python}}" -m pytest -m "not posix_only" {{portable_test_folders}}
 
-# The test files are listed in vitest.config.js.
+# The test files are listed in vitest.config.js: unit tests run in Node, *.browser.test.jsx in Chromium and WebKit
+# (install those once with `tools/ci/install-dev-tools browsers`, as the header says).
 # vitest over the whole JavaScript workspace.
 test-js: env-js
     pnpm exec vitest run
