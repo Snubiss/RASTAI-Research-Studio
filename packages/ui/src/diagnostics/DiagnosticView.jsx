@@ -1,8 +1,8 @@
 // One Diagnostic, the way every error in the app is shown (layout frontend-and-plugins.md 2.4 step 6 and 2.7).
 // Basic: the catalog's plain text and a short fix button, with the catalog's fix sentence beside it so the user
 // knows what the button will do (a fix with no command shows the sentence alone). Advanced adds the code, path and
-// full message. The severity color is a locked
-// token (--rr-locked-severity-*), so no theme can make an error look like info.
+// full message. The severity color is a locked token (--rr-locked-severity-*), so no theme can make an error look
+// like info.
 
 import { Button } from "../components/Button.jsx";
 import { useMode } from "../mode/use-mode.js";
