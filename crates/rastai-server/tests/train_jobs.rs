@@ -42,7 +42,8 @@ mod on_linux {
     /// `<data>/envs/<environment_id>-<lock_hash12>/`: the embedded node finds the cpu environment here (daemon.rs).
     const ENVIRONMENT_FOLDER: &str = "cpu-000000000000";
     /// Starting Python and torch takes a few seconds and the run 400 steps; a loaded machine is slower.
-    const RUN_LIMIT: Duration = Duration::from_secs(300);
+    /// The limit catches a hang, not a slow machine: 300 s timed out at load average 70-90 (issue #262).
+    const RUN_LIMIT: Duration = Duration::from_secs(1200);
     /// "At once": the answer doesn't wait for the job, only for its rows.
     const ANSWER_LIMIT: Duration = Duration::from_secs(5);
     const POLL: Duration = Duration::from_millis(100);
