@@ -519,7 +519,7 @@ Failures:
 - Reduced motion (`ui.reduced_motion` or the OS setting) sets both motion tokens to 0 and turns off camera auto-motion, inertia and animated transitions in 3D views.
 - Focus is always visible: the focus ring is a token (`--rr-focus-ring-width`, `--rr-focus-ring-offset`, color role `focus_ring`).
 - `tests/e2e/accessibility.spec.js` runs axe-core (dev tooling, contracts §2.5) on every section in both modes and both built-in themes.
-- From M8, theme plugins pass an accessibility check in `rastai-formats` before they load (WCAG 2.2 AA: 4.5:1 for text, 3:1 for UI parts and the focus ring, 24 px targets); high-contrast built-in themes come with it (2.10).
+- From M8, theme plugins pass an accessibility check in `rastai-formats` before they load (WCAG 2.2 AA: 4.5:1 for text, 3:1 for UI parts and the focus ring, 24 px targets); the high-contrast built-in theme, which ships with DESIGN-03, is checked by the same check (2.10).
 
 ### 2.10 Theming and the locked security UI
 
@@ -552,7 +552,7 @@ flowchart TD
 - **Components and plugin UIs read only `--rr-*` variables.** No color, font, spacing, radius, shadow or duration literal in component CSS or JSX. `tools/checks/check-colors` fails CI on a color literal in `packages/canvas/src/`, `packages/viz/src/`, `apps/web/src/sections/` and `plugins/*/ui/src/`; `@rastai/ui`'s own component CSS follows the same rule.
 - **Renderers never pick colors.** They take `CanvasColors` or `VizColors` (plain RGBA arrays) through `setColors`. The spike's hard-coded `#101318` is gone; it seeds the built-in dark theme's `canvas_background`.
 - **Role keys are fixed** (contracts §5.6). A theme may set any of them; missing ones come from its `base`. `@rastai/ui` may not import `@rastai/formats` (contracts §2.3), so `COLOR_ROLES` in `built-in-themes.js` is read from the built-in `light.theme.json`, never typed out by hand. Two tests keep it equal to the schema: `tokens.test.js` compares it and both built-ins with `schemas/rastai.theme/1.json`, and `rastai-formats`' `theme_tokens.rs` validates both files through `read_document` and checks that they set every role.
-- **Built-in themes** are `light` and `dark`, stored as plain `rastai.theme/1` files (`light.theme.json`, `dark.theme.json`) that `@rastai/ui/src/tokens/built-in-themes.js` imports. Follow-OS high-contrast themes and a font assets path come in M8.
+- **Built-in themes** are `light` and `dark`, stored as plain `rastai.theme/1` files (`light.theme.json`, `dark.theme.json`) that `@rastai/ui/src/tokens/built-in-themes.js` imports. The `high_contrast` built-in ships with DESIGN-03 (its values come from there); the accessibility check that covers it, a follow-OS built-in and a font assets path come in M8.
 - **Plugin themes** (`themes[]`, capability `ui.theme@1`) are refused before M8 with `RRS-P1002`. From M8 the daemon validates the theme file, runs the accessibility check (2.9) and the Appearance page offers a picker.
 - **Per-panel `theme_override`** in `rastai.layout/1` is M8 or Phase 2.
 
@@ -1114,7 +1114,7 @@ None. The spike canvas's background (`#101318`) and node colors seed the built-i
 
 ### 4.7 Build order
 
-Step 1 (M1): the token contract (`token-types.js`, built-in themes, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS`), base styles, the security components, Button, fields, Table, Dialog, Toast, `DiagnosticView`, mode primitives, `CommandPaletteView`, `PanelChrome`. Every later step adds what its section needs: Markdown in step 3 (chat), `ChartFrame` in step 4. M8 adds plugin theme resolution, the high-contrast built-ins and the font assets path.
+Step 1 (M1): the token contract (`token-types.js`, built-in themes, `applyThemeTokens`, `canvasColors`, `vizColors`, `LOCKED_TOKENS`), base styles, the security components, Button, fields, Table, Dialog, Toast, `DiagnosticView`, mode primitives, `CommandPaletteView`, `PanelChrome`. Every later step adds what its section needs: Markdown in step 3 (chat), `ChartFrame` in step 4. M8 adds plugin theme resolution, the follow-OS built-ins and the font assets path. The high-contrast built-in comes earlier, with DESIGN-03.
 
 ---
 
@@ -2316,7 +2316,7 @@ None directly. Lessons: render at frame rate, not event rate (spike 02 packet ra
 | 7 | Gym |
 | 8 | Plugins section complete (install, trust prompt, dev), `IframePanel` and the bridge, macros (`assistant-skills.js` is Phase 2, plan §10 row 45) |
 | 9 | Remote: pairing, transfers, headless help |
-| M8 | plugin themes in the Appearance picker, the high-contrast built-ins, `theme_override` per panel (or Phase 2) |
+| M8 | plugin themes in the Appearance picker, the accessibility check for the high-contrast built-in (shipped by DESIGN-03), `theme_override` per panel (or Phase 2) |
 | M11 | `ArchivePage.jsx` (Settings > Storage > Archive), pruned-run stubs with Restore (M11-E06) |
 
 ---

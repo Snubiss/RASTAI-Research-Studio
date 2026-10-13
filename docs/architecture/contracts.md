@@ -1012,7 +1012,7 @@ The theme contract every section, plugin UI, renderer and the static viewer foll
 
 **CSS variables are the public surface.** `applyThemeTokens(root, tokens)` sets them on the root element; components and plugin UIs read only these:
 - colors `--rr-color-<role>` (underscores become hyphens: `--rr-color-surface-raised`);
-- `--rr-font-ui`, `--rr-font-mono`, `--rr-font-weight-<regular|medium|bold>`, `--rr-font-size-<xs…xl>`, `--rr-line-height-<body|heading|code>`;
+- `--rr-font-ui`, `--rr-font-mono`, `--rr-font-weight-<regular|medium|bold>`, `--rr-font-size-<xs…xxl>` (`xxl` is the optional display size; a theme that leaves it out gets the `xl` value, and DESIGN-03 starts emitting it), `--rr-line-height-<body|heading|code>`;
 - `--rr-space-<n>` (from the active density), `--rr-radius-<small|medium|large>`;
 - `--rr-motion-fast`, `--rr-motion-slow`, `--rr-motion-easing`;
 - `--rr-focus-ring-width`, `--rr-focus-ring-offset`;

@@ -351,7 +351,7 @@ class ThemeTypography:
     font_family_mono: str
     # Regular, medium and bold weights.
     font_weights: ThemeFontWeights
-    # Font sizes xs to xl.
+    # Font sizes xs to xl, and the optional xxl display size for headings (xl when left out).
     font_sizes_px: ThemeFontSizes
     # Body, heading and code line heights.
     line_heights: ThemeLineHeights

@@ -78,7 +78,7 @@
  * @property {string} font_family_ui CSS font-family list for the interface.
  * @property {string} font_family_mono CSS font-family list for code.
  * @property {ThemeFontWeights} font_weights Regular, medium and bold weights.
- * @property {ThemeFontSizes} font_sizes_px Font sizes xs to xl.
+ * @property {ThemeFontSizes} font_sizes_px Font sizes xs to xl, and the optional xxl display size for headings (xl when left out).
  * @property {ThemeLineHeights} line_heights Body, heading and code line heights.
  */
 
