@@ -10,7 +10,8 @@ against what it recorded.
 What differs between the surfaces by design, and is not compared:
 - The principal. The CLI is always the owner (daemon.sock, peer credentials; it never sends a token, layout 9.7),
   so HTTP uses the owner token beside it; MCP always runs as a scoped token (`train`: `read` and `training`).
-  For the same reason the scoped-token refusals run on HTTP and MCP only.
+  For the same reason the scoped-token refusals run on HTTP and MCP only: the CLI has no token to refuse, which is
+  how plan M1-49's Test line words its chat-only criterion.
 - A job command's answer: the job id on all three, and the result (`run_id`, the plan) only over HTTP; the CLI and
   MCP leave the run to `job.get`, which shows it the same on all three.
 - An MCP tools/call carries no idempotency key (none is defined for MCP), so keys are checked on HTTP and the CLI.
@@ -32,7 +33,8 @@ from transcripts import as_jsonl, read_golden, recorded_lines
 
 DESIGN = "templates/designs/textcnn.rrsmodel"
 DATASET = "fixtures/datasets/textcnn_tiny.jsonl"
-# An absolute path to no file: train.start takes it (the node checks the path), and the job fails reading it.
+# A path under the repo to no file, made absolute by paths_arguments: train.start takes it (the node checks the
+# path), and the job fails reading it.
 MISSING_DATASET = "fixtures/datasets/no_such_dataset.jsonl"
 UNKNOWN_RECIPE = "no_such_recipe"
 # A well-formed job id no daemon ever made.
@@ -48,6 +50,7 @@ ENDED_JOB_STATES = ("succeeded", "failed", "cancelled")
 # The volatile node field system.status shows; every surface reads it at a different moment.
 HEARTBEAT_FIELD = "last_heartbeat_unix_ms"
 CODE_UNKNOWN_JOB = "RRS-J0005"
+CODE_RECIPE_NOT_INSTALLED = "RRS-T0002"
 CODE_INVALID_ARGUMENTS = "RRS-C0002"
 CODE_IDEMPOTENCY_CONFLICT = "RRS-C0004"
 CODE_SCOPE_NOT_GRANTED = "RRS-C1005"
@@ -114,14 +117,24 @@ def wait_until_ended(http: HttpSurface, job_ids: list[str]) -> None:
         time.sleep(JOB_POLL_SECONDS)
 
 
-@pytest.fixture(scope="session")
-def three_surfaces_run(
-    repo_root: Path, owner_http: HttpSurface, cli: CliSurface, train_mcp: McpSurface
-) -> ThreeSurfacesRun:
-    surfaces = [owner_http, cli, train_mcp]
+@dataclass
+class JobStarts:
+    """The jobs train.start started, and what a retry with an idempotency key answered."""
+
+    started: dict
+    job_ids: dict
+    failing_start: Outcome
+    http_replay: Outcome
+    cli_replay: Outcome
+    http_conflict: Outcome
+    cli_conflict: Outcome
+
+
+def start_jobs(owner_http: HttpSurface, cli: CliSurface, train_mcp: McpSurface, repo_root: Path) -> JobStarts:
+    """One train.start per surface, one that fails later, then a retry soon after the first call: the same key and
+    arguments, then the same key with other arguments."""
     train_arguments = paths_arguments(repo_root, "classification", DATASET)
     missing_dataset_arguments = paths_arguments(repo_root, "classification", MISSING_DATASET)
-    status = on_every_surface(surfaces, "system.status", {})
     started = {
         "http": owner_http.execute("train.start", train_arguments, IDEMPOTENCY_KEY),
         "cli": cli.execute("train.start", train_arguments),
@@ -130,32 +143,58 @@ def three_surfaces_run(
     failing_start = owner_http.execute("train.start", missing_dataset_arguments)
     job_ids = {name: outcome.job_id for name, outcome in started.items()}
     job_ids["failing"] = failing_start.job_id
-    # A retry soon after the first call: the same key and arguments, then the same key with other arguments.
     http_replay = owner_http.execute("train.start", train_arguments, IDEMPOTENCY_KEY)
     cli_replay = cli.execute("train.start", train_arguments, IDEMPOTENCY_KEY)
     http_conflict = owner_http.execute("train.start", missing_dataset_arguments, IDEMPOTENCY_KEY)
     cli_conflict = cli.execute("train.start", missing_dataset_arguments, IDEMPOTENCY_KEY)
-    unknown_job = on_every_surface(surfaces, "job.get", {"job_id": UNKNOWN_JOB_ID})
-    unknown_recipe = on_every_surface(surfaces, "train.start", paths_arguments(repo_root, UNKNOWN_RECIPE, DATASET))
-    without_dataset = {key: value for key, value in train_arguments.items() if key != "dataset_path"}
-    missing_argument = on_every_surface(surfaces, "train.start", without_dataset)
-    wait_until_ended(owner_http, [job_id for job_id in job_ids.values() if job_id])
-    job_reads = {name: on_every_surface(surfaces, "job.get", {"job_id": job_id}) for name, job_id in job_ids.items()}
-    listed = owner_http.execute("job.list", {})
-    return ThreeSurfacesRun(
-        status=status,
+    return JobStarts(
         started=started,
         job_ids=job_ids,
         failing_start=failing_start,
-        unknown_job=unknown_job,
-        unknown_recipe=unknown_recipe,
-        missing_argument=missing_argument,
-        job_reads=job_reads,
         http_replay=http_replay,
         cli_replay=cli_replay,
         http_conflict=http_conflict,
         cli_conflict=cli_conflict,
-        train_jobs_listed=[job for job in listed.result["jobs"] if job["kind"] == "train"],
+    )
+
+
+def train_jobs_listed(owner_http: HttpSurface) -> list:
+    """job.list lists every kind; only train jobs are this test's."""
+    listed = owner_http.execute("job.list", {})
+    assert listed.ok, listed
+    return [job for job in listed.result["jobs"] if job["kind"] == "train"]
+
+
+@pytest.fixture(scope="session")
+def three_surfaces_run(
+    repo_root: Path, owner_http: HttpSurface, cli: CliSurface, train_mcp: McpSurface
+) -> ThreeSurfacesRun:
+    """Everything runs once, in this order, so the MCP session matches its golden transcript."""
+    surfaces = [owner_http, cli, train_mcp]
+    status = on_every_surface(surfaces, "system.status", {})
+    starts = start_jobs(owner_http, cli, train_mcp, repo_root)
+    unknown_job = on_every_surface(surfaces, "job.get", {"job_id": UNKNOWN_JOB_ID})
+    unknown_recipe = on_every_surface(surfaces, "train.start", paths_arguments(repo_root, UNKNOWN_RECIPE, DATASET))
+    without_dataset = paths_arguments(repo_root, "classification", DATASET)
+    del without_dataset["dataset_path"]
+    missing_argument = on_every_surface(surfaces, "train.start", without_dataset)
+    job_ids = starts.job_ids
+    wait_until_ended(owner_http, [job_id for job_id in job_ids.values() if job_id])
+    job_reads = {name: on_every_surface(surfaces, "job.get", {"job_id": job_id}) for name, job_id in job_ids.items()}
+    return ThreeSurfacesRun(
+        status=status,
+        started=starts.started,
+        job_ids=job_ids,
+        failing_start=starts.failing_start,
+        unknown_job=unknown_job,
+        unknown_recipe=unknown_recipe,
+        missing_argument=missing_argument,
+        job_reads=job_reads,
+        http_replay=starts.http_replay,
+        cli_replay=starts.cli_replay,
+        http_conflict=starts.http_conflict,
+        cli_conflict=starts.cli_conflict,
+        train_jobs_listed=train_jobs_listed(owner_http),
     )
 
 
@@ -289,6 +328,7 @@ def test_an_unknown_job_is_refused_the_same_way_on_every_surface(three_surfaces_
 def test_bad_train_arguments_are_refused_the_same_way_on_every_surface(three_surfaces_run: ThreeSurfacesRun):
     outcomes = three_surfaces_run.unknown_recipe
     assert_same_refusal(outcomes)
+    assert [item["code"] for item in outcomes["http"].diagnostics] == [CODE_RECIPE_NOT_INSTALLED]
     assert UNKNOWN_RECIPE in outcomes["http"].diagnostics[0]["message"], outcomes["http"]
 
 
@@ -366,8 +406,9 @@ def test_a_token_without_the_scope_is_refused_train_start_the_same_way(
             "fix_text": "Use a token that has the scope shown.",
         }
     ]
-    listed = owner_http.execute("job.list", {}).result["jobs"]
-    assert len(listed) == len(three_surfaces_run.train_jobs_listed), "a refused train.start started a job"
+    train_job_ids_now = sorted(job["job_id"] for job in train_jobs_listed(owner_http))
+    train_job_ids_before = sorted(job["job_id"] for job in three_surfaces_run.train_jobs_listed)
+    assert train_job_ids_now == train_job_ids_before, "a refused train.start started a job"
 
 
 def test_a_chat_only_token_reads_nothing_and_a_read_token_reads_the_same_as_the_owner(

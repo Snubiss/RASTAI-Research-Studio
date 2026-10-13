@@ -125,7 +125,7 @@ test-crash: env-cpu
 # other and against the golden transcripts in fixtures/mcp/e2e/. pytest runs it (settings in
 # tests/e2e/three_surfaces/pyproject.toml) with the cpu environment's Python, which also runs the real TextCNN jobs.
 # Linux only, like the job tests above. CI runs it as its own `e2e-surfaces` job; while CI is manual-only, `check`
-# runs it too (plan 3.6). It grows with each milestone's main action.
+# runs it too (plan 3.6), and it leaves `check` when CI returns (plan 8.7). It grows with each milestone's main action.
 # The same commands give the same outcomes over HTTP, the CLI and MCP, against a real daemon.
 e2e-surfaces: env-cpu
     cargo build --locked -p rastai-cli

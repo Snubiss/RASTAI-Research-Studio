@@ -589,7 +589,7 @@ The web app is one client of the commands API among several. Because `apps/web` 
 - **Bearer requests may omit Origin**; if they send one, the Origin rule applies (contracts §3.2). A token is scoped (`token.create`), revocable (`token.revoke`) and never shown again after creation.
 - **Typed calls in JavaScript** use the generated wrappers against any `CommandExecutor`: `modelLoad(client, args)` in a script is the same function a plugin panel calls with its `PluginHost`.
 - **Stability:** every command and event type is `preview` until Phase 2 (`CommandDescriptor.stability`, `EventTypeDescriptor.stability`). `buf breaking` checks the protobuf messages, but it can't see inside `arguments_json` and `result_json`, which are strings to protobuf; `check-schema-diff` (M1-58, ADR-0038) diffs `schemas/commands/` and `schemas/events/` against the base branch: every change needs a contracts.md update, and a breaking change to a `stable` item fails CI. Every item stays `preview` until Phase 2, so until then a client should pin the daemon version it was tested with (`GET /api/health`).
-- **Proof that it works:** M1-49's three-surfaces test (`tests/e2e/three_surfaces/`) runs one action through UI, CLI and MCP and grows each milestone; M10-E02 adds an API-only run of the core loop.
+- **Proof that it works:** M1-49's three-surfaces test (`tests/e2e/three_surfaces/`) runs the same commands over Connect JSON on HTTP, the `rastai` verbs and `rastai mcp` against one `rastai serve --headless` and checks they give the same outcomes and diagnostics; the UI joins with the web shell, and it grows each milestone; M10-E02 adds an API-only run of the core loop.
 
 **Live-stream rules for any client** (the web app follows the same rules, 2.2)
 - Open one `EventService.Subscribe` stream per client or window, filtered by event types and subject ids. The stream is binary protobuf in the prototype; JSON for `EventService` comes through a generated proto-JSON codec only if needed (M9, else Phase 2).
@@ -2285,7 +2285,7 @@ The First Run tutorial covers minutes 3–10 of spec §6: load a model, chat, op
 | `accessibility.spec.js` | axe-core on every section in both modes and both built-in themes |
 | `theme.spec.js` | light, dark, `system` with an emulated OS dark scheme, then compact density: the canvas and every chart recolor, the number of WebGL contexts stays the same, and the `--rr-locked-*` variables don't change (2.10) |
 | `psychology-latency.spec.js` | M4 latency budget: 200 slider changes on the fixture model; the p95 of the round trip from `execute("chat.settings.set")` to its `ok` outcome (UI → daemon → node → worker) is under 50 ms locally (14.3) |
-| `three_surfaces/` | M1-49: one action through the UI, the CLI and MCP gives the same result; grows each milestone. M10-E02 adds an API-only run of the core loop with no browser |
+| `three_surfaces/` | M1-49: the same commands over Connect JSON on HTTP, the `rastai` verbs and `rastai mcp` give the same outcomes and diagnostics (pytest, `just e2e-surfaces`); the UI joins with the web shell; grows each milestone. M10-E02 adds an API-only run of the core loop with no browser |
 
 ### 8.8 Ported code
 
