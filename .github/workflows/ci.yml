@@ -230,3 +230,17 @@ jobs:
       - *install-just-node
       - *pnpm-cache
       - *test-js
+
+  # HTTP, the CLI and MCP against one real daemon (plan M1-49): the same commands give the same outcomes on all
+  # three, and the MCP sessions match fixtures/mcp/e2e/. Linux only: the daemon's job tests read /proc and signal
+  # process groups. It runs the real TextCNN job in the cpu environment, hence the uv and cargo caches.
+  e2e-surfaces:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - *checkout
+      - *install-just-uv
+      - *uv-cache
+      - *cargo-cache
+      - name: just e2e-surfaces
+        run: just e2e-surfaces
