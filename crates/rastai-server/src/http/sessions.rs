@@ -210,6 +210,15 @@ pub fn revoke_scoped_token(auth: &AuthState, token_id: &str) {
     }
 }
 
+/// Marks every scoped token revoked. A revoke does this when its write has committed but it can't read back which
+/// tokens it swept: the gate then fails closed until the next start loads the cache from `rastai.db` (contracts 8.2).
+pub fn revoke_all_scoped_tokens(auth: &AuthState) {
+    let mut tokens = lock_list(&auth.scoped_tokens);
+    for token in tokens.iter_mut() {
+        token.revoked = true;
+    }
+}
+
 /// The scoped token whose text hashes to `token_hash`, revoked or not; the gate decides what a revoked one means.
 pub fn find_scoped_token(auth: &AuthState, token_hash: &str) -> Option<ScopedToken> {
     let tokens = lock_list(&auth.scoped_tokens);

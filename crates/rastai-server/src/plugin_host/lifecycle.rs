@@ -172,7 +172,8 @@ pub(crate) async fn save_plugin_row(server: &Server, row: Option<PluginRow>) {
 
 /// Saves a disable: the plugin's row with its new state, when it has one, and the revoke of every token whose chain
 /// leads to the plugin, in one write transaction (contracts 8.2). A dev plugin has no row, so its write is the revoke
-/// alone. Once it has committed, the swept tokens are marked in the gate's cache. A write that fails is logged, as a
+/// alone. Once it has committed, the swept tokens are marked in the gate's cache (every scoped token, if they can't be
+/// read back, token.rs). A write that fails is logged, as a
 /// row's is: the plugin is disabled in memory, so its principal holds no scope, and its tokens are tried again by
 /// the next start's sweep while the plugin stays disabled or gone.
 pub(crate) async fn save_disabled_plugin(server: &Server, plugin_id: &str, row: Option<PluginRow>) {
@@ -191,12 +192,7 @@ pub(crate) async fn save_disabled_plugin(server: &Server, plugin_id: &str, row: 
         );
         return;
     }
-    if let Err(error) = mark_revoked_tokens_in_cache(server) {
-        log_warn(
-            "a disabled plugin's revoked tokens could not be read back into the gate's cache",
-            &[("plugin_id", plugin_id), ("code", error.code())],
-        );
-    }
+    mark_revoked_tokens_in_cache(server, None);
 }
 
 /// The start sweep (contracts 8.2): after the plugins load and before the listener opens, revokes every live token
@@ -222,7 +218,8 @@ pub async fn revoke_tokens_of_gone_plugins(server: &Server) -> Result<(), StoreE
         });
     }
     write_index(&server.store.index, IndexWrite::Batch(revokes)).await?;
-    mark_revoked_tokens_in_cache(server)
+    mark_revoked_tokens_in_cache(server, None);
+    Ok(())
 }
 
 /// The plugins named as a creator in `tokens.created_by` that the host holds no plugin for, or holds as `disabled`
