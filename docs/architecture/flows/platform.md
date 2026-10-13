@@ -611,7 +611,7 @@ pub async fn execute_command(server: &Server, principal: &Principal, request: Ex
 }
 
 async fn run_command(server: &Server, caller: &Principal, request: &ExecuteRequest) -> Result<CommandOutput, Vec<Diagnostic>> {
-    let principal = narrow_to_acting_plugin(server, caller, &request.acting_plugin_id);  // only ever removes rights
+    let principal = narrow_to_acting_plugin(server, caller, &request.acting_plugin_id)?;  // owner only (RRS-C1005); only ever removes rights
     let descriptor = find_descriptor(&server.registry, &request.command_id)?;     // RRS-C0001
     check_scope(&principal, descriptor)?;                                           // RRS-C1005
     check_plugin_enabled(server, descriptor)?;                                      // RRS-C0003
@@ -630,7 +630,7 @@ async fn run_command(server: &Server, caller: &Principal, request: &ExecuteReque
 }
 ```
 
-- **The principal is never in the request** (contracts §4.2). It comes from the session cookie or `owner.token` (owner), a scoped bearer token (`token`), the socket peer (owner), a plugin job token (`plugin`) or a node session (`node`). `ExecuteRequest.acting_plugin_id` (new; plan §10 row 3) only narrows an owner principal to that plugin's grant, for calls from a plugin's UI. A plugin that isn't enabled has an empty grant, so every scope check fails.
+- **The principal is never in the request** (contracts §4.2). It comes from the session cookie or `owner.token` (owner), a scoped bearer token (`token`), the socket peer (owner), a plugin job token (`plugin`) or a node session (`node`). `ExecuteRequest.acting_plugin_id` (new; plan §10 row 3) only narrows an owner principal to that plugin's grant, for calls from a plugin's UI. A plugin that isn't enabled has an empty grant, so every scope check fails. **Any other caller that sets it is refused** with `RRS-C1005` (its scope shown as `owner`), first of all the checks and in a dry run too: a scoped token, a plugin's job token or a node never runs as a plugin. Otherwise a token could make a token recorded as a plugin's, which revoking the token wouldn't reach (contracts 8.2 "Token creators and revocation", threat model R28).
 - **Scope before arguments**, so a caller without the scope learns nothing about argument shapes.
 - **Arguments** are parsed by `rastai-formats` into the generated `<Name>Args` type. The `RRS-E` diagnostics come back with JSON-pointer paths, wrapped in `RRS-C0002`.
 - **Journal:** every command except `read`-scope ones gets a started row before the handler and a finished row after. Fields marked `secret` or `content` in the argument type's description are written as `<redacted>` in `arguments_json`, and those marked so in the result type's description are written as `<redacted>` in `result_json` (contracts 5.1). So a command that changes something never holds `read` (`job.cancel` holds `training`, contracts 6.4). A started row with no finished row means the daemon died mid-command; the next start marks it `RRS-C0005`, so the user can see what was interrupted.
@@ -649,7 +649,9 @@ Every box is in `rastai-server` unless marked.
 ```mermaid
 flowchart TD
   A["Execute request with its principal"] --> AP{"acting_plugin_id set?"}
-  AP -->|"yes"| NP["Principal becomes plugin:plugin_id<br/>scopes capped by its grant"]
+  AP -->|"yes"| AO{"Caller is the owner?"}
+  AO -->|"no"| E0["RRS-C1005 scope shown as owner"]
+  AO -->|"yes"| NP["Principal becomes plugin:plugin_id<br/>scopes capped by its grant"]
   AP -->|"no"| B{"Descriptor found?"}
   NP --> B
   B -->|"no"| E1["RRS-C0001 unknown command"]
@@ -875,7 +877,7 @@ pub fn check_request_gate(request: &RequestHead, listener: &Listener, auth: &Aut
 - **A cookie request without Origin** passes only for `GET` and `HEAD` with `Sec-Fetch-Site` `same-origin` or `none`: the app's own blob downloads and images, and a URL the user typed. Browsers send Origin on every POST, so every Connect call carries it. Why the rule: `<img src>` on a page served from another loopback port sends the daemon's cookie (same site, since cookies ignore ports) with no Origin, and its `Sec-Fetch-Site` is `same-site`, so it is refused. A browser that sends no `Sec-Fetch-Site` gets `RRS-C1004` on such GETs.
 - Bearer requests may omit Origin (curl, Navi, scripts); if they send one, the Origin rule applies. Origin `null` (a sandboxed plugin iframe) is refused, so a third-party iframe can't call the daemon directly. The Tauri window loads the web app from the daemon, so its Origin is the daemon's own and no Tauri origin needs to be accepted.
 - Scoped tokens are looked up by BLAKE3 hash; plain tokens are never stored.
-- **Plugin UIs get no principal here.** When an iframe calls `tools/call`, the UI bridge in `@rastai/plugin` sends the call with the owner's cookie and sets `ExecuteRequest.acting_plugin_id`. `execute_command` then narrows the principal to the plugin's grant (3.1, 3.2). The field can only remove rights (plan §10 row 3; layout/frontend-and-plugins.md 20).
+- **Plugin UIs get no principal here.** When an iframe calls `tools/call`, the UI bridge in `@rastai/plugin` sends the call with the owner's cookie and sets `ExecuteRequest.acting_plugin_id`. `execute_command` then narrows the principal to the plugin's grant (3.1, 3.2). The field can only remove rights (plan §10 row 3; layout/frontend-and-plugins.md 20), and only the owner may send it: a bearer token or a plugin's job token that sets it is refused with `RRS-C1005` (3.2).
 - `/v1/*` and `/mcp` go through the same gate. Then `rastai-gateway` checks `chat` (plus `gateway.spend` for paid API adapters) and `rastai-mcp` checks each tool's scope.
 - Plugin UI assets are public static files with no secrets; the Host check still applies.
 
@@ -923,7 +925,7 @@ sequenceDiagram
 - `rastai mcp` without `RASTAI_TOKEN` answers every request with `RRS-C3002` and a fix that runs `token.create` with `mcp-default`. It never falls back to the owner token: an agent gets scopes only when the owner grants them.
 - MCP tool names are command ids with dots replaced by `__`. Malformed JSON-RPC → `RRS-C3001`.
 - Revocation applies on the next request; open streams for that token close with `RRS-C1006`.
-- **Revoking follows what a token made** (contracts 8.2, threat model R28). `token.create` records its caller as the new token's `created_by`. Revoking a token also revokes, in the same transaction, every live token it made, directly or through tokens it made, so a leaked `system.admin` token can't leave a successor behind; disabling a plugin does the same for the tokens that plugin made, and so does starting the daemon without a plugin (a dropped dev path, say). Each swept token is marked revoked in the gate's cache once the transaction commits. The owner's tokens are never revoked this way.
+- **Revoking follows what a token made** (contracts 8.2, threat model R28). `token.create` records its caller as the new token's `created_by`; only the owner may narrow to a plugin (3.2), so a token's create is always recorded as that token, never as a plugin it names. Revoking a token also revokes, in the same transaction, every live token it made, directly or through tokens it made, so a leaked `system.admin` token can't leave a successor behind; disabling a plugin does the same for the tokens that plugin made, and so does starting the daemon without a plugin (a dropped dev path, say). Each swept token is marked revoked in the gate's cache once the transaction commits. The owner's tokens are never revoked this way.
 - "Copy as MCP" writes the client config with a placeholder, never a real token.
 
 **Persisted:** `tokens` (durable, hash only); `gateway_log` in `vault.db` with the principal; journal rows.
