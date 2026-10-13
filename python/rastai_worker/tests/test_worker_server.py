@@ -64,7 +64,8 @@ TOKEN_METADATA_KEY = "rastai-job-token"
 SOCKET_FOLDER_PREFIX = "rr-worker-"
 UNIX_TARGET_PREFIX = "unix:"
 CALL_TIMEOUT_SECONDS = 5.0
-PROCESS_TIMEOUT_SECONDS = 60.0
+# The budget guards against a hang, not a slow machine: a real TextCNN run hit 60 s at load average ~90 (#234).
+PROCESS_TIMEOUT_SECONDS = 600.0
 POLL_SECONDS = 0.02
 FRAME_HEADER_FORMAT = "<II"
 # The worker itself, as the node starts it (contracts 3.1).
