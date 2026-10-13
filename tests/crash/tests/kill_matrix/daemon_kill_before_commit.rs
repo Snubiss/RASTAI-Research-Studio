@@ -2,7 +2,7 @@
 //! before the transaction that indexes them. The ack stays where it was, so the restarted daemon watches after it,
 //! receives the same records again and indexes each exactly once.
 
-use crate::kill_matrix::checks::{check_after_row, run_log, run_row, wait_until_run_indexed};
+use crate::kill_matrix::checks::{LogRead, check_after_row, run_log, run_row, wait_until_run_indexed};
 use crate::kill_matrix::commands::{start_training, wait_for_job_state};
 use crate::kill_matrix::daemon_process::DaemonProcess;
 use crate::kill_matrix::scenario::Scenario;
@@ -18,7 +18,14 @@ fn row_2_records_received_before_the_commit_are_indexed_exactly_once() {
     first.wait_until_paused(&scenario);
     // The daemon holds records it received and never committed: the log is ahead of the ack.
     let acked_at_kill = run_row(&scenario.paths, &run_id).unwrap().acked_sequence;
-    assert!(run_log(&scenario.paths, &run_id).last_sequence() > acked_at_kill);
+    let log_at_kill = run_log(&scenario.paths, &run_id);
+    assert!(
+        log_at_kill.last_sequence() > acked_at_kill,
+        "ack {acked_at_kill}, log {:?} ending {:?}\n{}",
+        sequences_and_types(&log_at_kill),
+        log_at_kill.end,
+        scenario.describe()
+    );
     first.kill_9();
 
     let second = DaemonProcess::start(&scenario, None);
@@ -27,4 +34,13 @@ fn row_2_records_received_before_the_commit_are_indexed_exactly_once() {
     check_after_row(&scenario, &[&run_id]);
     second.stop(&scenario);
     scenario.finish();
+}
+
+/// Each record's sequence and type, for a failure message.
+fn sequences_and_types(log: &LogRead) -> Vec<(u64, String)> {
+    let mut listed = Vec::new();
+    for record in &log.records {
+        listed.push((record.sequence, record.event_type.clone()));
+    }
+    listed
 }
