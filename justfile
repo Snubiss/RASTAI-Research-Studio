@@ -113,8 +113,10 @@ test-daemon-jobs: env-cpu
 # starts its own daemon and training job. Then the worker's own kill -9 tests in tests/crash/ (pytest, settings in
 # tests/crash/pyproject.toml). Linux only: the rows read /proc and signal process groups. CI runs it as its own
 # `test-crash` job; while CI is manual-only, `check` runs it too (plan 3.6), like the job tests above.
-# The kill -9 matrix: the Rust rows, then the worker's Python kill -9 tests.
+# The kill -9 matrix: the debug `rastai` binary the rows run as their daemon, the Rust rows, then the worker's Python
+# kill -9 tests.
 test-crash: env-cpu
+    cargo build --locked -p rastai-cli
     cargo test --locked -p rastai-crash-tests -- --ignored --test-threads=1
     cd tests/crash && "{{cpu_python}}" -m pytest
 

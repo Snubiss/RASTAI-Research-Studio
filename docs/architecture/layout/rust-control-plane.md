@@ -1593,7 +1593,7 @@ crates/rastai-store/
   src/
     lib.rs
     error.rs                  StoreError with RRS-S codes
-    store.rs                  Store (the handles), open_store(), close_store(), startup cleanup
+    store.rs                  Store (the handles), open_store(), close_store(), startup cleanup, open_index_readers()
     sqlite.rs                 the only rusqlite import: open with pragmas, migrations, quick_check, transactions, savepoints
     writer_thread.rs          one std thread per database file: request channel, batching, savepoint per request, oneshot replies
     reader_pool.rs            a few read-only connections per database, each behind a Mutex
@@ -1682,6 +1682,9 @@ pub struct Store {
 /// and deletes stale .incoming/ files. Synchronous: called once at startup before anything is served.
 pub fn open_store(paths: &DataPaths) -> Result<Store, StoreError>
 pub async fn close_store(store: Store)                  // waits for both writer threads to drain and commit
+/// Read-only connections to a running daemon's rastai.db from another process (the kill -9 tests): never creates,
+/// migrates or writes the file, so it is never a second writer.
+pub fn open_index_readers(paths: &DataPaths) -> Result<ReaderPool, StoreError>
 
 // writer_thread.rs and index/writes.rs
 pub struct IndexWriter { /* std::sync::mpsc::Sender<IndexRequest> */ }

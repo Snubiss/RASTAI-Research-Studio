@@ -2,7 +2,7 @@
 fixture, the worker process as the node starts it, a stand-in node as a process of its own (so a test can kill it
 with SIGKILL), /proc reading, and the run log read frame by frame.
 
-Every process a test starts is in `started`, and the `processes` fixture of conftest.py kills each one's whole
+Every process a test starts goes in the list of conftest.py's `started` fixture, which kills each one's whole
 process group on every exit path, a failed assertion included (issue #244).
 """
 

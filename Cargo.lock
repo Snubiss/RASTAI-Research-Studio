@@ -729,7 +729,6 @@ dependencies = [
  "rastai-core",
  "rastai-diag",
  "rastai-proto",
- "rastai-server",
  "rastai-store",
  "rastai-transport",
  "serde_json",
