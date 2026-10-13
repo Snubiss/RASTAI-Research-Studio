@@ -1,8 +1,8 @@
 // openEventStream: the one EventService.Subscribe stream of a window, with backoff, resume and the resync signal
 // (layout frontend-and-plugins.md 2.2, 3.2; contracts 7.2). It owns its reconnect loop; only stop() ends it, or a
-// refused session, which no retry can fix.
+// refusal no retry can fix (a session, Host or Origin the gate refuses).
 
-import { isUnauthenticatedError } from "./connection.js";
+import { isGateRefusalError } from "./connection.js";
 import {
   CODE_DAEMON_UNREACHABLE,
   CODE_EVENTS_MISSED,
@@ -56,7 +56,8 @@ import { callFailureDiagnostic, clientDiagnostic, daemonDiagnosticOf } from "./d
  * @property {boolean} resyncOnOpen         call onResync once the new stream is open, so nothing is missed
  */
 
-// After RRS-C0401 the stream starts again from now: 0 asks the daemon for a new stream (contracts 7.2).
+// 0 asks the daemon for a new stream that starts with the next event (contracts 7.2): after RRS-C0401, and on
+// every attempt until the stream has handed on its first event.
 const NEW_STREAM_SEQUENCE = 0n;
 
 /**
@@ -110,6 +111,7 @@ async function runStream(client, eventTypes, state, handlers) {
       state.resyncOnOpen = true;
       handlers.onStatus("resyncing", end.problem);
     } else {
+      noteMissedWhileDown(state);
       reportDrop(client, state, handlers, end.problem);
     }
     await waitBeforeReconnect(state);
@@ -162,9 +164,10 @@ async function readOneConnection(client, eventTypes, state, handlers) {
  */
 function streamEndFromError(error, baseUrl) {
   const refusal = daemonDiagnosticOf(error);
-  // The gate refuses a session (after a daemon restart, say) with HTTP 401 before any envelope, so the error
-  // carries no Diagnostic; only its Connect code tells it from a broken connection, and no retry can fix it.
-  if (refusal === null && isUnauthenticatedError(error)) {
+  // The gate refuses a session (after a daemon restart, say) with HTTP 401, and a Host or Origin it doesn't allow
+  // with 403, before any envelope, so the error carries no Diagnostic; only its Connect code tells it from a broken
+  // connection, and no retry can fix it. Opening Rastai again (RRS-U0003's fix) gives a session at an allowed origin.
+  if (refusal === null && isGateRefusalError(error)) {
     return { kind: "refused", problem: clientDiagnostic(CODE_SIGNED_OUT) };
   }
   if (refusal === null) {
@@ -206,6 +209,18 @@ function markOpen(state, handlers) {
     handlers.onResync();
   }
   handlers.onStatus("connected", null);
+}
+
+/**
+ * A dropped stream that has handed on no event has no sequence to resume from: it reconnects with 0, a new stream
+ * from the next event, so whatever the daemon published while it was down is lost. onResync runs once it is open
+ * again, so the app refetches what it missed.
+ * @param {StreamState} state
+ */
+function noteMissedWhileDown(state) {
+  if (state.lastSequence === NEW_STREAM_SEQUENCE) {
+    state.resyncOnOpen = true;
+  }
 }
 
 /** @param {StreamState} state */

@@ -1,5 +1,6 @@
 // openEventStream against the fake daemon (layout frontend-and-plugins.md 2.2, 3.5): resume with the right
-// after_bus_sequence, the backoff, RRS-C0401 and onResync, a refused session, and stop().
+// after_bus_sequence, the backoff, RRS-C0401 and onResync, a drop before the first event, the gate's refusals, and
+// stop().
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -131,6 +132,36 @@ describe("resume", () => {
     expect(recorder.log.filter((entry) => entry === "resync")).toHaveLength(1);
   });
 
+  test("a stream that drops before its first event calls onResync once the new stream is open", async () => {
+    const client = await connect();
+    // It never saw a bus_sequence, so it reconnects with 0 (a new stream from the next event): events published
+    // while it was down are gone, and only a refetch brings them back.
+    daemon.connections = [
+      { events: [], end: "drop" },
+      { events: [busEvent(7)], end: "open" },
+    ];
+    const recorder = createRecorder();
+    const stream = openEventStream(client, ["job.state_changed"], 0n, recorder.handlers);
+    await vi.waitFor(() => expect(recorder.log).toContain("event:7"));
+    stream.stop();
+    expect(daemon.subscribeRequests.map((request) => request.afterBusSequence)).toEqual([0n, 0n]);
+    expect(recorder.log).toEqual(["status:connecting", "status:reconnecting", "resync", "status:connected", "event:7"]);
+  });
+
+  test("a stream given a sequence that drops before its first event resumes from it without a resync", async () => {
+    const client = await connect();
+    daemon.connections = [
+      { events: [], end: "drop" },
+      { events: [busEvent(5)], end: "open" },
+    ];
+    const recorder = createRecorder();
+    const stream = openEventStream(client, [], 4n, recorder.handlers);
+    await vi.waitFor(() => expect(recorder.log).toContain("event:5"));
+    stream.stop();
+    expect(daemon.subscribeRequests.map((request) => request.afterBusSequence)).toEqual([4n, 4n]);
+    expect(recorder.log).not.toContain("resync");
+  });
+
   test("a drop alone never calls onResync", async () => {
     const client = await connect();
     daemon.connections = [
@@ -226,6 +257,27 @@ describe("ending", () => {
     await pause(QUIET_PERIOD_MS);
     expect(subscribeAttempts()).toBe(1);
     stream.stop();
+  });
+
+  test("an Origin the gate refuses (403 and the Connect error as JSON) ends in signed_out after one attempt", async () => {
+    const client = await connect();
+    // RRS-C1004 is permission_denied: connect-es can't read the stream's Diagnostic, only the code, and a retry
+    // would be refused the same way for good.
+    daemon.refusal = "RRS-C1004";
+    const recorder = createRecorder();
+    const stream = openEventStream(client, [], 0n, recorder.handlers);
+    // A stream that wrongly keeps retrying is stopped all the same, so it can't reach the next test's daemon.
+    try {
+      await vi.waitFor(() => expect(recorder.statuses.at(-1)?.status).toBe("signed_out"));
+      expect(recorder.statuses).toEqual([
+        { status: "connecting", code: null },
+        { status: "signed_out", code: "RRS-U0003" },
+      ]);
+      await pause(QUIET_PERIOD_MS);
+      expect(subscribeAttempts()).toBe(1);
+    } finally {
+      stream.stop();
+    }
   });
 
   test("stop() closes an open stream and nothing reconnects", async () => {

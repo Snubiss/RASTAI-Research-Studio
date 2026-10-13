@@ -2915,6 +2915,8 @@ The layout and flow docs, and plan §11, proposed these names in "New names" sec
 | first-party UIs | `psychologyUi`, `evalUi`, `PacketStore`, `summarizeVerify`; `MAX_TOKENS_PER_STORE` (8192) |
 | `@rastai/web` (`apps/web`) (M1) | `PanelFrame` (records `RRS-U1004` crashes), `StatusBar` (the egress badge), `macro-recorder.js`, `assistant-skills.js` (Phase 2, plan §10 row 45); `DRAFT_MAX_AGE_DAYS` (30) |
 
+An export only the other files of its own package import (`@rastai/client`'s `STREAM_OPEN_GRACE_MS` or `isGateRefusalError`, say) is package-internal and isn't registered here, as a Rust `pub(crate)` item isn't; an export a package's `src/index.js`, a named entry point or another package uses is.
+
 ### 15.4 Desktop shell, CLI and HTTP details
 
 - **Desktop:** app identifier `dev.rastai.studio` (until the domain is settled, section 14 row 8); the shell watches `daemon.lock` every 5 s and reruns `rastai open --print-url` when the daemon died; window geometry in `<config>/desktop-window.json`; when `$APPIMAGE` is set the CLI copies itself to `<data>/bin/rastai-<version>` and runs the daemon from there.

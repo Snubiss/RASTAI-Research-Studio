@@ -22,6 +22,9 @@ const UPLOAD_METHOD = "PUT";
 const NO_RESPONSE_STATUS = 0;
 const HTTP_OK_MIN = 200;
 const HTTP_OK_MAX = 299;
+// size_bytes in the upload's answer: protobuf JSON writes a uint64 as a string of decimal digits.
+const DECIMAL_DIGITS = /^[0-9]+$/;
+const MAX_UINT64 = 2n ** 64n - 1n;
 
 /**
  * A URL for <img src> or a download link. Cookie credential only: the browser sends the cookie on a GET with no
@@ -142,20 +145,45 @@ function blobRefOfReply(client, body) {
   if (json === null || typeof json !== "object" || typeof json.hash !== "string") {
     return failureDiagnostic(null, client.baseUrl);
   }
-  return blobRefFromJson(json);
+  const sizeBytes = sizeBytesOf(json.size_bytes);
+  if (sizeBytes === null) {
+    return failureDiagnostic(null, client.baseUrl);
+  }
+  return blobRefFromJson(json, sizeBytes);
 }
 
 /**
- * PUT /api/blobs answers the BlobRef as protobuf JSON with proto field names; size_bytes is a 64-bit integer, so
- * it comes as a string (contracts 4).
+ * size_bytes as protobuf JSON writes a uint64: a decimal string, or absent when it is 0; a reader also accepts a
+ * plain number. Null for anything else, which BigInt would throw on or read as a size no uint64 holds.
+ * @param {any} value
+ * @returns {bigint | null}
+ */
+function sizeBytesOf(value) {
+  let sizeBytes = null;
+  if (value === undefined) {
+    sizeBytes = 0n;
+  } else if (typeof value === "string" && DECIMAL_DIGITS.test(value)) {
+    sizeBytes = BigInt(value);
+  } else if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    sizeBytes = BigInt(value);
+  }
+  if (sizeBytes === null || sizeBytes > MAX_UINT64) {
+    return null;
+  }
+  return sizeBytes;
+}
+
+/**
+ * PUT /api/blobs answers the BlobRef as protobuf JSON with proto field names (contracts 4).
  * @param {any} json
+ * @param {bigint} sizeBytes   json.size_bytes, already checked by sizeBytesOf
  * @returns {BlobRef}
  */
-function blobRefFromJson(json) {
+function blobRefFromJson(json, sizeBytes) {
   return {
     $typeName: BLOB_REF_TYPE_NAME,
     hash: String(json.hash ?? ""),
-    sizeBytes: BigInt(json.size_bytes ?? 0),
+    sizeBytes,
     mediaType: String(json.media_type ?? ""),
   };
 }

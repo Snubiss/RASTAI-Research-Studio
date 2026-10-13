@@ -16,7 +16,7 @@ Read the root `CLAUDE.md` first. This file adds the local rules of layout `docs/
 2. **connect-es and protobuf-es only in `connection.js`** (contracts §2.5). Other files call the stubs on the client object with plain request objects. Tests use them through `testing/fake-daemon.js`; only `proto-golden.test.js` imports protobuf-es itself.
 3. **Never throw on a command failure.** `execute` resolves to an `ExecuteOutcome`; a transport problem is an outcome with an RRS-U Diagnostic. Every user-facing failure carries a catalog code.
 4. **Never store a credential.** The session key and a bearer token live only in memory, passed in by the caller. A cookie credential never sets `Authorization` and never reads `document.cookie`; it sends the key as `Rastai-Session-Key` on every request but `GET` and `HEAD`. A bearer credential sends `Authorization: Bearer <token>` on every request and nothing else.
-5. **One event stream per `DaemonClient`.** `openEventStream` owns its reconnect loop; only `stop()` or a refused session ends it.
+5. **One event stream per `DaemonClient`.** `openEventStream` owns its reconnect loop; only `stop()` or a refusal at the gate (a session, Host or Origin it won't take) ends it.
 6. **Never read local files or open other sockets** (contracts §2.4 rule 4). The login code is read from the URL fragment only.
 
 ## Tests

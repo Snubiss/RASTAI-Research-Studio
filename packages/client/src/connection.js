@@ -31,6 +31,9 @@ const READ_ONLY_METHODS = ["GET", "HEAD"];
 // Every Connect call the client makes is a POST (connect-es sends GET only with useHttpGet, which is off).
 const CONNECT_METHOD = "POST";
 const TRAILING_SLASHES = /\/+$/;
+// The Connect codes of the gate's refusals (rastai-server connect.rs connect_code): no retry of the same request
+// can pass the gate.
+const GATE_REFUSAL_CODES = [Code.Unauthenticated, Code.PermissionDenied];
 
 /**
  * Checks the daemon's health, then builds a client.
@@ -110,14 +113,15 @@ export function requestHeaders(credential, method) {
 }
 
 /**
- * True when a call failed with the Connect code unauthenticated. The daemon's gate refuses a stream it won't take
- * with the HTTP status of the code (401) and the Connect error as JSON, before any envelope; connect-es reads that
- * body only for unary calls, so on a stream the code is all that tells a refused session from a broken connection.
+ * True when a call failed with a Connect code the daemon's gate refuses with: unauthenticated (401, a session or
+ * token it doesn't take) or permission_denied (403, a Host or Origin it doesn't allow). The gate answers with that
+ * HTTP status and the Connect error as JSON, before any envelope; connect-es reads that body only for unary calls,
+ * so on a stream the code is all that tells a refusal from a broken connection.
  * @param {any} error   what a connect-es call threw
  * @returns {boolean}
  */
-export function isUnauthenticatedError(error) {
-  return error instanceof ConnectError && error.code === Code.Unauthenticated;
+export function isGateRefusalError(error) {
+  return error instanceof ConnectError && GATE_REFUSAL_CODES.includes(error.code);
 }
 
 /**
