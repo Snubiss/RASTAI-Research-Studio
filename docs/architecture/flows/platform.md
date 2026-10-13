@@ -1384,7 +1384,7 @@ flowchart TD
   J --> K["Scan the blob store<br/>drop artifact rows whose blob is missing,<br/>except blobs an archive.pruned record freed"]
   K --> L["Scan known projects for documents rows"]
   L --> M["Scan the HF cache for models rows"]
-  M --> Q["quick_check, then link rastai.db to rastai.db.broken-unix_ms<br/>and rename rastai.db.rebuilding over rastai.db"]
+  M --> Q["quick_check, then copy rastai.db to rastai.db.broken-unix_ms<br/>and rename rastai.db.rebuilding over rastai.db"]
   Q --> N["Report counts, every diagnostic, and pruned-run stubs<br/>pending their archive pull at the next daemon start (M11)"]
 ```
 

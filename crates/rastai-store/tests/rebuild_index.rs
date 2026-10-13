@@ -353,6 +353,14 @@ fn write_rebuild_fixture() {
     }
 }
 
+/// Every job row's run has a runs row: a job row whose run was left out is an orphan the live index never holds.
+fn assert_jobs_name_runs(rebuilt: &[TableRows]) {
+    let run_ids: Vec<&String> = rows_of(rebuilt, "runs").iter().map(|row| &row[0]).collect();
+    for job in rows_of(rebuilt, "jobs") {
+        assert!(run_ids.contains(&&job[1]), "a job row names no run row: {job:?}");
+    }
+}
+
 // ---- Live indexing, as the daemon does it ----
 
 fn copy_fixture(paths: &DataPaths) {
@@ -738,7 +746,11 @@ fn a_run_folder_without_a_run_json_is_passed_over_quietly() {
 
     assert!(codes(&report).is_empty(), "reported {:?}", codes(&report));
     assert_eq!(report.runs, 1);
-    assert_eq!(rows_of(&read_index(&paths), "runs").len(), 1);
+    let rebuilt = read_index(&paths);
+    assert_eq!(rows_of(&rebuilt, "runs").len(), 1);
+    // Run B's job_state_changed records still come from the daemon log, but their run has no row, so no job row.
+    assert_eq!(rows_of(&rebuilt, "jobs").len(), 1);
+    assert_jobs_name_runs(&rebuilt);
     remove_test_folder(&paths);
 }
 
@@ -759,6 +771,9 @@ fn a_run_json_that_names_another_run_is_left_out() {
     assert_eq!(rows_of(&rebuilt, "runs").len(), 1);
     // Run A's row is its own run.json's, not the copy's in run B's folder.
     assert_eq!(rows_of(&rebuilt, "runs")[0][6], format!("{:?}", record_hash_of(RUN_A)));
+    // Run B's job_state_changed records are in the daemon log, but run B is left out, so its job has no row either.
+    assert_eq!(rows_of(&rebuilt, "jobs").len(), 1);
+    assert_jobs_name_runs(&rebuilt);
     remove_test_folder(&paths);
 }
 
