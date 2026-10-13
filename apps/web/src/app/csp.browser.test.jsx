@@ -27,14 +27,22 @@ describe("the egress badge under the daemon's policy", () => {
     policyMeta.httpEquiv = "Content-Security-Policy";
     policyMeta.content = DAEMON_CONTENT_SECURITY_POLICY;
     document.head.append(policyMeta);
+    try {
+      mounted = await mount(<EgressBadge activeEgress={[BADGE_ENTRY]} onOpen={() => {}} />);
+      const badge = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("button"));
+      expect(badge).not.toBeNull();
+      await inAct(() => badge.focus());
 
-    mounted = await mount(<EgressBadge activeEgress={[BADGE_ENTRY]} onOpen={() => {}} />);
-    const badge = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("button"));
-    expect(badge).not.toBeNull();
-    await inAct(() => badge.focus());
+      const style = getComputedStyle(badge);
+      expect(style.outlineStyle).toBe("solid");
+      expect(style.outlineWidth).toBe("2px");
+    } finally {
+      // The policy is for this test only: a later test in this page must not run under it.
+      policyMeta.remove();
+    }
+  });
 
-    const style = getComputedStyle(badge);
-    expect(style.outlineStyle).toBe("solid");
-    expect(style.outlineWidth).toBe("2px");
+  test("the policy meta is gone once its test ends", () => {
+    expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')).toBeNull();
   });
 });
