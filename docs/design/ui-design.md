@@ -233,7 +233,7 @@ Nothing is renamed.
 
 ### 4.5 Type: Geist + Geist Mono (chosen 2026-10-13)
 
-**Chosen:** pairing A, **Geist + Geist Mono**. Owner, 2026-10-13: "A text schema is fine we can revisit later if needed.".
+**Chosen:** pairing A, **Geist + Geist Mono**. Owner, 2026-10-13: "A text schema is fine we can revisit later if needed".
 
 | | Geist + Geist Mono |
 |---|---|
