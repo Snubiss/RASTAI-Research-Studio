@@ -202,6 +202,7 @@ mod tests {
             scopes: vec!["read".to_string()],
             created_unix_ms: 1,
             revoked_unix_ms: None,
+            created_by: "owner".to_string(),
         }
     }
 

@@ -35,6 +35,10 @@ pub(crate) const INDEX_MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("index/migrations/0002_journal_arguments_hash.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("index/migrations/0003_token_creator.sql"),
+    },
 ];
 
 // Reads are short and the daemon serves a handful of clients, so a few readers keep them from queueing.
@@ -93,6 +97,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::sqlite::{
+        SqliteTransaction, begin_transaction, commit_transaction, execute, integer_value, optional_integer_value,
+        text_value,
+    };
 
     // The migration a newer app would have added; this build doesn't know it.
     const NEWER_MIGRATION_SQL: &str = "CREATE TABLE added_by_a_newer_app (note TEXT NOT NULL) STRICT;";
@@ -140,6 +148,147 @@ mod tests {
 
         assert_eq!(error.code(), "RRS-S0002");
         assert_eq!(std::fs::read(&database_path).unwrap(), bytes_before);
+        if let Some(root) = paths.data.parent() {
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    // ---- Migration 0003 on a file that already has tokens (contracts 8.2 "Token creators and revocation") ----
+    // Here too, not in tests/index_migrations.rs: a file at version 2 is made with the crate's own migration functions.
+
+    /// The version before `0003_token_creator.sql`.
+    const VERSION_BEFORE_TOKEN_CREATOR: usize = 2;
+    const INSERT_OLD_TOKEN: &str = "INSERT INTO tokens (token_id, name, token_hash, scopes, created_unix_ms,
+            revoked_unix_ms)
+        VALUES (?1, ?1, 'blake3:' || ?1, '[\"system.admin\"]', 1, ?2)";
+    const INSERT_JOURNAL_ROW: &str = "INSERT INTO command_journal (journal_id, command_id, principal, arguments_json,
+            ok, result_json, started_unix_ms, finished_unix_ms)
+        VALUES (?1, ?2, ?3, '{}', ?4, ?5, ?6, ?6)";
+    const INSERT_OLD_PLUGIN: &str = "INSERT INTO plugins (plugin_id, version, state, content_hash,
+            granted_permissions, source)
+        VALUES (?1, '1.0.0', ?2, 'blake3:00', '[]', 'installed')";
+    const MIGRATION_TIME_FLOOR_MS: i64 = 1_000_000_000_000;
+    const JOURNAL_STARTED_UNIX_MS: i64 = 1;
+
+    /// One journal row of a `token.create` as `execute_command` writes it: the result keeps `token_id` and redacts
+    /// the token's text.
+    fn journal_create(
+        transaction: &SqliteTransaction<'_>,
+        journal_id: &str,
+        principal: &str,
+        ok: bool,
+        result_json: &str,
+    ) {
+        let parameters = [
+            text_value(journal_id),
+            text_value("token.create"),
+            text_value(principal),
+            integer_value(i64::from(ok)),
+            text_value(result_json),
+            integer_value(JOURNAL_STARTED_UNIX_MS),
+        ];
+        execute(transaction, INSERT_JOURNAL_ROW, &parameters).unwrap();
+    }
+
+    fn created_result(token_id: &str) -> String {
+        format!("{{\"token_id\":\"{token_id}\",\"name\":\"x\",\"scopes\":[],\"token\":\"<redacted>\"}}")
+    }
+
+    /// A version-2 file as a daemon before SEC-01 left it: tokens with no creator column, the journal rows that
+    /// made them, and two plugins.
+    fn write_version_two_file(database_path: &Path) {
+        let connection = open_database_for_writing(
+            database_path,
+            &INDEX_DATABASE_SETTINGS,
+            &INDEX_MIGRATIONS[..VERSION_BEFORE_TOKEN_CREATOR],
+        )
+        .unwrap();
+        let transaction = begin_transaction(&connection).unwrap();
+        // (token, revoked at, principal of its token.create)
+        let tokens: [(&str, Option<i64>, &str); 7] = [
+            ("tok_a", None, "owner"),
+            ("tok_b", None, "token:tok_a"),
+            ("tok_r", Some(5), "owner"),
+            ("tok_s", None, "token:tok_r"),
+            ("tok_t", None, "token:tok_s"),
+            ("tok_p", None, "plugin:acme_gone"),
+            ("tok_q", None, "plugin:acme_live"),
+        ];
+        for (token_id, revoked_unix_ms, principal) in tokens {
+            let parameters = [text_value(token_id), optional_integer_value(revoked_unix_ms)];
+            execute(&transaction, INSERT_OLD_TOKEN, &parameters).unwrap();
+            journal_create(
+                &transaction,
+                &format!("jrn_{token_id}"),
+                principal,
+                true,
+                &created_result(token_id),
+            );
+        }
+        // tok_n has no successful row: a failed one names it, and a result that isn't JSON is passed over.
+        execute(
+            &transaction,
+            INSERT_OLD_TOKEN,
+            &[text_value("tok_n"), optional_integer_value(None)],
+        )
+        .unwrap();
+        journal_create(
+            &transaction,
+            "jrn_failed",
+            "token:tok_r",
+            false,
+            &created_result("tok_n"),
+        );
+        journal_create(&transaction, "jrn_not_json", "token:tok_r", true, "not json");
+        for (plugin_id, state) in [("acme_gone", "disabled"), ("acme_live", "enabled")] {
+            execute(
+                &transaction,
+                INSERT_OLD_PLUGIN,
+                &[text_value(plugin_id), text_value(state)],
+            )
+            .unwrap();
+        }
+        commit_transaction(transaction).unwrap();
+    }
+
+    #[test]
+    fn migration_0003_fills_created_by_from_the_journal_and_revokes_orphaned_successors() {
+        let paths = test_paths("token-creator-migration");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        write_version_two_file(&rastai_db_path(&paths));
+
+        let store = open_store(&paths).unwrap();
+        let tokens = {
+            let reader = crate::index::reads::open_index_reader(&store.index_readers).unwrap();
+            crate::index::kept_tables::list_tokens(&reader).unwrap()
+        };
+        close(store);
+
+        let found: Vec<(&str, &str, Option<i64>)> = tokens
+            .iter()
+            .map(|row| (row.token_id.as_str(), row.created_by.as_str(), row.revoked_unix_ms))
+            .collect();
+        let migration_time = found
+            .iter()
+            .find(|(token_id, _, _)| *token_id == "tok_s")
+            .and_then(|(_, _, revoked)| *revoked)
+            .unwrap();
+        assert!(migration_time > MIGRATION_TIME_FLOOR_MS, "{migration_time}");
+        let expected: Vec<(&str, &str, Option<i64>)> = vec![
+            // Valid tokens stay valid, their creators filled in.
+            ("tok_a", "owner", None),
+            ("tok_b", "token:tok_a", None),
+            // A revoked token keeps its time; what it made, and what that made, is revoked at the migration's time.
+            ("tok_n", "", None),
+            ("tok_p", "plugin:acme_gone", Some(migration_time)),
+            ("tok_q", "plugin:acme_live", None),
+            ("tok_r", "owner", Some(5)),
+            ("tok_s", "token:tok_r", Some(migration_time)),
+            ("tok_t", "token:tok_s", Some(migration_time)),
+        ];
+        let mut sorted = found.clone();
+        sorted.sort();
+        assert_eq!(sorted, expected);
         if let Some(root) = paths.data.parent() {
             std::fs::remove_dir_all(root).unwrap();
         }

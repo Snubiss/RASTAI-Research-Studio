@@ -28,8 +28,8 @@ const TABLE_ROW_START: &str = "| `";
 // The milestone markers of contracts' conventions. In a list cell one covers only the name it follows (12.6).
 const MILESTONE_MARKER_STARTS: &[&str] = &["(M", "(L2)", "(Phase 2)", "(Phase 3)"];
 // The migration files the store compiles in, which sql_names.rs reads for schemas/names.json.
-// The version of the last one (0002_journal_arguments_hash.sql), which a migrated file records.
-const LAST_MIGRATION_VERSION: i64 = 2;
+// The version of the last one (0003_token_creator.sql), which a migrated file records.
+const LAST_MIGRATION_VERSION: i64 = 3;
 const INDEX_MIGRATIONS_FOLDER: &str = "crates/rastai-store/src/index/migrations";
 
 fn repo_root() -> PathBuf {

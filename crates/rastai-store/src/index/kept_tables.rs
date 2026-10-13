@@ -6,8 +6,8 @@
 use crate::error::StoreError;
 use crate::index::reads::IndexReader;
 use crate::sqlite::{
-    SqlValue, SqliteTransaction, execute, integer_value, optional_integer_value, query_rows, read_integer,
-    read_optional_integer, read_text, text_value,
+    SqlValue, SqliteTransaction, execute, integer_value, optional_integer_value, query_rows, query_rows_in_transaction,
+    read_integer, read_optional_integer, read_text, text_value,
 };
 
 const UPSERT_PROJECT: &str = "INSERT INTO projects (project_id, path, name, opened_unix_ms)
@@ -17,15 +17,44 @@ const UPSERT_PROJECT: &str = "INSERT INTO projects (project_id, path, name, open
 const SELECT_PROJECT_BY_ID: &str = "SELECT project_id, path, name, opened_unix_ms FROM projects WHERE project_id = ?1";
 
 // A token is inserted once and never changed but for its revocation, so a duplicate id is an error, not an update.
-const INSERT_TOKEN: &str = "INSERT INTO tokens (token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
-// Revoking twice keeps the first time.
-const REVOKE_TOKEN: &str = "UPDATE tokens SET revoked_unix_ms = ?2 WHERE token_id = ?1 AND revoked_unix_ms IS NULL";
-const SELECT_TOKEN_BY_HASH: &str = "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms
+const INSERT_TOKEN: &str = "INSERT INTO tokens (token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms,
+        created_by)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+// A token's creator is live while its row is there and not revoked (contracts 8.2).
+const SELECT_TOKEN_REVOKED: &str = "SELECT revoked_unix_ms FROM tokens WHERE token_id = ?1";
+// Revokes the named token and every live token whose created_by chain leads to it, all at the same time. The chain is
+// followed through tokens already revoked, so revoking twice keeps each token's first time and still sweeps what is
+// live under it.
+const REVOKE_TOKEN_CHAIN: &str = "UPDATE tokens SET revoked_unix_ms = ?2
+    WHERE revoked_unix_ms IS NULL
+        AND token_id IN (
+            WITH RECURSIVE swept (token_id) AS (
+                SELECT ?1
+                UNION
+                SELECT tokens.token_id FROM tokens JOIN swept ON tokens.created_by = 'token:' || swept.token_id
+            )
+            SELECT token_id FROM swept
+        )";
+// Revokes every live token a plugin made, and every live token those made, all at the same time.
+const REVOKE_PLUGIN_TOKEN_CHAIN: &str = "UPDATE tokens SET revoked_unix_ms = ?2
+    WHERE revoked_unix_ms IS NULL
+        AND token_id IN (
+            WITH RECURSIVE swept (token_id) AS (
+                SELECT token_id FROM tokens WHERE created_by = 'plugin:' || ?1
+                UNION
+                SELECT tokens.token_id FROM tokens JOIN swept ON tokens.created_by = 'token:' || swept.token_id
+            )
+            SELECT token_id FROM swept
+        )";
+const SELECT_TOKEN_BY_HASH: &str = "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms,
+        created_by
     FROM tokens WHERE token_hash = ?1";
 // Oldest first, as token.list shows them; the id breaks a tie, since ids sort by creation time too.
-const SELECT_ALL_TOKENS: &str = "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms
+const SELECT_ALL_TOKENS: &str =
+    "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms, created_by
     FROM tokens ORDER BY created_unix_ms, token_id";
+/// How `created_by` names a token that made another (`principal_label`, contracts 6.3).
+const TOKEN_CREATOR_PREFIX: &str = "token:";
 
 const UPSERT_NODE: &str = "INSERT INTO nodes (node_id, name, transport, address, state, protocol_version,
         capabilities, last_heartbeat_unix_ms)
@@ -66,6 +95,9 @@ pub struct TokenRow {
     pub scopes: Vec<String>,
     pub created_unix_ms: i64,
     pub revoked_unix_ms: Option<i64>,
+    /// The principal that ran `token.create`, as the journal writes it: `owner`, `token:<token_id>` or
+    /// `plugin:<plugin_id>`; empty when nothing recorded it (a token from before migration 0003).
+    pub created_by: String,
 }
 
 /// A node. `transport` is `local` or `ssh`.
@@ -103,7 +135,13 @@ pub(crate) fn upsert_project(transaction: &SqliteTransaction<'_>, row: &ProjectR
     Ok(())
 }
 
+/// Inserts a new token. A token made by a token is refused while its creator is revoked or gone
+/// (`StoreError::TokenCreatorRevoked`): the check runs in the writer's transaction, the one every revoke goes through,
+/// so a create racing its creator's revoke either lands first and is swept, or is refused (contracts 8.2).
 pub(crate) fn insert_token(transaction: &SqliteTransaction<'_>, row: &TokenRow) -> Result<(), StoreError> {
+    if let Some(creator_token_id) = row.created_by.strip_prefix(TOKEN_CREATOR_PREFIX) {
+        check_creator_token_live(transaction, creator_token_id)?;
+    }
     let parameters = [
         text_value(&row.token_id),
         text_value(&row.name),
@@ -111,11 +149,28 @@ pub(crate) fn insert_token(transaction: &SqliteTransaction<'_>, row: &TokenRow) 
         word_list_value(&row.scopes)?,
         integer_value(row.created_unix_ms),
         optional_integer_value(row.revoked_unix_ms),
+        text_value(&row.created_by),
     ];
     execute(transaction, INSERT_TOKEN, &parameters)?;
     Ok(())
 }
 
+/// A creator that has no row is as dead as a revoked one: the gate admits only tokens `rastai.db` holds.
+fn check_creator_token_live(transaction: &SqliteTransaction<'_>, creator_token_id: &str) -> Result<(), StoreError> {
+    let rows = query_rows_in_transaction(transaction, SELECT_TOKEN_REVOKED, &[text_value(creator_token_id)])?;
+    let live = match rows.first() {
+        Some(row) => read_optional_integer(row, 0)?.is_none(),
+        None => false,
+    };
+    if live {
+        return Ok(());
+    }
+    Err(StoreError::TokenCreatorRevoked {
+        token_id: creator_token_id.to_string(),
+    })
+}
+
+/// Revokes the token and every live token it made, directly or through tokens it made, with the one time.
 pub(crate) fn revoke_token(
     transaction: &SqliteTransaction<'_>,
     token_id: &str,
@@ -123,8 +178,22 @@ pub(crate) fn revoke_token(
 ) -> Result<(), StoreError> {
     execute(
         transaction,
-        REVOKE_TOKEN,
+        REVOKE_TOKEN_CHAIN,
         &[text_value(token_id), integer_value(revoked_unix_ms)],
+    )?;
+    Ok(())
+}
+
+/// Revokes every live token whose chain leads to `plugin:<plugin_id>`, with the one time.
+pub(crate) fn revoke_plugin_tokens(
+    transaction: &SqliteTransaction<'_>,
+    plugin_id: &str,
+    revoked_unix_ms: i64,
+) -> Result<(), StoreError> {
+    execute(
+        transaction,
+        REVOKE_PLUGIN_TOKEN_CHAIN,
+        &[text_value(plugin_id), integer_value(revoked_unix_ms)],
     )?;
     Ok(())
 }
@@ -207,6 +276,7 @@ fn token_from_columns(row: &[SqlValue]) -> Result<TokenRow, StoreError> {
         scopes: read_word_list(row, 3)?,
         created_unix_ms: read_integer(row, 4)?,
         revoked_unix_ms: read_optional_integer(row, 5)?,
+        created_by: read_text(row, 6)?,
     })
 }
 

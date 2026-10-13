@@ -1,7 +1,8 @@
 //! `StoreError`, the one error type of this crate (contracts 12.2). Library functions return it; the edge (a command
 //! handler, the daemon's startup, the node's tailer, the CLI) turns it into a `Diagnostic` through `code()`.
 //!
-//! Every variant maps to a code that contracts 10.3 lists in the `RRS-S` range. SQLite's own failures are sorted by
+//! Every variant maps to a code that contracts 10.3 lists in the `RRS-S` range, but `TokenCreatorRevoked`, the token
+//! rule the writer's transaction enforces, which is the gate's `RRS-C1006`. SQLite's own failures are sorted by
 //! `sqlite.rs` into these variants, so a full disk, a damaged file and an unwritable folder each get their own code.
 //! A torn event-log tail is not an error: the reader reports it as `FrameRead::Incomplete`, and the writer truncates
 //! it and says how many bytes it dropped (`truncated_tail_bytes`), which the caller logs as `RRS-S2001` (info).
@@ -22,6 +23,8 @@ const CODE_RUN_LOG_RECORD_REFUSED: &str = "RRS-S2004";
 const CODE_NOT_ENOUGH_FREE_SPACE: &str = "RRS-S3001";
 const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
+/// The gate's code for a revoked token: the one refusal here that isn't the store's own.
+const CODE_TOKEN_REVOKED: &str = "RRS-C1006";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
@@ -55,6 +58,10 @@ pub enum StoreError {
     DatabaseReadFailed { reason: String },
     /// The writer thread has stopped (the store was closed, or the thread ended), so the write was never applied.
     WriterStopped,
+    /// A token whose creator, token `token_id`, is revoked or gone wasn't inserted (contracts 8.2, threat model R28).
+    /// Not a fault of the store but the rule that a revoked token's successors die with it, so its code is the
+    /// gate's `RRS-C1006`, the one its holder gets.
+    TokenCreatorRevoked { token_id: String },
     /// A bad event-log frame with more of the file after it, or a file that doesn't start with `RRSEVLG1` (offset 0).
     /// Bit rot or a foreign file, never a crash: a crash only tears the tail.
     EventLogCorrupt { path: PathBuf, offset: u64 },
@@ -122,6 +129,7 @@ impl StoreError {
             StoreError::DatabaseWriteFailed { .. } => CODE_WRITE_FAILED,
             StoreError::DatabaseReadFailed { .. } => CODE_READ_FAILED,
             StoreError::WriterStopped => CODE_WRITE_FAILED,
+            StoreError::TokenCreatorRevoked { .. } => CODE_TOKEN_REVOKED,
             StoreError::EventLogCorrupt { .. } => CODE_EVENT_LOG_CORRUPT,
             StoreError::EventSequenceGap { .. } => CODE_EVENT_SEQUENCE_GAP,
             StoreError::RunLogRecordRefused { .. } => CODE_RUN_LOG_RECORD_REFUSED,
@@ -234,6 +242,10 @@ mod tests {
         assert_eq!(write_failed.code(), "RRS-S3005");
         assert_eq!(read_failed.code(), "RRS-S0006");
         assert_eq!(StoreError::WriterStopped.code(), "RRS-S3005");
+        let creator_revoked = StoreError::TokenCreatorRevoked {
+            token_id: "tok_a".to_string(),
+        };
+        assert_eq!(creator_revoked.code(), "RRS-C1006");
     }
 
     #[test]

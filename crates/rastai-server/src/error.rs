@@ -124,6 +124,8 @@ fn store_error_values(error: &StoreError) -> Vec<(&'static str, String)> {
         StoreError::BlobHashMismatch { hash, .. } | StoreError::BlobMissing { hash } => {
             vec![("content_hash", hash.clone())]
         }
+        // `RRS-C1006` says only that the token was revoked: which creator it was is the owner's to see in token.list.
+        StoreError::TokenCreatorRevoked { .. } => Vec::new(),
         _ => store_error_reason_values(error),
     }
 }

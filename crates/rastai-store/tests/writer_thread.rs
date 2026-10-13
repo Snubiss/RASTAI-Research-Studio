@@ -64,6 +64,7 @@ fn token_row(token_id: &str) -> TokenRow {
         scopes: vec!["read".to_string(), "plugin:acme".to_string()],
         created_unix_ms: 10,
         revoked_unix_ms: None,
+        created_by: "owner".to_string(),
     }
 }
 

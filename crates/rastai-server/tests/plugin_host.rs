@@ -559,7 +559,7 @@ async fn a_plugin_acts_only_within_its_grant_and_only_while_enabled() {
     )
     .await;
     assert_eq!(response_codes(&refused), ["RRS-C1005"]);
-    // A token keeps only what it holds itself, even acting as the plugin.
+    // A token can't act as the plugin at all: only the owner narrows (contracts 4.2, 8.2).
     let chat_token = token_principal(vec![Scope::Chat]);
     let narrowed = run_command(&running.server, &chat_token, as_plugin("system.status", "{}")).await;
     assert_eq!(response_codes(&narrowed), ["RRS-C1005"]);

@@ -404,6 +404,7 @@ sequenceDiagram
   ND-->>SRV: node_id, HardwareProfile, session token
   SRV->>ND: ListJobs, then WatchRunEvents per open run
   SRV->>SRV: load enabled plugins, see 7.3
+  SRV->>STO: revoke the tokens of a plugin that is gone or disabled, contracts 8.2
   SRV->>GW: start the /v1 routes and adapters
   SRV->>SRV: bind 127.0.0.1 on port 47820 to 47829, and daemon.sock
   SRV->>SRV: write daemon.port, health ok

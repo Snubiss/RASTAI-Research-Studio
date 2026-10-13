@@ -34,7 +34,8 @@ use crate::plugin_host::capabilities::{
 };
 use crate::plugin_host::contributions::{plugin_scopes, register_plugin_commands};
 use crate::plugin_host::lifecycle::{
-    change_plugin_state, plugin_row, record_plugin_state_changes, record_state_change, save_plugin_row,
+    change_plugin_state, plugin_row, record_plugin_state_changes, record_state_change, save_disabled_plugin,
+    save_plugin_row,
 };
 use crate::server_state::Server;
 
@@ -159,12 +160,18 @@ pub async fn unload_plugin(server: &Server, plugin_id: &str) {
 }
 
 /// Turns a plugin off: its contributions go, its state becomes `disabled` (the user's decision, so its row keeps
-/// it), and every other enabled plugin is checked again, since it may have needed this one's capabilities
-/// (`RRS-P1002`) or this one as a dependency (`RRS-P3001`). `plugin.disable` (M8) calls it; until then tests do.
+/// it), the tokens it made are revoked with what they made (contracts 8.2), and every other enabled plugin is checked
+/// again, since it may have needed this one's capabilities (`RRS-P1002`) or this one as a dependency (`RRS-P3001`).
+/// `plugin.disable` (M8) calls it; until then tests do.
 pub async fn disable_plugin(server: &Server, plugin_id: &str) -> PluginState {
-    unload_plugin(server, plugin_id).await;
-    let row = apply_state(server, plugin_id, PluginState::Disabled, Vec::new());
-    save_plugin_row(server, row).await;
+    {
+        // From the state change until the sweep is in the gate's cache, so a token.create for this plugin either
+        // committed before it (and is swept) or finds the plugin disabled (token.rs).
+        let _plugin_host_guard = server.plugin_host_lock.lock().await;
+        unload_plugin(server, plugin_id).await;
+        let row = apply_state(server, plugin_id, PluginState::Disabled, Vec::new());
+        save_disabled_plugin(server, plugin_id, row).await;
+    }
     // Before the re-check, so the log has this plugin's move ahead of the moves it causes.
     record_plugin_state_changes(server).await;
     recheck_enabled_plugins(server).await;

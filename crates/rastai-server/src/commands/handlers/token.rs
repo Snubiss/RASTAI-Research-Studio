@@ -10,6 +10,20 @@
 //! `token.create` (a token or a plugin holding `system.admin`) can only hand out scopes it holds itself, so no token
 //! is ever a way to more rights than its creator had (`RRS-C1005`, the same code as a missing scope).
 //!
+//! Every token records its creator (`tokens.created_by`, the journal's principal text), and revocation follows it
+//! (contracts 8.2 "Token creators and revocation", threat model R28): revoking a token revokes, in the same write,
+//! every live token it made and every token those made, and disabling a plugin does the same for what the plugin
+//! made (plugin_host/lifecycle.rs). A create never outlives its creator's revoke:
+//! - a `token:` creator is checked in the writer transaction that inserts the row, the one every revoke goes
+//!   through, so the create is refused with `RRS-C1006` once the creator is revoked;
+//! - a `plugin:` creator is checked against the plugin host under `Server.plugin_host_lock`, held until the insert
+//!   commits; `disable_plugin` holds the same lock until its sweep is in the gate's cache (`RRS-C1005` once the
+//!   plugin isn't enabled, as its grant is then empty).
+//!
+//! The gate's cache follows the database: a new token goes into the cache before its insert is sent (nobody holds
+//! its text until `token.create` answers) and comes out again if the insert fails, and a revoke marks its tokens only
+//! after its write committed. So a sweep always finds the entry it must mark, and no create puts a live one back.
+//!
 //! A login code is owner-only (flows/platform.md 4.1): its session is the owner's, with every scope, so a code made
 //! for a token or a plugin, even one holding `system.admin`, would turn that principal into the owner. Every principal
 //! but the owner is refused `token.login_code.create` with `RRS-C1005`, dry runs included.
@@ -27,15 +41,21 @@ use rastai_formats::commands::token::{
     TokenLoginCodeCreateResult, TokenRevokeArgs, TokenRevokeResult, TokenSummary,
 };
 use rastai_formats::hashing::hash_bytes;
+use rastai_proto::common::v1::PluginState;
+use rastai_store::error::StoreError;
 use rastai_store::index::kept_tables::{TokenRow, list_tokens};
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::writes::IndexWrite;
 use rastai_store::writer_thread::write_index;
+use tokio::sync::MutexGuard;
 
 use crate::auth_files::lowercase_hex;
 use crate::commands::arguments::invalid_arguments;
 use crate::commands::context::{CommandContext, core_failure, store_failure, sync_result};
-use crate::http::sessions::{ScopedToken, add_scoped_token, create_login_code, revoke_scoped_token};
+use crate::http::sessions::{
+    ScopedToken, add_scoped_token, create_login_code, remove_scoped_token, revoke_scoped_token,
+};
+use crate::plugin_host::load::plugin_status;
 use crate::server_state::Server;
 
 /// The same strength as the owner token, login codes and session keys.
@@ -98,6 +118,8 @@ pub(crate) async fn create(
         };
         return Ok(sync_result(result_json(&planned)));
     }
+    // Held until the insert has committed, so a disable can't sweep between the check and the insert (contracts 8.2).
+    let _plugin_host_guard = lock_plugin_creator(context.server, context.principal, &context.command.scope).await?;
     let token_id = new_id(IdPrefix::Token).map_err(|error| core_failure(&error))?;
     let secret = random_bytes(TOKEN_SECRET_BYTES).map_err(|error| core_failure(&error))?;
     let token = lowercase_hex(&secret);
@@ -108,17 +130,9 @@ pub(crate) async fn create(
         scopes: scope_names.clone(),
         created_unix_ms: now_unix_ms(),
         revoked_unix_ms: None,
+        created_by: principal_label(context.principal),
     };
-    let cached = ScopedToken {
-        token_id: token_id.clone(),
-        token_hash: row.token_hash.clone(),
-        scopes,
-        revoked: false,
-    };
-    write_index(&context.server.store.index, IndexWrite::InsertToken(row))
-        .await
-        .map_err(|error| store_failure(&error))?;
-    add_scoped_token(&context.server.auth, cached);
+    insert_token(context.server, row, scopes).await?;
     let result = TokenCreateResult {
         token_id,
         name: arguments.name,
@@ -126,6 +140,39 @@ pub(crate) async fn create(
         token,
     };
     Ok(sync_result(result_json(&result)))
+}
+
+/// For a `plugin:` creator, takes the plugin-host lock and checks the plugin is still enabled; the caller holds the
+/// guard until its insert commits. Any other creator needs no lock: a `token:` one is checked by the insert itself.
+async fn lock_plugin_creator<'server>(
+    server: &'server Server,
+    creator: &Principal,
+    scope: &str,
+) -> Result<Option<MutexGuard<'server, ()>>, Vec<Diagnostic>> {
+    if creator.kind != PrincipalKind::Plugin {
+        return Ok(None);
+    }
+    let guard = server.plugin_host_lock.lock().await;
+    check_creator_plugin_enabled(server, creator, scope)?;
+    Ok(Some(guard))
+}
+
+/// Adds the token to the gate's cache, then inserts its row; takes the cache entry back if the insert fails or is
+/// refused (`RRS-C1006` when its `token:` creator was revoked meanwhile).
+async fn insert_token(server: &Server, row: TokenRow, scopes: Vec<Scope>) -> Result<(), Vec<Diagnostic>> {
+    let token_id = row.token_id.clone();
+    let cached = ScopedToken {
+        token_id: token_id.clone(),
+        token_hash: row.token_hash.clone(),
+        scopes,
+        revoked: false,
+    };
+    add_scoped_token(&server.auth, cached);
+    if let Err(error) = write_index(&server.store.index, IndexWrite::InsertToken(row)).await {
+        remove_scoped_token(&server.auth, &token_id);
+        return Err(store_failure(&error));
+    }
+    Ok(())
 }
 
 /// The tokens, oldest first, never with their text; revoked ones only when asked for.
@@ -142,7 +189,9 @@ pub(crate) async fn list(
     Ok(sync_result(result_json(&TokenListResult { tokens })))
 }
 
-/// Revokes a token at once. Revoking one already revoked keeps its first time. A dry run checks the id only.
+/// Revokes a token at once, with every live token it made, directly or through tokens it made (contracts 8.2).
+/// Revoking one already revoked keeps its first time and still sweeps what is live under it. A dry run checks the
+/// id only.
 pub(crate) async fn revoke(
     context: &CommandContext<'_>,
     arguments: TokenRevokeArgs,
@@ -157,10 +206,10 @@ pub(crate) async fn revoke(
         );
         return Err(vec![refusal]);
     };
-    let revoked_unix_ms = match row.revoked_unix_ms {
-        Some(earlier) => earlier,
-        None if context.dry_run => now_unix_ms(),
-        None => revoke_now(context.server, &row.token_id).await?,
+    let revoked_unix_ms = if context.dry_run {
+        row.revoked_unix_ms.unwrap_or_else(now_unix_ms)
+    } else {
+        revoke_now(context.server, row).await?
     };
     let result = TokenRevokeResult {
         token_id: row.token_id.clone(),
@@ -169,17 +218,52 @@ pub(crate) async fn revoke(
     Ok(sync_result(result_json(&result)))
 }
 
-async fn revoke_now(server: &Server, token_id: &str) -> Result<i64, Vec<Diagnostic>> {
+/// Revokes the token's whole chain in one write, then marks every revoked token in the gate's cache. Returns the
+/// named token's revoke time: its first one when it was already revoked.
+async fn revoke_now(server: &Server, row: &TokenRow) -> Result<i64, Vec<Diagnostic>> {
     let revoked_unix_ms = now_unix_ms();
     let write = IndexWrite::RevokeToken {
-        token_id: token_id.to_string(),
+        token_id: row.token_id.clone(),
         revoked_unix_ms,
     };
     write_index(&server.store.index, write)
         .await
         .map_err(|error| store_failure(&error))?;
-    revoke_scoped_token(&server.auth, token_id);
-    Ok(revoked_unix_ms)
+    mark_revoked_tokens_in_cache(server).map_err(|error| store_failure(&error))?;
+    Ok(row.revoked_unix_ms.unwrap_or(revoked_unix_ms))
+}
+
+/// Marks every token `rastai.db` holds as revoked as revoked in the gate's cache too. Called after a revoke's write
+/// has committed, so a token a cascade swept is refused (`RRS-C1006`) from its next request on. Marking one already
+/// marked changes nothing, so this reads the small table whole rather than asking the write which ids it swept.
+pub(crate) fn mark_revoked_tokens_in_cache(server: &Server) -> Result<(), StoreError> {
+    let reader = open_index_reader(&server.store.index_readers)?;
+    for row in list_tokens(&reader)? {
+        if row.revoked_unix_ms.is_some() {
+            revoke_scoped_token(&server.auth, &row.token_id);
+        }
+    }
+    Ok(())
+}
+
+/// A plugin, or the owner narrowed to its UI, makes a token only while the plugin is enabled. The narrowing already
+/// empties a plugin's grant when it isn't, but the plugin may be disabled between that check and this one; the
+/// caller holds the plugin-host lock from here until its insert commits.
+fn check_creator_plugin_enabled(server: &Server, creator: &Principal, scope: &str) -> Result<(), Vec<Diagnostic>> {
+    let enabled = matches!(plugin_status(server, &creator.id), Some((PluginState::Enabled, _)));
+    if enabled {
+        return Ok(());
+    }
+    let label = principal_label(creator);
+    let refusal = diagnostic(
+        CODE_SCOPE_NOT_GRANTED,
+        &[
+            ("command_id", CREATE_COMMAND_ID),
+            ("scope", scope),
+            ("principal", &label),
+        ],
+    );
+    Err(vec![refusal])
 }
 
 fn check_name(name: &str) -> Result<(), Vec<Diagnostic>> {
@@ -283,8 +367,7 @@ fn token_summary(row: &TokenRow) -> TokenSummary {
         name: row.name.clone(),
         scopes: row.scopes.clone(),
         created_unix_ms: u64::try_from(row.created_unix_ms).unwrap_or(0),
-        // `tokens.created_by` lands with SEC-01's code PR (contracts 8.2); until then no creator is recorded.
-        created_by: String::new(),
+        created_by: row.created_by.clone(),
         revoked_unix_ms: row
             .revoked_unix_ms
             .map(|unix_ms| u64::try_from(unix_ms).unwrap_or(0))
@@ -407,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn a_summary_shows_an_active_token_as_revoked_at_zero() {
+    fn a_summary_shows_its_creator_and_an_active_token_as_revoked_at_zero() {
         let row = TokenRow {
             token_id: "tok_a".to_string(),
             name: "ci".to_string(),
@@ -415,9 +498,11 @@ mod tests {
             scopes: vec!["read".to_string()],
             created_unix_ms: 5,
             revoked_unix_ms: None,
+            created_by: "token:tok_parent".to_string(),
         };
         let summary = token_summary(&row);
         assert_eq!(summary.created_unix_ms, 5);
+        assert_eq!(summary.created_by, "token:tok_parent");
         assert_eq!(summary.revoked_unix_ms, 0);
         let revoked = TokenRow {
             revoked_unix_ms: Some(9),

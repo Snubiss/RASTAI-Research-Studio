@@ -8,8 +8,8 @@
 use std::path::PathBuf;
 
 use rastai_core::paths::DataPaths;
-use rastai_core::principal::{Principal, PrincipalKind};
-use rastai_core::scopes::Scope;
+use rastai_core::principal::{Principal, PrincipalKind, owner_principal};
+use rastai_core::scopes::{Scope, scope_name};
 use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
 use rastai_server::commands::execute::execute_command;
 use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
@@ -133,6 +133,21 @@ pub fn token_principal(scopes: Vec<Scope>) -> Principal {
     Principal {
         kind: PrincipalKind::Token,
         id: "tok_01JA2B3C4D5E6F7G8H9J0K1M2N".to_string(),
+        scopes,
+    }
+}
+
+/// A scoped token the owner made with these scopes, as the gate would admit it. `token.create` checks a `token:`
+/// creator against `rastai.db` (contracts 8.2), so a principal with a made-up id can't make tokens; this one can.
+#[allow(clippy::unwrap_used)]
+pub async fn created_token_principal(server: &Server, scopes: Vec<Scope>) -> Principal {
+    let scope_names: Vec<String> = scopes.iter().map(scope_name).collect();
+    let arguments = serde_json::json!({"name": "made-by-the-owner", "scopes": scope_names});
+    let request = execute_request("token.create", &arguments.to_string());
+    let created = ok_result(&run_command(server, &owner_principal(), request).await);
+    Principal {
+        kind: PrincipalKind::Token,
+        id: created["token_id"].as_str().unwrap().to_string(),
         scopes,
     }
 }
