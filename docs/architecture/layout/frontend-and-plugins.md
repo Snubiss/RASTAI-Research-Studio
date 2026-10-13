@@ -269,7 +269,7 @@ stateDiagram-v2
 Rules:
 - **No Redux, MobX, Zustand, React Query or similar.** The tools above are each under 100 lines and live in `@rastai/plugin/src/state/`.
 - **Server state is never computed in the browser** (decision 16). `useQuery` holds command results as they came; views may sort, group and format them for display.
-- **The query cache** is a `Map` keyed by `command_id` + canonical JSON of the arguments. An entry is dropped when an event of one of its `invalidatedBy` types arrives (optionally matching `subject_id`), and all entries drop on resync.
+- **The query cache** is one `Map` per host (two plugins never share a result), keyed by `command_id` + canonical JSON of the arguments + the invalidating event types and subjects. An entry is fetched again when an event of one of its `invalidatedBy` types arrives (only for its `subjectIds` when it names some), every entry is fetched again on resync (`invalidateQueries(host)`), and an entry is dropped when the last component watching it unmounts, so a result is never served after events it missed.
 - **localStorage** holds only throwaway conveniences and unsent drafts. Every access is wrapped in try/catch, and the app works with it empty. Never settings, never secrets.
   - Conveniences: recently used palette entries and the last route per section.
   - **Unsent drafts** (spec §2: nothing the user did is lost to a crash): text the user typed but hasn't sent or committed, so a WebKitGTK crash, a reload after RRS-U0004 or a resync doesn't lose a long prompt.
@@ -302,9 +302,10 @@ export function useStore(store) {}
  * @param {string} commandId
  * @param {object} args
  * @param {string[]} invalidatedBy   event types, e.g. ["conversation.changed"]
+ * @param {string[]} [subjectIds]    only events about these subjects, e.g. [jobId]; empty or left out: any subject
  * @returns {QueryState}
  */
-export function useQuery(commandId, args, invalidatedBy) {}
+export function useQuery(commandId, args, invalidatedBy, subjectIds) {}
 
 // packages/plugin/src/state/live-buffer.js
 const DEFAULT_LIVE_BUFFER_CAPACITY = 16384;
@@ -1702,29 +1703,34 @@ packages/plugin/
   CLAUDE.md                     local rules: the public surface; breaking changes need a semver note
   src/
     index.js                    the only import path plugins use; re-exports @rastai/client/commands
-    constants.js                bridge limits: message size, calls in flight, init timeout, events per batch
+    constants.js                (M8) bridge limits: message size, calls in flight, init timeout, events per batch
     host-api.js                 JSDoc @typedefs: PluginHost, EventFilter, Contribution (no code)
+    in-process-host.js          createInProcessHost: the PluginHost for in-process code over the app's HostServices
     ui-registry.js              JSDoc @typedefs PluginUi, Section, Panel, LensView, MetricView, SettingsPage;
-                                registerPluginUi
+                                registerPluginUi, registeredPluginUi
+    plugin-diagnostic.js        the Diagnostics the SDK raises itself (RRS-C0001, RRS-C1005), from the catalog
+    event-filter.js             eventMatches: an EventFilter against one BusEvent
     react/
       PluginHostProvider.jsx    gives a subtree its PluginHost
+      plugin-host-context.js    the React context (private)
       use-plugin-host.js
       use-query.js              2.3
       use-command.js            useCommand: run, running, last outcome
       CommandForm.jsx           form from a command's arguments_schema_json, built on FieldForm
       JobProgress.jsx           state and progress of any job id, with its final Diagnostic
+      DiagnosticList.jsx        an outcome's diagnostics through DiagnosticView; fix buttons run through the host
       ModelPicker.jsx           model.list with load state; used by several sections and plugins
       FileBrowser.jsx           file.browse dialog for opening large files by path
     state/
       store.js                  createStore, useStore
       live-buffer.js            createLiveBuffer, pushItem, itemsSince, useLiveBuffer
       frame-tick.js             one shared requestAnimationFrame scheduler
-      query-cache.js            cache map and invalidation by event type and subject
+      query-cache.js            one cache map per host; invalidation by event type and subject; invalidateQueries
       draft-store.js            loadDraft, saveDraft, clearDraft: unsent text in localStorage (2.3)
     commands/
-      mcp-names.js              toMcpToolName and fromMcpToolName ("eval.test" and "eval__test")
+      mcp-names.js              (M8) toMcpToolName and fromMcpToolName ("eval.test" and "eval__test")
       schema-to-fields.js       JSON Schema subset to FieldSpec[] for CommandForm
-    bridge/
+    bridge/                     (M8)
       protocol.js               JSON-RPC 2.0 types and method-name constants (MCP Apps names plus rastai/)
       host.js                   createBridgeHost: validates, enforces scopes, batches events (runs in the app)
       guest.js                  connectToHost: a PluginHost over postMessage (runs inside the iframe)
@@ -1732,6 +1738,7 @@ packages/plugin/
     testing/
       mock-host.js              createMockHost: a PluginHost with canned outcomes and recorded calls
       host-contract.js          a shared test table for the rest of PluginHost (subscribe, mode, theme, contributions)
+      render.js                 mounts React elements for the browser tests only; not exported
 ```
 
 There is no `generated/` folder here. The typed wrappers for core commands (contracts §12.4) are generated once, into `@rastai/client/src/generated/commands.js`, which the client also exports as the subpath `@rastai/client/commands`. That file imports nothing at run time, so re-exporting it brings no transport code into an iframe bundle.
@@ -1870,11 +1877,16 @@ export async function connectToHost() {}
 
 // testing/mock-host.js
 /**
- * A PluginHost with canned outcomes, plus what the test needs to look at.
+ * A PluginHost with canned outcomes, plus what the test needs to drive and look at.
  * @typedef {object} MockHost
  * @property {PluginHost} host
- * @property {{ commandId: string, args: object }[]} calls   every execute, in order
- * @property {(event: BusEvent) => void} emit                 delivers a fake event to subscribers
+ * @property {RecordedCall[]} calls                       every execute ({ commandId, args, options }), in order
+ * @property {(event: BusEvent) => void} emit             delivers a fake event to the matching subscribers
+ * @property {(mode: UiMode, theme: ThemeTokens) => void} setDisplay   changes the display and tells the listeners
+ * @property {string[]} routes                            every navigate, in order
+ * @property {Object<string, string>[]} contexts          every setContext, in order
+ * @property {Diagnostic[][]} shownDiagnostics            every showDiagnostics, in order
+ * @property {Object<string, Contribution[]>} contributions   what host.contributions(kind) returns; tests fill it
  */
 
 /**
@@ -1891,9 +1903,9 @@ Three implementations of `PluginHost`:
 
 | Implementation | Where | Used by | Notes |
 |---|---|---|---|
-| In-process | `apps/web/src/plugin-host/in-process-host.js` | core sections, first-party plugins | Direct calls into `@rastai/client` and the event hub. Passes `actingPluginId` and checks the plugin's declared `commands:[scopes]` before calling. |
+| In-process | `createInProcessHost` in `@rastai/plugin/src/in-process-host.js`, wired by `apps/web/src/plugin-host/in-process-host.js` | core sections, first-party plugins | Direct calls into `@rastai/client` and the event hub, which the app passes in once per window as `HostServices`. Fills `actingPluginId` (empty for `core`) and checks the plugin's declared `commands:[scopes]` before calling (RRS-C1005). |
 | Iframe guest | `@rastai/plugin/src/bridge/guest.js` | third-party plugin UIs | JSON-RPC over postMessage; events arrive as proto-JSON and are parsed back into `BusEvent` by the JSON codec in `@rastai/client`'s `connection.js`, the one file allowed to import protobuf-es (contracts §2.5). The bridge host encodes them with the same codec. |
-| Mock | `@rastai/plugin/src/testing/mock-host.js` | unit tests, `rastai plugin test` UI snapshots | Canned outcomes, recorded calls, `emit` for fake events. |
+| Mock | `@rastai/plugin/src/testing/mock-host.js` | unit tests, `rastai plugin test` UI snapshots | The in-process host over an in-memory world: canned outcomes, recorded calls, `emit` for fake events, `setDisplay`, and the routes, contexts and diagnostics the shell would get. |
 
 So a panel is written once against `PluginHost` and runs anywhere. Typed wrappers (`modelLoad(host, args)`) are plain generated functions, one per command, so a call site reads like the command it runs and is greppable. They take any `CommandExecutor`, so the same line works with a `DaemonClient` in a script. Plugins get the same wrappers for their own commands, generated from their `types.json` (10.4).
 
@@ -1997,7 +2009,7 @@ apps/web/
       first-party.js            the static table: plugin_id to a lazy import (trusted, in-process only)
       core-sections.js          the core sections' section.json files and lazy imports, loaded the same way
       plugin-registry.js        sections, panels, lens views, metric views, settings pages, contributions
-      in-process-host.js        PluginHost for in-process code
+      in-process-host.js        builds the window's HostServices and one createInProcessHost per plugin
       IframePanel.jsx           iframe element and its bridge host's lifecycle
       MissingPluginsBanner.jsx  "Install 3 plugins (permissions: ...)" with plugin.suggest
     frame/

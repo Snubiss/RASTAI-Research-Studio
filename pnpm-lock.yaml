@@ -213,6 +213,31 @@ importers:
 
   packages/formats: {}
 
+  packages/plugin:
+    dependencies:
+      '@rastai/catalog':
+        specifier: workspace:*
+        version: link:../catalog
+      '@rastai/client':
+        specifier: workspace:*
+        version: link:../client
+      '@rastai/ui':
+        specifier: workspace:*
+        version: link:../ui
+      react:
+        specifier: 19.3.0
+        version: 19.3.0
+    devDependencies:
+      '@rastai/formats':
+        specifier: workspace:*
+        version: link:../formats
+      '@rastai/proto':
+        specifier: workspace:*
+        version: link:../proto
+      react-dom:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
+
   packages/proto:
     dependencies:
       '@bufbuild/protobuf':

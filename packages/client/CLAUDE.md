@@ -4,7 +4,7 @@ Read the root `CLAUDE.md` first. This file adds the local rules of layout `docs/
 
 ## Where things are
 
-- `src/index.js`: public exports only, plus the generated wrappers. `@rastai/client/commands` is `src/generated/commands.js` alone; `@rastai/client/testing` is `src/testing/executor-contract.js`, for other packages' tests.
+- `src/index.js`: public exports only, plus the generated wrappers. `@rastai/client/commands` is `src/generated/commands.js` alone; `@rastai/client/testing` is `src/testing/executor-contract.js` and `@rastai/client/testing/fake-daemon` is `src/testing/fake-daemon.js`, both for `@rastai/plugin`'s host tests (`check-imports` allows them only under `packages/plugin/src/testing/`).
 - `src/connection.js`: `connectToDaemon`, `checkHealth`, the credential headers (`requestHeaders`). `src/execute.js`: `execute`, `listCommands`. `src/event-stream.js`: `openEventStream`. `src/login.js`, `src/blobs.js`, `src/diagnostics.js` (the RRS-U Diagnostics the client raises), `src/constants.js`.
 - `src/types.js` and `src/command-executor.js` hold JSDoc only (contracts §12.4).
 - `src/generated/commands.js` is written by `just codegen` (rastai-formats-codegen): never edit it.
@@ -21,4 +21,4 @@ Read the root `CLAUDE.md` first. This file adds the local rules of layout `docs/
 
 ## Tests
 
-`just test-js` runs vitest over `src/*.test.js` in Node; `just check-js` type-checks the JSDoc. The executor contract table (`testing/executor-contract.js`) runs against a `DaemonClient` in `execute.test.js`; `@rastai/plugin` runs it against each `PluginHost`.
+`just test-js` runs vitest over `src/*.test.js` in Node; `just check-js` type-checks the JSDoc. The executor contract table (`testing/executor-contract.js`) runs against a `DaemonClient` in `execute.test.js`; `@rastai/plugin` runs it against each `PluginHost`, the in-process host over a `DaemonClient` on this fake daemon.

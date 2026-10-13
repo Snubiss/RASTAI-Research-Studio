@@ -99,11 +99,23 @@ const lazy = () => import("./sections/home/Home.jsx");
 HOME_SECTION = """import { usePluginHost } from "@rastai/plugin";
 import { Button } from "@rastai/ui";
 """
+PLUGIN_INDEX = """export * from "@rastai/client/commands";
+export { createMockHost } from "./testing/mock-host.js";
+"""
+PLUGIN_CONTRACT_TEST = """import { connectToDaemon } from "@rastai/client";
+import { EXECUTOR_CONTRACT_CASES } from "@rastai/client/testing";
+import { createFakeDaemon } from "@rastai/client/testing/fake-daemon";
+import { expect, test } from "vitest";
+"""
+PLUGIN_RENDER = """import { act } from "react";
+import { createRoot } from "react-dom/client";
+"""
 PASSING_JAVASCRIPT = (
     js_package("packages/ui", "@rastai/ui")
     | js_package("packages/client", "@rastai/client")
     | js_package("packages/viz", "@rastai/viz")
     | js_package("apps/web", "@rastai/web")
+    | js_package("packages/plugin", "@rastai/plugin")
     | {
         "packages/ui/src/diagnostics/DiagnosticView.jsx": DIAGNOSTIC_VIEW,
         "packages/ui/src/tokens/canvas-colors.js": CANVAS_COLORS,
@@ -115,6 +127,9 @@ PASSING_JAVASCRIPT = (
         "packages/viz/src/flow/data-flow-view.js": 'import { createContext } from "@rastai/canvas";\n',
         "apps/web/src/app/boot.js": BOOT,
         "apps/web/src/sections/home/Home.jsx": HOME_SECTION,
+        "packages/plugin/src/index.js": PLUGIN_INDEX,
+        "packages/plugin/src/testing/host-contract.test.js": PLUGIN_CONTRACT_TEST,
+        "packages/plugin/src/testing/render.js": PLUGIN_RENDER,
         # beside src/: dev tooling, not package code
         "apps/web/vite.config.js": 'import { defineConfig } from "vite";\n',
     }
@@ -126,6 +141,40 @@ FAILING_JAVASCRIPT = [
         "plugins/psychology/ui/src/Live.jsx",
         'import { TrustPrompt } from "@rastai/ui/security";\n',
         "only apps/web/src/ may import",
+    ),
+    # A plugin UI can't render the security UI, so it can't fake it (frontend layout 2.10): not by a static
+    # import, a lazy one or a re-export, and @rastai/plugin can't hand it on either.
+    (
+        "plugins/evaluation/ui/src/SuitePanel.jsx",
+        'const prompt = await import("@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/evaluation/ui/src/index.js",
+        'export { PermissionList } from "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/index.js",
+        'export { EgressBadge, TrustPrompt } from "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    # Sections reach the typed wrappers through @rastai/plugin, and only the plugin hosts' tests use the client's
+    # test support.
+    (
+        "apps/web/src/sections/home/Home.jsx",
+        'import { jobList } from "@rastai/client/commands";\n',
+        "only packages/plugin/src/ may import",
+    ),
+    (
+        "packages/plugin/src/react/use-query.js",
+        'import { createFakeDaemon } from "@rastai/client/testing/fake-daemon";\n',
+        "only packages/plugin/src/testing/ may import",
+    ),
+    (
+        "packages/plugin/src/react/CommandForm.jsx",
+        'import { createRoot } from "react-dom/client";\n',
+        "`react-dom` is imported only in",
     ),
     (
         "packages/ui/src/diagnostics/View.jsx",
@@ -204,6 +253,8 @@ def test_each_javascript_rule_fails(write_tree, run_check, path, source, expecte
         | js_package("packages/canvas", "@rastai/canvas")
         | js_package("apps/web", "@rastai/web")
         | js_package("plugins/psychology/ui", "@rastai/psychology-ui")
+        | js_package("plugins/evaluation/ui", "@rastai/eval-ui")
+        | js_package("packages/plugin", "@rastai/plugin")
     )
     root = write_tree(packages | {path: source})
     result = run_check("check-imports", "--root", str(root))

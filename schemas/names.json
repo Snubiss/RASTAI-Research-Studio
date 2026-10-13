@@ -468,6 +468,7 @@
     "@rastai/catalog",
     "@rastai/client",
     "@rastai/formats",
+    "@rastai/plugin",
     "@rastai/proto",
     "@rastai/ui"
   ],
