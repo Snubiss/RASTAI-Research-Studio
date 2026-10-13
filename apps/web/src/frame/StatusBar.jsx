@@ -1,6 +1,6 @@
-// The status bar (design 3.5): the connection, the node's telemetry, the running jobs, and the locked egress badge on
-// the right. The badge shows only while data leaves the machine, and the setting privacy.show_egress_badge hides it.
-// Each figure comes from the daemon's events and commands; the bar only formats them.
+// The status bar (design 3.5): the connection, the node's telemetry, the running jobs with their progress, and the
+// locked egress badge on the right. The badge shows only while data leaves the machine, and the setting
+// privacy.show_egress_badge hides it. Each figure comes from the daemon's events and commands; the bar only formats them.
 
 import { EgressBadge } from "@rastai/ui/security";
 import { useStore } from "@rastai/plugin";
@@ -10,6 +10,16 @@ import { ACTIVE_JOB_STATES } from "../constants.js";
 import { useShell } from "../app/shell-context.js";
 import { readSetting } from "../state/settings.js";
 import { activeEgress } from "./egress-state.js";
+
+/**
+ * @typedef {object} JobSummary   a job.list entry (contracts 6.4, the JSON field names)
+ * @property {string} job_id
+ * @property {string} kind
+ * @property {string} run_id
+ * @property {string} state
+ */
+
+/** @typedef {{ fraction: number, message: string }} JobProgressSample */
 
 const BYTES_PER_GIB = 1024 * 1024 * 1024;
 // The egress list is re-checked this often while it has entries, so a held entry drops off after its hold time.
@@ -30,12 +40,13 @@ export function StatusBar() {
   const settings = useStore(shell.stores.settings);
   const nodes = useStore(shell.stores.nodes);
   const telemetry = useStore(shell.stores.telemetry);
-  const jobs = /** @type {{ state: string }[]} */ (useStore(shell.stores.jobs));
+  const jobs = /** @type {JobSummary[]} */ (useStore(shell.stores.jobs));
+  const jobProgress = useStore(shell.stores.jobProgress);
   const egress = useStore(shell.stores.egress);
   const now = useClock(egress.length > 0);
   const badgeOn = readSetting(settings.values, "privacy.show_egress_badge", true) === true;
   const held = activeEgress(egress, now);
-  const running = jobs.filter((job) => ACTIVE_JOB_STATES.includes(job.state)).length;
+  const runningJobs = jobs.filter((job) => ACTIVE_JOB_STATES.includes(job.state));
   const node = nodes[0] ?? null;
   const connectionWord = CONNECTION_WORDS[connection.status] ?? connection.status;
   return (
@@ -45,7 +56,12 @@ export function StatusBar() {
         {connectionWord}
       </span>
       <span className="rr-status-bar__node">{nodeSummary(node, node === null ? null : telemetry[node.node_id])}</span>
-      <span className="rr-status-bar__jobs">{running === 0 ? "No jobs running" : `${running} running`}</span>
+      <span className="rr-status-bar__jobs">
+        {runningJobs.length === 0 ? "No jobs running" : `${runningJobs.length} running`}
+      </span>
+      {runningJobs.map((job) => (
+        <RunningJob key={job.job_id} job={job} progress={jobProgress[job.job_id] ?? null} />
+      ))}
       <span className="rr-status-bar__spacer" />
       {badgeOn && held.length > 0 ? (
         <EgressBadge activeEgress={held} onOpen={() => shell.stores.overlay.set("egress")} />
@@ -53,6 +69,31 @@ export function StatusBar() {
       <span className="rr-status-bar__version">{shell.client.daemonVersion}</span>
     </footer>
   );
+}
+
+/**
+ * One running job: its name and, once the daemon has sent progress for it, a mini progress bar.
+ * @param {object} props
+ * @param {JobSummary} props.job
+ * @param {JobProgressSample | null} props.progress
+ */
+function RunningJob({ job, progress }) {
+  const name = jobName(job);
+  return (
+    <span className="rr-status-bar__job">
+      <span>{name}</span>
+      {progress === null ? null : <progress max={1} value={progress.fraction} aria-label={`${name} progress`} />}
+    </span>
+  );
+}
+
+/**
+ * A job has no name of its own (JobSummary), so the bar names it by its kind, with its run when it has one.
+ * @param {JobSummary} job
+ * @returns {string}
+ */
+export function jobName(job) {
+  return job.run_id ? `${job.kind} · ${job.run_id}` : job.kind;
 }
 
 /**

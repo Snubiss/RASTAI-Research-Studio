@@ -21,13 +21,13 @@ export const FIRST_RUN_STEPS = [
 ];
 
 /**
- * Whether the daemon's command list has a command.
- * @param {{ commandId: string }[]} commands
+ * Whether the daemon's command list has a command. command.list answers in the protobuf JSON names (command_id).
+ * @param {{ command_id: string }[]} commands
  * @param {string} commandId
  * @returns {boolean}
  */
 function commandListed(commands, commandId) {
-  return commands.some((command) => command.commandId === commandId);
+  return commands.some((command) => command.command_id === commandId);
 }
 
 export function FirstRunChecklist() {
@@ -39,7 +39,7 @@ export function FirstRunChecklist() {
         First run
       </h2>
       {listing.status === "error" ? (
-        <DiagnosticView diagnostic={listing.diagnostics[0]} onFix={() => {}} />
+        <DiagnosticView diagnostic={listing.diagnostics[0]} />
       ) : (
         <ol className="rr-first-run">
           {FIRST_RUN_STEPS.map((step) => (
@@ -65,7 +65,7 @@ function FirstRunStep({ step, mode, listing }) {
     state = commandListed(commands, step.commandId) ? (
       <span className="rr-first-run__state">Ready to run</span>
     ) : (
-      <DiagnosticView diagnostic={notAvailableDiagnostic(step.commandId)} onFix={() => {}} />
+      <DiagnosticView diagnostic={notAvailableDiagnostic(step.commandId)} />
     );
   }
   return (

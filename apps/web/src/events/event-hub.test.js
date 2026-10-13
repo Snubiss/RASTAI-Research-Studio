@@ -7,8 +7,14 @@ import { DURABLE_EVENT_TYPES, HIDDEN_PAUSE_MS, RESUBSCRIBE_DEBOUNCE_MS } from ".
 import { createEventHub, matches } from "./event-hub.js";
 
 /**
- * Each stream the hub opens, with what it was opened for and the handlers it gave it.
- * @returns {{ openStream: (eventTypes: string[], afterBusSequence: bigint, handlers: any) => any, streams: any[] }}
+ * The fake opener: the openStream the hub calls, and the streams it has opened so far.
+ * @typedef {object} FakeOpener
+ * @property {(eventTypes: string[], afterBusSequence: bigint, handlers: any) => any} openStream
+ * @property {any[]} streams   each stream opened, with what it was opened for and the handlers it was given
+ */
+
+/**
+ * @returns {FakeOpener}
  */
 function fakeOpener() {
   /** @type {any[]} */
@@ -37,7 +43,7 @@ function event(eventType, subjectId, busSequence) {
   return { eventType, subjectId, busSequence };
 }
 
-/** @type {ReturnType<typeof fakeOpener>} */
+/** @type {FakeOpener} */
 let opener;
 /** @type {string[]} */
 let statuses;

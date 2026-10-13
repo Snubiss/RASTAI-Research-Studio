@@ -46,7 +46,7 @@ export class ErrorBoundary extends Component {
     const diagnostic = pluginDiagnostic(CODE_PANEL_CRASHED, { panel_id: this.props.panelId, reason });
     return (
       <div className="rr-panel-error">
-        <DiagnosticView diagnostic={diagnostic} onFix={() => {}} />
+        <DiagnosticView diagnostic={diagnostic} />
         <Button variant="secondary" onClick={this.reloadPanel}>
           Reload panel
         </Button>

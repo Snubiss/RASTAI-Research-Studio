@@ -20,7 +20,7 @@ export function ConnectionBanner() {
     const problem = connection.problem ?? pluginDiagnostic(CODE_DAEMON_UNREACHABLE, { address: shell.client.baseUrl });
     return (
       <div className="rr-connection-banner">
-        <DiagnosticView diagnostic={problem} onFix={() => {}} />
+        <DiagnosticView diagnostic={problem} />
       </div>
     );
   }

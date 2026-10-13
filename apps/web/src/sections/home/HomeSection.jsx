@@ -69,7 +69,7 @@ export function HomeSection() {
         <h2 id="recent-title" className="rr-home-panel__title">
           Recent
         </h2>
-        <DiagnosticView diagnostic={notAvailableDiagnostic("project.recent.list")} onFix={() => {}} />
+        <DiagnosticView diagnostic={notAvailableDiagnostic("project.recent.list")} />
       </section>
     </div>
   );

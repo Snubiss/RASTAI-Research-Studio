@@ -63,6 +63,15 @@ export function answered(result) {
 
 /**
  * The event stream the shell opens, driven by the test: `emit` delivers an event, `setStatus` reports the connection.
+ * @typedef {object} FakeStream
+ * @property {{ eventTypes: string[], afterBusSequence: bigint, handlers: any }[]} opened
+ * @property {(client: any, eventTypes: string[], afterBusSequence: bigint, handlers: any) => any} openStream
+ * @property {(event: any) => void} emit
+ * @property {(status: string, problem?: any) => void} setStatus
+ */
+
+/**
+ * @returns {FakeStream}
  */
 export function fakeStream() {
   /** @type {{ eventTypes: string[], afterBusSequence: bigint, handlers: any }[]} */
@@ -108,7 +117,7 @@ export async function ensureCoreUi() {
 /**
  * A shell over a fake client and stream, with settings, commands and plugins set as the daemon would answer them.
  * @param {{ answers?: Object<string, any>, settings?: Object<string, any>, commands?: any[], plugins?: any[] }} [setup]
- * @returns {Promise<{ shell: Shell, client: any, stream: ReturnType<typeof fakeStream> }>}
+ * @returns {Promise<{ shell: Shell, client: any, stream: FakeStream }>}
  */
 export async function testShell(setup = {}) {
   await ensureCoreUi();

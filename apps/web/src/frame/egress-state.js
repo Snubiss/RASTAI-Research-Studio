@@ -58,10 +58,12 @@ export function activeEgress(entries, nowUnixMs) {
  * @returns {ActiveEgress | null}
  */
 export function egressReportOf(event) {
-  if (event?.eventType !== "egress.active" || event.payload?.case !== "egressActive") {
+  // The payload is an EventPayload; its oneof (the `payload` field) names the report.
+  const oneof = event?.payload?.payload;
+  if (event?.eventType !== "egress.active" || oneof?.case !== "egressActive") {
     return null;
   }
-  const value = event.payload.value;
+  const value = oneof.value;
   return {
     purpose: String(value.purpose ?? ""),
     host: String(value.host ?? ""),

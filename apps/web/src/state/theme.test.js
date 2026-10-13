@@ -4,7 +4,7 @@
 import { LOCKED_TOKENS } from "@rastai/ui";
 import { describe, expect, test, vi } from "vitest";
 
-import { themeNameFor, themeTokensFor, watchColorScheme, withoutLockedTokens } from "./theme.js";
+import { themeNameFor, themeTokensFor, watchMediaQuery, withoutLockedTokens } from "./theme.js";
 
 const LIGHT_OS = { prefersDark: false, prefersReducedMotion: false };
 const DARK_OS = { prefersDark: true, prefersReducedMotion: false };
@@ -86,11 +86,11 @@ describe("themeTokensFor", () => {
   });
 });
 
-describe("watchColorScheme", () => {
-  test("calls back on each OS change, and stops when asked", () => {
+describe("watchMediaQuery", () => {
+  test("calls back with the new value on each change, and stops when asked", () => {
     const query = fakeQuery(false);
     const onChange = vi.fn();
-    const stop = watchColorScheme(query, onChange);
+    const stop = watchMediaQuery(query, onChange);
     query.change(true);
     query.change(false);
     expect(onChange.mock.calls).toEqual([[true], [false]]);

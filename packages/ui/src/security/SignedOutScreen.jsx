@@ -10,8 +10,12 @@ const SIGNED_OUT_CODE = "RRS-U0003";
 // How to get a new sign-in link: the desktop app, or the CLI's `rastai open` (contracts 3.3).
 const REOPEN_INSTRUCTIONS = "Open the Rastai app, or run `rastai open` in a terminal. It opens a new signed-in window.";
 
-export function SignedOutScreen() {
-  const entry = CATALOG.find((item) => item.code === SIGNED_OUT_CODE);
+/**
+ * @param {{ code?: string }} props   the catalog code to show: RRS-U0003 by default, or RRS-U0002 when the sign-in link
+ *   was rejected (layout 8.3)
+ */
+export function SignedOutScreen({ code = SIGNED_OUT_CODE }) {
+  const entry = CATALOG.find((item) => item.code === code);
   return (
     <div className="rr-locked" style={SCREEN_STYLE} role="alert">
       <div style={PANEL_STYLE}>
@@ -19,7 +23,7 @@ export function SignedOutScreen() {
         <p style={TEXT_STYLE}>{entry?.fix_text}</p>
         <p style={TEXT_STYLE}>{REOPEN_INSTRUCTIONS}</p>
         <p style={TEXT_STYLE}>
-          <code style={CODE_STYLE}>{SIGNED_OUT_CODE}</code>
+          <code style={CODE_STYLE}>{code}</code>
         </p>
       </div>
     </div>

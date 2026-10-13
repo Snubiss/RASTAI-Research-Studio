@@ -26,12 +26,16 @@ const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 const NOSNIFF: &str = "nosniff";
 /// Scripts and styles from this origin only. `wasm-unsafe-eval` lets the formats validator compile its own bytes, and
 /// frames come only from this origin, where plugin UIs live under /plugins/. Nothing comes from another origin.
+/// The one inline style is the locked focus ring of the security UI (@rastai/ui LOCKED_FOCUS_RING_CSS), allowed by its
+/// hash: the security UI's ring must show whatever the theme, so it can't wait for a stylesheet. A test in apps/web
+/// keeps the hash in step with that CSS.
 pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; \
-    style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; worker-src 'self'; \
-    object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+    style-src 'self' 'sha256-KBjDeAaGjMz7k+ImE4bb6dA8AiFaIHw8lSI/QlRGHqU='; img-src 'self' data:; font-src 'self'; \
+    connect-src 'self'; frame-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; \
+    frame-ancestors 'none'";
 
 /// GET and HEAD for an embedded file; any other method or path is not found.
-pub async fn web_assets_endpoint(method: Method, uri: Uri) -> Response {
+pub(crate) async fn web_assets_endpoint(method: Method, uri: Uri) -> Response {
     if method != Method::GET && method != Method::HEAD {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -42,7 +46,7 @@ pub async fn web_assets_endpoint(method: Method, uri: Uri) -> Response {
 }
 
 /// The embedded file at this path. "/" is the index page.
-pub fn find_asset(path: &str) -> Option<&'static WebAsset> {
+fn find_asset(path: &str) -> Option<&'static WebAsset> {
     let wanted = if path == ROOT_PATH { INDEX_PATH } else { path };
     WEB_ASSETS.iter().find(|asset| asset.path == wanted)
 }

@@ -264,6 +264,12 @@ FAILING_JAVASCRIPT = [
     ),
     ("packages/client/src/login.js", 'import { readFileSync } from "node:fs";\n', "is for tests only"),
     ("packages/ui/src/components/Table.jsx", 'import sortBy from "lodash/sortBy";\n', "not a §27 library"),
+    # The shared host table is for the app's tests only: its folder may hold a component, which can't import it.
+    (
+        "apps/web/src/app/boot.js",
+        'import { HOST_CONTRACT_CASES } from "@rastai/plugin/testing/host-contract";\n',
+        "for test files only",
+    ),
     (
         "packages/canvas/src/index.js",
         'export { LineChart } from "@rastai/viz";\n',

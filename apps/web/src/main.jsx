@@ -11,7 +11,7 @@ import { SignedOutScreen } from "@rastai/ui/security";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App.jsx";
-import { loadCommands, loadPlugins, loadSettings, signIn } from "./app/boot.js";
+import { loadCommands, loadPlugins, loadSettings, noSessionScreen, signIn } from "./app/boot.js";
 import { connectDaemon, versionProblem } from "./app/daemon.js";
 import { OfflineScreen } from "./app/OfflineScreen.jsx";
 import { createShell } from "./app/shell.js";
@@ -23,7 +23,11 @@ async function main() {
   const root = createRoot(/** @type {HTMLElement} */ (document.getElementById("root")));
   const session = await signIn(window.location);
   if (session.sessionKey === null) {
-    root.render(<SignedOutScreen />);
+    if (noSessionScreen(session.diagnostic) === "offline") {
+      root.render(<OfflineScreen diagnostic={session.diagnostic} />);
+    } else {
+      root.render(<SignedOutScreen code={session.diagnostic?.code} />);
+    }
     return;
   }
   const connected = await connectDaemon(window.location.origin, session.sessionKey);

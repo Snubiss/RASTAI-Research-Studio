@@ -46,16 +46,24 @@ describe("egressReportOf", () => {
   test("reads the report of an egress.active event", () => {
     const event = {
       eventType: "egress.active",
+      // The bus event's payload is an EventPayload, so the report sits in its oneof.
       payload: {
-        case: "egressActive",
-        value: { purpose: "hf_download", host: "huggingface.co", subjectId: "model_01" },
+        payload: {
+          case: "egressActive",
+          value: { purpose: "hf_download", host: "huggingface.co", subjectId: "model_01" },
+        },
       },
     };
     expect(egressReportOf(event)).toEqual(DOWNLOAD);
   });
 
   test("any other event carries no report", () => {
-    expect(egressReportOf({ eventType: "job.progress", payload: { case: "jobProgress", value: {} } })).toBeNull();
+    expect(
+      egressReportOf({ eventType: "job.progress", payload: { payload: { case: "jobProgress", value: {} } } }),
+    ).toBeNull();
+    expect(
+      egressReportOf({ eventType: "egress.active", payload: { payload: { case: "egressActive", value: {} } } }),
+    ).not.toBeNull();
     expect(egressReportOf({ eventType: "egress.active", payload: undefined })).toBeNull();
   });
 });

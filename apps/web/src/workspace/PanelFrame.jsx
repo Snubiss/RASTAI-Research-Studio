@@ -11,21 +11,15 @@ import { NotAvailableSection } from "../sections/NotAvailableSection.jsx";
 import { panelById } from "../plugin-host/plugin-registry.js";
 import { effectiveMode, sectionLabel } from "../state/mode.js";
 import { layoutOf, setLayoutOf } from "../state/layouts.js";
-import { defaultLayout, movePanel, setModeOverride } from "./layout-tree.js";
+import { defaultLayout, setModeOverride } from "./layout-tree.js";
 
 /** @typedef {import("@rastai/ui").ModeOverride} ModeOverride */
 
-const MENU_MOVE_RIGHT = "move_right";
-const MENU_MOVE_BOTTOM = "move_bottom";
-const MENU_NEW_TAB = "new_tab";
 const MENU_RESET = "reset";
-// The panel menu's items (design 3.3). "Open in new window" is M1-55, with the second windows.
-const PANEL_MENU = [
-  { id: MENU_MOVE_RIGHT, label: "Move to right" },
-  { id: MENU_MOVE_BOTTOM, label: "Move to bottom" },
-  { id: MENU_NEW_TAB, label: "New tab" },
-  { id: MENU_RESET, label: "Reset layout" },
-];
+// The panel menu's items (design 3.3). Only what does something is listed: every section has one panel in this version,
+// so there is nothing to move beside and no tab to open. "Move to right/bottom", "New tab" and "Open in new window"
+// come with the sections that have more than one panel, and with the second windows (M1-55).
+const PANEL_MENU = [{ id: MENU_RESET, label: "Reset layout" }];
 
 /**
  * @param {object} props
@@ -49,11 +43,6 @@ export function PanelFrame({ sectionId, panelId, modeOverride }) {
   function onMenuSelect(itemId) {
     if (itemId === MENU_RESET) {
       changeLayout(() => defaultLayout(panelId));
-      return;
-    }
-    const target = MOVE_TARGET_OF_MENU[itemId];
-    if (target !== undefined) {
-      changeLayout((root) => movePanel(root, panelId, target));
     }
   }
 
@@ -76,10 +65,3 @@ export function PanelFrame({ sectionId, panelId, modeOverride }) {
     </section>
   );
 }
-
-/** @type {Object<string, "right" | "bottom" | "new_tab">} */
-const MOVE_TARGET_OF_MENU = {
-  [MENU_MOVE_RIGHT]: "right",
-  [MENU_MOVE_BOTTOM]: "bottom",
-  [MENU_NEW_TAB]: "new_tab",
-};

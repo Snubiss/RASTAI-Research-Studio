@@ -9,13 +9,15 @@ import { GO_PREFIX_TIMEOUT_MS } from "../constants.js";
 import { recordEgress } from "../frame/egress-state.js";
 import { inAct, mount } from "../testing/render.js";
 import { loadAppStyles } from "../testing/styles.js";
-import { answered, refused, testShell } from "../testing/fake-shell.js";
+import { answered, busEvent, refused, testShell } from "../testing/fake-shell.js";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { App } from "./App.jsx";
 
 const DESKTOP_VIEWPORT = { width: 1024, height: 768 };
 const PHONE_VIEWPORT = { width: 390, height: 844 };
 const MIN_TARGET_PX = 24;
+// Tab from the top of the page reaches the rail well inside this many presses (skip link, top bar, then the rail).
+const MAX_TAB_PRESSES = 30;
 
 beforeAll(async () => {
   await loadAppStyles();
@@ -197,8 +199,12 @@ describe("the global keys", () => {
 
   test("Tab reaches the section rail, and Enter follows its link", async () => {
     await renderApp();
-    sectionLink("Training")?.focus();
-    expect(document.activeElement).toBe(sectionLink("Training"));
+    const training = sectionLink("Training");
+    // The rail is reached by Tab from the top of the page, so the test presses Tab, as a keyboard user does.
+    for (let presses = 0; presses < MAX_TAB_PRESSES && document.activeElement !== training; presses++) {
+      await userEvent.keyboard("{Tab}");
+    }
+    expect(document.activeElement).toBe(training);
     await userEvent.keyboard("{Enter}");
     await vi.waitFor(() => expect(window.location.hash).toBe("#/training"));
   });
@@ -206,7 +212,7 @@ describe("the global keys", () => {
 
 describe("empty and error states", () => {
   test("a step whose command this version doesn't list says not available yet, with its code", async () => {
-    await renderApp({ answers: { "command.list": answered({ commands: [{ commandId: "hf.login" }] }) } });
+    await renderApp({ answers: { "command.list": answered({ commands: [{ command_id: "hf.login" }] }) } });
     const hardware = document.querySelector('[data-step="hardware"]');
     expect(hardware?.textContent).toContain("RRS-C0010");
     const signIn = document.querySelector('[data-step="hf_sign_in"]');
@@ -307,6 +313,63 @@ describe("the status bar", () => {
       [...document.querySelectorAll("button")].some((button) => button.textContent?.includes("Sending data")),
     ).toBe(false);
     expect(shell.stores.egress.get()).toHaveLength(1);
+  });
+});
+
+describe("the status bar from the daemon", () => {
+  test("at boot the node and the running jobs show, with no event", async () => {
+    await renderApp({
+      answers: {
+        "node.list": answered({ nodes: [{ node_id: "node_local", name: "local", transport: "local" }] }),
+        "job.list": answered({
+          jobs: [{ job_id: "job_01", node_id: "node_local", kind: "train", run_id: "run_01", state: "running" }],
+        }),
+      },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__node")?.textContent).toContain("local"));
+    expect(document.querySelector(".rr-status-bar__jobs")?.textContent).toBe("1 running");
+    expect(document.querySelector(".rr-status-bar__job")?.textContent).toContain("train · run_01");
+  });
+
+  test("a node.heartbeat event is kept and shown as the node's GPU and VRAM", async () => {
+    const { stream } = await renderApp({
+      answers: { "node.list": answered({ nodes: [{ node_id: "node_local", name: "local" }] }) },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__node")?.textContent).toContain("local"));
+    const sample = { gpus: [{ utilizationPercent: 54, vramUsedBytes: 4939212390n, vramTotalBytes: 17179869184n }] };
+    await inAct(() =>
+      stream.emit(busEvent("node.heartbeat", "node_local", { payload: { case: "nodeHeartbeat", value: sample } })),
+    );
+    expect(document.querySelector(".rr-status-bar__node")?.textContent).toBe("local · GPU 54% · VRAM 4.6 / 16.0 GiB");
+  });
+
+  test("job.progress draws a progress bar for each running job, named by its kind", async () => {
+    const { stream } = await renderApp({
+      answers: {
+        "job.list": answered({
+          jobs: [{ job_id: "job_01", node_id: "node_local", kind: "train", run_id: "", state: "running" }],
+        }),
+      },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
+    const progress = { payload: { case: "jobProgress", value: { fraction: 0.25, message: "tokenizing" } } };
+    await inAct(() => stream.emit(busEvent("job.progress", "job_01", progress)));
+    const bar = /** @type {HTMLProgressElement | null} */ (
+      document.querySelector('progress[aria-label="train progress"]')
+    );
+    expect(bar?.value).toBe(0.25);
+  });
+});
+
+describe("the panel menu", () => {
+  test("it offers only what does something in this version: Reset layout", async () => {
+    await renderApp({ route: "#/home" });
+    const trigger = /** @type {HTMLButtonElement | null} */ (document.querySelector(".rr-panel-chrome__menu button"));
+    await inAct(async () => trigger?.click());
+    const menu = document.querySelector(".rr-menu")?.textContent ?? "";
+    expect(menu).toContain("Reset layout");
+    expect(menu).not.toContain("Move to");
+    expect(menu).not.toContain("New tab");
   });
 });
 

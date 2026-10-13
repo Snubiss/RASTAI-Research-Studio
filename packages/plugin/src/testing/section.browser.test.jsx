@@ -17,10 +17,9 @@ import { useQuery } from "../react/use-query.js";
 import { registerPluginUi, registeredPluginUi } from "../ui-registry.js";
 import { sampleBusEvent } from "./host-contract.js";
 import { createMockHost } from "./mock-host.js";
-
-/** @typedef {import("./mock-host.js").MockHost} MockHost */
 import { inAct, mount } from "./render.js";
 
+/** @typedef {import("./mock-host.js").MockHost} MockHost */
 /** @typedef {import("@rastai/client/testing/fake-daemon").FakeDaemon} FakeDaemon */
 /** @typedef {import("../host-api.js").PluginHost} PluginHost */
 /** @typedef {import("../host-api.js").EventFilter} EventFilter */
