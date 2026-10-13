@@ -686,6 +686,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rastai-cli"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "rastai-core",
+ "rastai-diag",
+ "rastai-formats",
+ "rastai-mcp",
+ "rastai-proto",
+ "rastai-server",
+ "rastai-transport",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rastai-codegen"
 version = "0.1.0"
 dependencies = [

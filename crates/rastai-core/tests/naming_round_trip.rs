@@ -2,7 +2,8 @@
 //! is: the core table and every id contracts 6.4 registers, core and plugin alike. Each id must have the contract
 //! form, and survive `cli_words` -> `command_id_from_cli_words` and `mcp_tool_name` -> `command_id_from_mcp_tool_name`;
 //! no two ids may share a JavaScript wrapper; no CLI verb may shadow a fixed CLI word. Then the CLI and MCP columns
-//! of `fixtures/command-golden/copy-as.json` must follow the same rules.
+//! of `fixtures/command-golden/copy-as.json` must follow the same rules, with the CLI's syntax for true/false flags,
+//! lists and shell quoting (`rastai-cli`, layout 9.4; the fixture's README).
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use rastai_core::commands::naming::{
     ALIASES, CLI_MODE_WORDS, check_command_id, cli_words, command_id_from_cli_words, command_id_from_mcp_tool_name,
-    flag_name, javascript_wrapper_name, mcp_tool_name,
+    flag_name, javascript_wrapper_name, mcp_tool_name, negated_flag_name,
 };
 use rastai_core::commands::registry::{CommandRegistry, load_core_commands};
 use rastai_proto::commands::v1::CommandDescriptor;
@@ -192,29 +193,97 @@ fn only_the_exact_spelling_finds_a_command() {
     );
 }
 
-/// The `(flag, value)` pairs a copy-as CLI line should end with: `flag_name` of each field, the value as text.
-fn expected_flags(arguments: &Value) -> Vec<(String, String)> {
+/// The `(flag, value)` pairs a copy-as CLI line should end with: `flag_name` of each field with its value as text;
+/// a boolean as its flag alone, `true` as `--name` and `false` as `--no-name`; a list as its flag once per element.
+fn expected_flags(arguments: &Value) -> Vec<(String, Option<String>)> {
     let mut flags = Vec::new();
     for (field, value) in arguments.as_object().unwrap() {
-        let text = match value {
-            Value::String(text) => text.clone(),
-            other => other.to_string(),
-        };
-        flags.push((flag_name(field), text));
+        match value {
+            Value::Bool(true) => flags.push((flag_name(field), None)),
+            Value::Bool(false) => flags.push((negated_flag_name(field), None)),
+            Value::Array(elements) => {
+                for element in elements {
+                    flags.push((flag_name(field), Some(value_text(element))));
+                }
+            }
+            other => flags.push((flag_name(field), Some(value_text(other)))),
+        }
     }
     flags.sort();
     flags
 }
 
-/// The `(flag, value)` pairs after the verb of a CLI line, sorted.
-fn written_flags(flag_words: &[String]) -> Vec<(String, String)> {
-    assert_eq!(flag_words.len() % 2, 0, "every flag has one value: {flag_words:?}");
-    let mut flags: Vec<(String, String)> = flag_words
-        .chunks(2)
-        .map(|pair| (pair[0].clone(), pair[1].clone()))
-        .collect();
+fn value_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// The `(flag, value)` pairs after the verb of a CLI line, sorted. A flag followed by another flag, or by nothing,
+/// is a boolean's and has no value.
+fn written_flags(flag_words: &[String]) -> Vec<(String, Option<String>)> {
+    let mut flags = Vec::new();
+    let mut index = 0;
+    while index < flag_words.len() {
+        let flag = flag_words[index].clone();
+        assert!(
+            flag.starts_with("--"),
+            "a positional word in a copy-as line: {flag_words:?}"
+        );
+        match flag_words.get(index + 1) {
+            Some(value) if !value.starts_with("--") => {
+                flags.push((flag, Some(value.clone())));
+                index += 2;
+            }
+            _ => {
+                flags.push((flag, None));
+                index += 1;
+            }
+        }
+    }
     flags.sort();
     flags
+}
+
+/// The words of a CLI line as a POSIX shell splits it: spaces separate words, single quotes keep everything up to
+/// the next single quote, and a backslash outside quotes keeps the next character (`'it'\''s'` is `it's`).
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_word = false;
+    let mut characters = line.chars();
+    while let Some(character) = characters.next() {
+        match character {
+            ' ' => {
+                if in_word {
+                    words.push(std::mem::take(&mut current));
+                    in_word = false;
+                }
+            }
+            '\'' => {
+                in_word = true;
+                for quoted in characters.by_ref() {
+                    if quoted == '\'' {
+                        break;
+                    }
+                    current.push(quoted);
+                }
+            }
+            '\\' => {
+                in_word = true;
+                current.extend(characters.next());
+            }
+            other => {
+                in_word = true;
+                current.push(other);
+            }
+        }
+    }
+    if in_word {
+        words.push(current);
+    }
+    words
 }
 
 #[test]
@@ -232,12 +301,7 @@ fn copy_as_cli_and_mcp_columns_follow_the_rules() {
         assert_eq!(example["mcp"]["name"], mcp_tool_name(command_id), "{command_id}");
         assert_eq!(example["mcp"]["arguments"], example["arguments"], "{command_id}");
 
-        let words: Vec<String> = example["cli"]
-            .as_str()
-            .unwrap()
-            .split(' ')
-            .map(str::to_string)
-            .collect();
+        let words = shell_words(example["cli"].as_str().unwrap());
         assert_eq!(words[0], CLI_PROGRAM);
         let (found, word_count) = command_id_from_cli_words(&registry, &words[1..]).unwrap();
         assert_eq!(&found, command_id);

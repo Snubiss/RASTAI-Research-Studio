@@ -49,6 +49,7 @@
     "train.start"
   ],
   "crates": [
+    "rastai-cli",
     "rastai-codegen",
     "rastai-core",
     "rastai-diag",
