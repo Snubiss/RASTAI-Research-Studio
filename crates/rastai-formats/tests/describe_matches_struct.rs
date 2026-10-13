@@ -703,6 +703,7 @@ fn filled_theme() -> ThemeDocument {
                 md: 14,
                 lg: 16,
                 xl: 20,
+                xxl: Some(32),
             },
             line_heights: ThemeLineHeights {
                 body: 1.5,

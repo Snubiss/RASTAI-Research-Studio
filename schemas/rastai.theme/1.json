@@ -64,6 +64,10 @@
           "description": "Node input and output ports. A #rrggbb color.",
           "type": "string"
         },
+        "confidence_tint": {
+          "description": "Chat text shading by model confidence. A #rrggbb color.",
+          "type": "string"
+        },
         "diverging_negative": {
           "description": "Negative end of diverging color maps. A #rrggbb color.",
           "type": "string"
@@ -256,6 +260,10 @@
         },
         "xs": {
           "description": "Font size in CSS pixels.",
+          "type": "integer"
+        },
+        "xxl": {
+          "description": "Display size for headings, in CSS pixels. Left out, it is xl.",
           "type": "integer"
         }
       },

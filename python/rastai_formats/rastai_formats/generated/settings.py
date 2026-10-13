@@ -168,7 +168,7 @@ class SettingsUi:
 
     # Basic or Advanced interface.
     mode: Literal["basic", "advanced"] | None = None
-    # system, light, dark, or a plugin theme id (M8).
+    # system, light, dark, high_contrast (the built-in high-contrast theme), or a plugin theme id (M8).
     theme: str | None = None
     # Spacing scale.
     density: Literal["comfortable", "compact"] | None = None

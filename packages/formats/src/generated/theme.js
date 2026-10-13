@@ -69,6 +69,7 @@
  * @property {string} [canvas_edge_active] Edges carrying data in a live view. A #rrggbb color.
  * @property {string} [canvas_label] Labels on the canvas. A #rrggbb color.
  * @property {string} [canvas_port] Node input and output ports. A #rrggbb color.
+ * @property {string} [confidence_tint] Chat text shading by model confidence. A #rrggbb color.
  */
 
 /**
@@ -97,6 +98,7 @@
  * @property {number} md Font size in CSS pixels.
  * @property {number} lg Font size in CSS pixels.
  * @property {number} xl Font size in CSS pixels.
+ * @property {number} [xxl] Display size for headings, in CSS pixels. Left out, it is xl.
  */
 
 /**

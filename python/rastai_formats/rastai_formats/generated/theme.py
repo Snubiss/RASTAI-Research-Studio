@@ -202,6 +202,8 @@ class ThemeColors:
     canvas_label: str | None = None
     # Node input and output ports. A #rrggbb color.
     canvas_port: str | None = None
+    # Chat text shading by model confidence. A #rrggbb color.
+    confidence_tint: str | None = None
 
 
 def theme_colors_from_json(data: dict[str, Any]) -> ThemeColors:
@@ -247,6 +249,7 @@ def theme_colors_from_json(data: dict[str, Any]) -> ThemeColors:
         canvas_edge_active=None if "canvas_edge_active" not in data else data["canvas_edge_active"],
         canvas_label=None if "canvas_label" not in data else data["canvas_label"],
         canvas_port=None if "canvas_port" not in data else data["canvas_port"],
+        confidence_tint=None if "confidence_tint" not in data else data["confidence_tint"],
     )
 
 
@@ -333,6 +336,8 @@ def theme_colors_to_json(value: ThemeColors) -> dict[str, Any]:
         data["canvas_label"] = value.canvas_label
     if value.canvas_port is not None:
         data["canvas_port"] = value.canvas_port
+    if value.confidence_tint is not None:
+        data["confidence_tint"] = value.confidence_tint
     return data
 
 
@@ -418,6 +423,8 @@ class ThemeFontSizes:
     lg: int
     # Font size in CSS pixels.
     xl: int
+    # Display size for headings, in CSS pixels. Left out, it is xl.
+    xxl: int | None = None
 
 
 def theme_font_sizes_from_json(data: dict[str, Any]) -> ThemeFontSizes:
@@ -428,6 +435,7 @@ def theme_font_sizes_from_json(data: dict[str, Any]) -> ThemeFontSizes:
         md=data["md"],
         lg=data["lg"],
         xl=data["xl"],
+        xxl=None if "xxl" not in data else data["xxl"],
     )
 
 
@@ -439,6 +447,8 @@ def theme_font_sizes_to_json(value: ThemeFontSizes) -> dict[str, Any]:
     data["md"] = value.md
     data["lg"] = value.lg
     data["xl"] = value.xl
+    if value.xxl is not None:
+        data["xxl"] = value.xxl
     return data
 
 

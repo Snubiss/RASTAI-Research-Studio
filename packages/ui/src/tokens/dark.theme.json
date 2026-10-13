@@ -45,7 +45,8 @@
     "canvas_edge": "#6b8099",
     "canvas_edge_active": "#8cc4ff",
     "canvas_label": "#f2f7ff",
-    "canvas_port": "#9fb3c8"
+    "canvas_port": "#9fb3c8",
+    "confidence_tint": "#4a3b12"
   },
   "typography": {
     "font_family_ui": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Noto Sans\", sans-serif",

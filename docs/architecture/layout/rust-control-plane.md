@@ -815,7 +815,7 @@ pub struct ThemeDocument {
 }
 ```
 
-- **Role keys are struct fields, not a free map.** `ThemeColors` has one `Option<String>` per role (`background` … `canvas_port`). A typo, an unknown role or a `--rr-locked-*` name is an unknown field, so layer 2 refuses it with `RRS-E1003`. That is how a theme can never set a locked security-UI token (owner decision N7).
+- **Role keys are struct fields, not a free map.** `ThemeColors` has one `Option<String>` per role (`background` … `canvas_port`, and `confidence_tint`). A typo, an unknown role or a `--rr-locked-*` name is an unknown field, so layer 2 refuses it with `RRS-E1003`. That is how a theme can never set a locked security-UI token (owner decision N7).
 - **Values** are checked in layer 3 (`meaning/theme.rs`): every color is `#rrggbb`. The M8 accessibility check (WCAG 2.2 AA: 4.5:1 for text, 3:1 for UI parts and the focus ring, 24 px targets) lives in the same file, so the theme picker, `plugin lint` and the plugin host all get the same verdict.
 - **One owner.** The role list is defined here once. The codegen writes it into `@rastai/formats` as a JSDoc `@typedef`; `@rastai/ui` reads that, holds the color values of the built-in themes, and maps fields to `--rr-*` variables (frontend doc). `tests/theme_tokens.rs` reads the built-in theme files through `read_document`.
 - **Settings:** `ui.theme` (`system` default, `light`, `dark`, or a plugin theme id from M8) and `ui.density` (`comfortable`, `compact`) are `SettingsDocument` fields (contracts §11.2).

@@ -12,6 +12,7 @@ use std::path::Path;
 
 use rastai_diag::diagnostic::Diagnostic;
 use rastai_formats::byte_source::SliceSource;
+use rastai_formats::documents::Document;
 use rastai_formats::documents::theme::COLOR_ROLES;
 use rastai_formats::json::pretty::pretty_json;
 use rastai_formats::limits::ImportLimits;
@@ -78,6 +79,62 @@ fn the_base_theme_is_valid() {
     let outcome = read_theme(&base_theme());
     assert_eq!(outcome.diagnostics, vec![]);
     assert!(outcome.document.is_some());
+}
+
+/// The base theme with the two tokens of DESIGN-02: an optional display size and a chat tint.
+fn theme_with_new_tokens() -> Value {
+    let mut theme = base_theme();
+    theme["typography"]["font_sizes_px"]["xxl"] = json!(32);
+    theme["colors"]["confidence_tint"] = json!("#fff1c2");
+    theme
+}
+
+#[test]
+fn a_theme_with_the_new_tokens_validates_and_reads_them_back() {
+    let outcome = read_theme(&theme_with_new_tokens());
+    assert_eq!(outcome.diagnostics, vec![]);
+    let Some(Document::Theme(theme)) = outcome.document else {
+        panic!("the theme with the new tokens must read as a theme");
+    };
+    assert_eq!(theme.typography.font_sizes_px.xxl, Some(32));
+    assert_eq!(theme.colors.confidence_tint.as_deref(), Some("#fff1c2"));
+}
+
+#[test]
+fn a_theme_without_the_new_tokens_validates_and_leaves_them_unset() {
+    let outcome = read_theme(&base_theme());
+    assert_eq!(outcome.diagnostics, vec![]);
+    let Some(Document::Theme(theme)) = outcome.document else {
+        panic!("the base theme must read as a theme");
+    };
+    assert_eq!(theme.typography.font_sizes_px.xxl, None);
+    assert_eq!(theme.colors.confidence_tint, None);
+}
+
+#[test]
+fn a_new_color_that_is_not_rrggbb_is_a_meaning_error() {
+    let mut theme = theme_with_new_tokens();
+    theme["colors"]["confidence_tint"] = json!("amber");
+    assert_eq!(
+        codes_and_pointers(&read_theme(&theme).diagnostics),
+        one(CODE_VALUE_FORM, "/colors/confidence_tint")
+    );
+}
+
+#[test]
+fn a_misspelled_new_token_is_an_unknown_field() {
+    let mut theme = theme_with_new_tokens();
+    theme["colors"]["confidence-tint"] = json!("#fff1c2");
+    theme["typography"]["font_sizes_px"]["xxxl"] = json!(40);
+    let outcome = read_theme(&theme);
+    let expected = vec![
+        (CODE_UNKNOWN_FIELD.to_string(), "/colors/confidence-tint".to_string()),
+        (
+            CODE_UNKNOWN_FIELD.to_string(),
+            "/typography/font_sizes_px/xxxl".to_string(),
+        ),
+    ];
+    assert_eq!(codes_and_pointers(&outcome.diagnostics), expected);
 }
 
 #[test]

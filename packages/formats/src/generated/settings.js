@@ -37,7 +37,7 @@
  * Appearance and interface mode.
  * @typedef {object} SettingsUi
  * @property {"basic" | "advanced"} [mode] Basic or Advanced interface.
- * @property {string} [theme] system, light, dark, or a plugin theme id (M8).
+ * @property {string} [theme] system, light, dark, high_contrast (the built-in high-contrast theme), or a plugin theme id (M8).
  * @property {"comfortable" | "compact"} [density] Spacing scale.
  * @property {string} [locale] Interface language.
  * @property {boolean} [reduced_motion] Turn animations off.
