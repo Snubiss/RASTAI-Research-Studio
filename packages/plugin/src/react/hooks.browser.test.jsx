@@ -144,7 +144,8 @@ function CancelButton() {
   const cancel = useCommand("job.cancel");
   return (
     <div>
-      <button type="button" onClick={() => cancel.run({ job_id: "job_01" })}>
+      {/* The catch only keeps a rejecting host's error from going unhandled; the output shows what run left. */}
+      <button type="button" onClick={() => cancel.run({ job_id: "job_01" }).catch(() => {})}>
         Cancel
       </button>
       <output>{cancel.running ? "running" : cancel.outcome ? `ok ${cancel.outcome.ok}` : "idle"}</output>
@@ -173,6 +174,19 @@ describe("useCommand", () => {
     expect(mock.calls.map((call) => [call.commandId, call.args])).toEqual([["job.cancel", { job_id: "job_01" }]]);
     await inAct(() => answers[0](okOutcome({ job: { state: "cancelled" } })));
     expect(page.container.querySelector("output")?.textContent).toBe("ok true");
+  });
+
+  test("stops counting a run as in flight when the host rejects", async () => {
+    const mock = createMockHost("core", {});
+    mock.host.execute = () => Promise.reject(new Error("the host went away"));
+    const page = await show(
+      <PluginHostProvider host={mock.host}>
+        <CancelButton />
+      </PluginHostProvider>,
+    );
+    await inAct(() => page.container.querySelector("button")?.click());
+    await settle();
+    expect(page.container.querySelector("output")?.textContent).toBe("idle");
   });
 });
 

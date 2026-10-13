@@ -27,10 +27,15 @@ export function useCommand(commandId) {
     /** @param {object} args */
     async (args) => {
       setRunsInFlight((count) => count + 1);
-      const result = await host.execute(commandId, args);
-      setOutcome(result);
-      setRunsInFlight((count) => count - 1);
-      return result;
+      // A host's execute answers a failure with an outcome, but a broken host could still reject; the run must then
+      // stop counting as in flight, or the button stays disabled for good.
+      try {
+        const result = await host.execute(commandId, args);
+        setOutcome(result);
+        return result;
+      } finally {
+        setRunsInFlight((count) => count - 1);
+      }
     },
     [host, commandId],
   );
