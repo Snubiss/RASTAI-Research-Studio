@@ -22,13 +22,14 @@ use rastai_proto::common::v1::PluginState;
 use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
 use rastai_server::http::connect_json::execute_response_from_json;
 use rastai_server::plugin_host::load::disable_plugin;
-use rastai_server::server_state::Server;
+use rastai_server::server_state::{Server, TokenCreatePause};
 use rastai_store::index::kept_tables::{PluginRow, get_plugin, list_tokens};
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::writes::IndexWrite;
 use rastai_store::writer_thread::write_index;
 use rastai_transport::http_client::HttpResponse;
 use serde_json::{Value, json};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use common::{
@@ -512,6 +513,77 @@ async fn an_installed_plugins_tokens_die_when_it_is_disabled() {
     assert_eq!(saved.state, "disabled");
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
+}
+
+/// A disable that lands between a plugin's create's check and its insert must still sweep the new token: the create
+/// holds the plugin-host lock across that window, so the disable waits for the insert to commit. The create is
+/// paused in the window (`Server.token_create_pause`). Were the lock let go after the check, the disable would run
+/// to its end inside the window, and the token would be inserted live after it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disable_inside_a_plugins_create_still_sweeps_the_new_token() {
+    let paths = test_paths("tc-dev-window");
+    let plugin_folder = write_admin_plugin(&paths);
+    let running = start_with_dev_folders(&paths, &[&plugin_folder]).await;
+    let (reached_sender, reached) = oneshot::channel();
+    let (resume, resume_receiver) = oneshot::channel();
+    let pause = TokenCreatePause {
+        reached: reached_sender,
+        resume: resume_receiver,
+    };
+    *running.server.token_create_pause.lock().unwrap() = Some(pause);
+    let create = spawn_plugin_create(&running.server);
+    reached.await.unwrap();
+
+    // Asked before the disable starts, so only the create can be holding the lock.
+    let create_holds_the_lock = running.server.plugin_host_lock.try_lock().is_err();
+    let mut waiting_disable = None;
+    if create_holds_the_lock {
+        waiting_disable = Some(spawn_disable(&running.server));
+    } else {
+        disable_plugin(&running.server, ADMIN_PLUGIN_ID).await;
+    }
+    resume.send(()).unwrap();
+    let created = ok_result(&create.await.unwrap());
+    if let Some(disable) = waiting_disable {
+        disable.await.unwrap();
+    }
+
+    let new_token = NewToken {
+        token_id: created["token_id"].as_str().unwrap().to_string(),
+        token: created["token"].as_str().unwrap().to_string(),
+    };
+    assert_eq!(plugin_state(&running, ADMIN_PLUGIN_ID).await, "disabled");
+    assert_revoked(running.http_port, &new_token).await;
+    let rows = {
+        let reader = open_index_reader(&running.server.store.index_readers).unwrap();
+        list_tokens(&reader).unwrap()
+    };
+    let row = rows.iter().find(|row| row.token_id == new_token.token_id).unwrap();
+    assert!(
+        row.revoked_unix_ms.is_some(),
+        "the plugin's new token is live in rastai.db"
+    );
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+/// `token.create` as the dev plugin's own principal (its module or job), holding the scopes it was granted.
+fn spawn_plugin_create(server: &Arc<Server>) -> JoinHandle<ExecuteResponse> {
+    let server = Arc::clone(server);
+    let plugin = Principal {
+        kind: PrincipalKind::Plugin,
+        id: ADMIN_PLUGIN_ID.to_string(),
+        scopes: vec![Scope::SystemAdmin, Scope::Read],
+    };
+    tokio::spawn(async move {
+        let request = execute_request("token.create", r#"{"name": "in-the-window", "scopes": ["read"]}"#);
+        run_command(&server, &plugin, request).await
+    })
+}
+
+fn spawn_disable(server: &Arc<Server>) -> JoinHandle<PluginState> {
+    let server = Arc::clone(server);
+    tokio::spawn(async move { disable_plugin(&server, ADMIN_PLUGIN_ID).await })
 }
 
 /// Dropping a dev path (owner-only, read at start) removes its plugin at the next start, and the start sweep revokes

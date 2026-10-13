@@ -20,7 +20,7 @@ use rastai_formats::describe::types::TypeDescription;
 use rastai_mcp::server::session::McpSession;
 use rastai_proto::commands::v1::CommandDescriptor;
 use rastai_store::store::Store;
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
 use crate::commands::journal::IdempotencyKeyLock;
 use crate::events::bus::{BUS_BUFFER_EVENTS, Bus, new_bus};
@@ -49,6 +49,10 @@ pub struct Server {
     /// outlives the plugin's disable. A tokio mutex, because both hold it across a write; `plugins` stays a std lock
     /// for the short reads in between.
     pub plugin_host_lock: tokio::sync::Mutex<()>,
+    /// A test seam, always `None` in a running daemon: when a test sets it, the next `token.create` stops between
+    /// its checks and its insert, still holding `plugin_host_lock` for a `plugin:` creator, until the test lets it
+    /// go. tests/token_creators.rs puts a disable in that window, so a create that let the lock go early fails it.
+    pub token_create_pause: Mutex<Option<TokenCreatePause>>,
     /// Login codes, sessions, the owner token's hash and the scoped tokens' hashes.
     pub auth: AuthState,
     /// The daemon-wide bus: the last `daemon.bus_buffer_events` events and every `Subscribe` stream's source.
@@ -70,6 +74,13 @@ pub struct Server {
     pub shutdown: watch::Sender<bool>,
 }
 
+/// How a paused `token.create` tells the test it has stopped (`reached`), and waits for the test to let it go on
+/// (`resume`, or the test dropping its sender).
+pub struct TokenCreatePause {
+    pub reached: oneshot::Sender<()>,
+    pub resume: oneshot::Receiver<()>,
+}
+
 pub fn build_server(
     paths: DataPaths,
     settings: ResolvedSettings,
@@ -87,6 +98,7 @@ pub fn build_server(
         registry: RwLock::new(core_command_registry()),
         plugins: RwLock::new(PluginHost::default()),
         plugin_host_lock: tokio::sync::Mutex::new(()),
+        token_create_pause: Mutex::new(None),
         auth,
         bus: new_bus(bus_buffer_events, now_unix_ms()),
         daemon_log: tokio::sync::Mutex::new(new_daemon_log()),

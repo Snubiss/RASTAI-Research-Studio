@@ -124,6 +124,7 @@ pub(crate) async fn create(
     }
     // Held until the insert has committed, so a disable can't sweep between the check and the insert (contracts 8.2).
     let _plugin_host_guard = lock_plugin_creator(context.server, context.principal, &context.command.scope).await?;
+    pause_if_a_test_asked(context.server).await;
     let token_id = new_id(IdPrefix::Token).map_err(|error| core_failure(&error))?;
     let secret = random_bytes(TOKEN_SECRET_BYTES).map_err(|error| core_failure(&error))?;
     let token = lowercase_hex(&secret);
@@ -159,6 +160,22 @@ async fn lock_plugin_creator<'server>(
     let guard = server.plugin_host_lock.lock().await;
     check_creator_plugin_enabled(server, creator, scope)?;
     Ok(Some(guard))
+}
+
+/// The test seam `Server.token_create_pause`: a test stops a create here, between its checks and its insert, to put
+/// a disable in that window. Nothing happens unless a test set it.
+async fn pause_if_a_test_asked(server: &Server) {
+    let pause = match server.token_create_pause.lock() {
+        Ok(mut pause) => pause.take(),
+        Err(poisoned) => poisoned.into_inner().take(),
+    };
+    let Some(pause) = pause else {
+        return;
+    };
+    if pause.reached.send(()).is_ok() {
+        // Resumed or dropped by the test, the create goes on either way.
+        let _ = pause.resume.await;
+    }
 }
 
 /// Adds the token to the gate's cache, then inserts its row; takes the cache entry back if the insert fails or is
