@@ -1071,7 +1071,7 @@ Lane B · size M · type test · depends on M1-31, M1-30, M1-47 · claims L1
 
 - **Goal:** The §32 skeleton promise that commands are reachable over HTTP, the CLI and the in-house MCP: one test drives `rastai serve --headless` in a temporary RASTAI_HOME and runs the same commands three ways. Adds the `e2e-surfaces` CI job. It is also the proof that `apps/web` holds no domain logic (contracts §2.4 rule 9): every later milestone adds its main action to it, and M10-E02 adds an API-only run of the core loop.
 - **Files:** `tests/e2e/three_surfaces/`; `fixtures/mcp/e2e/` (golden transcript); `justfile` and `ci.yml`: e2e-surfaces
-- **Test:** system.status, train.start and job.get give the same results over Connect JSON, `rastai` verbs and `rastai mcp` (golden transcript); a chat-only token is refused train.start with RRS-C1005 on all three.
+- **Test:** system.status, train.start and job.get give the same results over Connect JSON, `rastai` verbs and `rastai mcp` (golden transcript); a chat-only token is refused train.start with RRS-C1005 the same way over HTTP and MCP; the CLI is always the owner over `daemon.sock` and never carries a token (layout rust-control-plane 9.7), so it has no token to refuse.
 - **Docs:** [Spec §32 weeks 3–4](../spec/rastai_spec_v5.md), [Layout: Rust control plane §7, §9, §14](../architecture/layout/rust-control-plane.md), [Layout: frontend §2.11](../architecture/layout/frontend-and-plugins.md)
 
 #### M1-50 `@rastai/client`: credentials, `CommandExecutor` and the generated JavaScript packages
@@ -1918,7 +1918,7 @@ After the merge, the issue stays open until the verification comment of 3.6 clos
 
 ### 8.7 CI jobs by milestone
 
-Each job is one `just` recipe; the workflow files stay thin (contracts §1). While the repository is private, `ci.yml` and `nightly.yml` run only when started by hand (`workflow_dispatch`; owner decision of 2026-10-11, PROC-01), and no job is required (8.4). The Trigger and Required columns are what each job returns to when CI does; a job added before then still lands in its workflow file with its jobs, and `just check` covers the Linux side locally (3.6); the two recipes that leave `check` when CI returns are (so far `test-crash`, M1-48, and `e2e-surfaces`, M1-49).
+Each job is one `just` recipe; the workflow files stay thin (contracts §1). While the repository is private, `ci.yml` and `nightly.yml` run only when started by hand (`workflow_dispatch`; owner decision of 2026-10-11, PROC-01), and no job is required (8.4). The Trigger and Required columns are what each job returns to when CI does; a job added before then still lands in its workflow file with its jobs, and `just check` covers the Linux side locally (3.6). A job's recipe that `just check` runs only because CI is manual-only (so far `test-crash`, M1-48, and `e2e-surfaces`, M1-49) leaves `check` when CI returns, so the `checks` job doesn't run it a second time beside its own job.
 
 | Job | Workflow | Runs on | Trigger | Added by | Required on `main` |
 |---|---|---|---|---|---|
