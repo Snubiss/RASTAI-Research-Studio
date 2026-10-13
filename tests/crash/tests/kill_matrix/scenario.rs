@@ -96,7 +96,7 @@ impl Scenario {
 }
 
 /// The five data roots in one folder, the way `RASTAI_HOME` lays them out.
-pub fn paths_in(folder: &Path) -> DataPaths {
+fn paths_in(folder: &Path) -> DataPaths {
     DataPaths {
         config: folder.join("config"),
         data: folder.join("data"),

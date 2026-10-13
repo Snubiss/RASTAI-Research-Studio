@@ -1,31 +1,29 @@
-//! The daemon as a process of its own. The row's side starts this test binary again with
-//! `RASTAI_TEST_DAEMON_FOLDER` (and `RASTAI_TEST_PAUSE_AT` when the row names a point), waits until it serves, and
-//! later waits for its pause, kills it or stops it cleanly. The child's side, `serve_if_asked`, runs what `rastai
-//! serve` runs on the folder's data roots: start, serve, and stop on SIGTERM.
+//! The daemon as a process of its own: the real `rastai serve --headless --port 0`, with `RASTAI_HOME` naming the
+//! scenario's folder (and `RASTAI_TEST_PAUSE_AT` when the row names a point). The row waits until it serves, and
+//! later waits for its pause, kills it or stops it cleanly with SIGTERM.
+//!
+//! The binary is the debug `rastai` next to this test binary's own folder, which `just test-crash` builds first; only
+//! a debug build honours the pause points.
 //!
 //! Dropping a `DaemonProcess` kills it, so a failed row never leaves a daemon behind. Its embedded node goes with
 //! it; the workers don't, which is what the scenario's own drop is for.
 
 use std::fs::OpenOptions;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-
-use rastai_server::daemon::{DaemonOptions, start_daemon};
-use rastai_server::error::ServerError;
-use rastai_server::shutdown::{stop_on_signals, wait_for_shutdown};
 
 use crate::kill_matrix::commands::daemon_answers;
 use crate::kill_matrix::processes::{has_exited, is_stopped};
-use crate::kill_matrix::scenario::{DAEMON_OUTPUT_FILE, Scenario, paths_in};
+use crate::kill_matrix::scenario::{DAEMON_OUTPUT_FILE, Scenario};
 
-/// The variable that makes this binary a daemon process, naming its folder (contracts 15.9, tests only), and the
-/// one test such a process runs.
-const DAEMON_FOLDER_VARIABLE: &str = "RASTAI_TEST_DAEMON_FOLDER";
-const DAEMON_PROCESS_TEST: &str = "kill_matrix::daemon_process_for_kill_tests";
+/// The CLI binary and the arguments that run the daemon without a browser. Port 0: the operating system picks a free
+/// loopback port, so rows never fight over 47820–47829.
+const RASTAI_BINARY: &str = "rastai";
+const SERVE_ARGUMENTS: &[&str] = &["serve", "--headless", "--port", "0"];
+/// `RASTAI_HOME` puts all five data roots in one folder (contracts 8.1), the layout `scenario::paths_in` makes.
+const HOME_VARIABLE: &str = "RASTAI_HOME";
 /// The hook's variable (rastai-node pause_points.rs; contracts 15.9).
 const PAUSE_VARIABLE: &str = "RASTAI_TEST_PAUSE_AT";
-/// Port 0: the operating system picks a free loopback port, so rows never fight over 47820–47829.
-const ANY_FREE_PORT: u16 = 0;
 const KILL_TOOL: &str = "kill";
 
 /// A daemon process the row started.
@@ -60,10 +58,10 @@ impl DaemonProcess {
             .append(true)
             .open(scenario.folder.join(DAEMON_OUTPUT_FILE))
             .unwrap();
-        let mut command = Command::new(std::env::current_exe().unwrap());
+        let mut command = Command::new(rastai_binary());
         command
-            .args([DAEMON_PROCESS_TEST, "--exact", "--nocapture"])
-            .env(DAEMON_FOLDER_VARIABLE, &scenario.folder)
+            .args(SERVE_ARGUMENTS)
+            .env(HOME_VARIABLE, &scenario.folder)
             .env_remove(PAUSE_VARIABLE)
             .stdin(Stdio::null())
             .stdout(output.try_clone().unwrap())
@@ -117,28 +115,16 @@ impl DaemonProcess {
     }
 }
 
-/// The child's side: with `RASTAI_TEST_DAEMON_FOLDER` set, runs a daemon on that folder until SIGTERM, as `rastai
-/// serve` does; without it, returns at once.
-pub fn serve_if_asked() {
-    let Ok(folder) = std::env::var(DAEMON_FOLDER_VARIABLE) else {
-        return;
-    };
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let served = runtime.block_on(serve_until_stopped(Path::new(&folder)));
-    if let Err(error) = served {
-        panic!("the daemon stopped with {}: {error:?}", error.code());
-    }
-}
-
-async fn serve_until_stopped(folder: &Path) -> Result<(), ServerError> {
-    let options = DaemonOptions {
-        port: Some(ANY_FREE_PORT),
-        ..DaemonOptions::default()
-    };
-    let running = start_daemon(paths_in(folder), &options).await?;
-    stop_on_signals(&running.server);
-    wait_for_shutdown(running).await
+/// `target/<profile>/rastai`: this test binary is `target/<profile>/deps/kill_matrix-<hash>`, so the CLI built by
+/// `cargo build -p rastai-cli` in the same profile sits two folders up from it.
+fn rastai_binary() -> PathBuf {
+    let test_binary = std::env::current_exe().unwrap();
+    let profile_folder = test_binary.parent().and_then(|deps| deps.parent()).unwrap();
+    let binary = profile_folder.join(RASTAI_BINARY);
+    assert!(
+        binary.exists(),
+        "{} is missing: run `cargo build -p rastai-cli` first (`just test-crash` does)",
+        binary.display()
+    );
+    binary
 }

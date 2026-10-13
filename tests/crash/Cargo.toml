@@ -8,11 +8,9 @@ version.workspace = true
 publish.workspace = true
 
 # Dev only, never shipped (contracts 2.1; flows/platform.md 6.5). The library is only this crate's description; the
-# rows are the integration test tests/kill_matrix.rs, which runs a daemon as a process of its own by starting its
-# own binary again (until `rastai serve` lands, M1-31). `just test-crash` runs them, with the cpu environment.
+# rows are the integration test tests/kill_matrix.rs, which runs the real `rastai serve --headless` as the daemon
+# process. `just test-crash` builds that binary and runs them, with the cpu environment.
 [dev-dependencies]
-# The daemon process: start_daemon on the test's folders, the signal handlers and the clean stop.
-rastai-server = { path = "../../crates/rastai-server" }
 # Data paths.
 rastai-core = { path = "../../crates/rastai-core" }
 # The run logs and the daemon log, read frame by frame, and the daemon's index, read from outside the daemon.

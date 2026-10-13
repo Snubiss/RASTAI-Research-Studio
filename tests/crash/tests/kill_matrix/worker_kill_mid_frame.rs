@@ -1,7 +1,7 @@
 //! Row 11, the daemon's half (flows/platform.md 6.2 and 6.5): kill -9 the worker inside a frame write. The log ends
 //! in a torn tail; readers stop before it and never repair it (only a writer truncates). The node ends the run's
 //! stream at the last whole frame, the daemon indexes every whole record exactly once and nothing of the torn one,
-//! and the job fails with `RRS-J1001` (a SIGKILL the node didn't send).
+//! and the job fails with `RRS-J1001` naming SIGKILL (a signal the node didn't send).
 //!
 //! The other half, `train.resume` truncating the torn tail and continuing the sequence, is the worker's: the next
 //! job of the run opens the log as its writer. M1 has no `train.resume` command yet (M5), so
@@ -15,6 +15,7 @@ use crate::kill_matrix::scenario::{Scenario, run_folder};
 
 const PAUSE_POINT: &str = "worker.event_log.mid_metrics_frame";
 const CODE_KILLED_BY_SIGNAL: &str = "RRS-J1001";
+const SIGNAL_NAME: &str = "SIGKILL";
 
 #[test]
 #[ignore = "needs the cpu environment (just env-cpu); just test-crash runs it"]
@@ -30,6 +31,7 @@ fn row_11_a_worker_killed_inside_a_frame_leaves_a_torn_tail_the_daemon_ignores()
     wait_for_job_state(&scenario, &job_id, "failed");
     let failure = job_failure(&scenario.paths, &job_id).unwrap();
     assert_eq!(failure.code, CODE_KILLED_BY_SIGNAL, "{failure:?}");
+    assert!(failure.message.contains(SIGNAL_NAME), "{failure:?}");
     wait_until_run_indexed(&scenario, &run_id, "failed");
     // Ignored, not repaired: the file still ends inside the frame, and the whole records before it are all there is.
     let after = run_log(&scenario.paths, &run_id);

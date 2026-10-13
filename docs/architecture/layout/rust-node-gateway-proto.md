@@ -1726,14 +1726,14 @@ flowchart TD
 
 - Unit tests at the bottom of `vram_leases.rs` (`decide_lease` table cases), `exit_cause.rs`, `environments.rs` (`pick_environment_id` table), `handshake.rs`, `run_events.rs` (position table), `hf_cache.rs`, `permissions.rs`.
 - Integration tests listed in the tree. They use `tests/support/fake_worker.py` in the CPU environment and the llama-server stand-in, so they need no GPU.
-- Crash tests in `tests/crash/` (run in every CI build, spec §29). Since M1-48 the M1 rows are modules of one integration test, `tests/crash/tests/kill_matrix.rs` (each file below is `tests/crash/tests/kill_matrix/<file>`), which runs the daemon as its own test binary started again (`RASTAI_TEST_DAEMON_FOLDER`) and lands each kill at a `RASTAI_TEST_PAUSE_AT` point (`pause_points.rs`); `just test-crash` runs them one at a time:
+- Crash tests in `tests/crash/` (run in every CI build, spec §29). Since M1-48 the M1 rows are modules of one integration test, `tests/crash/tests/kill_matrix.rs` (each file below is `tests/crash/tests/kill_matrix/<file>`), which runs the real `rastai serve --headless` as the daemon process (`RASTAI_HOME` naming the row's folder) and lands each kill at a `RASTAI_TEST_PAUSE_AT` point (`pause_points.rs`); `just test-crash` runs them one at a time:
 
 | Test | Checks |
 |---|---|
 | `daemon_kill_embedded_node.rs` | kill -9 the daemon (which also kills the embedded node) during TextCNN training; restart; the job reattaches and the daemon has every sequence with no gaps. This is the weeks 3–4 exit criterion (§32). |
 | `daemon_kill_before_commit.rs`, `daemon_kill_worker_finishes.rs`, `daemon_kill_mid_command.rs`, `worker_kill_normal_run.rs` | rows 2, 3, 9 and 13 of platform flow 6.5 (M1-48) |
 | `node_kill_mid_run.rs` | the same with a standalone node over a local socket |
-| `worker_kill_mid_frame.rs` | the node stops at a torn tail, the job is `failed` with the worker's last diagnostic or `RRS-J3002` |
+| `worker_kill_mid_frame.rs` | row 11 of platform flow 6.5 (M1-48): kill -9 the worker mid-frame; the torn tail is left as it is, every whole record is indexed exactly once, and the run and job are `failed` with `RRS-J1001` naming SIGKILL (a signal the node didn't send, `exit_cause.rs`) |
 | `pid_reuse.rs` | a `job.json` pointing at an unrelated live pid is never signaled and ends `failed`; so does one whose `boot_id` is from an earlier boot, even with matching start ticks |
 | `llama_server_kill.rs` | kill llama-server mid-stream: `RRS-G3003`, model `failed` then `unloaded`, lease released |
 | `node_kill_with_sandboxes.rs` | section 5.7 |
