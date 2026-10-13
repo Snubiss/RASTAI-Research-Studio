@@ -3,6 +3,7 @@
 // details. Drawn only with the locked egress colors.
 
 import { BADGE_STYLE } from "./locked-styles.js";
+import { LockedFocusRing } from "./LockedFocusRing.jsx";
 
 /**
  * One active outbound transfer: why, to where, and for which job, run or model.
@@ -22,17 +23,20 @@ export function EgressBadge({ activeEgress, onOpen }) {
     return null;
   }
   return (
-    <button
-      type="button"
-      className="rr-locked"
-      style={BADGE_STYLE}
-      aria-label={egressDescription(activeEgress)}
-      title={egressDescription(activeEgress)}
-      onClick={onOpen}
-    >
-      <span aria-hidden="true">{"↑"}</span>
-      <span>{badgeText(activeEgress)}</span>
-    </button>
+    <>
+      <LockedFocusRing />
+      <button
+        type="button"
+        className="rr-locked"
+        style={BADGE_STYLE}
+        aria-label={egressDescription(activeEgress)}
+        title={egressDescription(activeEgress)}
+        onClick={onOpen}
+      >
+        <span aria-hidden="true">{"↑"}</span>
+        <span>{badgeText(activeEgress)}</span>
+      </button>
+    </>
   );
 }
 

@@ -16,7 +16,7 @@ import { LOCKED_PREFIX, lockedTokensFor } from "./locked.js";
 /** One CSS variable: [name, value]. @typedef {[string, string]} CssVariable */
 
 // Each list is `const` so the checker knows every key is a field of its token group.
-const FONT_SIZE_KEYS = /** @type {const} */ (["xs", "sm", "md", "lg", "xl"]);
+const FONT_SIZE_KEYS = /** @type {const} */ (["xs", "sm", "md", "lg", "xl", "xxl"]);
 const FONT_WEIGHT_KEYS = /** @type {const} */ (["regular", "medium", "bold"]);
 const LINE_HEIGHT_KEYS = /** @type {const} */ (["body", "heading", "code"]);
 const RADIUS_KEYS = /** @type {const} */ (["small", "medium", "large"]);

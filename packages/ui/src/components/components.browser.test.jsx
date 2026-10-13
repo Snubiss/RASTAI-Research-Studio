@@ -306,4 +306,47 @@ describe("PanelChrome", () => {
     expect(mounted.container.querySelector("[role=menu]")).toBeNull();
     await mounted.unmount();
   });
+
+  test("the menu takes focus on open, moves with the arrow keys and returns focus to its button on close", async () => {
+    /** @type {string[]} */
+    const selected = [];
+    const mounted = await mount(
+      <PanelChrome
+        title="Live"
+        modeOverride=""
+        onModeOverrideChange={() => {}}
+        menuItems={[
+          { id: "reload", label: "Reload panel" },
+          { id: "move", label: "Move to right" },
+          { id: "close", label: "Close panel" },
+        ]}
+        onMenuSelect={(id) => selected.push(id)}
+      />,
+    );
+    const menuButton = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("[aria-haspopup=menu]"));
+    menuButton.focus();
+    await userEvent.keyboard("{Enter}");
+    const items = [...mounted.container.querySelectorAll("[role=menuitem]")];
+    expect(document.activeElement).toBe(items[0]);
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(items[1]);
+    await userEvent.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(items[0]);
+    await userEvent.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(items[2]);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(items[0]);
+
+    await userEvent.keyboard("{Escape}");
+    expect(mounted.container.querySelector("[role=menu]")).toBeNull();
+    expect(document.activeElement).toBe(menuButton);
+
+    await userEvent.keyboard("{Enter}");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(selected).toEqual(["move"]);
+    expect(mounted.container.querySelector("[role=menu]")).toBeNull();
+    expect(document.activeElement).toBe(menuButton);
+    await mounted.unmount();
+  });
 });

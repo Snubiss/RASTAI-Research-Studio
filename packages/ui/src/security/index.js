@@ -5,6 +5,7 @@
 export { EgressBadge } from "./EgressBadge.jsx";
 export { PermissionList } from "./PermissionList.jsx";
 export { SignedOutScreen } from "./SignedOutScreen.jsx";
+export { TokenConfirm } from "./TokenConfirm.jsx";
 export { TrustPrompt } from "./TrustPrompt.jsx";
 
 /** @typedef {import("./EgressBadge.jsx").ActiveEgress} ActiveEgress */

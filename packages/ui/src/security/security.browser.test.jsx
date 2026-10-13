@@ -4,7 +4,7 @@
 // the same run, so no stored picture can drift, and also the computed colors against LOCKED_TOKENS.
 
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { cssRgb } from "../tokens/color-math.js";
 import { loadStyles } from "../testing/load-styles.js";
@@ -13,7 +13,7 @@ import { applyThemeTokens } from "../tokens/apply-theme.js";
 import { COLOR_ROLES } from "../tokens/built-in-themes.js";
 import { LOCKED_TOKENS } from "../tokens/locked.js";
 import { builtInTheme } from "../tokens/resolve-tokens.js";
-import { EgressBadge, PermissionList, SignedOutScreen, TrustPrompt } from "./index.js";
+import { EgressBadge, PermissionList, SignedOutScreen, TokenConfirm, TrustPrompt } from "./index.js";
 
 /** @typedef {import("../tokens/token-types.js").ThemeTokens} ThemeTokens */
 /** @typedef {import("react").ReactElement} ReactElement */
@@ -27,11 +27,14 @@ const ACTIVE_EGRESS = [
   { purpose: "API chat", host: "api.example.com", subjectId: "conv_01" },
 ];
 const PERMISSIONS = ["commands:[read, chat]", "network:[huggingface.co]", "gpu", "weights.read"];
+const TOKEN_CAN = ["Read models and runs", "Start training jobs"];
+const TOKEN_CANNOT = ["Change settings", "Create other tokens"];
 const noop = () => {};
 // The test's own frame around each component. It sets no font size on purpose: the component inherits whatever
 // the hostile theme's type scale puts on the page, so a security element that forgets its own fixed size changes
-// the screenshot. flow-root keeps a child's margins inside the frame, so only the component inside is compared.
-const FRAME_STYLE = { display: "flow-root", padding: "8px", lineHeight: "20px" };
+// the screenshot. The frame is a flex box, not a block: a block's line box takes the strut of the theme's font, which
+// moved an inline badge by half a pixel under the hostile theme in WebKit. flex keeps a child's margins inside too.
+const FRAME_STYLE = { display: "flex", alignItems: "flex-start", padding: "8px", lineHeight: "20px" };
 
 /** @type {Array<{ name: string, element: () => ReactElement, selector: string }>} */
 const COMPONENTS = [
@@ -48,6 +51,13 @@ const COMPONENTS = [
   {
     name: "TrustPrompt",
     element: () => <TrustPrompt pluginName="Example" permissions={PERMISSIONS} onAccept={noop} onDecline={noop} />,
+    selector: "dialog",
+  },
+  {
+    name: "TokenConfirm",
+    element: () => (
+      <TokenConfirm tokenName="laptop" canDo={TOKEN_CAN} cannotDo={TOKEN_CANNOT} onApprove={noop} onCancel={noop} />
+    ),
     selector: "dialog",
   },
   { name: "SignedOutScreen", element: () => <SignedOutScreen />, selector: "[role=alert]" },
@@ -67,6 +77,7 @@ function hostileTokens(base) {
     md: HOSTILE_FONT_SIZE_PX,
     lg: HOSTILE_FONT_SIZE_PX,
     xl: HOSTILE_FONT_SIZE_PX,
+    xxl: HOSTILE_FONT_SIZE_PX,
   };
   return {
     ...tokens,
@@ -90,6 +101,8 @@ function lockPageBackground() {
  * @returns {Promise<{ screenshot: string, colors: string[] }>}
  */
 async function capture(element) {
+  await document.fonts.ready;
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const screenshot = await page.screenshot({ element, save: false });
   const elements = [element, ...element.querySelectorAll("*")];
   const colors = elements.map((item) => {
@@ -101,6 +114,8 @@ async function capture(element) {
 
 beforeAll(async () => {
   await loadStyles();
+  // The bundled Geist faces load before the first capture, so a late font swap can't change one side of a comparison.
+  await Promise.all([document.fonts.load('16px "Geist"'), document.fonts.load('16px "Geist Mono"')]);
 });
 
 afterEach(() => {
@@ -143,6 +158,61 @@ describe("the security UI ignores the theme", () => {
       await badge.unmount();
     });
   }
+});
+
+describe("the token confirmation", () => {
+  test("Approve is disabled until the show-once box is ticked, and Cancel has the focus first", async () => {
+    /** @type {string[]} */
+    const decisions = [];
+    const mounted = await mount(
+      <TokenConfirm
+        tokenName="laptop"
+        canDo={TOKEN_CAN}
+        cannotDo={TOKEN_CANNOT}
+        onApprove={() => decisions.push("approve")}
+        onCancel={() => decisions.push("cancel")}
+      />,
+    );
+    const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
+    expect(dialog.open).toBe(true);
+    expect(dialog.textContent).toContain("Create token laptop?");
+    expect(dialog.textContent).toContain("Read models and runs");
+    expect(dialog.textContent).toContain("Create other tokens");
+    expect(document.activeElement?.textContent).toBe("Cancel");
+
+    const create = /** @type {HTMLButtonElement} */ (
+      [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Create token")
+    );
+    expect(create.disabled).toBe(true);
+    create.click();
+    expect(decisions).toEqual([]);
+
+    await userEvent.click(/** @type {HTMLElement} */ (dialog.querySelector("input[type=checkbox]")));
+    expect(create.disabled).toBe(false);
+    await userEvent.click(create);
+    expect(decisions).toEqual(["approve"]);
+    await mounted.unmount();
+  });
+
+  test("Escape declines, and the focus ring is drawn by the component", async () => {
+    /** @type {string[]} */
+    const decisions = [];
+    const mounted = await mount(
+      <TokenConfirm
+        tokenName="laptop"
+        canDo={TOKEN_CAN}
+        cannotDo={TOKEN_CANNOT}
+        onApprove={() => decisions.push("approve")}
+        onCancel={() => decisions.push("cancel")}
+      />,
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(decisions).toEqual(["cancel"]);
+    const dialogStyle = document.querySelector("dialog style");
+    expect(dialogStyle?.textContent).toContain(".rr-locked:focus-visible");
+    expect(dialogStyle?.textContent).toContain("var(--rr-locked-security-text");
+    await mounted.unmount();
+  });
 });
 
 describe("what the security components say", () => {

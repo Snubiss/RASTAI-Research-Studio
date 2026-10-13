@@ -1,0 +1,100 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.theme/1.json",
+  "type": "rastai.theme",
+  "schema_version": 1,
+  "id": "builtin_high_contrast",
+  "name": "High contrast",
+  "base": "dark",
+  "colors": {
+    "background": "#000000",
+    "surface": "#0b0b0b",
+    "surface_raised": "#161616",
+    "surface_sunken": "#000000",
+    "overlay": "#000000",
+    "text": "#ffffff",
+    "text_muted": "#d9d9d9",
+    "text_disabled": "#8c8c8c",
+    "text_on_accent": "#000000",
+    "border": "#9a9a9a",
+    "border_strong": "#ffffff",
+    "divider": "#6e6e6e",
+    "accent": "#9fc0ff",
+    "accent_hover": "#c2d6ff",
+    "accent_active": "#7fa8ff",
+    "selection": "#1c3a73",
+    "focus_ring": "#4de2ff",
+    "success": "#5fe39a",
+    "series_1": "#5aa2ff",
+    "series_2": "#f0883e",
+    "series_3": "#3fb950",
+    "series_4": "#db61a2",
+    "series_5": "#a371f7",
+    "series_6": "#e3b341",
+    "series_7": "#39c5cf",
+    "series_8": "#ff7b72",
+    "sequential_low": "#1b2a3f",
+    "sequential_high": "#cfe4ff",
+    "diverging_negative": "#ffb070",
+    "diverging_zero": "#333333",
+    "diverging_positive": "#9fc0ff",
+    "canvas_background": "#000000",
+    "canvas_grid": "#262626",
+    "canvas_node": "#0b0b0b",
+    "canvas_node_border": "#ffffff",
+    "canvas_node_selected": "#9fc0ff",
+    "canvas_edge": "#b3b3b3",
+    "canvas_edge_active": "#4de2ff",
+    "canvas_label": "#ffffff",
+    "canvas_port": "#d9d9d9",
+    "confidence_tint": "#ffb070"
+  },
+  "typography": {
+    "font_family_ui": "\"Geist\", \"Noto Sans\", system-ui, sans-serif",
+    "font_family_mono": "\"Geist Mono\", \"DejaVu Sans Mono\", ui-monospace, monospace",
+    "font_weights": {
+      "regular": 400,
+      "medium": 500,
+      "bold": 600
+    },
+    "font_sizes_px": {
+      "xs": 11,
+      "sm": 12,
+      "md": 14,
+      "lg": 16,
+      "xl": 20,
+      "xxl": 28
+    },
+    "line_heights": {
+      "body": 1.5,
+      "heading": 1.25,
+      "code": 1.45
+    }
+  },
+  "density": {
+    "comfortable": {
+      "spacing_px": [0, 4, 8, 12, 16, 24, 32, 48]
+    },
+    "compact": {
+      "spacing_px": [0, 2, 4, 8, 12, 16, 24, 32]
+    }
+  },
+  "radius_px": {
+    "small": 4,
+    "medium": 6,
+    "large": 10
+  },
+  "motion": {
+    "fast_ms": 120,
+    "slow_ms": 240,
+    "easing": "cubic-bezier(0.2, 0, 0, 1)"
+  },
+  "focus_ring": {
+    "width_px": 3,
+    "offset_px": 2
+  },
+  "elevation": {
+    "level_1": "0 0 0 1px #9a9a9a",
+    "level_2": "0 0 0 1px #ffffff",
+    "level_3": "0 0 0 2px #ffffff"
+  }
+}

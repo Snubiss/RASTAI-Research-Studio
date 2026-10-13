@@ -912,16 +912,20 @@ packages/ui/
       canvas-colors.js         canvasColors(tokens): plain RGBA arrays for @rastai/canvas
       viz-colors.js            vizColors(tokens): plain RGBA arrays and color maps for @rastai/viz
       color-math.js            hexToRgba (the renderer color functions) and cssRgb (the browser tests)
+      high_contrast.theme.json the high-contrast built-in (base dark), the one the locked set and ui.theme `high_contrast` name
     security/                  exported only from @rastai/ui/security; only apps/web may import it (2.10)
       index.js
       EgressBadge.jsx          "data is leaving this machine": the active {purpose, host} pairs, click for details
       TrustPrompt.jsx          a plugin's permissions in plain English; says Python modules are trusted code
       PermissionList.jsx       requested and granted permissions
       SignedOutScreen.jsx      RRS-U0003 with "open Rastai again" instructions
+      TokenConfirm.jsx         "create token" confirmation: what it can and cannot do, a show-once box, Approve disabled until ticked
+      LockedFocusRing.jsx      the security UI's focus ring, drawn inside each component with a locked color (not in base.css)
       locked-styles.js         the inline styles: locked colors, and a fixed font, sizes and spacing no theme reaches
       permission-text.js       each manifest permission in plain English, the sensitive ones marked
+    fonts/                     Geist and Geist Mono (variable woff2) and OFL.txt, loaded by @font-face in base.css; README.md
     styles/
-      base.css                 reset, typography, focus ring, reduced-motion rules; values only through var(--rr-*)
+      base.css                 reset, typography, @font-face, focus ring, reduced-motion rules; values only through var(--rr-*)
       components.css           one block per component; class prefix rr-; values only through var(--rr-*)
     mode/
       mode-types.js            JSDoc @typedef UiMode
@@ -939,7 +943,10 @@ packages/ui/
       ChartFrame.jsx           title, chart slot, legend, "Show as table" toggle with Table
       CommandPaletteView.jsx   palette view only: filter input, list, keyboard navigation; data comes from the caller
       SidebarNav.jsx  StatusBarView.jsx   view only; apps/web's StatusBar feeds it
-      PanelChrome.jsx          panel title bar: title, Basic/Advanced override toggle, panel menu
+      PanelChrome.jsx          panel title bar: title, Basic/Advanced override toggle, panel menu (arrow keys, focus returns)
+      StatePill.jsx            a state's word and glyph, colored by class (live, ok, error, warning, neutral)
+      SegmentedControl.jsx     2 to 4 mutually exclusive options with aria-pressed
+      StatTile.jsx             a label and one big mono number, with an optional change line
     diagnostics/
       DiagnosticView.jsx       Basic: basic_text, a short fix button, fix_text beside it. Advanced: adds code, path, message.
                                Severity colors from --rr-locked-severity-*

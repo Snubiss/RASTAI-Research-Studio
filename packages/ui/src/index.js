@@ -20,7 +20,10 @@ export { Dialog } from "./components/Dialog.jsx";
 export { FieldForm } from "./components/FieldForm.jsx";
 export { NumberField } from "./components/NumberField.jsx";
 export { PanelChrome } from "./components/PanelChrome.jsx";
+export { SegmentedControl } from "./components/SegmentedControl.jsx";
 export { Select } from "./components/Select.jsx";
+export { StatePill } from "./components/StatePill.jsx";
+export { StatTile } from "./components/StatTile.jsx";
 export { Table } from "./components/Table.jsx";
 export { TextField } from "./components/TextField.jsx";
 export { Toast } from "./components/Toast.jsx";
@@ -36,6 +39,8 @@ export { DiagnosticView } from "./diagnostics/DiagnosticView.jsx";
 /** @typedef {import("./components/CommandPaletteView.jsx").PaletteEntry} PaletteEntry */
 /** @typedef {import("./components/PanelChrome.jsx").ModeOverride} ModeOverride */
 /** @typedef {import("./components/PanelChrome.jsx").PanelMenuItem} PanelMenuItem */
+/** @typedef {import("./components/SegmentedControl.jsx").SegmentOption} SegmentOption */
 /** @typedef {import("./components/Select.jsx").SelectOption} SelectOption */
+/** @typedef {import("./components/StatePill.jsx").StateTone} StateTone */
 /** @typedef {import("./components/Table.jsx").TableColumn} TableColumn */
 /** @typedef {import("./components/show-toast.js").ToastEntry} ToastEntry */
