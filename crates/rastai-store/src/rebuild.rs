@@ -728,7 +728,7 @@ fn blob_problem(blobs: &BlobStore, content_hash: &str, verify: bool) -> Option<S
 
 // ---- Putting the new index in place ----
 
-/// Puts the finished new index at `rastai.db`. The old file is linked (or copied) to `rastai.db.broken-<unix_ms>`
+/// Puts the finished new index at `rastai.db`. The old file is copied to `rastai.db.broken-<unix_ms>`
 /// with its `-wal` first, and stays at `rastai.db` until the rename replaces it, so there is always an index there.
 /// Its `-wal` and `-shm` are removed before the rename, since SQLite would apply an old `-wal` to the new file; the
 /// kept copy has the `-wal` under its own name, and SQLite makes a new `-shm` when it is opened. A kill between the
@@ -889,7 +889,7 @@ fn sync_folder(_folder: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// A file in the data folder that can't be created, written, linked, renamed or removed: `RRS-S0004`, or
+/// A file in the data folder that can't be created, written, copied, renamed or removed: `RRS-S0004`, or
 /// `RRS-S3002` for a full disk, whose fix is space rather than permissions.
 fn write_error(path: &Path, error: &std::io::Error) -> StoreError {
     if error.kind() == ErrorKind::StorageFull {
