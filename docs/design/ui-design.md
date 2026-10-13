@@ -248,7 +248,7 @@ Nothing is renamed.
 A swap changes only the bundled files, `OFL.txt` and the two `font_family_*` token values.
 
 How the three were compared. IBM Plex was rejected on 2026-10-13 ("something a bit more stylish please. not over the
-top but not 1050's [sic] mainframe either"). Three pairings, each a UI sans plus a matching mono from the same family, are on
+top but not 1050's [sic] mainframe either."). Three pairings, each a UI sans plus a matching mono from the same family, are on
 the "Type options" board (Foundations page). That board shows the same slice of UI in each: headings, a run row with
 numbers, a stat tile, a shaded chat line, a button row and the status-bar line. Licenses were checked in each family's
 official repository and in Google Fonts' `ofl/` folders on 2026-10-13.
@@ -438,7 +438,7 @@ Every change is `settings.set`; `command.finished` refreshes all windows.
 ### 6.9 Locked security UI (board 9)
 
 Three prompts over a dimmed Settings › API tokens page. The board's theme tweak includes a "Hostile test theme" that
-sets every role to one grey: the app becomes unreadable, the three prompts do not change (security.browser.test.jsx's rule).
+sets every role to one grey: the app becomes unreadable, the three prompts do not change (`packages/ui/src/security/security.browser.test.jsx`'s rule).
 
 1. **Let a new window sign in as you?** (**approved; ADR-0039 Accepted 2026-10-13**; decision 6): window title, address, opened by, "It can: do everything you can". Deny is default.
 2. **Create the token "navi"?**: "It can" lists each granted scope in plain words; "It cannot" lists the rest that matter; then the show-once box with Copy. Data: `token.create` (with a dry run, R13).
@@ -533,8 +533,8 @@ Only shapes, no code that uses them. Add a contracts-changes entry for the task 
   - add `--rr-font-size-xxl` and `--rr-color-confidence-tint` to the CSS variable list;
   - record that the high-contrast built-in ships now rather than at M8.
 - **Contracts §11.2**: `ui.theme` gains the value `high_contrast` beside `system`, `light`, `dark` and the plugin
-  theme ids. The exact spelling follows the contracts naming rules; `high_contrast` is the proposal. The settings
-  schema and `check-schema-diff` follow. `ui.mode` is already a §11.2 key and needs no change.
+  theme ids. DESIGN-02 (#275) registered `high_contrast` here (contracts §5.6 and §11.2), so it is no longer a
+  proposal. The settings schema and `check-schema-diff` follow. `ui.mode` is already a §11.2 key and needs no change.
 - No other name is registered here. The component, path and file names of §10 register in the PR that first uses
   them (§9 (c) and (d)), because ADR-0038 puts a name that is not a shape in the same PR as its code.
 - No breaking change: every command and event is still `preview`, and both new keys add to the theme document.
@@ -570,7 +570,7 @@ This is DESIGN-03 (#267), a follow-up PR on main after M1-51 (PR #256, merged 20
   - `palettes.test.js`: the §4.1 pairs (accent and focus ring vs `background` and `surface`, `text_on_accent` vs
     `accent` and `accent_hover`, `border_strong` 3:1, canvas node border and edge 3:1), run on all three built-ins;
   - `tokens.test.js`: every role, including `confidence_tint`, resolves in all three;
-  - `security.browser.test.jsx`: screenshots of TokenConfirm under the hostile theme;
+  - `packages/ui/src/security/security.browser.test.jsx`: screenshots of TokenConfirm under the hostile theme;
   - a test that the font files and `OFL.txt` are present and that base.css names them.
 
 ### (d) M1-53, M1-54 and M1-55 on top
