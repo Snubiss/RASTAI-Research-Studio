@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { connectToDaemon } from "./connection.js";
-import { RECONNECT_DELAYS_MS } from "./constants.js";
+import { RECONNECT_DELAYS_MS, STREAM_OPEN_GRACE_MS } from "./constants.js";
 import { openEventStream, reconnectDelayMs } from "./event-stream.js";
 import { createFakeDaemon } from "./testing/fake-daemon.js";
 
@@ -16,6 +16,8 @@ import { createFakeDaemon } from "./testing/fake-daemon.js";
 const SUBSCRIBE_PATH = "/rastai.events.v1.EventService/Subscribe";
 // Longer than the first two reconnect delays together, so a loop that wrongly kept going would have retried.
 const QUIET_PERIOD_MS = 1_000;
+// How long a test waits for a stream with no events to count as open: well past the grace period.
+const OPEN_WAIT_MS = STREAM_OPEN_GRACE_MS * 4;
 
 /**
  * Everything the handlers were told, in order, as short strings: "status:connected", "event:7", "resync".
@@ -120,6 +122,8 @@ describe("resume", () => {
     // 0 asks the daemon for a new stream that starts with the next event (contracts 7.2).
     expect(daemon.subscribeRequests.map((request) => request.afterBusSequence)).toEqual([10n, 0n]);
     expect(recorder.statuses).toContainEqual({ status: "resyncing", code: "RRS-C0401" });
+    // The daemon sent its headers before RRS-C0401, but that stream never counted as connected.
+    expect(recorder.log).toEqual(["status:connecting", "status:resyncing", "resync", "status:connected", "event:900"]);
     // The refetch runs after the new stream is subscribed, so an event during it isn't missed.
     const resyncAt = recorder.log.indexOf("resync");
     expect(resyncAt).toBeGreaterThan(recorder.log.indexOf("status:resyncing"));
@@ -178,25 +182,57 @@ describe("backoff", () => {
     expect(subscribeAttempts()).toBe(attemptsWhenOffline + 1);
     stream.stop();
   });
+
+  test("a stream that ends right after its headers neither reports connected nor resets the backoff", async () => {
+    const client = await connect();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    daemon.connections = [
+      { events: [], end: "drop" },
+      { events: [], end: "drop" },
+      { events: [], end: "drop" },
+    ];
+    const recorder = createRecorder();
+    const stream = openEventStream(client, [], 0n, recorder.handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(subscribeAttempts()).toBe(1);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(subscribeAttempts()).toBe(2);
+    // The second failure waits 500 ms, not 250 ms again.
+    await vi.advanceTimersByTimeAsync(499);
+    expect(subscribeAttempts()).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(subscribeAttempts()).toBe(3);
+    expect(recorder.log).not.toContain("status:connected");
+    // The fourth connection has no script, so it stays open and counts as connected after the grace period.
+    await vi.advanceTimersByTimeAsync(1_000 + STREAM_OPEN_GRACE_MS);
+    expect(subscribeAttempts()).toBe(4);
+    expect(recorder.log.at(-1)).toBe("status:connected");
+    stream.stop();
+  });
 });
 
 describe("ending", () => {
-  test("a refused session ends in signed_out with RRS-U0003 and stops retrying", async () => {
+  test("a session the gate refuses (401 and the Connect error as JSON) ends in signed_out after one attempt", async () => {
     const client = await connect();
+    // As after a daemon restart: sessions don't survive one, so the gate refuses the stream before any envelope.
     daemon.refusal = "RRS-C1002";
     const recorder = createRecorder();
-    openEventStream(client, [], 0n, recorder.handlers);
+    const stream = openEventStream(client, [], 0n, recorder.handlers);
     await vi.waitFor(() => expect(recorder.statuses.at(-1)?.status).toBe("signed_out"));
-    expect(recorder.statuses.at(-1)).toEqual({ status: "signed_out", code: "RRS-U0003" });
+    expect(recorder.statuses).toEqual([
+      { status: "connecting", code: null },
+      { status: "signed_out", code: "RRS-U0003" },
+    ]);
     await pause(QUIET_PERIOD_MS);
     expect(subscribeAttempts()).toBe(1);
+    stream.stop();
   });
 
   test("stop() closes an open stream and nothing reconnects", async () => {
     const client = await connect();
     const recorder = createRecorder();
     const stream = openEventStream(client, [], 0n, recorder.handlers);
-    await vi.waitFor(() => expect(recorder.log).toContain("status:connected"));
+    await vi.waitFor(() => expect(recorder.log).toContain("status:connected"), { timeout: OPEN_WAIT_MS });
     stream.stop();
     await pause(QUIET_PERIOD_MS);
     expect(subscribeAttempts()).toBe(1);

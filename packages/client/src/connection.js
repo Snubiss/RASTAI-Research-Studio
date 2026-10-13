@@ -2,7 +2,7 @@
 // 2.1, 3.2; contracts 3.2, 12.4). The only file of the client that imports connect-es and protobuf-es (contracts
 // 2.5): the other files call the generated service stubs on the client object with plain request objects.
 
-import { createClient } from "@connectrpc/connect";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { CommandService, EventService } from "@rastai/proto";
 
@@ -107,6 +107,17 @@ export function requestHeaders(credential, method) {
     headers[SESSION_KEY_HEADER] = credential.sessionKey ?? "";
   }
   return headers;
+}
+
+/**
+ * True when a call failed with the Connect code unauthenticated. The daemon's gate refuses a stream it won't take
+ * with the HTTP status of the code (401) and the Connect error as JSON, before any envelope; connect-es reads that
+ * body only for unary calls, so on a stream the code is all that tells a refused session from a broken connection.
+ * @param {any} error   what a connect-es call threw
+ * @returns {boolean}
+ */
+export function isUnauthenticatedError(error) {
+  return error instanceof ConnectError && error.code === Code.Unauthenticated;
 }
 
 /**

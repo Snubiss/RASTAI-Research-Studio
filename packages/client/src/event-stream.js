@@ -2,7 +2,15 @@
 // (layout frontend-and-plugins.md 2.2, 3.2; contracts 7.2). It owns its reconnect loop; only stop() ends it, or a
 // refused session, which no retry can fix.
 
-import { CODE_DAEMON_UNREACHABLE, CODE_EVENTS_MISSED, OFFLINE_AFTER_MS, RECONNECT_DELAYS_MS } from "./constants.js";
+import { isUnauthenticatedError } from "./connection.js";
+import {
+  CODE_DAEMON_UNREACHABLE,
+  CODE_EVENTS_MISSED,
+  CODE_SIGNED_OUT,
+  OFFLINE_AFTER_MS,
+  RECONNECT_DELAYS_MS,
+  STREAM_OPEN_GRACE_MS,
+} from "./constants.js";
 import { callFailureDiagnostic, clientDiagnostic, daemonDiagnosticOf } from "./diagnostics.js";
 
 /** @typedef {import("@rastai/proto").BusEvent} BusEvent */
@@ -42,6 +50,7 @@ import { callFailureDiagnostic, clientDiagnostic, daemonDiagnosticOf } from "./d
  * @property {boolean} stopped
  * @property {AbortController | null} connection   aborts the open connection on stop()
  * @property {(() => void) | null} wakeUp          ends the wait between attempts early, on stop()
+ * @property {boolean} isOpen               the current connection counts as open (STREAM_OPEN_GRACE_MS)
  * @property {number} failedAttempts        connection attempts since the last one that opened
  * @property {number | null} failingSinceMs  when the stream last stopped working; null while it works
  * @property {boolean} resyncOnOpen         call onResync once the new stream is open, so nothing is missed
@@ -65,6 +74,7 @@ export function openEventStream(client, eventTypes, afterBusSequence, handlers) 
     stopped: false,
     connection: null,
     wakeUp: null,
+    isOpen: false,
     failedAttempts: 0,
     failingSinceMs: null,
     resyncOnOpen: false,
@@ -117,14 +127,19 @@ async function runStream(client, eventTypes, state, handlers) {
 async function readOneConnection(client, eventTypes, state, handlers) {
   const connection = new AbortController();
   state.connection = connection;
+  state.isOpen = false;
+  let cancelOpenTimer = () => {};
   const request = { afterBusSequence: state.lastSequence, eventTypes, subjectIds: [] };
   try {
     const events = client.events.subscribe(request, {
       signal: connection.signal,
-      // The response headers arrived: the daemon took the stream.
-      onHeader: () => markOpen(state, handlers),
+      // The headers alone don't prove the daemon took the stream: it may end it right after them.
+      onHeader: () => {
+        cancelOpenTimer = markOpenAfterGrace(state, handlers);
+      },
     });
     for await (const event of events) {
+      markOpen(state, handlers);
       state.lastSequence = event.busSequence;
       handlers.onEvent(event);
     }
@@ -135,6 +150,7 @@ async function readOneConnection(client, eventTypes, state, handlers) {
     }
     return streamEndFromError(error, client.baseUrl);
   } finally {
+    cancelOpenTimer();
     state.connection = null;
   }
 }
@@ -146,6 +162,11 @@ async function readOneConnection(client, eventTypes, state, handlers) {
  */
 function streamEndFromError(error, baseUrl) {
   const refusal = daemonDiagnosticOf(error);
+  // The gate refuses a session (after a daemon restart, say) with HTTP 401 before any envelope, so the error
+  // carries no Diagnostic; only its Connect code tells it from a broken connection, and no retry can fix it.
+  if (refusal === null && isUnauthenticatedError(error)) {
+    return { kind: "refused", problem: clientDiagnostic(CODE_SIGNED_OUT) };
+  }
   if (refusal === null) {
     return { kind: "dropped", problem: clientDiagnostic(CODE_DAEMON_UNREACHABLE, { address: baseUrl }) };
   }
@@ -157,12 +178,27 @@ function streamEndFromError(error, baseUrl) {
 }
 
 /**
+ * Marks the stream open once it has stayed up STREAM_OPEN_GRACE_MS after its headers.
+ * @param {StreamState} state
+ * @param {EventStreamHandlers} handlers
+ * @returns {() => void}   cancels the wait, when the connection ends first
+ */
+function markOpenAfterGrace(state, handlers) {
+  const timer = setTimeout(() => markOpen(state, handlers), STREAM_OPEN_GRACE_MS);
+  return () => clearTimeout(timer);
+}
+
+/**
  * The stream is open again: the backoff starts over, and a pending resync runs now, after the new stream is
- * subscribed, so an event that happens during the refetch still arrives.
+ * subscribed, so an event that happens during the refetch still arrives. Runs once per connection.
  * @param {StreamState} state
  * @param {EventStreamHandlers} handlers
  */
 function markOpen(state, handlers) {
+  if (state.isOpen) {
+    return;
+  }
+  state.isOpen = true;
   state.failedAttempts = 0;
   state.failingSinceMs = null;
   if (state.resyncOnOpen) {

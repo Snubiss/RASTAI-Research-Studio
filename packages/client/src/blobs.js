@@ -63,14 +63,18 @@ export async function readBlobBytes(client, blobHash) {
  */
 export async function uploadBlob(client, file, onProgress) {
   if (file.size > MAX_BROWSER_UPLOAD_BYTES) {
-    const fileName = file instanceof File ? file.name : "This file";
-    return clientDiagnostic(CODE_UPLOAD_TOO_LARGE, { file_name: fileName });
+    // A Blob that isn't a File has no name: its {file_name} stays unfilled rather than English the catalog doesn't
+    // hold, and the UI shows the catalog's plain text by code anyway.
+    if (file instanceof File) {
+      return clientDiagnostic(CODE_UPLOAD_TOO_LARGE, { file_name: file.name });
+    }
+    return clientDiagnostic(CODE_UPLOAD_TOO_LARGE);
   }
   const reply = await sendUpload(client, file, onProgress);
   if (reply.status < HTTP_OK_MIN || reply.status > HTTP_OK_MAX) {
     return refusalOf(client, reply.status, async () => reply.body);
   }
-  return blobRefFromJson(JSON.parse(reply.body));
+  return blobRefOfReply(client, reply.body);
 }
 
 /**
@@ -119,6 +123,26 @@ async function readRefusal(readBody) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The BlobRef a successful upload answered with. A success whose body isn't one didn't come from the daemon
+ * (something else answered), so it is reported as failureDiagnostic reports any answer without a Diagnostic.
+ * @param {DaemonClient} client
+ * @param {string} body
+ * @returns {BlobRef | Diagnostic}
+ */
+function blobRefOfReply(client, body) {
+  let json = null;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    json = null;
+  }
+  if (json === null || typeof json !== "object" || typeof json.hash !== "string") {
+    return failureDiagnostic(null, client.baseUrl);
+  }
+  return blobRefFromJson(json);
 }
 
 /**

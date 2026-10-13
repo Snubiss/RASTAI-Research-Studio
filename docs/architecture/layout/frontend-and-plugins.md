@@ -663,6 +663,9 @@ packages/client/
 // constants.js
 export const RECONNECT_DELAYS_MS = [250, 500, 1000, 2000, 5000];   // then stays at 5 s
 export const OFFLINE_AFTER_MS = 30_000;                             // banner switches to "offline"
+export const STREAM_OPEN_GRACE_MS = 500;   // a stream counts as open at its first event or after this long up, so
+                                           // one the daemon ends right after its headers neither reports
+                                           // "connected" nor resets the backoff
 export const MAX_BROWSER_UPLOAD_BYTES = 256 * 1024 * 1024;          // bigger files open by path, no copy
 export const LOGIN_CODE_PARAMETER = "login";   // a key in the URL fragment's query (#login=<code>), never the real query
                                                // string: a fragment never reaches a server log or a Referer header
@@ -844,14 +847,14 @@ Callers:
 
 Behavior worth stating:
 - `execute` never throws for an expected failure. Each call gets a fresh `idempotency_key`; a retry after a reconnect reuses it, so the daemon doesn't run the command twice.
-- `openEventStream` owns its reconnect loop. Only `stop()` ends it. A refused session (after a daemon restart) reports `signed_out` and stops retrying.
+- `openEventStream` owns its reconnect loop. Only `stop()` ends it. A refused session (after a daemon restart) reports `signed_out` and stops retrying. The gate refuses a stream with HTTP 401 and the Connect error as JSON before any envelope, a body connect-es reads only for unary calls, so the stream knows the refusal by its Connect code (`unauthenticated`, read by `connection.js`) and reports RRS-U0003.
 - With a cookie credential the client never sets an `Authorization` header and never reads `document.cookie` (the cookie is HttpOnly anyway). With a bearer credential it sends the token on every request and nothing else.
 
 ### 3.3 Dependencies
 
 - Internal: `@rastai/proto` (messages and service stubs), `@rastai/formats` (generated argument and result types, named in the wrappers' JSDoc).
 - External: `@connectrpc/connect` and `@connectrpc/connect-web` (connect-es: the Connect transport) and `@bufbuild/protobuf` (protobuf-es runtime), approved in §27 (contracts §2.5). All three are imported only in `connection.js`. Other files call the generated stubs on the client object with plain request objects, so they import no library. The tests reach them through `testing/fake-daemon.js`; `proto-golden.test.js` alone imports protobuf-es, to re-encode what the client decoded.
-- Modules: `connection.js` imports `execute.js`, `diagnostics.js` and `constants.js`; `execute.js` and `event-stream.js` import `diagnostics.js` and `constants.js`; `blobs.js` and `login.js` also import `connection.js` for `daemonUrl` and the credential headers (`requestHeaders`); `generated/commands.js` imports nothing at run time (its types are JSDoc imports); `types.js` and `command-executor.js` hold only JSDoc.
+- Modules: `connection.js` imports `execute.js`, `diagnostics.js` and `constants.js`; `execute.js` and `event-stream.js` import `diagnostics.js` and `constants.js`; `blobs.js` and `login.js` also import `connection.js` for `daemonUrl` and the credential headers (`requestHeaders`), and `event-stream.js` for `isUnauthenticatedError`, so connect-es's error codes stay in `connection.js`; `generated/commands.js` imports nothing at run time (its types are JSDoc imports); `types.js` and `command-executor.js` hold only JSDoc.
 
 ### 3.4 Boundary rules
 
@@ -864,7 +867,7 @@ Behavior worth stating:
 
 - Unit tests next to each file, run by vitest in Node. The fake daemon (`testing/fake-daemon.js`) is connect-es's in-memory router behind a `fetch` the tests install in place of the global one, so the client runs unchanged and every request's headers are recorded.
 - `connection.test.js`: a bearer credential sets `Authorization: Bearer <token>` on commands, the stream and blob reads; a cookie credential never sets it, and sends `Rastai-Session-Key` on `Execute`, `Subscribe` and blob uploads but not on blob reads; `useJsonWire` picks the JSON format; an unreachable daemon gives RRS-U0001.
-- `event-stream.test.js`: resume with the right `after_bus_sequence`; the backoff sequence; RRS-C0401 calls `onResync`; a refused session ends in `signed_out`; `stop()` ends the loop.
+- `event-stream.test.js`: resume with the right `after_bus_sequence`; the backoff sequence, which a stream ended right after its headers doesn't reset; RRS-C0401 calls `onResync` and never reports `connected` for the refused stream; a session the gate refuses (401 and the Connect error as JSON, as the daemon's gate answers) ends in `signed_out` with RRS-U0003 after one attempt; `stop()` ends the loop. The fake daemon answers every gate refusal in the gate's shapes and keeps HTTP 200 with the end-of-stream envelope for refusals inside the endpoint (RRS-C0401).
 - `login.test.js`: the cases in `fixtures/ui/fragments.json`. `#login=abc` and `#/open?path=x&login=abc` give `abc`; after removal the fragments are `#/home` and `#/open?path=x`; `?login=abc` in the real query string gives `null`.
 - `proto-golden.test.js`: the golden `ExecuteResponse`, `ListCommandsResponse` and `BusEvent` bytes go through `execute`, `listCommands` and `openEventStream`, and what they return encodes back byte-identical; `execute` writes the `ExecuteRequest` golden byte for byte. Every message's own round trip is `packages/proto/src/golden.test.js` (node layout 3.5).
 - `diagnostics.test.js`: each message `clientDiagnostic` fills is the catalog's (`catalog/errors/RRS-U.json`).
