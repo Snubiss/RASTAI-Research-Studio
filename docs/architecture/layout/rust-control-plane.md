@@ -262,11 +262,11 @@ Every CI step is one recipe. Recipes owned by other docs (web, Python, proto) ar
 
 | Recipe | Runs | Used by |
 |---|---|---|
-| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus `check-fuzz-locks`, the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs | "done" means this passes (§29); the pre-push hook before every push, and the verifier on a fresh clone of the PR head (plan 3.6) |
+| `just check` | `fmt-check lint test-rust wasm codegen-check deny check-deps check-unsafe check-names check-schema-diff proto-check` plus `check-fuzz-locks`, the Python checks (ruff, pytest) and JS checks (`check-js`, prettier, `check-colors`, `check-no-typescript`) from their docs; while CI is manual-only, also the cpu-environment job tests `test-node-jobs`, `test-daemon-jobs` and `test-crash` | "done" means this passes (§29); the pre-push hook before every push, and the verifier on a fresh clone of the PR head (plan 3.6) |
 | `just install-hooks` | `git config core.hooksPath tools/hooks` (this clone's config, never `--global`), so git runs `tools/hooks/pre-push` | dev: once per clone |
 | `just build` | `cargo build --workspace --locked` | dev |
 | `just test-rust` | `cargo test --workspace --locked` (unit + `crates/*/tests/`; MySQL tests skip themselves without a server) | CI on Linux, macOS, Windows runners (CPU) |
-| `just test-crash` | `cargo test -p rastai-crash-tests -- --test-threads=1` | CI on Linux |
+| `just test-crash` | `cargo test --locked -p rastai-crash-tests -- --ignored --test-threads=1` (the rows run the real worker in the cpu environment, so they are `#[ignore]`d in a plain `cargo test`), then pytest in `tests/crash/` (the worker's kill -9 tests) | CI on Linux (`test-crash`); `just check` while CI is manual-only (plan 3.6) |
 | `just test-archive` | `rastai-archive` tests and crash rows 20–24 against the MySQL 8.4 and 9.7, MariaDB and MinIO containers (section 14.9) | CI job `mysql-archive` (M11-E07) |
 | `just fuzz <crate> <target> [seconds]` | `cargo +nightly fuzz run <target> -- -max_total_time=<seconds>` in `crates/<crate>/fuzz` (the targets of contracts §12.5), against that folder's checked-in `Cargo.lock`, which `check-fuzz-locks` keeps current | nightly CI, 10 minutes per target |
 | `just codegen` | `buf generate` (proto doc; protobuf-es with target `js+dts`), then `cargo run -p rastai-codegen --bin rastai-catalog-codegen`, then `--bin rastai-formats-codegen`, then `--bin rastai-names-codegen` (last: it reads the catalog, the tables and the migrations) | after any catalog, document or command change |

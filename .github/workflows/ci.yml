@@ -195,6 +195,20 @@ jobs:
       - *cargo-cache
       - *test-python-portable
 
+  # The kill -9 matrix (flows/platform.md 6.5; plan M1-48): real daemon and worker processes killed at named points,
+  # restarted and checked, with the real TextCNN worker, so it needs the cpu environment. Linux only: the rows read
+  # /proc and signal process groups.
+  test-crash:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - *checkout
+      - *install-just-uv
+      - *uv-cache
+      - *cargo-cache
+      - name: just test-crash
+        run: just test-crash
+
   test-js:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

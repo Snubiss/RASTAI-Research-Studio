@@ -52,6 +52,7 @@
     "rastai-cli",
     "rastai-codegen",
     "rastai-core",
+    "rastai-crash-tests",
     "rastai-diag",
     "rastai-formats",
     "rastai-formats-python",

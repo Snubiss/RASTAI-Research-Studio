@@ -1,0 +1,17 @@
+# Not a package: the settings for the worker's kill -9 tests in this folder (python layout 7.9 and 12; plan M1-48).
+# ruff uses the same rules as python/ (owner decision 7). pytest runs the test_*.py files here with the same options
+# as python/, plus this folder on the import path so the tests can load worker_support.py. The Rust rows beside them
+# are the rastai-crash-tests crate; `just test-crash` runs both.
+
+[tool.ruff]
+extend = "../../python/pyproject.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+pythonpath = ["."]
+addopts = ["--strict-markers", "--import-mode=importlib"]
+markers = ["posix_only: needs Unix sockets, flock or setsid; skipped on Windows"]
+filterwarnings = [
+    # torch warns on import when numpy is missing; no Rastai code uses numpy (python/pyproject.toml).
+    "ignore:Failed to initialize NumPy:UserWarning",
+]

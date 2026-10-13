@@ -723,6 +723,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rastai-crash-tests"
+version = "0.1.0"
+dependencies = [
+ "rastai-core",
+ "rastai-diag",
+ "rastai-proto",
+ "rastai-server",
+ "rastai-store",
+ "rastai-transport",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rastai-diag"
 version = "0.1.0"
 dependencies = [

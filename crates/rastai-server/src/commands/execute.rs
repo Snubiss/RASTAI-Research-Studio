@@ -29,6 +29,7 @@ use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_diag::logger::log_warn;
 use rastai_formats::validate::meaning::plugin_manifest::{EXPECTED_PLUGIN_ID_FORM, is_plugin_id};
+use rastai_node::pause_points::pause_at;
 use rastai_proto::commands::v1::{CommandDescriptor, ExecuteRequest, ExecuteResponse};
 use rastai_proto::common::v1::PluginState;
 use rastai_proto::events::v1::event_payload::Payload;
@@ -56,6 +57,9 @@ const OWNER_ONLY: &str = "owner";
 /// The fix of `RRS-C0003` (M8 builds it).
 const PLUGIN_ENABLE_COMMAND_ID: &str = "plugin.enable";
 const COMMAND_FINISHED_EVENT: &str = "command.finished";
+/// The kill -9 tests' point (rastai_node::pause_points; flows/platform.md 6.5 row 9): the journal's started row is
+/// committed and the handler hasn't run.
+const PAUSE_JOURNAL_STARTED: &str = "daemon.journal.started";
 
 /// The outcome of one request, and the journal row it has (empty when it has none).
 struct CommandOutcome {
@@ -242,6 +246,7 @@ async fn run_journaled(server: &Server, checked: &CheckedCommand, request: &Exec
         Ok(journal_id) => journal_id,
         Err(diagnostics) => return unjournaled(Err(diagnostics)),
     };
+    pause_at(PAUSE_JOURNAL_STARTED);
     let context = command_context(server, checked, request, journal_id.clone());
     let result = dispatch(&context, &request.arguments_json).await;
     // The command has run, so its answer goes back even when its row can't be finished; the next start marks that

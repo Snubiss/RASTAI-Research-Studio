@@ -70,6 +70,13 @@ pub fn open_store(paths: &DataPaths) -> Result<Store, StoreError> {
     })
 }
 
+/// Read-only connections to the `rastai.db` a running daemon has open, for a process that isn't that daemon: the
+/// kill -9 tests (`tests/crash/`) watch a daemon process's index this way. It never creates, migrates or writes the
+/// file, so it can't be a second writer; while the daemon runs, WAL lets these read beside its writer thread.
+pub fn open_index_readers(paths: &DataPaths) -> Result<ReaderPool, StoreError> {
+    open_reader_pool(&rastai_db_path(paths), INDEX_READER_COUNT)
+}
+
 /// Waits until every write already queued is committed and the file is closed. Clones of `store.index` held
 /// elsewhere keep the writer thread alive, so drop them first.
 pub async fn close_store(store: Store) {
@@ -289,6 +296,29 @@ mod tests {
         let mut sorted = found.clone();
         sorted.sort();
         assert_eq!(sorted, expected);
+        if let Some(root) = paths.data.parent() {
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    // The kill -9 tests read a live daemon's index from another process: the readers read the file its writer made,
+    // and a missing file is an error, never a new empty database.
+    #[test]
+    fn outside_readers_read_the_live_index_and_never_create_one() {
+        let paths = test_paths("outside-readers");
+        assert!(open_index_readers(&paths).is_err());
+        assert!(!rastai_db_path(&paths).exists());
+        let store = open_store(&paths).unwrap();
+        let readers = open_index_readers(&paths).unwrap();
+        let reader = crate::index::reads::open_index_reader(&readers).unwrap();
+        let newest_version = INDEX_MIGRATIONS.last().unwrap().version;
+        assert_eq!(
+            crate::index::reads::read_index_schema_version(&reader).unwrap(),
+            newest_version
+        );
+        drop(reader);
+        drop(readers);
+        close(store);
         if let Some(root) = paths.data.parent() {
             std::fs::remove_dir_all(root).unwrap();
         }

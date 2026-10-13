@@ -1411,6 +1411,7 @@ python/rastai_worker/
     live_stream.py              LiveStream: bounded queue of ephemeral events for WatchLive; drops oldest
     job_events.py               JobEvents implementation over EventLogWriter and LiveStream
     control.py                  JobControl updates from Control RPCs and signals; SIGTERM → preempt_requested, SIGINT, SIGHUP
+    pause_points.py             the kill -9 tests' RASTAI_TEST_PAUSE_AT: SIGSTOP this process at a named point, once
     vram.py                     apply the granted lease (set_per_process_memory_fraction); resize through the host
     hardware_fingerprint.py     HardwareFingerprint for run records and replays (spike reporting.py port)
     diagnostics.py              exception → Diagnostic dict; traceback to stderr.log; exit code choice

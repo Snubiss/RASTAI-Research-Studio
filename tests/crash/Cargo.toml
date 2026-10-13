@@ -1,0 +1,32 @@
+[package]
+name = "rastai-crash-tests"
+description = "Rastai's kill -9 matrix: real daemon and worker processes killed at named points, then restarted and checked"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+publish.workspace = true
+
+# Dev only, never shipped (contracts 2.1; flows/platform.md 6.5). The library is only this crate's description; the
+# rows are the integration test tests/kill_matrix.rs, which runs a daemon as a process of its own by starting its
+# own binary again (until `rastai serve` lands, M1-31). `just test-crash` runs them, with the cpu environment.
+[dev-dependencies]
+# The daemon process: start_daemon on the test's folders, the signal handlers and the clean stop.
+rastai-server = { path = "../../crates/rastai-server" }
+# Data paths.
+rastai-core = { path = "../../crates/rastai-core" }
+# The run logs and the daemon log, read frame by frame, and the daemon's index, read from outside the daemon.
+rastai-store = { path = "../../crates/rastai-store" }
+# The records those logs hold.
+rastai-proto = { path = "../../crates/rastai-proto" }
+# The catalog: every failure a row shows must carry one of its codes.
+rastai-diag = { path = "../../crates/rastai-diag" }
+# Commands over daemon.sock, as the CLI sends them.
+rastai-transport = { path = "../../crates/rastai-transport" }
+# A current-thread runtime for each request over daemon.sock; the rows themselves are plain threads that poll.
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time"] }
+# The Connect JSON bodies of Execute, job.json and command results.
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
