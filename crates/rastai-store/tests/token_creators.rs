@@ -165,3 +165,29 @@ fn revoking_a_plugins_tokens_follows_the_tokens_they_made() {
     runtime.block_on(close_store(store));
     remove_test_folder(&paths);
 }
+
+/// A row that is already revoked admits no one, so its creator isn't checked: a rebuild copies the revoked tokens a
+/// revoked or gone token made, as they were.
+#[test]
+fn a_revoked_token_is_written_whatever_its_creator() {
+    let paths = test_paths("token-revoked-copy");
+    let store = open_store(&paths).unwrap();
+    let runtime = runtime();
+    write(&runtime, &store, IndexWrite::InsertToken(token("tok_a", OWNER))).unwrap();
+    write(&runtime, &store, revoke_token("tok_a", FIRST_REVOKE_MS)).unwrap();
+    for (token_id, creator) in [("tok_child", "token:tok_a"), ("tok_orphan", "token:tok_never_made")] {
+        let revoked_child = TokenRow {
+            revoked_unix_ms: Some(FIRST_REVOKE_MS),
+            ..token(token_id, creator)
+        };
+        write(&runtime, &store, IndexWrite::InsertToken(revoked_child)).unwrap();
+    }
+    let rows = expected(&[
+        ("tok_a", Some(FIRST_REVOKE_MS)),
+        ("tok_child", Some(FIRST_REVOKE_MS)),
+        ("tok_orphan", Some(FIRST_REVOKE_MS)),
+    ]);
+    assert_eq!(revoke_times(&store), rows);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}

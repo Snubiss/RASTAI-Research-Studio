@@ -135,11 +135,14 @@ pub(crate) fn upsert_project(transaction: &SqliteTransaction<'_>, row: &ProjectR
     Ok(())
 }
 
-/// Inserts a new token. A token made by a token is refused while its creator is revoked or gone
+/// Inserts a new token. A live token made by a token is refused while its creator is revoked or gone
 /// (`StoreError::TokenCreatorRevoked`): the check runs in the writer's transaction, the one every revoke goes through,
-/// so a create racing its creator's revoke either lands first and is swept, or is refused (contracts 8.2).
+/// so a create racing its creator's revoke either lands first and is swept, or is refused (contracts 8.2). A row that
+/// is already revoked skips the check: it admits no one, and a rebuild copies revoked children of revoked creators.
 pub(crate) fn insert_token(transaction: &SqliteTransaction<'_>, row: &TokenRow) -> Result<(), StoreError> {
-    if let Some(creator_token_id) = row.created_by.strip_prefix(TOKEN_CREATOR_PREFIX) {
+    if row.revoked_unix_ms.is_none()
+        && let Some(creator_token_id) = row.created_by.strip_prefix(TOKEN_CREATOR_PREFIX)
+    {
         check_creator_token_live(transaction, creator_token_id)?;
     }
     let parameters = [

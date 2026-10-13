@@ -53,8 +53,8 @@ pub enum IndexWrite {
     },
     UpsertNode(NodeRow),
     UpsertPlugin(PluginRow),
-    /// A new token. One made by a token is refused with `StoreError::TokenCreatorRevoked` while that creator is
-    /// revoked or gone (contracts 8.2).
+    /// A new token. A live one made by a token is refused with `StoreError::TokenCreatorRevoked` while that creator
+    /// is revoked or gone (contracts 8.2); a row already revoked is written as it is.
     InsertToken(TokenRow),
     /// Revokes the token and every live token whose `created_by` chain leads to it, all with this time. A token
     /// already revoked keeps its first time.
