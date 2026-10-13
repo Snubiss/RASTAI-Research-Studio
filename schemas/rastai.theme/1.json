@@ -409,7 +409,7 @@
         },
         "font_sizes_px": {
           "$ref": "#/$defs/ThemeFontSizes",
-          "description": "Font sizes xs to xl."
+          "description": "Font sizes xs to xl, and the optional xxl display size for headings (xl when left out)."
         },
         "font_weights": {
           "$ref": "#/$defs/ThemeFontWeights",

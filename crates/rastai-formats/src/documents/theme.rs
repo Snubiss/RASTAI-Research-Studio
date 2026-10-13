@@ -454,7 +454,11 @@ fn describe_theme_typography() -> TypeDescription {
                 "CSS font-family list for code.",
             ),
             type_field("font_weights", FONT_WEIGHTS_NAME, "Regular, medium and bold weights."),
-            type_field("font_sizes_px", FONT_SIZES_NAME, "Font sizes xs to xl."),
+            type_field(
+                "font_sizes_px",
+                FONT_SIZES_NAME,
+                "Font sizes xs to xl, and the optional xxl display size for headings (xl when left out).",
+            ),
             type_field(
                 "line_heights",
                 LINE_HEIGHTS_NAME,
