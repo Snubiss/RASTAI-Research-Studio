@@ -8,6 +8,10 @@
 //!   end (`wake_scheduler`), and every `SCHEDULER_TICK_SECONDS` in case a wake was missed.
 //! - **The job lock** (`Scheduler.job_state_lock`) is held while job states are compared and recorded and while a
 //!   run's end is settled (nodes/reconcile.rs), so a heartbeat, a launch and a settle never record one move twice.
+//!   It is never held across a node call, so a heartbeat never waits on a `StartJob` that takes long.
+//! - **The launch lock** (`Scheduler.launch_lock`) is held by a launch from its queue check to its recorded answer,
+//!   `StartJob` included (launch.rs). The cancel of a queued job and a run's settle take it before the job lock, so
+//!   neither lands while a node may be starting the job.
 //!
 //! The job is the generated `JobSpec` (contracts 2.4 rule 3); there is no second job struct.
 
@@ -45,12 +49,15 @@ pub struct Scheduler {
     pub wake: Notify,
     /// Held while job states are compared and recorded, and while a run's end is settled (see the top).
     pub job_state_lock: tokio::sync::Mutex<()>,
+    /// Held by a launch across its `StartJob`; taken before `job_state_lock` when both are needed (see the top).
+    pub launch_lock: tokio::sync::Mutex<()>,
 }
 
 pub fn new_scheduler() -> Scheduler {
     Scheduler {
         wake: Notify::new(),
         job_state_lock: tokio::sync::Mutex::new(()),
+        launch_lock: tokio::sync::Mutex::new(()),
     }
 }
 

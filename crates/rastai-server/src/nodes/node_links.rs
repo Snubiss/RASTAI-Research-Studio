@@ -111,6 +111,9 @@ pub struct NodeLink {
     /// When the watch may try to connect again, and the pause after that.
     pub retry_at_unix_ms: i64,
     pub retry_backoff_seconds: u64,
+    /// Set when the node goes unreachable and kept through failed attempts until the next connect, which then logs
+    /// `RRS-N2003` (reconnected): a failed attempt moves the link to connecting, so its state can't tell.
+    pub was_unreachable: bool,
     pub connection: Arc<NodeConnection>,
 }
 
@@ -147,6 +150,7 @@ pub fn embedded_node_links(node_id: &str, socket_path: &Path) -> NodeLinks {
         telemetry: None,
         retry_at_unix_ms: 0,
         retry_backoff_seconds: RECONNECT_FIRST_BACKOFF_SECONDS,
+        was_unreachable: false,
         connection: Arc::new(NodeConnection {
             node_id: node_id.to_string(),
             channel: Mutex::new(None),
@@ -235,7 +239,6 @@ pub async fn connect_node(server: &Arc<Server>, node_id: &str) -> Result<(), Dia
     let Some(socket_path) = with_link(server, node_id, |link| link_socket_path(link)) else {
         return Err(diagnostic(CODE_NO_SUCH_NODE, &[("node_id", node_id)]));
     };
-    let was_unreachable = link_state(server, node_id) == Some(NodeState::Unreachable);
     move_link_state(server, node_id, NodeState::Connecting).await;
     let channel = match dial(&socket_path).await {
         Ok(channel) => channel,
@@ -251,7 +254,7 @@ pub async fn connect_node(server: &Arc<Server>, node_id: &str) -> Result<(), Dia
             return Err(problem);
         }
     };
-    keep_session(server, node_id, client, &answer);
+    let was_unreachable = keep_session(server, node_id, client, &answer);
     move_link_state(server, node_id, NodeState::Connected).await;
     log_connected(node_id, was_unreachable);
     reconcile_node(server, node_id).await;
@@ -404,9 +407,18 @@ fn state_after_refusal(problem: &Diagnostic) -> NodeState {
     }
 }
 
-fn keep_session(server: &Server, node_id: &str, client: NodeServiceClient<Channel>, answer: &HandshakeResponse) {
+/// Keeps the new session on the link. Returns whether the node had gone unreachable since its last connect, and
+/// clears that mark.
+fn keep_session(
+    server: &Server,
+    node_id: &str,
+    client: NodeServiceClient<Channel>,
+    answer: &HandshakeResponse,
+) -> bool {
     let now = now_unix_ms();
-    with_link(server, node_id, |link| {
+    let was_unreachable = with_link(server, node_id, |link| {
+        let was_unreachable = link.was_unreachable;
+        link.was_unreachable = false;
         link.protocol_version = answer.protocol_version;
         link.capabilities = answer.capabilities.clone();
         link.session_token = answer.session_token.clone();
@@ -417,7 +429,9 @@ fn keep_session(server: &Server, node_id: &str, client: NodeServiceClient<Channe
             session_token: answer.session_token.clone(),
         };
         *lock_channel(&link.connection) = Some(channel);
+        was_unreachable
     });
+    was_unreachable.unwrap_or(false)
 }
 
 fn log_connected(node_id: &str, was_unreachable: bool) {
@@ -453,6 +467,7 @@ async fn check_heartbeats(server: &Arc<Server>) {
         );
         log_warn(&lost.message, &[("code", CODE_UNREACHABLE)]);
         forget_channel(server, &node_id);
+        with_link(server, &node_id, |link| link.was_unreachable = true);
         move_link_state(server, &node_id, NodeState::Unreachable).await;
         mark_running_jobs_lost(server, &node_id).await;
     }
