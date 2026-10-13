@@ -29,8 +29,9 @@ pub const QUIET_NODE_FLAG: &str = "nodes.heartbeat_seconds=3600";
 /// How long `start_quiet_test_daemon` waits for the handshake's heartbeat.
 const FIRST_HEARTBEAT_WAIT_MS: u64 = 10_000;
 const FIRST_HEARTBEAT_POLL_MS: u64 = 20;
-/// How long a test's start waits for a lock its own process released a moment ago (start_daemon_in_test).
-const LOCK_RELEASE_WAIT_MS: u64 = 2000;
+/// How long a test's start waits for a lock its own process released a moment ago (start_daemon_in_test). A child can
+/// hold the lock file that long on a machine at load 100; the wait only runs when the lock is still held.
+const LOCK_RELEASE_WAIT_MS: u64 = 10_000;
 const LOCK_RELEASE_POLL_MS: u64 = 10;
 
 /// Empty data folders for one test, under one short parent: the socket path must stay within 107 bytes.
@@ -74,10 +75,32 @@ pub async fn start_test_daemon(paths: &DataPaths) -> RunningDaemon {
 /// starting (between its fork and its exec it holds every open file of this process), so a lock held by this very
 /// process is tried again for up to `LOCK_RELEASE_WAIT_MS`. Any other failure fails the test.
 pub async fn start_daemon_in_test(paths: &DataPaths, options: &DaemonOptions) -> RunningDaemon {
+    match start_once_the_lock_is_free(paths, options).await {
+        Ok(running) => running,
+        Err(error) => panic!("the test daemon didn't start: {} {error:?}", error.code()),
+    }
+}
+
+/// The start of a test that expects a refusal (`RRS-C10xx`) on folders an earlier start of the same test released.
+/// It waits out the lock the same way `start_daemon_in_test` does, so the refusal it checks is the one the start
+/// reached, not the lock's.
+pub async fn refused_start_in_test(paths: &DataPaths, options: &DaemonOptions) -> ServerError {
+    match start_once_the_lock_is_free(paths, options).await {
+        Ok(running) => {
+            stop_test_daemon(running).await;
+            panic!("the start was accepted, but a refusal was expected");
+        }
+        Err(error) => error,
+    }
+}
+
+/// `start_daemon`, tried again while the only thing holding the lock is this process (see `start_daemon_in_test`).
+/// Another holder, another daemon for instance, is returned at once.
+async fn start_once_the_lock_is_free(paths: &DataPaths, options: &DaemonOptions) -> Result<RunningDaemon, ServerError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(LOCK_RELEASE_WAIT_MS);
     loop {
         let error = match start_daemon(paths.clone(), options).await {
-            Ok(running) => return running,
+            Ok(running) => return Ok(running),
             Err(error) => error,
         };
         let held_here = matches!(
@@ -85,7 +108,7 @@ pub async fn start_daemon_in_test(paths: &DataPaths, options: &DaemonOptions) ->
             ServerError::Store(StoreError::DaemonLockHeld { holder_pid: Some(pid), .. }) if *pid == std::process::id()
         );
         if !held_here || std::time::Instant::now() > deadline {
-            panic!("the test daemon didn't start: {} {error:?}", error.code());
+            return Err(error);
         }
         tokio::time::sleep(std::time::Duration::from_millis(LOCK_RELEASE_POLL_MS)).await;
     }

@@ -19,7 +19,8 @@ mod on_unix {
     use tokio::net::TcpListener;
 
     use crate::common::{
-        options_on_any_port, remove_test_folder, send_to_port, start_test_daemon, stop_test_daemon, test_paths,
+        options_on_any_port, refused_start_in_test, remove_test_folder, send_to_port, start_test_daemon,
+        stop_test_daemon, test_paths,
     };
 
     const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
@@ -76,7 +77,7 @@ mod on_unix {
         let token = fs::read_to_string(&token_path).unwrap();
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o644)).unwrap();
 
-        let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+        let refused = refused_start_in_test(&paths, &options_on_any_port()).await;
         assert_eq!(refused.code(), "RRS-C1008");
         assert!(nothing_was_started(&paths), "no listener bound, no database opened");
         assert_eq!(
@@ -109,7 +110,7 @@ mod on_unix {
         // Not readable by others, but writable by the group: someone may have put a token they know in its place.
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o620)).unwrap();
 
-        let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+        let refused = refused_start_in_test(&paths, &options_on_any_port()).await;
         assert_eq!(refused.code(), "RRS-C1008");
         assert!(nothing_was_started(&paths));
         assert_eq!(fs::read_to_string(&token_path).unwrap(), token);
@@ -122,7 +123,7 @@ mod on_unix {
         let paths = test_paths("unusable");
         let token_path = owner_token_path(&paths);
         fs::create_dir_all(&token_path).unwrap();
-        let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+        let refused = refused_start_in_test(&paths, &options_on_any_port()).await;
         assert_eq!(refused.code(), "RRS-C1010");
         assert!(nothing_was_started(&paths));
         fs::remove_dir(&token_path).unwrap();
@@ -131,7 +132,7 @@ mod on_unix {
         fs::set_permissions(&token_path, fs::Permissions::from_mode(0o000)).unwrap();
         // Root reads any file, so the open this test is about can't fail for it.
         if fs::read(&token_path).is_err() {
-            let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+            let refused = refused_start_in_test(&paths, &options_on_any_port()).await;
             assert_eq!(refused.code(), "RRS-C1010");
             assert!(nothing_was_started(&paths));
         }
@@ -150,7 +151,7 @@ mod on_unix {
         for text in ["", "3f", "password\n", truncated, uppercase.as_str()] {
             fs::write(&token_path, text).unwrap();
             fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-            let refused = start_daemon(paths.clone(), &options_on_any_port()).await.err().unwrap();
+            let refused = refused_start_in_test(&paths, &options_on_any_port()).await;
             assert_eq!(refused.code(), "RRS-C1010", "{text:?}");
             assert!(nothing_was_started(&paths));
             assert_eq!(fs::read_to_string(&token_path).unwrap(), text, "never rewritten");
