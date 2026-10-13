@@ -11,18 +11,12 @@ use rastai_cli::exit_codes::EXIT_OK;
 use rastai_cli::help::run_help;
 use rastai_cli::local_commands::run_local_command;
 use rastai_cli::mcp_bridge::run_mcp_bridge;
-use rastai_cli::modes::{Mode, choose_mode};
+use rastai_cli::modes::{Mode, choose_mode, mode_words};
 use rastai_cli::open_ui::run_open;
 use rastai_cli::output::{OutputSettings, output_settings, print_final};
 use rastai_cli::serve::run_serve;
 use rastai_cli::verbs::{outcome_diagnostics, outcome_exit_code, run_verb};
 use rastai_diag::diagnostic::Diagnostic;
-
-// The words of the modes whose task hasn't landed, for their `RRS-C0010`.
-const NODE_SERVE_WORDS: &str = "node serve";
-const NODE_INIT_WORDS: &str = "node init";
-const NODE_CHECK_UPDATE_WORDS: &str = "node check-update";
-const TUNNEL_WORDS: &str = "tunnel";
 
 /// How an invocation ended: its exit code and what to report.
 struct Outcome {
@@ -35,8 +29,9 @@ fn main() -> ExitCode {
         Ok(arguments) => arguments,
         Err(error) => return report_and_exit(output_settings(&GlobalFlags::default()), outcome_of_error(error)),
     };
-    let settings = report_settings(&arguments);
-    let outcome = match choose_mode(&arguments) {
+    let chosen = choose_mode(&arguments);
+    let settings = report_settings(&arguments, &chosen);
+    let outcome = match chosen {
         Ok(mode) => run_mode(mode, &arguments),
         Err(error) => outcome_of_error(error),
     };
@@ -52,9 +47,9 @@ fn command_line_words() -> Vec<String> {
 }
 
 /// How the end is reported. `rastai mcp`'s stdout is the MCP channel, so its report always goes to stderr as text.
-fn report_settings(arguments: &ParsedArguments) -> OutputSettings {
+fn report_settings(arguments: &ParsedArguments, chosen: &Result<Mode, CliError>) -> OutputSettings {
     let mut settings = output_settings(&arguments.global);
-    if matches!(choose_mode(arguments), Ok(Mode::McpBridge)) {
+    if matches!(chosen, Ok(Mode::McpBridge)) {
         settings.json = false;
     }
     settings
@@ -70,10 +65,10 @@ fn run_mode(mode: Mode, arguments: &ParsedArguments) -> Outcome {
             },
             Err(error) => outcome_of_error(error),
         },
-        Mode::NodeServe => outcome_of_error(not_available_yet(NODE_SERVE_WORDS)),
-        Mode::NodeInit => outcome_of_error(not_available_yet(NODE_INIT_WORDS)),
-        Mode::NodeCheckUpdate => outcome_of_error(not_available_yet(NODE_CHECK_UPDATE_WORDS)),
-        Mode::Tunnel => outcome_of_error(not_available_yet(TUNNEL_WORDS)),
+        // Their tasks haven't landed (M9, L2): `RRS-C0010` naming the words.
+        Mode::NodeServe | Mode::NodeInit | Mode::NodeCheckUpdate | Mode::Tunnel => {
+            outcome_of_error(not_available_yet(&mode_words(&mode)))
+        }
         other => run_async_mode(other, arguments, settings),
     }
 }
@@ -108,7 +103,8 @@ fn run_async_mode(mode: Mode, arguments: &ParsedArguments, settings: OutputSetti
                     diagnostics,
                 })
             }
-            other => Err(not_available_yet(&format!("{other:?}"))),
+            // run_mode answers every other mode before the runtime starts; this arm only keeps the match whole.
+            other => Err(not_available_yet(&mode_words(&other))),
         }
     });
     // A daemon's background tasks (an open stream, a pending browser start) end with the process, not here.

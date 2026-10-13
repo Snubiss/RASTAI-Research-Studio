@@ -2900,9 +2900,11 @@ use rastai_core::commands::naming::{ALIASES, CLI_MODE_WORDS};   // the words liv
 pub fn choose_mode(arguments: &ParsedArguments) -> Mode
 
 // verbs.rs
-pub async fn run_verb(client: &DaemonClient, words: &[String], arguments: &ParsedArguments) -> Result<VerbOutcome, CliError>
-pub enum VerbOutcome { Finished(ExecuteResponse), JobEnded { job_id: String, final_state: JobState, diagnostics: Vec<Diagnostic> },
-                       StreamEnded { diagnostics: Vec<Diagnostic> }, Detached { job_id: String } }
+pub async fn run_verb(client: &DaemonClient, paths: &DataPaths, words: &[String], arguments: &ParsedArguments) -> Result<VerbOutcome, CliError>
+pub enum VerbOutcome { Finished(ExecuteResponse),   // sync, a refusal, and (until M3) a stream command's session id
+                       JobEnded { job_id: String, final_state: JobState, from_state: JobState, diagnostics: Vec<Diagnostic> },
+                       StreamEnded { diagnostics: Vec<Diagnostic> },   // (M3) with chat.send, the first stream command
+                       Detached { job_id: String } }
 
 // verb_arguments.rs
 pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Value, arguments: &ParsedArguments) -> Result<String, Vec<Diagnostic>>
@@ -2916,7 +2918,7 @@ pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Va
 3. **Words to id.** `command_id_from_cli_words` takes the longest match (`rastai eval suite add-conversation x` → `eval.suite.add_conversation`, one word left as a positional). No match prints the three closest ids by edit distance and exits `EXIT_USAGE`.
 4. **Flags to arguments** (9.4), validated locally against the schema for a fast message; the daemon validates again.
 5. **Execute** with a random idempotency key per invocation (`--idempotency-key` to set one, so a retried script never starts two runs).
-6. **Result.** `sync`: print it. `job`: print the job id, then follow `job.state_changed`, `job.progress` and `job.log_line` until a terminal state, unless `--detach`. `stream`: print tokens or packets as they arrive (`rastai chat send` prints the reply as it streams).
+6. **Result.** `sync`: print it. `job`: print the job id, then follow `job.state_changed`, `job.progress` and `job.log_line` until a terminal state, unless `--detach`. `stream` (M3): print tokens or packets as they arrive (`rastai chat send` prints the reply as it streams); until the first stream command lands, its result, the session id, is printed like a `sync` one's.
 7. **Exit code** from the outcome (9.5).
 
 ### 9.4 Flags and arguments
@@ -2954,11 +2956,12 @@ pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Va
 | Internal | `rastai-transport` | the SSH child process for `rastai tunnel` (also the socket client below) |
 | Internal | `rastai-mcp` | `rastai mcp` |
 | Internal | `rastai-store` | `take_daemon_lock` and `rebuild_index` for the offline rebuild |
-
-`rastai-archive` is not a dependency: `rastai archive sync` and the other `archive.*` verbs are generated registry commands that the daemon runs, so the CLI never holds archive credentials.
 | Internal | `rastai-core`, `rastai-formats`, `rastai-transport`, `rastai-proto`, `rastai-diag` | naming, local validation, the socket client, Connect messages, rendering |
 | External | tokio | runtime for the async modes |
 | External | prost | binary Connect for `Subscribe` |
+| External | serde_json | arguments JSON, results, the command cache and `--json` output (a foundation, contracts §2.5) |
+
+`rastai-archive` is not a dependency: `rastai archive sync` and the other `archive.*` verbs are generated registry commands that the daemon runs, so the CLI never holds archive credentials.
 
 The argument parser is in-house (contracts §2.1); there is no CLI-parsing crate.
 

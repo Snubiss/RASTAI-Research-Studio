@@ -35,6 +35,7 @@ const FALSE_WORD: &str = "false";
 const EXPECTED_OBJECT: &str = "a JSON object";
 const EXPECTED_ONE_SOURCE: &str = "--arguments-json or --arguments-file, not both";
 const EXPECTED_NO_MORE_WORDS: &str = "no more positional words";
+const EXPECTED_NO_FLAGS: &str = "no flags: this command takes none";
 const EXPECTED_JSON_ONLY: &str = "this field only through --arguments-json or --arguments-file";
 const EXPECTED_MAP_ENTRY: &str = "key=value";
 const EXPECTED_NO_VALUE: &str = "no value after an off flag";
@@ -393,7 +394,7 @@ fn expected_value(field: &ArgumentField) -> String {
 /// The command's flags, for a refusal of one it doesn't have.
 fn flag_list(fields: &[ArgumentField]) -> String {
     if fields.is_empty() {
-        return EXPECTED_NO_MORE_WORDS.to_string();
+        return EXPECTED_NO_FLAGS.to_string();
     }
     let flags: Vec<&str> = fields.iter().map(|field| field.flag.as_str()).collect();
     flags.join(", ")
@@ -441,6 +442,11 @@ mod tests {
                 FlagKind::JsonOnly,
             ]
         );
+    }
+
+    #[test]
+    fn a_command_with_no_fields_takes_no_flags() {
+        assert_eq!(flag_list(&[]), "no flags: this command takes none");
     }
 
     #[test]

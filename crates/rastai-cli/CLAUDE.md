@@ -12,9 +12,12 @@ section 9; its names are in `docs/architecture/contracts.md` §2.1 and §15.1.
 - **Only `output.rs` prints.** Text mode: results on stdout, diagnostics on stderr. `--json`: one JSON object per
   line on stdout, ending with `{"exit_code": n, "diagnostics": [...]}`. `rastai mcp`'s stdout is the MCP channel.
 - **Local commands are only those that must work without a daemon:** `validate`, `version`, `help`, and (M1-33)
-  `storage rebuild-index`. Help never starts a daemon; it falls back to the command cache.
+  `storage rebuild-index`. Help never starts a daemon; it falls back to this version's command cache (`commands-<app version>.json`), which a verb writes only from a daemon of this version.
 - **daemon.sock only, as the owner by peer credentials.** The CLI never reads `owner.token` and never opens
   `rastai.db` (except, from M1-33, inside the offline rebuild with `daemon.lock` held).
+- **Streams are followed from M3.** A `stream` command's result (its session id) is printed like a `sync` one's
+  and nothing is subscribed; printing its ephemeral events until the session ends lands with `chat.send` (M3), which
+  defines them. Only `job` commands are followed now.
 - **Exit codes are a contract** (layout 9.5, `exit_codes.rs`). Every refusal is a catalog diagnostic, and
   `CliError`'s variant picks the code.
 - **A daemon the CLI starts runs on its own:** `rastai serve --headless --json` in its own process group. Tests

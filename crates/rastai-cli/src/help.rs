@@ -1,6 +1,7 @@
 //! `rastai help [words]` and `--help` (layout: rust-control-plane.md 9.1): help text from the command descriptors
 //! and their argument schemas, plus one usage line per fixed mode. Help never starts a daemon: it asks a running
-//! one for its commands, and otherwise reads the command cache, so the verbs are listed while the daemon is down.
+//! one for its commands, and otherwise reads this version's command cache, so the verbs are listed while the daemon
+//! is down. With `--json` each answer is one JSON line, like any other result.
 
 use rastai_core::commands::naming::{GLOBAL_FLAGS, cli_words};
 use rastai_core::commands::registry::CommandRegistry;
@@ -13,7 +14,7 @@ use crate::command_cache::load_command_cache;
 use crate::daemon_client::{DaemonClient, list_commands, read_health};
 use crate::error::CliError;
 use crate::modes::fixed_words_of;
-use crate::output::{OutputSettings, print_result, print_text};
+use crate::output::{OutputSettings, print_line, print_result, print_text};
 use crate::verb_arguments::{ArgumentField, argument_fields, kind_words};
 use crate::verbs::find_verb;
 
@@ -65,12 +66,17 @@ pub async fn run_help(paths: &DataPaths, words: &[String], settings: OutputSetti
     if let Some(mode_words) = fixed_words_of(words)
         && words.len() == mode_words.split(' ').count()
     {
-        print_text(settings, &mode_usage(mode_words));
+        let usage = mode_usage(mode_words);
+        print_line(settings, &usage, &json!({ "mode": mode_words, "usage": usage }));
         return Ok(());
     }
     let registry = CommandRegistry {
         commands: known_commands(paths).await,
     };
+    if words.is_empty() && settings.json {
+        print_result(settings, &overview_json(&registry));
+        return Ok(());
+    }
     if words.is_empty() {
         print_text(settings, &overview(&registry));
         return Ok(());
@@ -84,7 +90,8 @@ pub async fn run_help(paths: &DataPaths, words: &[String], settings: OutputSetti
     Ok(())
 }
 
-/// The running daemon's commands, else the cache of this version's.
+/// The running daemon's commands, else the cache of this version's: the commands of the daemon a verb would start
+/// (verbs.rs keeps the cache only from a daemon of this version).
 async fn known_commands(paths: &DataPaths) -> Vec<CommandDescriptor> {
     let socket_path = daemon_socket_path(paths);
     if let Ok(health) = read_health(&socket_path).await {
@@ -125,6 +132,26 @@ fn overview(registry: &CommandRegistry) -> String {
     lines.push(String::new());
     lines.push(format!("{GLOBAL_FLAGS_HEADING} {}", GLOBAL_FLAGS.join(" ")));
     lines.join("\n")
+}
+
+/// The overview as one JSON object: the modes with their usage, the commands with their verbs, the global flags.
+fn overview_json(registry: &CommandRegistry) -> Value {
+    let modes: Vec<Value> = MODE_USAGE
+        .iter()
+        .map(|(words, usage)| json!({ "mode": words, "usage": usage }))
+        .collect();
+    let commands: Vec<Value> = registry
+        .commands
+        .iter()
+        .map(|command| {
+            json!({
+                "command_id": command.command_id,
+                "verb": cli_words(&command.command_id).join(" "),
+                "title": command.title,
+            })
+        })
+        .collect();
+    json!({ "modes": modes, "commands": commands, "global_flags": GLOBAL_FLAGS })
 }
 
 /// One command: its usage line with positionals, its title and summary, then its flags.
@@ -202,6 +229,7 @@ fn flag_line(field: &ArgumentField) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rastai_core::commands::naming::CLI_MODE_WORDS;
@@ -212,6 +240,24 @@ mod tests {
             let usage = mode_usage(mode_words);
             assert!(usage.starts_with(&format!("{PROGRAM_NAME} {mode_words}")), "{usage}");
         }
+    }
+
+    #[test]
+    fn the_json_overview_lists_modes_commands_and_global_flags() {
+        let registry = CommandRegistry {
+            commands: vec![CommandDescriptor {
+                command_id: "job.cancel".to_string(),
+                title: "Cancel a job".to_string(),
+                ..CommandDescriptor::default()
+            }],
+        };
+        let overview = overview_json(&registry);
+        assert_eq!(overview["modes"].as_array().unwrap().len(), MODE_USAGE.len());
+        assert_eq!(
+            overview["commands"][0],
+            json!({"command_id": "job.cancel", "verb": "job cancel", "title": "Cancel a job"})
+        );
+        assert_eq!(overview["global_flags"][0], "--json");
     }
 
     #[test]
