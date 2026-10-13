@@ -228,7 +228,7 @@ What's persisted where:
 
 Failure branches:
 - **Dropped ephemeral events** (daemon backpressure): the PacketStore marks the missing token indexes. The live panel shows "N tokens missing" (RRS-U0005, info) and a **Recompute** button that runs `psychology.replay.open`.
-- **Stream drop:** the client reconnects with backoff and `after_bus_sequence` = the last sequence seen. The daemon replays the gap from its 10,000-event buffer.
+- **Stream drop:** the client reconnects with backoff and `after_bus_sequence` = the last sequence seen. The daemon replays the gap from its 10,000-event buffer. A stream started at 0 that dropped before it saw any event has no sequence: it reconnects with 0 (a new stream from the next event, contracts §7.2) and calls `onResync` once the new stream is open, because what was published in between is lost.
 - **Gap too old** (RRS-C0401): the hub calls `onResync`; every query is invalidated and the app stores refetch. Live buffers keep what they have and mark the rest missing.
 - **Daemon gone mid-generation:** the banner shows "reconnecting". A restarted daemon has no sessions, so the reconnect is refused and the window is `signed_out` until a new login code arrives (the desktop shell brings one; a browser tab needs `rastai open`). After sign-in, `conversation.get` returns the user's message; the half-streamed reply is lost and Regenerate works (contracts §8.3).
 
@@ -593,7 +593,7 @@ The web app is one client of the commands API among several. Because `apps/web` 
 
 **Live-stream rules for any client** (the web app follows the same rules, 2.2)
 - Open one `EventService.Subscribe` stream per client or window, filtered by event types and subject ids. The stream is binary protobuf in the prototype; JSON for `EventService` comes through a generated proto-JSON codec only if needed (M9, else Phase 2).
-- Keep the last `bus_sequence` you saw and resume with `after_bus_sequence`. On `RRS-C0401` the gap is gone: refetch state with the `*.list` and `*.get` commands.
+- Keep the last `bus_sequence` you saw and resume with `after_bus_sequence`. On `RRS-C0401` the gap is gone: refetch state with the `*.list` and `*.get` commands. Refetch too after reconnecting a stream that started at 0 and dropped before its first event: 0 starts a new stream, so it has no gap to replay.
 - Ephemeral events (`chat.token`, `psychology.packet`, `job.progress`, ...) may be dropped under load. Never treat them as the record: the stored message, run or result comes from a command after the durable event names it.
 - Decode token IDs with the model's piece table from `model.vocabulary`; never tokenize or detokenize on your own.
 - Draw at frame rate, not event rate, and do O(1) work per event.
@@ -847,14 +847,15 @@ Callers:
 
 Behavior worth stating:
 - `execute` never throws for an expected failure. Each call gets a fresh `idempotency_key`; a retry after a reconnect reuses it, so the daemon doesn't run the command twice.
-- `openEventStream` owns its reconnect loop. Only `stop()` ends it. A refused session (after a daemon restart) reports `signed_out` and stops retrying. The gate refuses a stream with HTTP 401 and the Connect error as JSON before any envelope, a body connect-es reads only for unary calls, so the stream knows the refusal by its Connect code (`unauthenticated`, read by `connection.js`) and reports RRS-U0003.
+- `openEventStream` owns its reconnect loop. Only `stop()` ends it. A refused session (after a daemon restart), or a Host or Origin the gate doesn't allow (RRS-C1003, RRS-C1004), reports `signed_out` and stops retrying. The gate refuses a stream with the HTTP status of the Connect code (401 or 403) and the Connect error as JSON before any envelope, a body connect-es reads only for unary calls, so the stream knows the refusal by its Connect code (`unauthenticated` or `permission_denied`, read by `connection.js`) and reports RRS-U0003, whose fix (open Rastai again) gives a session at an allowed origin.
+- It resumes after the last `bus_sequence` it handed to `onEvent`, or the caller's starting sequence until it has handed on one. When that is 0 (a new stream from the next event, contracts §7.2), a drop before the first event loses what the daemon published in between, so the stream calls `onResync` once the new stream is open, as after RRS-C0401.
 - With a cookie credential the client never sets an `Authorization` header and never reads `document.cookie` (the cookie is HttpOnly anyway). With a bearer credential it sends the token on every request and nothing else.
 
 ### 3.3 Dependencies
 
 - Internal: `@rastai/proto` (messages and service stubs), `@rastai/formats` (generated argument and result types, named in the wrappers' JSDoc).
 - External: `@connectrpc/connect` and `@connectrpc/connect-web` (connect-es: the Connect transport) and `@bufbuild/protobuf` (protobuf-es runtime), approved in §27 (contracts §2.5). All three are imported only in `connection.js`. Other files call the generated stubs on the client object with plain request objects, so they import no library. The tests reach them through `testing/fake-daemon.js`; `proto-golden.test.js` alone imports protobuf-es, to re-encode what the client decoded.
-- Modules: `connection.js` imports `execute.js`, `diagnostics.js` and `constants.js`; `execute.js` and `event-stream.js` import `diagnostics.js` and `constants.js`; `blobs.js` and `login.js` also import `connection.js` for `daemonUrl` and the credential headers (`requestHeaders`), and `event-stream.js` for `isUnauthenticatedError`, so connect-es's error codes stay in `connection.js`; `generated/commands.js` imports nothing at run time (its types are JSDoc imports); `types.js` and `command-executor.js` hold only JSDoc.
+- Modules: `connection.js` imports `execute.js`, `diagnostics.js` and `constants.js`; `execute.js` and `event-stream.js` import `diagnostics.js` and `constants.js`; `blobs.js` and `login.js` also import `connection.js` for `daemonUrl` and the credential headers (`requestHeaders`), and `event-stream.js` for `isGateRefusalError`, so connect-es's error codes stay in `connection.js`; `generated/commands.js` imports nothing at run time (its types are JSDoc imports); `types.js` and `command-executor.js` hold only JSDoc.
 
 ### 3.4 Boundary rules
 
@@ -867,7 +868,7 @@ Behavior worth stating:
 
 - Unit tests next to each file, run by vitest in Node. The fake daemon (`testing/fake-daemon.js`) is connect-es's in-memory router behind a `fetch` the tests install in place of the global one, so the client runs unchanged and every request's headers are recorded.
 - `connection.test.js`: a bearer credential sets `Authorization: Bearer <token>` on commands, the stream and blob reads; a cookie credential never sets it, and sends `Rastai-Session-Key` on `Execute`, `Subscribe` and blob uploads but not on blob reads; `useJsonWire` picks the JSON format; an unreachable daemon gives RRS-U0001.
-- `event-stream.test.js`: resume with the right `after_bus_sequence`; the backoff sequence, which a stream ended right after its headers doesn't reset; RRS-C0401 calls `onResync` and never reports `connected` for the refused stream; a session the gate refuses (401 and the Connect error as JSON, as the daemon's gate answers) ends in `signed_out` with RRS-U0003 after one attempt; `stop()` ends the loop. The fake daemon answers every gate refusal in the gate's shapes and keeps HTTP 200 with the end-of-stream envelope for refusals inside the endpoint (RRS-C0401).
+- `event-stream.test.js`: resume with the right `after_bus_sequence`; the backoff sequence, which a stream ended right after its headers doesn't reset; RRS-C0401 calls `onResync` and never reports `connected` for the refused stream; a stream that drops before its first event calls `onResync` once the new stream is open; a session the gate refuses (401 and the Connect error as JSON, as the daemon's gate answers) and an Origin it refuses (403, RRS-C1004) each end in `signed_out` with RRS-U0003 after one attempt; `stop()` ends the loop. The fake daemon answers every gate refusal in the gate's shapes and keeps HTTP 200 with the end-of-stream envelope for refusals inside the endpoint (RRS-C0401).
 - `login.test.js`: the cases in `fixtures/ui/fragments.json`. `#login=abc` and `#/open?path=x&login=abc` give `abc`; after removal the fragments are `#/home` and `#/open?path=x`; `?login=abc` in the real query string gives `null`.
 - `proto-golden.test.js`: the golden `ExecuteResponse`, `ListCommandsResponse` and `BusEvent` bytes go through `execute`, `listCommands` and `openEventStream`, and what they return encodes back byte-identical; `execute` writes the `ExecuteRequest` golden byte for byte. Every message's own round trip is `packages/proto/src/golden.test.js` (node layout 3.5).
 - `diagnostics.test.js`: each message `clientDiagnostic` fills is the catalog's (`catalog/errors/RRS-U.json`).
