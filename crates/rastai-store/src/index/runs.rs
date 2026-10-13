@@ -69,6 +69,7 @@ const CLEAR_OTHER_BEST_CHECKPOINTS: &str =
     "UPDATE checkpoints SET is_best = 0 WHERE run_id = ?1 AND checkpoint_id <> ?2";
 const SET_CHECKPOINT_PINNED: &str = "UPDATE checkpoints SET pinned = ?2 WHERE checkpoint_id = ?1";
 const SELECT_CHECKPOINT_RUN_ID: &str = "SELECT run_id FROM checkpoints WHERE checkpoint_id = ?1";
+const SELECT_JOB_RUN_ID: &str = "SELECT run_id FROM jobs WHERE job_id = ?1";
 
 const UPSERT_JOB: &str = "INSERT INTO jobs (job_id, run_id, node_id, kind, state, pid, process_group_id, exit_code,
         error_code)
@@ -321,6 +322,16 @@ pub(crate) fn read_checkpoint_run_id(
     checkpoint_id: &str,
 ) -> Result<Option<String>, StoreError> {
     let rows = query_rows_in_transaction(transaction, SELECT_CHECKPOINT_RUN_ID, &[text_value(checkpoint_id)])?;
+    match rows.first() {
+        Some(row) => Ok(Some(read_text(row, 0)?)),
+        None => Ok(None),
+    }
+}
+
+/// The run a job belongs to, or `None` when the index has no such job. The rebuild reads it before it writes a job
+/// from a run's `run.json`, so one run's file can't take over another run's job (rebuild.rs).
+pub(crate) fn read_job_run_id(transaction: &SqliteTransaction<'_>, job_id: &str) -> Result<Option<String>, StoreError> {
+    let rows = query_rows_in_transaction(transaction, SELECT_JOB_RUN_ID, &[text_value(job_id)])?;
     match rows.first() {
         Some(row) => Ok(Some(read_text(row, 0)?)),
         None => Ok(None),

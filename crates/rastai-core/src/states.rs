@@ -16,8 +16,11 @@
 use rastai_proto::common::v1::{
     EvalRunState, JobState, LeaseState, ModelState, NodeState, PluginState, RunState, SandboxState,
 };
+use rastai_proto::node::v1::JobKind;
 
 const UNSPECIFIED_NAME: &str = "unspecified";
+/// The proto names of job kinds start with this; contracts 9.1 names them without it, in lower case.
+const JOB_KIND_NAME_PREFIX: &str = "JOB_KIND_";
 
 // ---- Job (contracts 9.1, platform flow 5.2) ----
 
@@ -86,6 +89,18 @@ pub fn job_transition_allowed(from: JobState, to: JobState) -> bool {
 
 pub fn is_terminal_job_state(state: JobState) -> bool {
     JOB_TERMINAL_STATES.contains(&state)
+}
+
+/// A job kind's name as `jobs.kind` holds it (contracts 9.1): the proto name without `JOB_KIND_`, in lower case
+/// (`train`, `doctor_selftest`). A number this build doesn't know is written as the number, so it is never lost.
+pub fn job_kind_name(kind: i32) -> String {
+    match JobKind::try_from(kind) {
+        Ok(kind) => kind
+            .as_str_name()
+            .trim_start_matches(JOB_KIND_NAME_PREFIX)
+            .to_ascii_lowercase(),
+        Err(_) => kind.to_string(),
+    }
 }
 
 // ---- Training run (contracts 9.5, training flow 4.2 and the chain chart of 6) ----
@@ -589,6 +604,13 @@ pub fn is_terminal_eval_run_state(state: EvalRunState) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_job_kind_is_named_without_its_proto_prefix() {
+        assert_eq!(job_kind_name(JobKind::Train as i32), "train");
+        assert_eq!(job_kind_name(JobKind::DoctorSelftest as i32), "doctor_selftest");
+        assert_eq!(job_kind_name(999), "999");
+    }
 
     // Each machine's transitions in contracts 9's words, "from -> to", read with the parse functions, so a wrong
     // name or a missing table row fails here. The flow-doc additions are listed after a blank line.

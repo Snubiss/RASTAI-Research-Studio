@@ -1369,8 +1369,8 @@ Runs from `rastai storage rebuild-index`, a CLI-only command that works offline 
 
 ```mermaid
 flowchart TD
-  A["rastai-cli takes daemon.lock"] --> B["Move rastai.db and its -wal file aside<br/>as rastai.db.broken-unix_ms"]
-  B --> C["rastai-store creates a new rastai.db and runs migrations"]
+  A["rastai-cli takes daemon.lock"] --> B["Remove a rastai.db.rebuilding a killed rebuild left"]
+  B --> C["rastai-store creates rastai.db.rebuilding and runs migrations"]
   C --> D{"L2: a snapshot in backups passes quick_check?<br/>newest first, see 8.4"}
   D -->|"yes"| E["Copy tokens, nodes, plugins, projects<br/>from that snapshot"]
   D -->|"no snapshot, or before L2"| F["Those four tables start empty"]
@@ -1384,7 +1384,8 @@ flowchart TD
   J --> K["Scan the blob store<br/>drop artifact rows whose blob is missing,<br/>except blobs an archive.pruned record freed"]
   K --> L["Scan known projects for documents rows"]
   L --> M["Scan the HF cache for models rows"]
-  M --> N["Report counts, every diagnostic, and pruned-run stubs<br/>pending their archive pull at the next daemon start (M11)"]
+  M --> Q["quick_check, then link rastai.db to rastai.db.broken-unix_ms<br/>and rename rastai.db.rebuilding over rastai.db"]
+  Q --> N["Report counts, every diagnostic, and pruned-run stubs<br/>pending their archive pull at the next daemon start (M11)"]
 ```
 
 - **The four kept tables** (`tokens`, `nodes`, `plugins`, `projects`) can't be rebuilt from logs (contracts 8.2). There is no `settings` table: settings live only in their files (contracts 11.1), so a rebuild never touches them.
@@ -1398,6 +1399,8 @@ flowchart TD
 - The rebuild runs the same `apply_event_record` code as live indexing, so rebuilt rows can't differ from live ones.
 - Plugins rebuilt from their folders start `disabled` with no granted permissions, so each asks for trust again. That's the safe default. A plugin row from the snapshot keeps its old grant; if the plugin was updated since and asks for more, the load check (7.3) sends it back to `awaiting_trust`.
 - `--verify-blobs` re-hashes every blob (slow) and moves mismatches to `<data>/blobs/.quarantine/` with `RRS-S1001`.
+
+- **A kill mid-rebuild leaves a usable index (M1-33).** Nothing replaces `rastai.db` until the new index is whole and has passed `quick_check`; the old file keeps its name until the rename, so a kill leaves the old index or the new one, and running the rebuild again starts over.
 
 **Persisted:** the new `rastai.db`; the old file kept beside it until the user deletes it.
 

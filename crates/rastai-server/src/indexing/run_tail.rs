@@ -53,11 +53,11 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, timeout_at};
 
-use crate::error::store_error_diagnostic;
 use crate::events::bus::{bus_event_from_record, publish};
 use crate::events::daemon_events::DAEMON_SOURCE;
 use crate::server_state::Server;
 use crate::shutdown::wait_until_stopping;
+use rastai_store::error::store_error_diagnostic;
 
 /// Records per index transaction, and how long a batch waits for more after its first (contracts 15.10).
 pub const INDEX_BATCH_RECORDS: usize = 256;

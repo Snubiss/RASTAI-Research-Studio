@@ -20,7 +20,7 @@ use std::sync::Arc;
 use rastai_core::paths::{DataPaths, run_dir};
 use rastai_core::proto_json::{job_spec_from_json, job_spec_to_json};
 use rastai_core::states::{is_terminal_job_state, job_state_name};
-use rastai_core::time::{format_rfc3339, now_unix_ms};
+use rastai_core::time::format_rfc3339;
 use rastai_core::versions::APP_VERSION;
 use rastai_diag::diagnostic::{Diagnostic, Severity, diagnostic};
 use rastai_diag::logger::log_warn;
@@ -31,16 +31,16 @@ use rastai_formats::header::SharedHeader;
 use rastai_formats::limits::ImportLimits;
 use rastai_formats::validate::{read_document, write_document};
 use rastai_proto::common::v1::JobState;
-use rastai_proto::node::v1::{JobInfo, JobKind, JobSpec};
+use rastai_proto::node::v1::{JobInfo, JobSpec};
 use rastai_store::config_files::write_config_file;
 use rastai_store::index::runs::JobRow;
 
-use crate::error::store_error_diagnostic;
 use crate::nodes::node_links::start_job_on_node;
 use crate::nodes::reconcile::{
     SnapshotScope, fail_unlaunchable_job, read_job, record_job_changes, settle_runs_later, tail_then_settle,
 };
 use crate::server_state::Server;
+use rastai_store::error::store_error_diagnostic;
 
 /// `runs/<run_id>/run.json` (contracts 8.4).
 const RUN_RECORD_FILE: &str = "run.json";
@@ -51,8 +51,6 @@ const RUN_RECORD_SCHEMA_VERSION: u32 = 1;
 /// `RRS-C0002` for a `run.json` that can't be read back as a run record with a `JobSpec`.
 const CODE_INVALID_DOCUMENT: &str = "RRS-C0002";
 const EXPECTED_RUN_RECORD: &str = "a rastai.run_record/1 run.json with the job's job_spec";
-/// The proto names of job kinds start with this; contracts 9.1 names them without it, in lower case.
-const JOB_KIND_NAME_PREFIX: &str = "JOB_KIND_";
 
 /// What a new run starts with, beyond its job's `JobSpec`: what `run.json` and its `runs` row need.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,9 +75,15 @@ impl RunStart {
 }
 
 /// Writes the run's `run.json` with `spec` (its `job_id` filled in) and returns the record's content hash, which the
-/// `runs` row keeps as `record_hash`.
-pub fn write_run_record(paths: &DataPaths, spec: &JobSpec, run: &RunStart) -> Result<String, Diagnostic> {
-    let record = new_run_record(spec, run);
+/// `runs` row keeps as `record_hash`. `created_unix_ms` is the run's `created_unix_ms` too: `run.json` keeps it as
+/// `created_at`, to the millisecond, so a rebuild of `rastai.db` gives the row the same time (store rebuild.rs).
+pub fn write_run_record(
+    paths: &DataPaths,
+    spec: &JobSpec,
+    run: &RunStart,
+    created_unix_ms: i64,
+) -> Result<String, Diagnostic> {
+    let record = new_run_record(spec, run, created_unix_ms);
     let document = Document::RunRecord(record);
     let bytes = write_document(&document).map_err(|error| invalid_run_record(&format!("{error:?}")))?;
     let path = run_dir(paths, &spec.run_id).join(RUN_RECORD_FILE);
@@ -173,18 +177,7 @@ fn job_row_is_queued(server: &Server, job_id: &str) -> bool {
     read_job(server, job_id).is_some_and(|row| row.state == queued)
 }
 
-/// A job kind's name in contracts 9.1 (`JOB_KIND_TRAIN` → `train`), as `jobs.kind` holds it.
-pub fn job_kind_name(kind: i32) -> String {
-    match JobKind::try_from(kind) {
-        Ok(kind) => kind
-            .as_str_name()
-            .trim_start_matches(JOB_KIND_NAME_PREFIX)
-            .to_ascii_lowercase(),
-        Err(_) => kind.to_string(),
-    }
-}
-
-fn new_run_record(spec: &JobSpec, run: &RunStart) -> RunRecord {
+fn new_run_record(spec: &JobSpec, run: &RunStart, created_unix_ms: i64) -> RunRecord {
     RunRecord {
         header: SharedHeader {
             schema_url: RUN_RECORD_SCHEMA_URL.to_string(),
@@ -217,7 +210,7 @@ fn new_run_record(spec: &JobSpec, run: &RunStart) -> RunRecord {
         parent_run_id: String::new(),
         chain: None,
         source: None,
-        created_at: format_rfc3339(now_unix_ms()),
+        created_at: format_rfc3339(created_unix_ms),
     }
 }
 
@@ -250,7 +243,11 @@ fn invalid_run_record(found: &str) -> Diagnostic {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use rastai_core::time::parse_rfc3339;
     use rastai_proto::node::v1::JobKind;
+
+    /// A time with milliseconds, so a record that dropped them would read back another number.
+    const CREATED_UNIX_MS: i64 = 1_791_633_600_123;
 
     fn temporary_paths(name: &str) -> DataPaths {
         let root = std::env::temp_dir().join(format!("rsv-launch-{}-{name}", std::process::id()));
@@ -286,7 +283,7 @@ mod tests {
             data_policy: "local-only".to_string(),
             ..JobSpec::default()
         };
-        let record_hash = write_run_record(&paths, &spec, &train_run()).unwrap();
+        let record_hash = write_run_record(&paths, &spec, &train_run(), CREATED_UNIX_MS).unwrap();
         assert!(record_hash.starts_with("blake3:"), "{record_hash}");
         assert_eq!(read_run_job_spec(&paths, &spec.run_id).unwrap(), spec);
         let _ = std::fs::remove_dir_all(paths.data.parent().unwrap());
@@ -301,9 +298,23 @@ mod tests {
 
     #[test]
     fn names_are_the_contract_ones() {
-        assert_eq!(job_kind_name(JobKind::Train as i32), "train");
-        assert_eq!(job_kind_name(JobKind::DoctorSelftest as i32), "doctor_selftest");
-        assert_eq!(job_kind_name(999), "999");
         assert_eq!(train_run().kind_name(), "train");
+    }
+
+    // The runs row and run.json share one time, so a rebuild reads the row's time back from the file.
+    #[test]
+    fn run_json_keeps_the_runs_creation_time_to_the_millisecond() {
+        let paths = temporary_paths("created-at");
+        let spec = JobSpec {
+            job_id: "job_01JA2B3C4D5E6F7G8H9J0K1M2N".to_string(),
+            run_id: "run_01JA2B3C4D5E6F7G8H9J0K1M2P".to_string(),
+            kind: JobKind::Train as i32,
+            ..JobSpec::default()
+        };
+        write_run_record(&paths, &spec, &train_run(), CREATED_UNIX_MS).unwrap();
+        let path = run_dir(&paths, &spec.run_id).join(RUN_RECORD_FILE);
+        let record = read_run_record(&path).unwrap().unwrap();
+        assert_eq!(parse_rfc3339(&record.created_at).unwrap(), CREATED_UNIX_MS);
+        let _ = std::fs::remove_dir_all(paths.data.parent().unwrap());
     }
 }

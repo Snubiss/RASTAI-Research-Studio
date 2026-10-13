@@ -1,11 +1,12 @@
 //! The commands that work without a daemon (layout: rust-control-plane.md 9.7): `validate`, which is pure
-//! rastai-formats, `version`, and `storage rebuild-index`, which M1-33 builds (it holds `daemon.lock`, so it can't
-//! be a registry command the daemon runs).
+//! rastai-formats, `version`, and `storage rebuild-index`, which holds `daemon.lock` while rastai-store rebuilds
+//! `rastai.db` (layout 13.2), so it can't be a registry command the daemon runs, and refuses while a daemon runs.
 
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use rastai_core::paths::DataPaths;
 use rastai_core::versions::APP_VERSION;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic_at, has_errors};
 use rastai_formats::byte_source::SliceSource;
@@ -13,25 +14,98 @@ use rastai_formats::error::FormatsError;
 use rastai_formats::limits::ImportLimits;
 use rastai_formats::validate::read_document;
 use rastai_formats::validate::syntax::syntax_diagnostic;
+use rastai_store::data_dir_lock::take_daemon_lock;
+use rastai_store::error::store_error_diagnostic;
+use rastai_store::rebuild::{RebuildOptions, RebuildReport, rebuild_index};
 use serde_json::json;
 
-use crate::error::{CliError, not_available_yet};
+use crate::daemon_client::data_paths;
+use crate::error::CliError;
 use crate::exit_codes::{EXIT_FAILED, EXIT_OK};
-use crate::modes::{LocalCommand, Mode, mode_words};
+use crate::modes::LocalCommand;
 use crate::output::{OutputSettings, print_document_report, print_line};
 
 const CODE_SOURCE_UNREADABLE: &str = "RRS-D3001";
+/// The kill -9 test's pause point for the rebuild (contracts 15.9). Only a debug build reads it.
+const TEST_PAUSE_VARIABLE: &str = "RASTAI_TEST_PAUSE_AT";
 
-/// Runs a local command and returns its exit code.
-pub fn run_local_command(command: &LocalCommand, settings: OutputSettings) -> Result<u8, CliError> {
+/// How a local command ended: its exit code, and the problems it passed over, which the final line reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalOutcome {
+    pub exit_code: u8,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Runs a local command.
+pub fn run_local_command(command: &LocalCommand, settings: OutputSettings) -> Result<LocalOutcome, CliError> {
     match command {
-        LocalCommand::Validate(files) => Ok(validate_files(files, settings)),
+        LocalCommand::Validate(files) => Ok(clean_outcome(validate_files(files, settings))),
         LocalCommand::Version => {
             print_line(settings, APP_VERSION, &json!({ "version": APP_VERSION }));
-            Ok(EXIT_OK)
+            Ok(clean_outcome(EXIT_OK))
         }
-        LocalCommand::RebuildIndex { .. } => Err(not_available_yet(&mode_words(&Mode::Local(command.clone())))),
+        LocalCommand::RebuildIndex { verify_blobs } => {
+            let paths = data_paths()?;
+            run_rebuild_index(&paths, *verify_blobs, settings)
+        }
     }
+}
+
+fn clean_outcome(exit_code: u8) -> LocalOutcome {
+    LocalOutcome {
+        exit_code,
+        diagnostics: Vec::new(),
+    }
+}
+
+/// `rastai storage rebuild-index [--verify-blobs]`: takes `daemon.lock`, so it refuses with `RRS-S0001` while a
+/// daemon runs and no daemon can start until it is done, then rebuilds `rastai.db` and prints what it did. What the
+/// rebuild passed over (a damaged log, a missing blob) doesn't fail it: the index holds everything that could be
+/// read, and each problem is reported with its code.
+pub fn run_rebuild_index(
+    paths: &DataPaths,
+    verify_blobs: bool,
+    settings: OutputSettings,
+) -> Result<LocalOutcome, CliError> {
+    let lock = take_daemon_lock(paths).map_err(|error| CliError::Failed(vec![store_error_diagnostic(&error)]))?;
+    let options = RebuildOptions {
+        verify_blobs,
+        pause_at: test_pause_point(),
+    };
+    let rebuilt = rebuild_index(paths, &options);
+    drop(lock);
+    let report = rebuilt.map_err(|error| CliError::Failed(vec![store_error_diagnostic(&error)]))?;
+    print_rebuild_report(settings, &report);
+    Ok(LocalOutcome {
+        exit_code: EXIT_OK,
+        diagnostics: report.diagnostics,
+    })
+}
+
+/// The test-only pause point, from `RASTAI_TEST_PAUSE_AT` in a debug build; a release build never pauses.
+fn test_pause_point() -> String {
+    if !cfg!(debug_assertions) {
+        return String::new();
+    }
+    std::env::var(TEST_PAUSE_VARIABLE).unwrap_or_default()
+}
+
+fn print_rebuild_report(settings: OutputSettings, report: &RebuildReport) {
+    let old_index = report.old_index_path.as_ref().map(|path| path.display().to_string());
+    let mut text = format!(
+        "rastai.db rebuilt: {} runs, {} records, {} artifacts.",
+        report.runs, report.records, report.artifacts
+    );
+    if let Some(path) = &old_index {
+        text.push_str(&format!(" The old index is kept at {path} until you delete it."));
+    }
+    let value = json!({
+        "runs": report.runs,
+        "records": report.records,
+        "artifacts": report.artifacts,
+        "old_index_path": old_index,
+    });
+    print_line(settings, &text, &value);
 }
 
 /// `rastai validate <file>...`: every file's diagnostics, the four layers of `read_document`. `EXIT_FAILED` when

@@ -1,6 +1,6 @@
 //! The `rastai` binary (layout: rust-control-plane.md 9.2): parse the command line, choose the mode, run it, report
 //! and exit with the code of the table in exit_codes.rs. A tokio runtime is started only for the modes that talk to
-//! a daemon or are one; `validate` and `version` run without.
+//! a daemon or are one; `validate`, `version` and `storage rebuild-index` run without.
 
 use std::process::ExitCode;
 
@@ -59,9 +59,9 @@ fn run_mode(mode: Mode, arguments: &ParsedArguments) -> Outcome {
     let settings = output_settings(&arguments.global);
     match mode {
         Mode::Local(command) => match run_local_command(&command, settings) {
-            Ok(exit_code) => Outcome {
-                exit_code,
-                diagnostics: Vec::new(),
+            Ok(local) => Outcome {
+                exit_code: local.exit_code,
+                diagnostics: local.diagnostics,
             },
             Err(error) => outcome_of_error(error),
         },

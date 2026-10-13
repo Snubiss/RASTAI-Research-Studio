@@ -26,6 +26,8 @@ rastai-proto = { path = "../rastai-proto" }
 prost = { workspace = true }
 # `rastai serve`: the daemon itself.
 rastai-server = { path = "../rastai-server" }
+# `rastai storage rebuild-index`: daemon.lock and the offline rebuild of rastai.db (local_commands.rs).
+rastai-store = { path = "../rastai-store" }
 # `rastai mcp`: the stdio bridge.
 rastai-mcp = { path = "../rastai-mcp" }
 # HTTP/1.1 over daemon.sock (daemon_client.rs).

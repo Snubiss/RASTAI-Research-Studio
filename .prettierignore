@@ -16,6 +16,8 @@ pnpm-lock.yaml
 # (a trailing comma, too-deep nesting), and their .expected.json files pin each problem's
 # line and column, so reformatting them would change what the tests check.
 fixtures/documents/
+# The rebuild's data folder is compared byte for byte with the recipe that writes it, run.json files included.
+fixtures/data-dirs/
 
 # History and local output.
 spike/

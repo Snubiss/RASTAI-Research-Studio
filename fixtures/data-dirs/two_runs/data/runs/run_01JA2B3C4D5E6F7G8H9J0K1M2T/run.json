@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.run_record/1.json",
+  "type": "rastai.run_record",
+  "schema_version": 1,
+  "created_with": "0.1.0",
+  "id": "run_01JA2B3C4D5E6F7G8H9J0K1M2T",
+  "content_hash": "blake3:8ae32a85fa405af4145d892d6bcfb28c2095589697c140d4309792bc3cfb9e8b",
+  "derived_from": [],
+  "authors": [],
+  "license": "",
+  "source_url": "",
+  "requires": {},
+  "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2T",
+  "kind": "train",
+  "job_spec": {
+    "arguments_json": "{\"design_path\":\"/designs/textcnn.rrsmodel\"}",
+    "data_policy": "local-only",
+    "environment_id": "cpu",
+    "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2R",
+    "kind": "JOB_KIND_TRAIN",
+    "run_id": "run_01JA2B3C4D5E6F7G8H9J0K1M2T"
+  },
+  "recipe": {
+    "name": "classification",
+    "settings": {}
+  },
+  "dataset_hashes": [],
+  "plugin_versions": {},
+  "environment_lock_hash": "",
+  "seed": 7,
+  "git_commit": "",
+  "app_version": "0.1.0",
+  "parent_run_id": "",
+  "created_at": "2026-10-08T12:05:00.456Z"
+}

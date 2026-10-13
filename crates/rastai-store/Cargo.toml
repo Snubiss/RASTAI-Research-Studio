@@ -14,6 +14,8 @@ publish.workspace = true
 # DataPaths and the path functions (the only place paths are built), now_unix_ms, random bytes for temporary file
 # names, and the state names the indexer writes.
 rastai-core = { path = "../rastai-core" }
+# Diagnostic, the catalog message of each StoreError (error.rs) and the rebuild's report (rebuild.rs).
+rastai-diag = { path = "../rastai-diag" }
 # crc32.rs, the one CRC-32 table, for frame checksums (contracts 7.1); hashing.rs, the one BLAKE3, for blob names.
 rastai-formats = { path = "../rastai-formats" }
 # EventRecord, the body of every frame and what the indexer reads; BlobRef, what a blob write returns.

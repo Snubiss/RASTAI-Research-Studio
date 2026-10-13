@@ -11,8 +11,8 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_proto::commands::v1::CommandDescriptor;
 use rastai_store::error::StoreError;
 
-use crate::error::store_error_diagnostic;
 use crate::server_state::Server;
+use rastai_store::error::store_error_diagnostic;
 
 /// One running command.
 pub struct CommandContext<'a> {

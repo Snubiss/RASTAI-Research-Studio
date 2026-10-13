@@ -105,11 +105,13 @@ test-node-jobs: env-cpu
     cargo test --locked -p rastai-node --test jobs --test reattach --test train_job -- --ignored
 
 # The real TextCNN train job through the daemon: train.start, the embedded node, the run tail, job.cancel and a
-# restart mid-run (plan M1-47). Like test-node-jobs, it needs the cpu environment's Python.
-# The daemon's #[ignore]d train job tests (crates/rastai-server/tests/train_jobs.rs).
+# restart mid-run (plan M1-47), and `rastai storage rebuild-index` after a trained run, compared row by row with the
+# index the daemon wrote (plan M1-33). Like test-node-jobs, it needs the cpu environment's Python.
+# The daemon's #[ignore]d train job tests (crates/rastai-server/tests/train_jobs.rs, crates/rastai-cli/tests/rebuild_index.rs).
 test-daemon-jobs: env-cpu
     RASTAI_TEST_WORKER_THREADS={{test_worker_threads}} cargo test --locked -p rastai-server --test train_jobs \
         -- --ignored
+    RASTAI_TEST_WORKER_THREADS={{test_worker_threads}} cargo test --locked -p rastai-cli --test rebuild_index -- --ignored
 
 # The kill -9 matrix of flows/platform.md 6.5 (plan M1-48): rastai-crash-tests' rows kill real daemon and worker
 # processes at named points (RASTAI_TEST_PAUSE_AT), restart and check them; they run the real worker in the cpu

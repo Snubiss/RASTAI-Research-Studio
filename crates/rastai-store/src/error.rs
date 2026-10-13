@@ -4,10 +4,13 @@
 //! Every variant maps to a code that contracts 10.3 lists in the `RRS-S` range, but `TokenCreatorRevoked`, the token
 //! rule the writer's transaction enforces, which is the gate's `RRS-C1006`. SQLite's own failures are sorted by
 //! `sqlite.rs` into these variants, so a full disk, a damaged file and an unwritable folder each get their own code.
+//! `store_error_diagnostic` fills the catalog message's placeholders from the error's own fields.
 //! A torn event-log tail is not an error: the reader reports it as `FrameRead::Incomplete`, and the writer truncates
 //! it and says how many bytes it dropped (`truncated_tail_bytes`), which the caller logs as `RRS-S2001` (info).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 
 const CODE_DAEMON_LOCK_HELD: &str = "RRS-S0001";
 const CODE_SCHEMA_TOO_NEW: &str = "RRS-S0002";
@@ -25,6 +28,14 @@ const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
 /// The gate's code for a revoked token: the one refusal here that isn't the store's own.
 const CODE_TOKEN_REVOKED: &str = "RRS-C1006";
+/// What `RRS-S0001` says when the lock file's holder couldn't be read.
+const UNKNOWN_HOLDER_PID: &str = "unknown";
+/// What `RRS-S3001` names as the operation when the store reports it (the caller knows no better name), and what
+/// it says when the free space couldn't be read.
+const STORE_WRITE_OPERATION: &str = "This write";
+const UNKNOWN_NEEDED_BYTES: &str = "some";
+const UNKNOWN_FREE_BYTES: &str = "an unknown number";
+const WRITER_STOPPED_REASON: &str = "the index writer has stopped";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
@@ -144,6 +155,107 @@ impl StoreError {
             StoreError::FreeSpaceUnknown { .. } => CODE_NOT_ENOUGH_FREE_SPACE,
         }
     }
+}
+
+/// A store error as the catalog diagnostic of its code, every placeholder of the code's message filled: the one place
+/// a `StoreError` becomes a `Diagnostic`, for the daemon's reports (rastai-server) and the rebuild's (`rebuild.rs`).
+pub fn store_error_diagnostic(error: &StoreError) -> Diagnostic {
+    let values = store_error_values(error);
+    let mut pairs = Vec::new();
+    for (name, value) in &values {
+        pairs.push((*name, value.as_str()));
+    }
+    diagnostic(error.code(), &pairs)
+}
+
+/// The placeholder values of each variant's catalog message (catalog/errors/RRS-S.json).
+fn store_error_values(error: &StoreError) -> Vec<(&'static str, String)> {
+    match error {
+        StoreError::DaemonLockHeld { path, holder_pid } => {
+            let pid = match holder_pid {
+                Some(pid) => pid.to_string(),
+                None => UNKNOWN_HOLDER_PID.to_string(),
+            };
+            vec![("path", path_text(path)), ("pid", pid)]
+        }
+        StoreError::SchemaTooNew {
+            path, found_version, ..
+        } => {
+            vec![("path", path_text(path)), ("version", found_version.to_string())]
+        }
+        StoreError::DataDirectoryNotWritable { path, .. } => vec![("path", path_text(path))],
+        StoreError::RuntimeNotPrivate { path, reason } => vec![("path", path_text(path)), ("reason", reason.clone())],
+        StoreError::EventLogCorrupt { path, offset } => vec![("path", path_text(path)), ("offset", offset.to_string())],
+        StoreError::EventSequenceGap {
+            path,
+            expected_sequence,
+            found_sequence,
+        } => vec![
+            ("path", path_text(path)),
+            ("expected_sequence", expected_sequence.to_string()),
+            ("found_sequence", found_sequence.to_string()),
+        ],
+        StoreError::RunLogRecordRefused {
+            run_id,
+            sequence,
+            reason,
+        } => vec![
+            ("run_id", run_id.clone()),
+            ("sequence", sequence.to_string()),
+            ("reason", reason.clone()),
+        ],
+        StoreError::BlobHashMismatch { hash, .. } | StoreError::BlobMissing { hash } => {
+            vec![("content_hash", hash.clone())]
+        }
+        // `RRS-C1006` says only that the token was revoked: which creator it was is the owner's to see in token.list.
+        StoreError::TokenCreatorRevoked { .. } => Vec::new(),
+        _ => store_error_reason_values(error),
+    }
+}
+
+/// The variants whose message is `{reason}` alone (`RRS-S0003`, `RRS-S0006`, `RRS-S3002`, `RRS-S3005`), and the
+/// free-space ones (`RRS-S3001`).
+fn store_error_reason_values(error: &StoreError) -> Vec<(&'static str, String)> {
+    let reason = match error {
+        StoreError::NotEnoughFreeSpace {
+            path,
+            needed_bytes,
+            margin_bytes,
+            free_bytes,
+        } => {
+            let needed = needed_bytes.saturating_add(*margin_bytes).to_string();
+            return free_space_values(path, needed, free_bytes.to_string());
+        }
+        StoreError::FreeSpaceUnknown { path, reason } => {
+            let free = format!("{UNKNOWN_FREE_BYTES} ({reason})");
+            return free_space_values(path, UNKNOWN_NEEDED_BYTES.to_string(), free);
+        }
+        StoreError::IndexDamaged { reason }
+        | StoreError::DiskFull { reason }
+        | StoreError::DatabaseWriteFailed { reason }
+        | StoreError::DatabaseReadFailed { reason } => reason.clone(),
+        StoreError::EventLogReadFailed { path, reason }
+        | StoreError::EventLogWriteFailed { path, reason }
+        | StoreError::BlobReadFailed { path, reason }
+        | StoreError::BlobWriteFailed { path, reason }
+        | StoreError::ConfigFileWriteFailed { path, reason } => format!("{}: {reason}", path.display()),
+        StoreError::WriterStopped => WRITER_STOPPED_REASON.to_string(),
+        other => format!("{other:?}"),
+    };
+    vec![("reason", reason)]
+}
+
+fn free_space_values(path: &Path, needed_bytes: String, free_bytes: String) -> Vec<(&'static str, String)> {
+    vec![
+        ("operation", STORE_WRITE_OPERATION.to_string()),
+        ("needed_bytes", needed_bytes),
+        ("volume", path_text(path)),
+        ("free_bytes", free_bytes),
+    ]
+}
+
+fn path_text(path: &Path) -> String {
+    path.display().to_string()
 }
 
 /// An I/O error while opening or reading an event log.
@@ -317,6 +429,45 @@ mod tests {
         assert_eq!(blob_write_error(&path, &full).code(), "RRS-S3002");
         assert_eq!(blob_write_error(&path, &denied).code(), "RRS-S3005");
         assert_eq!(blob_read_error(&path, &denied).code(), "RRS-S0006");
+    }
+
+    #[test]
+    fn a_store_diagnostic_fills_every_placeholder_of_its_message() {
+        let path = PathBuf::from("/data/runs/run_a/events.log");
+        let errors = [
+            StoreError::EventSequenceGap {
+                path: path.clone(),
+                expected_sequence: 4,
+                found_sequence: 6,
+            },
+            StoreError::EventLogCorrupt {
+                path: path.clone(),
+                offset: 120,
+            },
+            StoreError::EventLogWriteFailed {
+                path: path.clone(),
+                reason: "permission denied".to_string(),
+            },
+            StoreError::DaemonLockHeld {
+                path: path.clone(),
+                holder_pid: None,
+            },
+            StoreError::FreeSpaceUnknown {
+                path: path.clone(),
+                reason: "statvfs failed".to_string(),
+            },
+            StoreError::WriterStopped,
+        ];
+        for error in &errors {
+            let found = store_error_diagnostic(error);
+            assert_eq!(found.code, error.code());
+            assert!(!found.message.contains('{'), "{}", found.message);
+        }
+        let gap = store_error_diagnostic(&errors[0]);
+        assert_eq!(
+            gap.message,
+            "Event sequence gap in /data/runs/run_a/events.log: expected 4, found 6."
+        );
     }
 
     #[test]
