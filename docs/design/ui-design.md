@@ -12,8 +12,8 @@ nothing from it. The second-window sign-in approval is recorded in ADR-0039.
   even when the owner has approved the design it belongs to (ADR-0038).
 - **Layout names.** Names such as `PanelChrome` or `SidebarNav` come from the frontend layout doc
   (`docs/architecture/layout/frontend-and-plugins.md`). Where a layout name is not yet in contracts, §10 marks it.
-- **Decisions.** §8 records each decision with its date. Rows 1, 2, 4, 7 and 9 quote the owner's words. Rows 3, 5 and 6 are
-  plain approvals whose words were not recorded. Row 8 is an orchestrator proposal.
+- **Decisions.** §8 records each decision with its date and quotes the owner's words, verbatim. Row 8 is an orchestrator
+  proposal.
 - **Values.** Token values in §4 are the design's values. Where the code on a branch differs, §4 says "now".
 
 Sources: spec v5.4 §1–3, §6–11, §13; layout `frontend-and-plugins.md` §2, §4, §8; contracts §5.6, §6.3, §6.4, §7.3, §9, §11.2, §15.6;
@@ -470,20 +470,20 @@ approve button has focus. Phone: prompts stack full width.
 
 ## 8. Owner decisions
 
-Decided on **2026-10-13**. Rows 1, 2, 4, 7 and 9 quote the owner's words. Rows 3, 5 and 6 are plain approvals whose
-words were not recorded. Row 8 is not an owner decision (see its note).
+Decided on **2026-10-13**. Each row quotes the owner's words, verbatim, as the owner wrote them. Row 8 is not an owner
+decision (see its note).
 
 | # | Question | Decision (2026-10-13) | Follow-up |
 |---|---|---|---|
 | 1 | Fonts | **IBM Plex rejected:** "something a bit more stylish please. not over the top but not 1950's mainframe either." Then, also 2026-10-13: **Geist + Geist Mono chosen**: "A text schema is fine we can revisit later if needed". | §4.2 and §4.5; every board now uses Geist. Spec §27 register row and §37 v5.4.5 (DESIGN-01, this PR); files bundled in §9 (c). Revisitable; B and C stay documented. |
 | 2 | Colors and the cobalt accent | **Approved as designed:** "colors seemed fine". | Values in §4.1 stand. |
-| 3 | Blue/orange diverging scale for everyone | **Approved** (plain approval; the owner's words were not recorded). | M1-51 theme data. |
-| 4 | High-contrast built-in | **Approved, ship now:** "we'll revisit in M8". | Third built-in theme in M1-51; `ui.theme` gains a high-contrast value (contract PR, §9). |
-| 5 | New keys `font_sizes_px.xxl`, `colors.confidence_tint` | **Approved** (plain approval; the owner's words were not recorded). | Own contract PR before code uses them (`rastai.theme/1` schema). |
-| 6 | Locked "let a new window sign in" approval | **Approved, ADR first** (plain approval; the owner's words were not recorded). | Status: **approved; ADR-0039 Accepted, 2026-10-13** (§6.9). Settles open question 24, which is removed from contracts §14. |
-| 7 | Chart smoothing and log scale as display-only options | **Approved:** "probably better for realtime". | In `@rastai/viz`; never feeds a verdict (§6.5). |
-| 8 | Keyboard shortcuts | Owner asked where they were: consolidated in §3.7 and on the "Keyboard shortcuts" board. **Copy as CLI is Ctrl .**, proposed by the orchestrator on 2026-10-13 (revisitable), because Ctrl Shift C opens the DevTools element picker. **Not an owner decision:** the owner has not confirmed Ctrl . in words; confirm at review. | The other "proposed" bindings in §3.7 ship as defaults; users can rebind all of them. |
-| 9 | Section label | **Approved:** "Chat" in Basic, "Inference" in Advanced. | The rail label follows the effective mode on every board. |
+| 3 | Blue/orange diverging scale for everyone | **Approved:** "thats fine". | M1-51 theme data. |
+| 4 | High-contrast built-in | **Approved, ship now:** "now is fine well revisit again in m8". | Third built-in theme in M1-51; `ui.theme` gains a high-contrast value (contract PR, §9). |
+| 5 | New keys `font_sizes_px.xxl`, `colors.confidence_tint` | **Approved:** "fine". | Own contract PR before code uses them (`rastai.theme/1` schema). |
+| 6 | Locked "let a new window sign in" approval | **Approved, ADR first:** "fine". | Status: **approved; ADR-0039 Accepted, 2026-10-13** (§6.9). Settles open question 24, which is removed from contracts §14. |
+| 7 | Chart smoothing and log scale as display-only options | **Approved:** "Fine, probably better for realtime". | In `@rastai/viz`; never feeds a verdict (§6.5). |
+| 8 | Keyboard shortcuts | Owner asked: "location please?" Consolidated in §3.7 and on the "Keyboard shortcuts" board; the owner did not choose a binding. **Copy as CLI is Ctrl .**, proposed by the orchestrator on 2026-10-13 (revisitable), because Ctrl Shift C opens the DevTools element picker. **Not an owner decision:** the owner has not confirmed Ctrl . in words; confirm at review. | The other "proposed" bindings in §3.7 ship as defaults; users can rebind all of them. |
+| 9 | Section label | **Approved:** "I like this idea. sounds good" ("Chat" in Basic, "Inference" in Advanced). | The rail label follows the effective mode on every board. |
 
 ---
 
