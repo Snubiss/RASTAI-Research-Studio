@@ -30,7 +30,9 @@ export function CommandForm({ commandId, argumentsSchemaJson, submitLabel = DEFA
   async function submit(event) {
     event.preventDefault();
     const outcome = await command.run(fieldValuesToArgs(fields, values));
-    onOutcome?.(outcome);
+    if (onOutcome) {
+      onOutcome(outcome);
+    }
   }
 
   return (
