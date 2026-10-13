@@ -5,7 +5,8 @@
   "type": "module",
   "description": "The JavaScript plugin SDK: the PluginHost shape every section and plugin UI codes against, its in-process and mock hosts, UI registration, the state tools, CommandForm, JobProgress and the re-exported typed command wrappers.",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./testing/host-contract": "./src/testing/host-contract.js"
   },
   "dependencies": {
     "@rastai/catalog": "workspace:*",

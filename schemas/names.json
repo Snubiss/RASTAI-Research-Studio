@@ -470,7 +470,8 @@
     "@rastai/formats",
     "@rastai/plugin",
     "@rastai/proto",
-    "@rastai/ui"
+    "@rastai/ui",
+    "@rastai/web"
   ],
   "python_packages": [
     "rastai_data",

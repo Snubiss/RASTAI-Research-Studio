@@ -38,6 +38,7 @@ use crate::http::health::health_endpoint;
 use crate::http::listeners::SocketPeer;
 use crate::http::mcp_endpoint::{MCP_PATH, mcp_endpoint};
 use crate::http::sessions::{NewSession, redeem_login_code, session_cookie_header};
+use crate::http::web_assets::web_assets_endpoint;
 use crate::server_state::Server;
 
 const JSON_CONTENT_TYPE: &str = "application/json";
@@ -71,7 +72,8 @@ pub fn build_router(server: Arc<Server>) -> Router {
             post(mcp_endpoint).layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES)),
         )
         .route(SUBSCRIBE_PATH, post(subscribe_endpoint))
-        .fallback(not_found);
+        // The web app: "/" and its files. Anything else is not found, after the gate has seen it.
+        .fallback(web_assets_endpoint);
     let gated = routes.layer(middleware::from_fn_with_state(server.clone(), gate_middleware));
     gated.with_state(server)
 }
@@ -168,10 +170,6 @@ fn login_answer(server: &Server, new_session: &NewSession) -> Response {
         Err(_) => return refusal_response(&diagnostic("RRS-C1002", &[])),
     }
     response
-}
-
-async fn not_found() -> StatusCode {
-    StatusCode::NOT_FOUND
 }
 
 /// A refusal: the diagnostic as JSON (the fields of `rastai.common.v1.Diagnostic`), with 401 for a missing or bad

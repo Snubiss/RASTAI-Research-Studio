@@ -15,7 +15,7 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
  * @property {number} savedUnixMs
  */
 
-/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+/** @type {Map<string, number>} */
 const pendingSaves = new Map();
 
 /**

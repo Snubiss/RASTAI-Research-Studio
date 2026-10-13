@@ -6,6 +6,9 @@
 
 /** @typedef {import("../host-api.js").PluginHost} PluginHost */
 /** @typedef {import("../host-api.js").Diagnostic} Diagnostic */
+/** @typedef {import("../host-api.js").ExecuteOutcome} ExecuteOutcome */
+
+import { callFailedDiagnostic, refusedOutcome } from "../plugin-diagnostic.js";
 
 /**
  * @typedef {object} QueryState
@@ -141,7 +144,7 @@ function openEntry(host, query) {
 async function fetchEntry(host, entry) {
   entry.latestFetch += 1;
   const thisFetch = entry.latestFetch;
-  const outcome = await host.execute(entry.query.commandId, entry.query.args);
+  const outcome = await executeQuery(host, entry.query);
   if (thisFetch !== entry.latestFetch) {
     return; // a newer request was sent after this one; its answer wins
   }
@@ -151,6 +154,21 @@ async function fetchEntry(host, entry) {
     entry.state = { status: "error", data: null, diagnostics: outcome.diagnostics };
   }
   entry.watchers.forEach((watcher) => watcher());
+}
+
+/**
+ * Runs the query's command. A host whose execute rejects still gives the entry an answer: an error outcome, so the
+ * entry leaves loading, and nothing is left as an unhandled rejection.
+ * @param {PluginHost} host
+ * @param {Query} query
+ * @returns {Promise<ExecuteOutcome>}
+ */
+async function executeQuery(host, query) {
+  try {
+    return await host.execute(query.commandId, query.args);
+  } catch (error) {
+    return refusedOutcome(callFailedDiagnostic(error));
+  }
 }
 
 /**

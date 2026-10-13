@@ -114,6 +114,25 @@ describe("watchQuery", () => {
     stop();
   });
 
+  test("a host whose execute rejects leaves the entry in an error state, with no unhandled rejection", async () => {
+    const mock = createMockHost("core", {});
+    const rejecting = {
+      ...mock.host,
+      execute: async () => {
+        throw new Error("the answer did not parse");
+      },
+    };
+    const stop = watchQuery(rejecting, JOB_LIST, () => {});
+    await settle();
+    const state = queryState(rejecting, queryKey(JOB_LIST));
+    expect(state.status).toBe("error");
+    expect(state.data).toBeNull();
+    expect(state.diagnostics).toHaveLength(1);
+    expect(state.diagnostics[0].code).toBe("RRS-U0001");
+    expect(state.diagnostics[0].message).toBe("the answer did not parse");
+    stop();
+  });
+
   test("an answer to an older request never replaces a newer one", async () => {
     /** @type {((outcome: ExecuteOutcome) => void)[]} */
     const pending = [];

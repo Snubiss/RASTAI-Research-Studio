@@ -26,6 +26,7 @@ const REGISTERED_EXPORTS = [
   "invalidateQueries",
   "itemsSince",
   "loadDraft",
+  "pluginDiagnostic",
   "pushItem",
   "registerPluginUi",
   "registeredPluginUi",
@@ -60,8 +61,12 @@ function sourceFiles(folder) {
 }
 
 describe("exports", () => {
-  test("index.js is the only entry point", () => {
-    expect(packageFile.exports).toEqual({ ".": "./src/index.js" });
+  test("index.js is the only entry point, besides the shared host table the app's tests run against", () => {
+    // The table is test support: apps/web's host-services test runs it against the window's real services (M1-53).
+    expect(packageFile.exports).toEqual({
+      ".": "./src/index.js",
+      "./testing/host-contract": "./src/testing/host-contract.js",
+    });
   });
 
   test("index.js exports the registered names and the core command wrappers, nothing else", () => {

@@ -7,6 +7,8 @@ import { CATALOG } from "@rastai/catalog";
 
 /** A command id nothing answers to: the mock host's reply for a command without a canned outcome. */
 export const CODE_UNKNOWN_COMMAND = "RRS-C0001";
+/** The daemon can't be reached, or a call got no answer (catalog RRS-U0001). */
+export const CODE_DAEMON_UNREACHABLE = "RRS-U0001";
 /** A plugin called a command outside its commands:[scopes] permission (contracts 6.3). */
 export const CODE_SCOPE_NOT_GRANTED = "RRS-C1005";
 
@@ -37,6 +39,17 @@ export function pluginDiagnostic(code, values) {
     fixCommandId: "",
     fixArgumentsJson: "",
   };
+}
+
+/**
+ * The Diagnostic for a call whose execute rejected instead of answering: nothing came back from the daemon, which
+ * is what RRS-U0001 says. The thrown message is kept for Advanced mode, which shows the full text.
+ * @param {unknown} error
+ * @returns {Diagnostic}
+ */
+export function callFailedDiagnostic(error) {
+  const message = error instanceof Error && error.message !== "" ? error.message : "The call did not complete.";
+  return { ...pluginDiagnostic(CODE_DAEMON_UNREACHABLE, { address: "" }), message };
 }
 
 /**

@@ -78,8 +78,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: it reads a pull request's
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
-check: fmt-check lint check-js test-rust test-node-jobs test-daemon-jobs test-crash e2e-surfaces test-python test-js wasm deny \
-    proto-check check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript \
+check: fmt-check lint check-js web-embed test-rust test-node-jobs test-daemon-jobs test-crash e2e-surfaces test-python \
+    test-js wasm deny proto-check check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript \
     check-fuzz-locks codegen-check check-names check-schema-diff
 
 # core.hooksPath goes in this clone's own git config (never --global), so other repositories keep their hooks.
@@ -150,6 +150,13 @@ fmt-check: env-cpu env-js
     "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/fixtures tools/github \
         crates/rastai-node/tests/support tests/crash tests/e2e/three_surfaces
     pnpm exec prettier --check .
+
+# The web app (layout frontend-and-plugins.md 8.1): `vite build` writes apps/web/dist/, and rastai-server embeds it
+# (build.rs), so the daemon serves the app at "/". Offline and reproducible: fonts and styles are bundled, nothing comes
+# from a CDN, and the output is hashed. `check` runs it first, so the daemon's tests see the real app; a release build
+# runs it before `cargo build`.
+web-embed: env-js
+    pnpm --filter @rastai/web build
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
 # The crates that also run in the browser must build for wasm32-unknown-unknown (layout sections 3.4 and 4.10).

@@ -22,6 +22,8 @@ export { useCommand } from "./react/use-command.js";
 export { CommandForm } from "./react/CommandForm.jsx";
 export { JobProgress } from "./react/JobProgress.jsx";
 
+export { pluginDiagnostic } from "./plugin-diagnostic.js";
+
 export { createMockHost } from "./testing/mock-host.js";
 
 /** @typedef {import("./host-api.js").PluginHost} PluginHost */
