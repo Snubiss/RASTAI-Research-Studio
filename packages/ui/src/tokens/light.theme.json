@@ -6,24 +6,24 @@
   "name": "Light",
   "base": "light",
   "colors": {
-    "background": "#ffffff",
-    "surface": "#f6f8fa",
+    "background": "#f3f4f6",
+    "surface": "#ffffff",
     "surface_raised": "#ffffff",
-    "surface_sunken": "#eef1f4",
-    "overlay": "#0b0d11",
-    "text": "#1a1f26",
-    "text_muted": "#57606a",
-    "text_disabled": "#8c959f",
+    "surface_sunken": "#eef0f3",
+    "overlay": "#0b0d12",
+    "text": "#16181d",
+    "text_muted": "#59606e",
+    "text_disabled": "#9aa0ab",
     "text_on_accent": "#ffffff",
-    "border": "#d0d7de",
-    "border_strong": "#6e7781",
-    "divider": "#e4e8ec",
-    "accent": "#0a66d8",
-    "accent_hover": "#0857ba",
-    "accent_active": "#06479a",
-    "selection": "#d6e8ff",
-    "focus_ring": "#0a66d8",
-    "success": "#1a7f37",
+    "border": "#d7dae1",
+    "border_strong": "#737a88",
+    "divider": "#e6e8ed",
+    "accent": "#3a56d4",
+    "accent_hover": "#2f47b8",
+    "accent_active": "#263a99",
+    "selection": "#e0e6ff",
+    "focus_ring": "#3a56d4",
+    "success": "#17784b",
     "series_1": "#0a66d8",
     "series_2": "#c75300",
     "series_3": "#1a7f37",
@@ -34,39 +34,40 @@
     "series_8": "#cf222e",
     "sequential_low": "#e7f0fb",
     "sequential_high": "#0b3d91",
-    "diverging_negative": "#cf222e",
-    "diverging_zero": "#eef1f4",
-    "diverging_positive": "#1a7f37",
-    "canvas_background": "#f6f8fa",
-    "canvas_grid": "#e4e8ec",
-    "canvas_node": "#c9d6e6",
-    "canvas_node_border": "#3d4b5c",
-    "canvas_node_selected": "#0a66d8",
-    "canvas_edge": "#6e7781",
-    "canvas_edge_active": "#0a66d8",
-    "canvas_label": "#1a1f26",
-    "canvas_port": "#57606a",
-    "confidence_tint": "#fff1c2"
+    "diverging_negative": "#c75300",
+    "diverging_zero": "#eef0f3",
+    "diverging_positive": "#0a66d8",
+    "canvas_background": "#f3f4f6",
+    "canvas_grid": "#dfe2e8",
+    "canvas_node": "#ffffff",
+    "canvas_node_border": "#737a88",
+    "canvas_node_selected": "#3a56d4",
+    "canvas_edge": "#7b8290",
+    "canvas_edge_active": "#3a56d4",
+    "canvas_label": "#16181d",
+    "canvas_port": "#59606e",
+    "confidence_tint": "#c75300"
   },
   "typography": {
-    "font_family_ui": "system-ui, -apple-system, \"Segoe UI\", Roboto, \"Noto Sans\", sans-serif",
-    "font_family_mono": "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"DejaVu Sans Mono\", monospace",
+    "font_family_ui": "\"Geist\", \"Noto Sans\", system-ui, sans-serif",
+    "font_family_mono": "\"Geist Mono\", \"DejaVu Sans Mono\", ui-monospace, monospace",
     "font_weights": {
       "regular": 400,
       "medium": 500,
-      "bold": 700
+      "bold": 600
     },
     "font_sizes_px": {
       "xs": 11,
       "sm": 12,
       "md": 14,
       "lg": 16,
-      "xl": 20
+      "xl": 20,
+      "xxl": 28
     },
     "line_heights": {
       "body": 1.5,
       "heading": 1.25,
-      "code": 1.4
+      "code": 1.45
     }
   },
   "density": {
@@ -78,9 +79,9 @@
     }
   },
   "radius_px": {
-    "small": 2,
-    "medium": 4,
-    "large": 8
+    "small": 4,
+    "medium": 6,
+    "large": 10
   },
   "motion": {
     "fast_ms": 120,
@@ -92,8 +93,8 @@
     "offset_px": 2
   },
   "elevation": {
-    "level_1": "0 1px 2px rgba(11, 13, 17, 0.12)",
-    "level_2": "0 2px 8px rgba(11, 13, 17, 0.16)",
-    "level_3": "0 8px 24px rgba(11, 13, 17, 0.2)"
+    "level_1": "0 1px 2px rgba(17, 20, 26, 0.08)",
+    "level_2": "0 4px 12px rgba(17, 20, 26, 0.10), 0 1px 2px rgba(17, 20, 26, 0.06)",
+    "level_3": "0 16px 40px rgba(17, 20, 26, 0.18), 0 2px 6px rgba(17, 20, 26, 0.08)"
   }
 }

@@ -16,7 +16,7 @@ import packageFile from "../package.json" with { type: "json" };
 const SOURCE_FOLDER = new URL("./", import.meta.url);
 const STYLESHEETS = ["styles/base.css", "styles/components.css"];
 const CSS_VARIABLE_USE = /var\((--rr-[a-z0-9-]+)/g;
-const SECURITY_COMPONENTS = ["EgressBadge", "PermissionList", "SignedOutScreen", "TrustPrompt"];
+const SECURITY_COMPONENTS = ["EgressBadge", "PermissionList", "SignedOutScreen", "TokenConfirm", "TrustPrompt"];
 // Written as joined parts, so this file doesn't contain the words it looks for.
 const FORBIDDEN_WORDS = ["inner" + "HTML", "dangerously" + "SetInnerHTML", "outer" + "HTML", "insertAdjacent" + "HTML"];
 

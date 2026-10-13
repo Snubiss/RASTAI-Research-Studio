@@ -23,8 +23,13 @@
  * @property {string} fontFamilyUi
  * @property {string} fontFamilyMono
  * @property {{ regular: number, medium: number, bold: number }} fontWeights
- * @property {{ xs: number, sm: number, md: number, lg: number, xl: number }} fontSizesPx
+ * @property {{ xs: number, sm: number, md: number, lg: number, xl: number, xxl: number }} fontSizesPx
  * @property {{ body: number, heading: number, code: number }} lineHeights
+ */
+
+/**
+ * The names builtInTheme takes: the built-in themes, which `ui.theme` names (a plugin theme is M8).
+ * @typedef {"light" | "dark" | "high_contrast"} BuiltInThemeName
  */
 
 /**

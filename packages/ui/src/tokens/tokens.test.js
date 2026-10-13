@@ -12,16 +12,25 @@ import { BUILT_IN_THEMES, COLOR_ROLES } from "./built-in-themes.js";
 import { canvasColors } from "./canvas-colors.js";
 import { LOCKED_TOKENS } from "./locked.js";
 import { COLORBLIND_COLORS } from "./palettes.js";
-import { builtInTheme } from "./resolve-tokens.js";
+import { builtInTheme, resolveTheme } from "./resolve-tokens.js";
 import { vizColors } from "./viz-colors.js";
 
 /** @typedef {import("./token-types.js").ThemeTokens} ThemeTokens */
 /** @typedef {import("./token-types.js").ThemeOptions} ThemeOptions */
+/** @typedef {import("./built-in-themes.js").BuiltInTheme} BuiltInTheme */
+/** @typedef {import("./token-types.js").BuiltInThemeName} BuiltInThemeName */
 
 // The generated JSON Schema of rastai.theme/1, which rastai-formats writes from its own types (`just codegen`).
 const THEME_SCHEMA_FILE = new URL("../../../../schemas/rastai.theme/1.json", import.meta.url);
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
 const BASES = /** @type {const} */ (["light", "dark"]);
+// Every built-in theme by its ui.theme name, with the base its locked set comes from.
+const THEME_NAMES = /** @type {const} */ (["light", "dark", "high_contrast"]);
+const BASE_OF = /** @type {Object<string, "light" | "dark">} */ ({
+  light: "light",
+  dark: "dark",
+  high_contrast: "dark",
+});
 /** @type {ThemeOptions} */
 const DEFAULT_OPTIONS = { density: "comfortable", reducedMotion: false, colorblind: false };
 /** @type {ThemeOptions[]} */
@@ -54,6 +63,7 @@ const DOCUMENTED_OTHER_VARIABLES = [
   "--rr-font-size-md",
   "--rr-font-size-lg",
   "--rr-font-size-xl",
+  "--rr-font-size-xxl",
   "--rr-line-height-body",
   "--rr-line-height-heading",
   "--rr-line-height-code",
@@ -101,6 +111,15 @@ function recordingRoot() {
 }
 
 /**
+ * The blue channel of a #rrggbb color, 0 to 255: tells blue from orange in the data-scale test.
+ * @param {string} hex
+ * @returns {number}
+ */
+function blueChannel(hex) {
+  return Number.parseInt(hex.slice(5, 7), 16);
+}
+
+/**
  * Tokens that try every way to name a locked token: as a role, as a CSS variable, at the top level.
  * @param {"light" | "dark"} base
  * @returns {ThemeTokens}
@@ -123,28 +142,79 @@ function hostileTokens(base) {
 }
 
 describe("built-in themes", () => {
-  test("the role keys are the generated schema's, and both built-ins set every one", () => {
+  test("the role keys are the generated schema's, and every built-in sets every one", () => {
     expect([...COLOR_ROLES].sort()).toEqual(schemaColorRoles());
-    for (const base of BASES) {
-      expect(Object.keys(BUILT_IN_THEMES[base].colors).sort()).toEqual(schemaColorRoles());
-      expect(BUILT_IN_THEMES[base].base).toBe(base);
+    for (const name of THEME_NAMES) {
+      expect(Object.keys(BUILT_IN_THEMES[name].colors).sort()).toEqual(schemaColorRoles());
+      expect(BUILT_IN_THEMES[name].base).toBe(BASE_OF[name]);
     }
   });
 
-  test("every role key resolves to a #rrggbb color in both built-ins, under every option set", () => {
-    for (const base of BASES) {
+  test("every role key resolves to a #rrggbb color in every built-in, under every option set", () => {
+    for (const name of THEME_NAMES) {
       for (const options of EVERY_OPTION_SET) {
-        const tokens = builtInTheme(base, options);
+        const tokens = builtInTheme(name, options);
         for (const role of COLOR_ROLES) {
-          expect(tokens.colors[role], `${base} ${role}`).toMatch(HEX_COLOR);
+          expect(tokens.colors[role], `${name} ${role}`).toMatch(HEX_COLOR);
         }
-        expect(tokens.base).toBe(base);
+        expect(tokens.base).toBe(BASE_OF[name]);
       }
     }
   });
 
-  test("dark's canvas background is the spike canvas's color", () => {
-    expect(BUILT_IN_THEMES.dark.colors.canvas_background).toBe("#101318");
+  test("the light and dark canvas backgrounds are the design's values (ui-design.md 4.1)", () => {
+    expect(BUILT_IN_THEMES.light.colors.canvas_background).toBe("#f3f4f6");
+    expect(BUILT_IN_THEMES.dark.colors.canvas_background).toBe("#0d0f13");
+  });
+
+  test("the design's confidence tint is set in every built-in (ui-design.md 4.4)", () => {
+    expect(BUILT_IN_THEMES.light.colors.confidence_tint).toBe("#c75300");
+    expect(BUILT_IN_THEMES.dark.colors.confidence_tint).toBe("#f0883e");
+    expect(BUILT_IN_THEMES.high_contrast.colors.confidence_tint).toBe("#ffb070");
+  });
+
+  test("the data scale is blue and orange by default: orange for negative, blue for positive", () => {
+    for (const name of /** @type {const} */ (["light", "dark"])) {
+      const colors = builtInTheme(name, DEFAULT_OPTIONS).colors;
+      expect(blueChannel(colors.diverging_negative)).toBeLessThan(blueChannel(colors.diverging_positive));
+      expect(colors.diverging_negative).not.toBe(colors.diverging_positive);
+    }
+    expect(BUILT_IN_THEMES.light.colors.diverging_negative).toBe("#c75300");
+    expect(BUILT_IN_THEMES.light.colors.diverging_positive).toBe("#0a66d8");
+  });
+
+  test("the high-contrast built-in is its own theme with the design's values and the dark base", () => {
+    const tokens = builtInTheme("high_contrast", DEFAULT_OPTIONS);
+    expect(tokens.name).toBe("High contrast");
+    expect(tokens.base).toBe("dark");
+    expect(tokens.colors.background).toBe("#000000");
+    expect(tokens.colors.text).toBe("#ffffff");
+    expect(tokens.colors.focus_ring).toBe("#4de2ff");
+    expect(tokens.focusRing.widthPx).toBe(3);
+    expect(tokens.colors).not.toEqual(builtInTheme("dark", DEFAULT_OPTIONS).colors);
+    expect(tokens.elevation.level1).toBe("0 0 0 1px #9a9a9a");
+  });
+
+  test("the high-contrast built-in takes the dark locked set", () => {
+    const tokens = builtInTheme("high_contrast", DEFAULT_OPTIONS);
+    expect(Object.fromEntries(lockedVariables(tokens))).toEqual(
+      Object.fromEntries(lockedVariables(builtInTheme("dark", DEFAULT_OPTIONS))),
+    );
+  });
+
+  test("a theme that leaves xxl out gets xl's size, and the built-ins set 28", () => {
+    expect(BUILT_IN_THEMES.light.typography.font_sizes_px.xxl).toBe(28);
+    expect(builtInTheme("light", DEFAULT_OPTIONS).typography.fontSizesPx.xxl).toBe(28);
+    const light = BUILT_IN_THEMES.light;
+    const { xxl, ...sizesWithoutXxl } = light.typography.font_sizes_px;
+    const withoutXxl = /** @type {BuiltInTheme} */ ({
+      ...light,
+      typography: { ...light.typography, font_sizes_px: sizesWithoutXxl },
+    });
+    expect(resolveTheme(withoutXxl, DEFAULT_OPTIONS).typography.fontSizesPx.xxl).toBe(
+      light.typography.font_sizes_px.xl,
+    );
+    expect(xxl).toBe(28);
   });
 
   test("density picks the spacing scale; both scales have the same steps", () => {
@@ -185,9 +255,9 @@ describe("built-in themes", () => {
 });
 
 describe("applyThemeTokens", () => {
-  test("sets every documented variable, for both built-ins", () => {
-    for (const base of BASES) {
-      const tokens = builtInTheme(base, DEFAULT_OPTIONS);
+  test("sets every documented variable, for every built-in", () => {
+    for (const name of THEME_NAMES) {
+      const tokens = builtInTheme(name, DEFAULT_OPTIONS);
       const root = recordingRoot();
       applyThemeTokens(root, tokens);
       const expected = [
@@ -208,7 +278,8 @@ describe("applyThemeTokens", () => {
     const root = recordingRoot();
     applyThemeTokens(root, builtInTheme("dark", DEFAULT_OPTIONS));
     expect(root.values.get("--rr-color-surface-raised")).toBe(BUILT_IN_THEMES.dark.colors.surface_raised);
-    expect(root.values.get("--rr-color-canvas-background")).toBe("#101318");
+    expect(root.values.get("--rr-color-canvas-background")).toBe("#0d0f13");
+    expect(root.values.get("--rr-font-size-xxl")).toBe("28px");
     expect(root.values.get("--rr-space-2")).toBe(`${BUILT_IN_THEMES.dark.density.comfortable.spacing_px[2]}px`);
     expect(root.values.get("color-scheme")).toBe("dark");
   });
@@ -265,7 +336,7 @@ describe("applyThemeTokens", () => {
 describe("renderer colors", () => {
   test("canvasColors gives RGBA arrays from 0 to 1 and the label font", () => {
     const colors = canvasColors(builtInTheme("dark", DEFAULT_OPTIONS));
-    expect(colors.background).toEqual([16 / 255, 19 / 255, 24 / 255, 1]);
+    expect(colors.background).toEqual([13 / 255, 15 / 255, 19 / 255, 1]);
     const roles = [colors.grid, colors.node, colors.nodeBorder, colors.nodeSelected, colors.edge, colors.edgeActive];
     for (const rgba of [...roles, colors.label, colors.port]) {
       expect(rgba).toHaveLength(4);

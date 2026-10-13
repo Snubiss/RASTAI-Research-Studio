@@ -30,6 +30,10 @@ export function lockedColor(key) {
 
 /** @typedef {import("react").CSSProperties} CSSProperties */
 
+// The focus ring of every focusable security element (ui-design.md 5.1). LockedFocusRing draws it inside each
+// component, so it doesn't depend on components.css being loaded, and it is the locked security-text color.
+export const LOCKED_FOCUS_RING_CSS = `.rr-locked:focus-visible { outline: 2px solid ${lockedColor("security-text")}; outline-offset: 2px; }`;
+
 // Every security style starts from this, so no element inherits the theme's font, size or spacing.
 /** @type {CSSProperties} */
 const FIXED_TEXT = {
@@ -97,6 +101,42 @@ export const BUTTON_STYLE = {
   background: lockedColor("security-surface"),
   color: lockedColor("security-text"),
   fontWeight: BOLD,
+  cursor: "pointer",
+};
+
+/** The filled button: the one action a locked dialog takes (ui-design.md 5.2: Approve is filled with security-text). */
+/** @type {CSSProperties} */
+export const PRIMARY_BUTTON_STYLE = {
+  ...BUTTON_STYLE,
+  background: lockedColor("security-text"),
+  color: lockedColor("security-surface"),
+};
+
+/** A disabled button keeps the locked colors and changes its outline, so it is told apart without a theme color. */
+/** @type {CSSProperties} */
+export const DISABLED_BUTTON_STYLE = {
+  ...PRIMARY_BUTTON_STYLE,
+  borderStyle: "dashed",
+  cursor: "not-allowed",
+};
+
+/** @type {CSSProperties} */
+export const CHECKBOX_STYLE = {
+  ...FIXED_TEXT,
+  width: "16px",
+  height: "16px",
+  margin: "0 8px 0 0",
+  accentColor: lockedColor("security-text"),
+  cursor: "pointer",
+};
+
+/** @type {CSSProperties} */
+export const CHECKBOX_LABEL_STYLE = {
+  ...TEXT_STYLE,
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "0",
+  minHeight: MIN_TARGET_SIZE,
   cursor: "pointer",
 };
 

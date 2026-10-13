@@ -6,11 +6,12 @@ Read the root `CLAUDE.md` first. This file adds the local rules of layout `docs/
 
 - `src/index.js`: the public exports. `@rastai/ui/security` is `src/security/index.js` alone; `@rastai/ui/styles/base.css` and `@rastai/ui/styles/components.css` are the two stylesheets a page loads once.
 - `src/tokens/`: the theme token contract (contracts §5.6). `light.theme.json` and `dark.theme.json` are the built-in themes as `rastai.theme/1` files (`built-in-themes.js` imports them; `crates/rastai-formats/tests/theme_tokens.rs` validates the same files). `resolve-tokens.js` (`builtInTheme`), `apply-theme.js` (`applyThemeTokens`), `palettes.js` (the colorblind set), `locked.js` (`LOCKED_TOKENS`), `canvas-colors.js` and `viz-colors.js` (plain RGBA data for the renderers), `token-types.js` (JSDoc only).
-- `src/security/`: `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen`, their inline locked styles (`locked-styles.js`) and the plain-English permission table (`permission-text.js`).
+- `src/security/`: `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen`, `TokenConfirm`, their inline locked styles (`locked-styles.js`), the security focus ring each component draws (`LockedFocusRing.jsx`) and the plain-English permission table (`permission-text.js`).
 - `src/mode/`: `ModeProvider`, `useMode`, `AdvancedOnly`; `mode-context.js` is private.
 - `src/components/`: one component per file; `FieldFrame.jsx` is private to the fields. `show-toast.js` keeps the toast list as plain data.
 - `src/diagnostics/`: `DiagnosticView` and `catalog-lookup.js` (the catalog text for a Diagnostic).
-- `src/styles/`: `base.css` and `components.css`, values only through `var(--rr-*)`.
+- `src/styles/`: `base.css` and `components.css`, values only through `var(--rr-*)`. `base.css` loads the bundled faces with `@font-face`.
+- `src/fonts/`: Geist and Geist Mono (variable woff2) and `OFL.txt`, from the official release; `README.md` has the source and checksums. Local files only, never a CDN.
 - `src/testing/`: helpers for the browser tests only (`mount`, `loadStyles`); not exported.
 
 ## Rules (layout §4.4)

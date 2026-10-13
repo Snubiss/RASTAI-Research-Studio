@@ -1,7 +1,8 @@
 /*
  * One block per @rastai/ui component, every class prefixed rr- (layout frontend-and-plugins.md 4.1). Values come
  * only from --rr-* variables, so a theme switch restyles everything with no React render. The diagnostic's severity
- * colors and the security UI's focus ring are --rr-locked-* variables, which no theme sets (2.10).
+ * colors are --rr-locked-* variables, which no theme sets (2.10). The security UI's focus ring is not here: the security
+ * components draw it themselves (src/security/LockedFocusRing.jsx), so it doesn't depend on this stylesheet.
  */
 
 /* ---- Button ---- */
@@ -397,10 +398,112 @@
   font-size: var(--rr-font-size-sm);
 }
 
-/* ---- The security UI's focus ring: locked, like the rest of its colors ---- */
+/* ---- StatePill: a state's word with a glyph, colored by its class (ui-design.md 5.2) ---- */
 
-.rr-locked :focus-visible,
-.rr-locked:focus-visible {
-  outline: 2px solid var(--rr-locked-security-text);
-  outline-offset: 2px;
+.rr-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rr-space-1);
+  padding: 0 var(--rr-space-2);
+  min-height: var(--rr-space-4);
+  border: 1px solid var(--rr-color-border);
+  border-radius: var(--rr-radius-large);
+  background: var(--rr-color-surface-raised);
+  color: var(--rr-color-text);
+  font-size: var(--rr-font-size-sm);
+  line-height: var(--rr-line-height-body);
+  white-space: nowrap;
+}
+
+.rr-state-pill__glyph {
+  font-weight: var(--rr-font-weight-bold);
+}
+
+.rr-state-pill--live .rr-state-pill__glyph {
+  color: var(--rr-color-accent);
+}
+
+.rr-state-pill--ok .rr-state-pill__glyph {
+  color: var(--rr-color-success);
+}
+
+.rr-state-pill--error .rr-state-pill__glyph {
+  color: var(--rr-locked-severity-error);
+}
+
+.rr-state-pill--warning .rr-state-pill__glyph {
+  color: var(--rr-locked-severity-warning);
+}
+
+.rr-state-pill--neutral .rr-state-pill__glyph {
+  color: var(--rr-color-text-muted);
+}
+
+/* ---- SegmentedControl: 2 to 4 options, one pressed (ui-design.md 5.1) ---- */
+
+.rr-segmented {
+  display: inline-flex;
+  gap: var(--rr-space-1);
+  padding: var(--rr-space-1);
+  border: 1px solid var(--rr-color-border);
+  border-radius: var(--rr-radius-medium);
+  background: var(--rr-color-surface-sunken);
+}
+
+.rr-segmented__option {
+  min-height: var(--rr-space-6);
+  padding: 0 var(--rr-space-3);
+  border: 0;
+  border-radius: var(--rr-radius-small);
+  background: transparent;
+  color: var(--rr-color-text-muted);
+  font-weight: var(--rr-font-weight-medium);
+  cursor: pointer;
+  transition: background var(--rr-motion-fast) var(--rr-motion-easing);
+}
+
+.rr-segmented__option:hover {
+  color: var(--rr-color-text);
+}
+
+.rr-segmented__option[aria-pressed="true"] {
+  background: var(--rr-color-surface-raised);
+  box-shadow: var(--rr-elevation-1);
+  color: var(--rr-color-text);
+}
+
+/* ---- StatTile: a label and one big number in the mono face (ui-design.md 4.2) ---- */
+
+.rr-stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rr-space-1);
+  padding: var(--rr-space-3) var(--rr-space-4);
+  border: 1px solid var(--rr-color-border);
+  border-radius: var(--rr-radius-large);
+  background: var(--rr-color-surface-raised);
+}
+
+.rr-stat-tile__label {
+  margin: 0;
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.rr-stat-tile__delta {
+  margin: 0;
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-sm);
+}
+
+.rr-stat-tile__value {
+  margin: 0;
+  color: var(--rr-color-text);
+  font-family: var(--rr-font-mono);
+  font-size: var(--rr-font-size-xxl);
+  font-weight: var(--rr-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--rr-line-height-heading);
 }

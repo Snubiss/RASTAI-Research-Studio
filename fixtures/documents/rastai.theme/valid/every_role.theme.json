@@ -45,7 +45,8 @@
     "canvas_edge": "#7c848c",
     "canvas_edge_active": "#7f878f",
     "canvas_label": "#828a92",
-    "canvas_port": "#858d95"
+    "canvas_port": "#858d95",
+    "confidence_tint": "#c75300"
   },
   "typography": {
     "font_family_ui": "Inter, system-ui, sans-serif",
@@ -60,7 +61,8 @@
       "sm": 12,
       "md": 14,
       "lg": 16,
-      "xl": 20
+      "xl": 20,
+      "xxl": 28
     },
     "line_heights": {
       "body": 1.5,

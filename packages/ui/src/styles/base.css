@@ -5,6 +5,37 @@
  * the OS preference) sets --rr-motion-fast and --rr-motion-slow to 0, and every transition uses them.
  */
 
+/*
+ * Geist and Geist Mono are bundled with the package (src/fonts/, the files and their OFL license are listed in
+ * src/fonts/README.md). They load from the same origin as the page, never from a CDN (ui-design.md 4.5). The variable
+ * files cover every weight the theme uses (400, 500 and 600). Until they load, the font stacks fall back to the
+ * system fonts after them.
+ */
+
+@font-face {
+  font-family: "Geist";
+  src: url("../fonts/Geist[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("../fonts/Geist-Italic[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../fonts/GeistMono[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {

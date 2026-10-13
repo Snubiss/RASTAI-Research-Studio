@@ -6,6 +6,7 @@
 import { useEffect, useId, useRef } from "react";
 
 import { BUTTON_STYLE, DANGER_TEXT_STYLE, HEADING_STYLE, PANEL_STYLE, TEXT_STYLE } from "./locked-styles.js";
+import { LockedFocusRing } from "./LockedFocusRing.jsx";
 import { PermissionList } from "./PermissionList.jsx";
 
 const TRUSTED_CODE_WARNING =
@@ -39,6 +40,7 @@ export function TrustPrompt({ pluginName, permissions, onAccept, onDecline }) {
 
   return (
     <dialog ref={dialogRef} className="rr-locked" style={PANEL_STYLE} aria-labelledby={titleId} onCancel={handleCancel}>
+      <LockedFocusRing />
       <h2 id={titleId} style={HEADING_STYLE}>
         Install {pluginName}?
       </h2>
@@ -46,10 +48,10 @@ export function TrustPrompt({ pluginName, permissions, onAccept, onDecline }) {
       <PermissionList requested={permissions} />
       <p style={DANGER_TEXT_STYLE}>{TRUSTED_CODE_WARNING}</p>
       <div>
-        <button type="button" style={BUTTON_STYLE} onClick={onDecline} autoFocus>
+        <button type="button" className="rr-locked" style={BUTTON_STYLE} onClick={onDecline} autoFocus>
           {"Don't install"}
         </button>
-        <button type="button" style={BUTTON_STYLE} onClick={onAccept}>
+        <button type="button" className="rr-locked" style={BUTTON_STYLE} onClick={onAccept}>
           Install
         </button>
       </div>

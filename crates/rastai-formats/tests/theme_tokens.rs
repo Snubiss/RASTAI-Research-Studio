@@ -2,8 +2,9 @@
 //! `colors` or anywhere else in the file, is an unknown field (`RRS-E1003`), and so is a misspelled role. The color
 //! roles are struct fields, so there is no free map a locked name could slip into (layout 4.2a).
 //!
-//! The built-in light and dark themes of `@rastai/ui` (M1-51) are read through the same `read_document`: the bytes
-//! the web app imports are the bytes rastai-formats validates, and each sets every color role.
+//! The built-in light, dark and high-contrast themes of `@rastai/ui` (M1-51, DESIGN-03) are read through the same
+//! `read_document`: the bytes the web app imports are the bytes rastai-formats validates, and each sets every color
+//! role.
 
 #![allow(clippy::unwrap_used)]
 
@@ -21,13 +22,15 @@ use serde_json::{Value, json};
 
 const BASE_THEME: &str = "../../fixtures/documents/rastai.theme/valid/night.theme.json";
 const THEME_FILE: &str = "test.theme.json";
-/// `@rastai/ui`'s built-in themes (layout frontend-and-plugins.md 2.10), with the base each must declare.
+/// `@rastai/ui`'s built-in themes (layout frontend-and-plugins.md 2.10), with the base each must declare. High
+/// contrast is a theme of its own with the dark base, so it takes the dark locked set (ui-design.md 4.1).
 const BUILT_IN_THEMES: &[(&str, &str)] = &[
     ("../../packages/ui/src/tokens/light.theme.json", "light"),
     ("../../packages/ui/src/tokens/dark.theme.json", "dark"),
+    ("../../packages/ui/src/tokens/high_contrast.theme.json", "dark"),
 ];
-/// The spike canvas's background, which seeds the dark theme's canvas (layout frontend-and-plugins.md 4.6).
-const SPIKE_CANVAS_BACKGROUND: &str = "#101318";
+/// The dark theme's canvas background, the design's value (ui-design.md 4.1).
+const DARK_CANVAS_BACKGROUND: &str = "#0d0f13";
 const CODE_UNKNOWN_FIELD: &str = "RRS-E1003";
 const CODE_VALUE_FORM: &str = "RRS-E2006";
 /// The locked tokens of contracts 5.6, as they are written in CSS.
@@ -214,8 +217,23 @@ fn the_built_in_themes_are_valid_and_set_every_role() {
 }
 
 #[test]
-fn the_dark_theme_keeps_the_spike_canvas_background() {
+fn the_dark_theme_has_the_designs_canvas_background() {
     let (dark_path, _) = BUILT_IN_THEMES[1];
     let theme: Value = serde_json::from_slice(&read_file(dark_path)).unwrap();
-    assert_eq!(theme["colors"]["canvas_background"], json!(SPIKE_CANVAS_BACKGROUND));
+    assert_eq!(theme["colors"]["canvas_background"], json!(DARK_CANVAS_BACKGROUND));
+}
+
+#[test]
+fn the_built_in_display_size_is_28_and_a_wrong_type_is_refused() {
+    let (light_path, _) = BUILT_IN_THEMES[0];
+    let theme: Value = serde_json::from_slice(&read_file(light_path)).unwrap();
+    assert_eq!(theme["typography"]["font_sizes_px"]["xxl"], json!(28));
+
+    // A display size written as text is a wrong kind of field (RRS-E1002), not a value out of range.
+    let mut wrong = base_theme();
+    wrong["typography"]["font_sizes_px"]["xxl"] = json!("28");
+    assert_eq!(
+        codes_and_pointers(&read_theme(&wrong).diagnostics),
+        one("RRS-E1002", "/typography/font_sizes_px/xxl")
+    );
 }

@@ -8,16 +8,17 @@ import { COLORBLIND_COLORS } from "./palettes.js";
 /** @typedef {import("./token-types.js").ThemeTokens} ThemeTokens */
 /** @typedef {import("./token-types.js").ThemeOptions} ThemeOptions */
 /** @typedef {import("./built-in-themes.js").BuiltInTheme} BuiltInTheme */
+/** @typedef {import("./token-types.js").BuiltInThemeName} BuiltInThemeName */
 
 const COMPACT_DENSITY = "compact";
 
 /**
- * @param {"light" | "dark"} base
+ * @param {BuiltInThemeName} name   "light", "dark" or "high_contrast"; anything else is light
  * @param {ThemeOptions} options
  * @returns {ThemeTokens}
  */
-export function builtInTheme(base, options) {
-  return resolveTheme(builtInThemeFor(base), options);
+export function builtInTheme(name, options) {
+  return resolveTheme(builtInThemeFor(name), options);
 }
 
 /**
@@ -37,7 +38,7 @@ export function resolveTheme(theme, options) {
       fontFamilyUi: theme.typography.font_family_ui,
       fontFamilyMono: theme.typography.font_family_mono,
       fontWeights: { ...theme.typography.font_weights },
-      fontSizesPx: { ...theme.typography.font_sizes_px },
+      fontSizesPx: fontSizesFor(theme),
       lineHeights: { ...theme.typography.line_heights },
     },
     spacingPx: spacingFor(theme, options.density),
@@ -57,15 +58,29 @@ export function resolveTheme(theme, options) {
 }
 
 /**
- * The built-in theme for a base; anything but "dark" is light.
- * @param {string} base
+ * The built-in theme with this name; anything unknown is light.
+ * @param {string} name
  * @returns {BuiltInTheme}
  */
-function builtInThemeFor(base) {
-  if (base === "dark") {
+function builtInThemeFor(name) {
+  if (name === "dark") {
     return BUILT_IN_THEMES.dark;
   }
+  if (name === "high_contrast") {
+    return BUILT_IN_THEMES.high_contrast;
+  }
   return BUILT_IN_THEMES.light;
+}
+
+/**
+ * The font sizes with `xxl` filled in: a theme that leaves the display size out gets `xl`, so every size is a number
+ * (contracts 5.6).
+ * @param {BuiltInTheme} theme
+ * @returns {{ xs: number, sm: number, md: number, lg: number, xl: number, xxl: number }}
+ */
+function fontSizesFor(theme) {
+  const sizes = theme.typography.font_sizes_px;
+  return { ...sizes, xxl: sizes.xxl ?? sizes.xl };
 }
 
 /**
