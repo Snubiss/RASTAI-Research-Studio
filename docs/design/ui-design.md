@@ -246,7 +246,7 @@ Nothing is renamed.
 A swap changes only the bundled files, `OFL.txt` and the two `font_family_*` token values.
 
 How the three were compared. IBM Plex was rejected on 2026-10-13 ("something a bit more stylish please. not over the
-top but not 1950's mainframe either"). Three pairings, each a UI sans plus a matching mono from the same family, are on
+top but not 1050's [sic] mainframe either"). Three pairings, each a UI sans plus a matching mono from the same family, are on
 the "Type options" board (Foundations page). That board shows the same slice of UI in each: headings, a run row with
 numbers, a stat tile, a shaded chat line, a button row and the status-bar line. Licenses were checked in each family's
 official repository and in Google Fonts' `ofl/` folders on 2026-10-13.
@@ -475,7 +475,7 @@ decision (see its note).
 
 | # | Question | Decision (2026-10-13) | Follow-up |
 |---|---|---|---|
-| 1 | Fonts | **IBM Plex rejected:** "something a bit more stylish please. not over the top but not 1950's mainframe either." Then, also 2026-10-13: **Geist + Geist Mono chosen**: "A text schema is fine we can revisit later if needed". | §4.2 and §4.5; every board now uses Geist. Spec §27 register row and §37 v5.4.5 (DESIGN-01, this PR); files bundled in §9 (c). Revisitable; B and C stay documented. |
+| 1 | Fonts | **IBM Plex rejected:** "something a bit more stylish please. not over the top but not 1050's [sic] mainframe either." Then, also 2026-10-13: **Geist + Geist Mono chosen**: "A text schema is fine we can revisit later if needed". | §4.2 and §4.5; every board now uses Geist. Spec §27 register row and §37 v5.4.5 (DESIGN-01, this PR); files bundled in §9 (c). Revisitable; B and C stay documented. |
 | 2 | Colors and the cobalt accent | **Approved as designed:** "colors seemed fine". | Values in §4.1 stand. |
 | 3 | Blue/orange diverging scale for everyone | **Approved:** "thats fine". | M1-51 theme data. |
 | 4 | High-contrast built-in | **Approved, ship now:** "now is fine well revisit again in m8". | Third built-in theme in M1-51; `ui.theme` gains a high-contrast value (contract PR, §9). |
