@@ -28,6 +28,9 @@ SYNC_SCRIPT = TESTS_FOLDER.parent / "sync_backlog.py"
 REPO_ROOT = TESTS_FOLDER.parents[2]
 PULL_REQUEST_TEMPLATE = REPO_ROOT / ".github/pull_request_template.md"
 SNAPSHOT_PATH = TESTS_FOLDER / "snapshots/dry_run_partial_repo.txt"
+THREAT_MODEL_PATH = REPO_ROOT / "docs/security/threat-model.md"
+CONTROL_PLANE_LAYOUT_PATH = REPO_ROOT / "docs/architecture/layout/rust-control-plane.md"
+PLATFORM_FLOWS_PATH = REPO_ROOT / "docs/architecture/flows/platform.md"
 
 # The fake repository has the real name, so the snapshot's blob URLs look like the real ones.
 REPO = "Snubiss/RASTAI-Research-Studio"
@@ -416,6 +419,40 @@ def test_scope_added_on_github_lives_in_the_backlog_and_the_plan() -> None:
     for item_id, phrases in TRIAGE_SCOPE_IN_BACKLOG.items():
         for phrase in phrases:
             assert phrase in bodies[item_id], f"{item_id} backlog scope lacks {phrase!r}"
+
+
+def table_row(document_text: str, row_id: str) -> str:
+    """The one Markdown table row that starts with `| <row_id> |`."""
+    row_start = f"| {row_id} | "
+    for line in document_text.splitlines():
+        if line.startswith(row_start):
+            return line
+    raise AssertionError(f"no table row {row_id}")
+
+
+def open_question(threat_model_text: str, number: int) -> str:
+    """Open question `<number>` of the threat model: a one-line numbered item under its "Open questions" heading
+    (the table of contents above it is numbered too, so the search starts at the heading)."""
+    heading_at = threat_model_text.index("\n## Open questions\n")
+    questions = threat_model_text[heading_at:]
+    item_start = f"{number}. "
+    for line in questions.splitlines():
+        if line.startswith(item_start):
+            return line
+    raise AssertionError(f"no open question {number}")
+
+
+def test_the_verified_row_skip_has_an_owner() -> None:
+    # The upload skips a blob whose verified blob_objects row already exists, and any archive user can write that
+    # row (R13). R23 left that gap with no owner, so it could drift; open question 8 now owns it, with M11-E05, and
+    # every doc that describes the skip points there.
+    threat_model = THREAT_MODEL_PATH.read_text(encoding="utf-8")
+    question = open_question(threat_model, 8)
+    assert "(R23)" in question
+    assert "M11-E05" in question
+    assert "open question 8" in table_row(threat_model, "R23")
+    for path in (CONTROL_PLANE_LAYOUT_PATH, PLATFORM_FLOWS_PATH):
+        assert "open question 8, decided with M11-E05" in path.read_text(encoding="utf-8"), path.name
 
 
 # ---- The PR template (plan 8.5) ----
