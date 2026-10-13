@@ -70,6 +70,27 @@
     "retired": false
   },
   {
+    "code": "RRS-N0008",
+    "severity": "error",
+    "title": "No such node",
+    "message": "No node {node_id} is known to this daemon.",
+    "basic_text": "Rastai doesn't know this computer.",
+    "fix_text": "Refresh the node list and pick a node from it.",
+    "fix_command_id": "node.list",
+    "docs_anchor": "rrs-n0008",
+    "retired": false
+  },
+  {
+    "code": "RRS-N0009",
+    "severity": "error",
+    "title": "Node call without a valid session token",
+    "message": "A {service} call was refused: it carried no session token of the current handshake.",
+    "basic_text": "Rastai and this computer lost track of their connection.",
+    "fix_text": "Wait a moment: the connection is made again on its own. If it keeps happening, restart Rastai.",
+    "docs_anchor": "rrs-n0009",
+    "retired": false
+  },
+  {
     "code": "RRS-N1001",
     "severity": "error",
     "title": "SSH authentication failed",

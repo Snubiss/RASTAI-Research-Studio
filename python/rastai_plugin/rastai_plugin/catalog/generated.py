@@ -191,6 +191,7 @@ RRS_H4004 = "RRS-H4004"
 RRS_J0001 = "RRS-J0001"
 RRS_J0002 = "RRS-J0002"
 RRS_J0004 = "RRS-J0004"
+RRS_J0005 = "RRS-J0005"
 RRS_J1001 = "RRS-J1001"
 RRS_J1002 = "RRS-J1002"
 RRS_J1003 = "RRS-J1003"
@@ -235,6 +236,8 @@ RRS_N0004 = "RRS-N0004"
 RRS_N0005 = "RRS-N0005"
 RRS_N0006 = "RRS-N0006"
 RRS_N0007 = "RRS-N0007"
+RRS_N0008 = "RRS-N0008"
+RRS_N0009 = "RRS-N0009"
 RRS_N1001 = "RRS-N1001"
 RRS_N1002 = "RRS-N1002"
 RRS_N1003 = "RRS-N1003"
@@ -2142,6 +2145,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         retired=False,
     ),
     CatalogEntry(
+        code=RRS_J0005,
+        severity="error",
+        title="No such job",
+        message="No job {job_id} is known to this daemon.",
+        basic_text="Rastai doesn't know this task.",
+        fix_text="Refresh the job list and pick a job from it.",
+        fix_command_id="job.list",
+        docs_anchor="rrs-j0005",
+        retired=False,
+    ),
+    CatalogEntry(
         code=RRS_J1001,
         severity="error",
         title="Job killed by a signal",
@@ -2623,6 +2637,28 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Check that the clocks of both computers are right, then connect again.",
         fix_command_id="",
         docs_anchor="rrs-n0007",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N0008,
+        severity="error",
+        title="No such node",
+        message="No node {node_id} is known to this daemon.",
+        basic_text="Rastai doesn't know this computer.",
+        fix_text="Refresh the node list and pick a node from it.",
+        fix_command_id="node.list",
+        docs_anchor="rrs-n0008",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N0009,
+        severity="error",
+        title="Node call without a valid session token",
+        message="A {service} call was refused: it carried no session token of the current handshake.",
+        basic_text="Rastai and this computer lost track of their connection.",
+        fix_text="Wait a moment: the connection is made again on its own. If it keeps happening, restart Rastai.",
+        fix_command_id="",
+        docs_anchor="rrs-n0009",
         retired=False,
     ),
     CatalogEntry(

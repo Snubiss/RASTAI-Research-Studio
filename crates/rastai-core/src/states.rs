@@ -131,6 +131,26 @@ const RUN_TRANSITIONS: &[(RunState, RunState)] = &[
     (RunState::Verifying, RunState::Failed),
     (RunState::Preparing, RunState::Cancelled),
     (RunState::Verifying, RunState::Cancelled),
+    // A job that ends before the worker's first record (contracts 9.5): the daemon records a spawn error, a bad
+    // launch or a KILL as failed or cancelled, `job.cancel` of a queued job as cancelled, and the worker's edge
+    // records a CANCEL or SIGTERM that came before the entry ran.
+    (RunState::Created, RunState::Failed),
+    (RunState::Created, RunState::Cancelled),
+    (RunState::Created, RunState::Preempted),
+    // Every way a job ends reaches a run that is checkpointing (contracts 9.1: KILL in any live state).
+    (RunState::Checkpointing, RunState::Paused),
+    (RunState::Checkpointing, RunState::Preempted),
+    (RunState::Checkpointing, RunState::Completed),
+    (RunState::Checkpointing, RunState::Failed),
+    (RunState::Checkpointing, RunState::Cancelled),
+    // A paused worker still answers Control and signals (contracts 9.1), so a paused run ends like a running one.
+    (RunState::Paused, RunState::Completed),
+    (RunState::Paused, RunState::Preempted),
+    (RunState::Paused, RunState::Failed),
+    (RunState::Paused, RunState::Cancelled),
+    // The job of a resume can be cancelled or preempted before it restored the checkpoint.
+    (RunState::Resuming, RunState::Cancelled),
+    (RunState::Resuming, RunState::Preempted),
 ];
 
 pub fn run_state_name(state: RunState) -> &'static str {
@@ -615,6 +635,20 @@ mod tests {
         "running -> completed",
         "running -> failed",
         "running -> cancelled",
+        "created -> failed",
+        "created -> cancelled",
+        "created -> preempted",
+        "checkpointing -> paused",
+        "checkpointing -> preempted",
+        "checkpointing -> completed",
+        "checkpointing -> failed",
+        "checkpointing -> cancelled",
+        "paused -> completed",
+        "paused -> preempted",
+        "paused -> failed",
+        "paused -> cancelled",
+        "resuming -> cancelled",
+        "resuming -> preempted",
         //
         "verifying -> failed",
         "preparing -> cancelled",
@@ -860,7 +894,44 @@ mod tests {
         assert!(!run_transition_allowed(RunState::Created, RunState::Running));
         assert!(!run_transition_allowed(RunState::Preempted, RunState::Running));
         assert!(!run_transition_allowed(RunState::Failed, RunState::Running));
-        assert!(!run_transition_allowed(RunState::Checkpointing, RunState::Completed));
+        assert!(!run_transition_allowed(RunState::Checkpointing, RunState::Verifying));
+        // Preempted is ended but resumable: until the owner decides contracts 14 row 25, a resume is its only exit.
+        assert!(!run_transition_allowed(RunState::Preempted, RunState::Cancelled));
+        assert!(!run_transition_allowed(RunState::Preempted, RunState::Failed));
+    }
+
+    // One assertion per edge contracts 9.5 gained with M1-47, each with what takes it: a job can end in any live
+    // state (contracts 9.1), so every live run state needs a way to each end.
+    #[test]
+    fn every_way_a_job_ends_reaches_the_run_in_any_live_state() {
+        // A spawn error, a bad launch or a worker that never registered: the daemon records the run failed.
+        assert!(run_transition_allowed(RunState::Created, RunState::Failed));
+        // job.cancel of a queued job, or a KILL before the first record: the daemon records it cancelled.
+        assert!(run_transition_allowed(RunState::Created, RunState::Cancelled));
+        // SIGTERM before the job's entry ran: the worker's edge records preempted.
+        assert!(run_transition_allowed(RunState::Created, RunState::Preempted));
+        // A periodic checkpoint that hits a full disk (RRS-T2001) pauses the run.
+        assert!(run_transition_allowed(RunState::Checkpointing, RunState::Paused));
+        // SIGTERM mid-checkpoint: the checkpoint finishes, then the run is preempted.
+        assert!(run_transition_allowed(RunState::Checkpointing, RunState::Preempted));
+        // STOP mid-checkpoint: that checkpoint is the final one.
+        assert!(run_transition_allowed(RunState::Checkpointing, RunState::Completed));
+        // A crash, an OOM, a SIGKILL the node didn't send, or RRS-T2001 on the SIGTERM path.
+        assert!(run_transition_allowed(RunState::Checkpointing, RunState::Failed));
+        // CANCEL, or KILL after the grace period.
+        assert!(run_transition_allowed(RunState::Checkpointing, RunState::Cancelled));
+        // STOP while paused: the run completes, reason stopped.
+        assert!(run_transition_allowed(RunState::Paused, RunState::Completed));
+        // SIGTERM while paused.
+        assert!(run_transition_allowed(RunState::Paused, RunState::Preempted));
+        // A crash, a SIGKILL or exit 4 while paused.
+        assert!(run_transition_allowed(RunState::Paused, RunState::Failed));
+        // CANCEL or KILL while paused.
+        assert!(run_transition_allowed(RunState::Paused, RunState::Cancelled));
+        // job.cancel of the resume's job before it restored the checkpoint.
+        assert!(run_transition_allowed(RunState::Resuming, RunState::Cancelled));
+        // SIGTERM before the resume restored the checkpoint.
+        assert!(run_transition_allowed(RunState::Resuming, RunState::Preempted));
     }
 
     #[test]
