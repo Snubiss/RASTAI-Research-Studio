@@ -40,9 +40,10 @@ afterEach(() => {
  * A segmented control whose value is kept in state, with every change recorded.
  * @param {object} props
  * @param {string[]} props.changes
+ * @param {string} [props.initial]
  */
-function SegmentHarness({ changes }) {
-  const [value, setValue] = useState("all");
+function SegmentHarness({ changes, initial = "all" }) {
+  const [value, setValue] = useState(initial);
   return (
     <SegmentedControl
       label="Log stream"
@@ -159,6 +160,53 @@ describe("SegmentedControl", () => {
     await mounted.unmount();
   });
 
+  test("Tab enters the group at the pressed option, and Shift+Tab after an arrow leaves from the arrowed-to option", async () => {
+    const mounted = await mount(<TabOrderHarness initial="all" />);
+    const [before, all, warnings, , after] = /** @type {HTMLElement[]} */ ([
+      ...mounted.container.querySelectorAll("button"),
+    ]);
+    before.focus();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(all);
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(warnings);
+    // Shift+Tab leaves the group to the button before it: the arrowed-to option is the stop, the pressed one is not.
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(before);
+    await mounted.unmount();
+  });
+
+  test("ArrowRight that wraps to the first option, then Tab, leaves the group to the button after it", async () => {
+    const mounted = await mount(<TabOrderHarness initial="errors" />);
+    const [before, all, , errors, after] = /** @type {HTMLElement[]} */ ([
+      ...mounted.container.querySelectorAll("button"),
+    ]);
+    before.focus();
+    await userEvent.tab();
+    expect(document.activeElement).toBe(errors);
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(all);
+    await userEvent.tab();
+    expect(document.activeElement).toBe(after);
+    await mounted.unmount();
+  });
+
+  test("when focus leaves the group, the next Tab into it lands on the pressed option again", async () => {
+    const mounted = await mount(<TabOrderHarness initial="all" />);
+    const [before, all, warnings, , after] = /** @type {HTMLElement[]} */ ([
+      ...mounted.container.querySelectorAll("button"),
+    ]);
+    before.focus();
+    await userEvent.tab();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(warnings);
+    await userEvent.tab();
+    expect(document.activeElement).toBe(after);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(all);
+    await mounted.unmount();
+  });
+
   test("a disabled group presses nothing and shows its options in the disabled text color", async () => {
     /** @type {string[]} */
     const changes = [];
@@ -180,6 +228,21 @@ describe("SegmentedControl", () => {
     await mounted.unmount();
   });
 });
+
+/**
+ * A button, the segmented group, and another button, so a test can see where Tab and Shift+Tab land.
+ * @param {object} props
+ * @param {string} props.initial
+ */
+function TabOrderHarness({ initial }) {
+  return (
+    <div>
+      <button type="button">before</button>
+      <SegmentHarness changes={[]} initial={initial} />
+      <button type="button">after</button>
+    </div>
+  );
+}
 
 describe("StatTile", () => {
   test("shows the label, the number in the mono face with tabular figures, and the change when there is one", async () => {

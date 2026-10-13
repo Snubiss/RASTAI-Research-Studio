@@ -200,6 +200,23 @@ function TokenHarness({ decisions }) {
 }
 
 /**
+ * Replaces navigator.clipboard for one test. The returned function puts the real one back.
+ * @param {(text: string) => Promise<void>} writeText
+ * @returns {() => void}
+ */
+function stubClipboard(writeText) {
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  return () => {
+    if (original) {
+      Object.defineProperty(navigator, "clipboard", original);
+    } else {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  };
+}
+
+/**
  * @param {ParentNode} root
  * @param {string} text
  * @returns {HTMLButtonElement | undefined}
@@ -225,12 +242,79 @@ describe("the token confirmation", () => {
     expect(text).not.toContain(TOKEN_VALUE);
     expect(dialog.querySelector("input[type=checkbox]")).toBeNull();
     expect(document.activeElement?.textContent).toBe("Cancel");
+    const glyph = dialog.querySelector("svg[aria-hidden=true]");
+    expect(glyph?.parentElement?.textContent).toContain("Rastai security check");
 
     const create = buttonNamed(dialog, "Create token");
     expect(create?.disabled).toBe(false);
     await userEvent.click(/** @type {HTMLElement} */ (create));
     expect(decisions).toEqual(["approve"]);
     await mounted.unmount();
+  });
+
+  test("Create token is disabled once pressed, so a second click cannot approve again", async () => {
+    /** @type {string[]} */
+    const decisions = [];
+    const mounted = await mount(
+      <TokenConfirm
+        tokenName="laptop"
+        canDo={TOKEN_CAN}
+        cannotDo={TOKEN_CANNOT}
+        onApprove={() => decisions.push("approve")}
+        onCancel={() => decisions.push("cancel")}
+      />,
+    );
+    const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
+    const create = /** @type {HTMLButtonElement} */ (buttonNamed(dialog, "Create token"));
+    create.click();
+    await expect.poll(() => create.disabled).toBe(true);
+    expect(getComputedStyle(create).borderTopStyle).toBe("dashed");
+    // A disabled button fires no click, so the plain click() is the second click a double click would send.
+    create.click();
+    expect(decisions).toEqual(["approve"]);
+    await mounted.unmount();
+  });
+
+  test("Copy puts the token on the clipboard and says so, and Done closes the prompt after approval", async () => {
+    /** @type {string[]} */
+    const written = [];
+    const restore = stubClipboard(async (text) => {
+      written.push(text);
+    });
+    try {
+      /** @type {string[]} */
+      const decisions = [];
+      const mounted = await mount(<TokenHarness decisions={decisions} />);
+      const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
+      await userEvent.click(/** @type {HTMLElement} */ (buttonNamed(dialog, "Create token")));
+      await userEvent.click(/** @type {HTMLElement} */ (buttonNamed(dialog, "Copy")));
+      expect(written).toEqual([TOKEN_VALUE]);
+      await expect.poll(() => dialog.querySelector("[role=status]")?.textContent).toBe("Copied.");
+
+      await userEvent.click(/** @type {HTMLElement} */ (buttonNamed(dialog, "Done")));
+      expect(decisions).toEqual(["approve", "cancel"]);
+      await mounted.unmount();
+    } finally {
+      restore();
+    }
+  });
+
+  test("when the clipboard refuses, the prompt says to copy the token by hand", async () => {
+    const restore = stubClipboard(async () => {
+      throw new Error("clipboard blocked");
+    });
+    try {
+      const mounted = await mount(<TokenHarness decisions={[]} />);
+      const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
+      await userEvent.click(/** @type {HTMLElement} */ (buttonNamed(dialog, "Create token")));
+      await userEvent.click(/** @type {HTMLElement} */ (buttonNamed(dialog, "Copy")));
+      await expect
+        .poll(() => dialog.querySelector("[role=status]")?.textContent)
+        .toBe("Copy did not work. Select the token and copy it by hand.");
+      await mounted.unmount();
+    } finally {
+      restore();
+    }
   });
 
   test("after approval the show-once box shows the new token, and Copy takes the focus", async () => {

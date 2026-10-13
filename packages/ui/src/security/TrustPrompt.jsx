@@ -6,7 +6,14 @@
 
 import { useEffect, useId, useRef } from "react";
 
-import { BUTTON_STYLE, DANGER_TEXT_STYLE, HEADING_STYLE, PANEL_STYLE, TEXT_STYLE } from "./locked-styles.js";
+import {
+  BUTTON_STYLE,
+  DANGER_TEXT_STYLE,
+  HEADING_STYLE,
+  PANEL_STYLE,
+  PRIMARY_BUTTON_STYLE,
+  TEXT_STYLE,
+} from "./locked-styles.js";
 import { LockedFocusRing } from "./LockedFocusRing.jsx";
 import { PermissionList } from "./PermissionList.jsx";
 import { SecurityCheckHeader } from "./SecurityCheckHeader.jsx";
@@ -54,7 +61,7 @@ export function TrustPrompt({ pluginName, permissions, onAccept, onDecline }) {
         <button type="button" className="rr-locked" style={BUTTON_STYLE} onClick={onDecline} autoFocus>
           {"Don't install"}
         </button>
-        <button type="button" className="rr-locked" style={BUTTON_STYLE} onClick={onAccept}>
+        <button type="button" className="rr-locked" style={PRIMARY_BUTTON_STYLE} onClick={onAccept}>
           Install
         </button>
       </div>
