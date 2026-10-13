@@ -19,10 +19,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use rastai_core::paths::{DataPaths, environments_dir, rastai_db_path, rastai_db_rebuilding_path};
-use rastai_store::index::reads::{list_table_columns, list_table_rows, open_index_reader};
+use rastai_core::paths::{
+    DataPaths, environments_dir, rastai_db_path, rastai_db_rebuilding_path, rastai_db_salvage_path,
+};
+use rastai_store::index::reads::{TableRows, list_every_table_rows, open_index_reader};
 use rastai_store::rebuild::{
-    COLUMNS_NOT_REBUILT, PAUSE_AFTER_RUN_FOLDERS, PAUSE_BEFORE_RENAME, PAUSE_BEFORE_SWAP, TABLES_NOT_REBUILT,
+    PAUSE_AFTER_RUN_FOLDERS, PAUSE_BEFORE_RENAME, PAUSE_BEFORE_SWAP, rebuilt_table_differences,
 };
 use rastai_store::store::{close_store, open_store};
 use serde_json::Value;
@@ -48,9 +50,6 @@ const PAUSE_VARIABLE: &str = "RASTAI_TEST_PAUSE_AT";
 /// In /proc/<pid>/stat, a process stopped by SIGSTOP, where the pause point leaves the rebuild.
 const STOPPED_STATE: &str = "T";
 const PAUSE_POINTS: &[&str] = &[PAUSE_AFTER_RUN_FOLDERS, PAUSE_BEFORE_SWAP, PAUSE_BEFORE_RENAME];
-
-/// Every table of an index: its name, its column names and its rows as sorted text.
-type IndexTables = Vec<(String, Vec<String>, Vec<Vec<String>>)>;
 
 fn repository_file(relative: &str) -> PathBuf {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(relative);
@@ -165,68 +164,25 @@ fn data_folder_indexed_live(home: &Path) {
 // ---- Reading and comparing indexes ----
 
 /// Every table of the index in `paths`, read through the store (which checks the file as the daemon does).
-fn read_index(paths: &DataPaths) -> IndexTables {
+fn read_index(paths: &DataPaths) -> Vec<TableRows> {
     let store = open_store(paths).unwrap();
-    let mut tables = Vec::new();
-    {
+    let tables = {
         let reader = open_index_reader(&store.index_readers).unwrap();
-        for table in list_table_columns(&reader).unwrap() {
-            let rows = list_table_rows(&reader, &table.table_name).unwrap();
-            tables.push((table.table_name, table.column_names, rows));
-        }
-    }
+        list_every_table_rows(&reader).unwrap()
+    };
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     runtime.block_on(close_store(store));
     tables
 }
 
-/// The table's rows without the columns no source holds, sorted again.
-fn rebuildable_rows(table_name: &str, column_names: &[String], rows: &[Vec<String>]) -> Vec<Vec<String>> {
-    let skipped: &[&str] = COLUMNS_NOT_REBUILT
-        .iter()
-        .find(|columns| columns.table_name == table_name)
-        .map(|columns| columns.column_names)
-        .unwrap_or(&[]);
-    let mut kept_rows: Vec<Vec<String>> = rows
-        .iter()
-        .map(|row| {
-            let mut kept = Vec::new();
-            for (index, value) in row.iter().enumerate() {
-                if !skipped.contains(&column_names[index].as_str()) {
-                    kept.push(value.clone());
-                }
-            }
-            kept
-        })
-        .collect();
-    kept_rows.sort();
-    kept_rows
-}
-
 /// Every rebuildable table of `rebuilt` equals `live` row by row; the tables a rebuild starts empty are empty.
-fn assert_rebuilt_matches(live: &IndexTables, rebuilt: &IndexTables) {
-    let live_names: Vec<&String> = live.iter().map(|(name, _, _)| name).collect();
-    let rebuilt_names: Vec<&String> = rebuilt.iter().map(|(name, _, _)| name).collect();
-    assert_eq!(live_names, rebuilt_names);
-    for ((table_name, column_names, live_rows), (_, _, rebuilt_rows)) in live.iter().zip(rebuilt) {
-        if TABLES_NOT_REBUILT.contains(&table_name.as_str()) {
-            assert!(
-                rebuilt_rows.is_empty(),
-                "{table_name} should start empty: {rebuilt_rows:?}"
-            );
-            continue;
-        }
-        assert_eq!(
-            rebuildable_rows(table_name, column_names, rebuilt_rows),
-            rebuildable_rows(table_name, column_names, live_rows),
-            "table {table_name} differs"
-        );
-    }
+fn assert_rebuilt_matches(live: &[TableRows], rebuilt: &[TableRows]) {
+    assert_eq!(rebuilt_table_differences(live, rebuilt), Vec::<String>::new());
 }
 
-fn row_count(tables: &IndexTables, table_name: &str) -> usize {
-    let found = tables.iter().find(|(name, _, _)| name == table_name).unwrap();
-    found.2.len()
+fn row_count(tables: &[TableRows], table_name: &str) -> usize {
+    let found = tables.iter().find(|table| table.table_name == table_name).unwrap();
+    found.rows.len()
 }
 
 // ---- Running the rebuild ----
@@ -323,6 +279,7 @@ fn a_rebuild_killed_at_any_point_leaves_a_usable_index() {
 
     rebuild(&home);
     assert!(!rastai_db_rebuilding_path(&paths).exists());
+    assert!(!rastai_db_salvage_path(&paths).exists());
     assert_rebuilt_matches(&live, &read_index(&paths));
 }
 

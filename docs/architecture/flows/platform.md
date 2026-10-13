@@ -1369,12 +1369,12 @@ Runs from `rastai storage rebuild-index`, a CLI-only command that works offline 
 
 ```mermaid
 flowchart TD
-  A["rastai-cli takes daemon.lock"] --> B["Remove a rastai.db.rebuilding a killed rebuild left"]
+  A["rastai-cli takes daemon.lock"] --> B["Remove a rastai.db.rebuilding or rastai.db.salvage<br/>a killed rebuild left"]
   B --> C["rastai-store creates rastai.db.rebuilding and runs migrations"]
   C --> D{"L2: a snapshot in backups passes quick_check?<br/>newest first, see 8.4"}
   D -->|"yes"| E["Copy tokens, nodes, plugins, projects<br/>from that snapshot"]
   D -->|"no snapshot, or before L2"| F["Those four tables start empty"]
-  E --> SAL["Read the same four tables from the broken file<br/>its readable rows win, windowed salvage from L2"]
+  E --> SAL["Read the same four tables from a copy of the broken file, rastai.db.salvage<br/>its readable rows win, windowed salvage from L2"]
   F --> SAL
   SAL --> TOK["Tokens the broken file can't read come back revoked<br/>plugin folders with no row start disabled until re-trusted"]
   TOK --> G["Scan the run folders for run.json"]
@@ -1389,7 +1389,7 @@ flowchart TD
 ```
 
 - **The four kept tables** (`tokens`, `nodes`, `plugins`, `projects`) can't be rebuilt from logs (contracts 8.2). There is no `settings` table: settings live only in their files (contracts 11.1), so a rebuild never touches them.
-- **Before L2** the rebuild reads the four kept tables straight from the broken file. A table it can't read starts empty and fails closed: no tokens (clients get `RRS-C1002` and the owner creates new ones), nodes need pairing again, plugins start `disabled` until trusted again, and projects come back on their next `project.open`.
+- **Before L2** the rebuild reads the four kept tables from a copy of the broken file, `rastai.db.salvage` (migrated if it is older, removed once read), so the file kept as `rastai.db.broken-<unix_ms>` is byte for byte the one the user had. A table it can't read starts empty and fails closed: no tokens (clients get `RRS-C1002` and the owner creates new ones), nodes need pairing again, plugins start `disabled` until trusted again, and projects come back on their next `project.open`.
 - **(L2) Snapshot base and salvage.** The four tables never come only from the file that failed its check. The base is the newest snapshot that passes `quick_check` (8.4, at most a day old). Rows the broken file still reads are newer, so they replace the snapshot's rows by primary key. The read is the same windowed salvage as `vault.db` recovery (8.4), so one bad page costs only the rows on it.
 - **Tokens fail closed.** A token row the broken file can't read may have been revoked after the snapshot, so it comes back revoked; the owner creates a new one. Nodes paired after the snapshot whose rows are unreadable need pairing again. Plugin folders with no row in either source start `disabled` with no granted permissions.
 - **Not rebuilt:** `undo_steps` (history only; every document starts with an empty stack), `transfers` (in-flight transfers restart from their partial file sizes) and `archive_cursors` (M11). The cursors start empty, so the next archive sync re-sends everything. That is safe because every archive write is an idempotent upsert (8.6), but it takes as long as a first sync.

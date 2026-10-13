@@ -74,6 +74,30 @@ pub fn list_table_rows(reader: &IndexReader, table_name: &str) -> Result<Vec<Vec
     Ok(table_rows)
 }
 
+/// One whole table as text: its name, its columns in declaration order and every row as `list_table_rows` writes
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableRows {
+    pub table_name: String,
+    pub column_names: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+/// Every table of the database with every row, sorted by table name: a whole index as text, so two indexes can be
+/// compared table by table (the rebuild's row by row check, `rebuilt_table_differences`).
+pub fn list_every_table_rows(reader: &IndexReader) -> Result<Vec<TableRows>, StoreError> {
+    let mut tables = Vec::new();
+    for table in list_table_columns(reader)? {
+        let rows = list_table_rows(reader, &table.table_name)?;
+        tables.push(TableRows {
+            table_name: table.table_name,
+            column_names: table.column_names,
+            rows,
+        });
+    }
+    Ok(tables)
+}
+
 /// Lends one reader from the pool, waiting only when every reader is in use.
 pub fn open_index_reader(pool: &ReaderPool) -> Result<IndexReaderGuard<'_>, StoreError> {
     Ok(IndexReaderGuard {

@@ -71,11 +71,12 @@ const ENCRYPTED_SECRETS_FILE: &str = "secrets.enc";
 // <data>
 const RASTAI_DB_FILE: &str = "rastai.db";
 const VAULT_DB_FILE: &str = "vault.db";
-// Database copies sit beside the database: `rastai.db.pre-<version>`, `rastai.db.broken-<unix_ms>`, and the index a
-// rebuild is still writing, `rastai.db.rebuilding`.
+// Database copies sit beside the database: `rastai.db.pre-<version>`, `rastai.db.broken-<unix_ms>`, the index a
+// rebuild is still writing, `rastai.db.rebuilding`, and the copy of the old index it reads, `rastai.db.salvage`.
 const PRE_UPDATE_MARK: &str = "pre";
 const BROKEN_MARK: &str = "broken";
 const REBUILDING_MARK: &str = "rebuilding";
+const SALVAGE_MARK: &str = "salvage";
 const BLOBS_FOLDER: &str = "blobs";
 const RUNS_FOLDER: &str = "runs";
 const DAEMON_FOLDER: &str = "daemon";
@@ -274,6 +275,14 @@ pub fn rastai_db_broken_path(paths: &DataPaths, unix_ms: i64) -> PathBuf {
 pub fn rastai_db_rebuilding_path(paths: &DataPaths) -> PathBuf {
     let rebuilding_file = format!("{RASTAI_DB_FILE}.{REBUILDING_MARK}");
     paths.data.join(rebuilding_file)
+}
+
+/// `<data>/rastai.db.salvage`: the copy of the old index `storage rebuild-index` reads its kept tables from, so the
+/// old file itself is never opened for writing and is kept as it was. Removed once read; the next rebuild removes one
+/// a crash left.
+pub fn rastai_db_salvage_path(paths: &DataPaths) -> PathBuf {
+    let salvage_file = format!("{RASTAI_DB_FILE}.{SALVAGE_MARK}");
+    paths.data.join(salvage_file)
 }
 
 pub fn blobs_dir(paths: &DataPaths) -> PathBuf {
@@ -775,6 +784,7 @@ mod tests {
                 "/r/data/rastai.db.broken-1791633600000",
             ),
             (rastai_db_rebuilding_path(&paths), "/r/data/rastai.db.rebuilding"),
+            (rastai_db_salvage_path(&paths), "/r/data/rastai.db.salvage"),
             (runs_dir(&paths), "/r/data/runs"),
             (run_events_log_path(&paths, "run_01"), "/r/data/runs/run_01/events.log"),
             (daemon_events_log_path(&paths), "/r/data/daemon/events.log"),

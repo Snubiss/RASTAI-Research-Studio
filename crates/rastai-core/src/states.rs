@@ -13,6 +13,7 @@
 //! `UNSPECIFIED` is the proto default, not a state anything is in: it has the name `unspecified` for logs, isn't
 //! parsed, and takes part in no transition.
 
+use rastai_formats::documents::run_record::RunKind;
 use rastai_proto::common::v1::{
     EvalRunState, JobState, LeaseState, ModelState, NodeState, PluginState, RunState, SandboxState,
 };
@@ -104,6 +105,16 @@ pub fn job_kind_name(kind: i32) -> String {
 }
 
 // ---- Training run (contracts 9.5, training flow 4.2 and the chain chart of 6) ----
+
+/// A run kind's name as `runs.kind` holds it and `run.json` writes it (contracts 9.5): `train`, `data_import`. The
+/// daemon names a new run's row with it and the rebuild names a rebuilt one, so the two can't differ. The name is
+/// the document's own JSON spelling, so `run.json` and `runs.kind` can't differ either.
+pub fn run_kind_name(kind: RunKind) -> String {
+    match serde_json::to_value(kind) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => String::new(),
+    }
+}
 
 const RUN_STATES: &[RunState] = &[
     RunState::Created,
@@ -610,6 +621,12 @@ mod tests {
         assert_eq!(job_kind_name(JobKind::Train as i32), "train");
         assert_eq!(job_kind_name(JobKind::DoctorSelftest as i32), "doctor_selftest");
         assert_eq!(job_kind_name(999), "999");
+    }
+
+    #[test]
+    fn a_run_kind_is_named_as_run_json_writes_it() {
+        assert_eq!(run_kind_name(RunKind::Train), "train");
+        assert_eq!(run_kind_name(RunKind::DataImport), "data_import");
     }
 
     // Each machine's transitions in contracts 9's words, "from -> to", read with the parse functions, so a wrong

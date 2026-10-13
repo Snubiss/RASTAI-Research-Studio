@@ -6,13 +6,20 @@
 //!   `apply_event_record`) and the daemon log through `apply_daemon_events`, so rebuilt rows can't differ from live
 //!   ones. The kept tables (`tokens`, `nodes`, `plugins`, `projects`) are copied from the old file, whatever of them
 //!   it still reads; a table it can't read starts empty, which fails closed (contracts 8.2).
+//! - **The old file is kept as it was.** The kept tables are read from a copy, `rastai.db.salvage`, which is
+//!   migrated to this build's columns if it is older and removed once read. The old file itself is never opened, so
+//!   `rastai.db.broken-<unix_ms>` holds the very bytes `rastai.db` had (with its `-wal`, if it had one).
 //! - **Crash-safe.** The new index is written to `rastai.db.rebuilding` and only takes the old one's place once it
 //!   is whole and has passed `quick_check`. The old file is linked to `rastai.db.broken-<unix_ms>` first and stays
 //!   at `rastai.db` until the rename, so a kill at any point leaves a usable index: the old one, or the new one. A
-//!   rebuild started again removes what a killed one left.
+//!   rebuild started again removes the `rastai.db.rebuilding` and `rastai.db.salvage` a killed one left. A rebuild
+//!   killed after the link leaves its `rastai.db.broken-<unix_ms>` behind, and every finished rebuild keeps one: they
+//!   are the user's to delete, and the report names only the one this rebuild made.
 //! - **Reading is tolerant.** A torn tail ends a log; a corrupt frame (`RRS-S2002`), a sequence gap (`RRS-S2003`)
 //!   or a record a run's log may not carry (`RRS-S2004`) ends it with that code in the report, and the rebuild goes
-//!   on with the next log. A `run.json` that can't be read leaves its run out, with the reason.
+//!   on with the next log. A `run.json` that can't be read (`RRS-S0006`) leaves its run out; one with a value the
+//!   rebuild can't use (`RRS-E2006` at that value: a run id that isn't its folder's, a `created_at` that isn't a
+//!   time, a `job_spec` of another run's job) leaves its run, or its job, out.
 //! - **Blobs.** An artifact whose home is this machine and whose blob is gone is dropped (`RRS-S1002`); with
 //!   `verify_blobs` each such blob is hashed again and a mismatch quarantined first (`RRS-S1001`).
 //!
@@ -33,12 +40,14 @@ use std::path::{Path, PathBuf};
 
 use rastai_core::ids::{IdPrefix, id_has_prefix};
 use rastai_core::paths::{
-    DataPaths, blobs_dir, rastai_db_broken_path, rastai_db_path, rastai_db_rebuilding_path, runs_dir,
+    DataPaths, blobs_dir, rastai_db_broken_path, rastai_db_path, rastai_db_rebuilding_path, rastai_db_salvage_path,
+    runs_dir,
 };
 use rastai_core::proto_json::job_spec_from_json;
-use rastai_core::states::{job_kind_name, job_state_name};
+use rastai_core::states::{job_kind_name, job_state_name, run_kind_name};
 use rastai_core::time::{now_unix_ms, parse_rfc3339};
-use rastai_diag::diagnostic::{Diagnostic, Severity, diagnostic};
+use rastai_diag::diagnostic::{Diagnostic, Severity, diagnostic_at};
+use rastai_diag::path::{DiagnosticPath, format_path};
 use rastai_formats::byte_source::SliceSource;
 use rastai_formats::documents::Document;
 use rastai_formats::documents::run_record::RunRecord;
@@ -56,7 +65,7 @@ use crate::index::kept_tables::{
     NodeRow, PluginRow, ProjectRow, TokenRow, insert_token, list_nodes, list_plugins, list_projects, list_tokens,
     upsert_node, upsert_plugin, upsert_project,
 };
-use crate::index::reads::IndexReader;
+use crate::index::reads::{IndexReader, TableRows};
 use crate::index::runs::{JobRow, RunRow, read_job_run_id, upsert_job, upsert_run};
 use crate::indexer::{apply_daemon_events, apply_run_events};
 use crate::sqlite::{
@@ -80,8 +89,13 @@ const LOCAL_TRANSPORT: &str = "local";
 /// SQLite's companions of a database file in WAL mode: they belong to the file of the same name.
 const WAL_FILE_SUFFIX: &str = "-wal";
 const SHARED_MEMORY_FILE_SUFFIX: &str = "-shm";
-/// `RRS-S0006`, "Couldn't read saved data": a `run.json` the rebuild can't use.
+/// `RRS-S0006`, the store's code for a failed read (crate CLAUDE.md): a `run.json` the file system won't give up.
 const CODE_READ_FAILED: &str = "RRS-S0006";
+/// `RRS-E2006`, "Value isn't in its required form", at the value: what a document check reports for a value it
+/// can't use, here one that leaves a run or its job out of the rebuilt index.
+const CODE_VALUE_FORM: &str = "RRS-E2006";
+/// The run record's document type, which a `run.json` must be.
+const RUN_RECORD_EXPECTED: &str = "a rastai.run_record document";
 /// The test-only points `RebuildOptions.pause_at` may name (contracts 15.9): the kill -9 test stops the rebuild
 /// there and kills it.
 pub const PAUSE_AFTER_RUN_FOLDERS: &str = "store.rebuild.after_run_folders";
@@ -166,6 +180,7 @@ pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<Rebu
     std::fs::create_dir_all(&paths.data).map_err(|error| not_writable(&paths.data, &error))?;
     let rebuilding_path = rastai_db_rebuilding_path(paths);
     remove_database_files(&rebuilding_path)?;
+    remove_database_files(&rastai_db_salvage_path(paths))?;
     let mut report = RebuildReport::default();
     if let Err(error) = write_rebuilt_index(paths, &rebuilding_path, options, &mut report) {
         let _ = remove_database_files(&rebuilding_path);
@@ -197,17 +212,45 @@ fn write_rebuilt_index(
 
 // ---- The kept tables ----
 
-/// The four kept tables as the old file still reads them. No old file: all four start empty. A file this build
-/// can't open, or a table it can't read, is reported and starts empty. A file a newer app migrated stops the rebuild
-/// (`RRS-S0002`): this build would drop what it doesn't know.
+/// The four kept tables as the old file still reads them. No old file: all four start empty. They are read from a
+/// copy, `rastai.db.salvage`, removed afterwards: opening the old file would migrate it and write to it, and the
+/// copy kept at `rastai.db.broken-<unix_ms>` must be the file as it was. A copy that can't be made stops the
+/// rebuild, since going on would drop every token and node.
 fn read_kept_tables(paths: &DataPaths, report: &mut RebuildReport) -> Result<KeptRows, StoreError> {
     let old_path = rastai_db_path(paths);
     if !old_path.exists() {
         return Ok(KeptRows::default());
     }
-    let connection = match open_database_for_salvage(&old_path, INDEX_MIGRATIONS) {
+    let salvage_path = rastai_db_salvage_path(paths);
+    let kept = match copy_database_files(&old_path, &salvage_path) {
+        Ok(()) => read_kept_tables_from(&old_path, &salvage_path, report),
+        Err(error) => Err(error),
+    };
+    remove_database_files(&salvage_path)?;
+    kept
+}
+
+/// The kept tables of the copy at `salvage_path`. A copy this build can't open, or a table it can't read, is
+/// reported and starts empty. A file a newer app migrated stops the rebuild (`RRS-S0002`, naming the old file):
+/// this build would drop what it doesn't know.
+fn read_kept_tables_from(
+    old_path: &Path,
+    salvage_path: &Path,
+    report: &mut RebuildReport,
+) -> Result<KeptRows, StoreError> {
+    let connection = match open_database_for_salvage(salvage_path, INDEX_MIGRATIONS) {
         Ok(connection) => connection,
-        Err(error @ StoreError::SchemaTooNew { .. }) => return Err(error),
+        Err(StoreError::SchemaTooNew {
+            found_version,
+            newest_known_version,
+            ..
+        }) => {
+            return Err(StoreError::SchemaTooNew {
+                path: old_path.to_path_buf(),
+                found_version,
+                newest_known_version,
+            });
+        }
         Err(error) => {
             report.diagnostics.push(store_error_diagnostic(&error));
             return Ok(KeptRows::default());
@@ -333,7 +376,9 @@ fn read_run_record(run_folder: &Path, report: &mut RebuildReport) -> Option<RunR
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) => {
-            report_unusable_run(report, &format!("{file_name}: {error}"));
+            let reason = format!("{file_name}: {error}");
+            let unreadable = diagnostic_at(CODE_READ_FAILED, &[("reason", &reason)], &file_name);
+            report.diagnostics.push(unreadable);
             return None;
         }
     };
@@ -348,24 +393,40 @@ fn read_run_record(run_folder: &Path, report: &mut RebuildReport) -> Option<RunR
         return None;
     }
     let Some(Document::RunRecord(record)) = outcome.document else {
-        report_unusable_run(report, &format!("{file_name} is not a run record"));
+        report_unusable_value(report, &path, "", "this document", RUN_RECORD_EXPECTED);
         return None;
     };
-    let folder_name = run_folder.file_name().map(|name| name.to_string_lossy().into_owned());
-    if folder_name.as_deref() != Some(record.run_id.as_str()) || !id_has_prefix(&record.run_id, IdPrefix::Run) {
-        report_unusable_run(
-            report,
-            &format!("{file_name} names run {:?}, not its folder's", record.run_id),
-        );
+    let folder_name = run_folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if folder_name != record.run_id || !id_has_prefix(&record.run_id, IdPrefix::Run) {
+        let found = format!("{:?}", record.run_id);
+        let expected = format!("{folder_name}, the name of its folder");
+        report_unusable_value(report, &path, "/run_id", &found, &expected);
         return None;
     }
     Some(record)
 }
 
-fn report_unusable_run(report: &mut RebuildReport, reason: &str) {
+/// A value of `run.json` the rebuild can't use, which leaves its run or its job out: `RRS-E2006` at that value, as a
+/// document check reports one. `json_pointer` is "" for the whole document.
+fn report_unusable_value(
+    report: &mut RebuildReport,
+    record_path: &Path,
+    json_pointer: &str,
+    found: &str,
+    expected: &str,
+) {
+    let location = DiagnosticPath {
+        file: record_path.display().to_string(),
+        json_pointer: json_pointer.to_string(),
+        ..DiagnosticPath::default()
+    };
+    let values = [("found", found), ("expected", expected)];
     report
         .diagnostics
-        .push(diagnostic(CODE_READ_FAILED, &[("reason", reason)]));
+        .push(diagnostic_at(CODE_VALUE_FORM, &values, &format_path(&location)));
 }
 
 /// One run's rows: its `runs` row and its first job's row from `run.json`, then its log. Returns how many records
@@ -377,16 +438,14 @@ fn rebuild_one_run(
     home_node_id: &str,
     report: &mut RebuildReport,
 ) -> Result<Option<u64>, StoreError> {
-    let created_unix_ms = match parse_rfc3339(&record.created_at) {
-        Ok(created_unix_ms) => created_unix_ms,
-        Err(error) => {
-            let reason = format!("{}: created_at {error:?}", run_folder.join(RUN_RECORD_FILE).display());
-            report_unusable_run(report, &reason);
-            return Ok(None);
-        }
+    let record_path = run_folder.join(RUN_RECORD_FILE);
+    let Ok(created_unix_ms) = parse_rfc3339(&record.created_at) else {
+        let found = format!("{:?}", record.created_at);
+        report_unusable_value(report, &record_path, "/created_at", &found, "an RFC 3339 time");
+        return Ok(None);
     };
     upsert_run(transaction, &run_row(record, home_node_id, created_unix_ms))?;
-    write_first_job(transaction, record, home_node_id, report)?;
+    write_first_job(transaction, &record_path, record, home_node_id, report)?;
     let applied = apply_run_log(transaction, &run_folder.join(RUN_EVENTS_FILE), &record.run_id, report)?;
     Ok(Some(applied))
 }
@@ -395,7 +454,7 @@ fn rebuild_one_run(
 fn run_row(record: &RunRecord, home_node_id: &str, created_unix_ms: i64) -> RunRow {
     RunRow {
         run_id: record.run_id.clone(),
-        kind: run_kind_name(record),
+        kind: run_kind_name(record.kind),
         state: RUN_CREATED_STATE.to_string(),
         project_id: String::new(),
         node_id: home_node_id.to_string(),
@@ -409,19 +468,12 @@ fn run_row(record: &RunRecord, home_node_id: &str, created_unix_ms: i64) -> RunR
     }
 }
 
-/// The run kind's name in contracts 9.5, as `run.json` writes it (`train`).
-fn run_kind_name(record: &RunRecord) -> String {
-    match serde_json::to_value(record.kind) {
-        Ok(serde_json::Value::String(name)) => name,
-        _ => String::new(),
-    }
-}
-
 /// The `queued` row of the job `run.json`'s `job_spec` started the run with, as `submit_job` writes it; the daemon
 /// log's `job.state_changed` records then move it. A run without a job (a chain or imported run) has none. A
 /// `job_spec` that names a job of another run, or no job id at all, is reported and left out.
 fn write_first_job(
     transaction: &SqliteTransaction<'_>,
+    record_path: &Path,
     record: &RunRecord,
     home_node_id: &str,
     report: &mut RebuildReport,
@@ -432,18 +484,17 @@ fn write_first_job(
     let spec = match job_spec_from_json(spec_json) {
         Ok(spec) => spec,
         Err(reason) => {
-            report_unusable_run(report, &format!("run {}: job_spec {reason}", record.run_id));
+            let found = format!("a job_spec that can't be read ({reason})");
+            report_unusable_value(report, record_path, "/job_spec", &found, "a JobSpec");
             return Ok(());
         }
     };
     let owner = read_job_run_id(transaction, &spec.job_id)?;
     let owned_elsewhere = owner.is_some_and(|owner| owner != record.run_id);
     if !id_has_prefix(&spec.job_id, IdPrefix::Job) || spec.run_id != record.run_id || owned_elsewhere {
-        let reason = format!(
-            "run {}: job_spec names job {:?} of run {:?}",
-            record.run_id, spec.job_id, spec.run_id
-        );
-        report_unusable_run(report, &reason);
+        let found = format!("job {:?} of run {:?}", spec.job_id, spec.run_id);
+        let expected = format!("a job of run {} that no other run's job_spec names", record.run_id);
+        report_unusable_value(report, record_path, "/job_spec/job_id", &found, &expected);
         return Ok(());
     }
     let job = JobRow {
@@ -501,14 +552,14 @@ fn apply_run_batch(
     let applied = run_in_savepoint(transaction, BATCH_SAVEPOINT, |inner| {
         apply_run_events(inner, run_id, batch)
     });
-    let refused_sequence = match &applied {
+    let refused_sequence = match applied {
         Ok(()) => return Ok((batch.len() as u64, false)),
-        Err(StoreError::RunLogRecordRefused { sequence, .. }) => *sequence,
-        Err(other) => return Err(other.clone()),
+        Err(refused @ StoreError::RunLogRecordRefused { sequence, .. }) => {
+            report.diagnostics.push(store_error_diagnostic(&refused));
+            sequence
+        }
+        Err(other) => return Err(other),
     };
-    if let Err(error) = &applied {
-        report.diagnostics.push(store_error_diagnostic(error));
-    }
     let before: Vec<EventRecord> = batch
         .iter()
         .filter(|record| record.sequence < refused_sequence)
@@ -634,9 +685,10 @@ fn blob_problem(blobs: &BlobStore, content_hash: &str, verify: bool) -> Option<S
 
 /// Puts the finished new index at `rastai.db`. The old file is linked (or copied) to `rastai.db.broken-<unix_ms>`
 /// with its `-wal` first, and stays at `rastai.db` until the rename replaces it, so there is always an index there.
-/// Its `-wal` and `-shm` are removed before the rename, since SQLite would apply an old `-wal` to the new file. The
-/// rebuild opened and closed the old file to read it, which moves a `-wal`'s pages into it, so normally there is
-/// none. Returns where the old index was kept.
+/// Its `-wal` and `-shm` are removed before the rename, since SQLite would apply an old `-wal` to the new file; the
+/// kept copy has the `-wal` under its own name, and SQLite makes a new `-shm` when it is opened. A kill between the
+/// removal and the rename leaves the old file at `rastai.db` without its `-wal`, so pages only the `-wal` held are
+/// missing there, but never from the kept copy beside it. Returns where the old index was kept.
 fn swap_in_rebuilt_index(
     paths: &DataPaths,
     rebuilding_path: &Path,
@@ -661,7 +713,9 @@ fn swap_in_rebuilt_index(
     Ok(old_index_path)
 }
 
-/// A second name for the old file: a hard link costs no space; a filesystem without links gets a copy.
+/// A second name for the old file: a hard link costs no space; a filesystem without links gets a copy. A link shares
+/// the old file's bytes, which is safe because nothing writes them: the rebuild read a copy (`read_kept_tables`), and
+/// after the rename no one opens the old file under `rastai.db` again.
 fn keep_old_file(path: &Path, kept_path: &Path) -> Result<(), StoreError> {
     if !path.exists() {
         return Ok(());
@@ -671,6 +725,20 @@ fn keep_old_file(path: &Path, kept_path: &Path) -> Result<(), StoreError> {
     }
     std::fs::copy(path, kept_path).map_err(|error| not_writable(kept_path, &error))?;
     sync_file(kept_path)
+}
+
+/// Copies a database file and its `-wal`, if it has one, to `copy_path`, so the copy holds every committed page.
+/// The `-shm` is left: it is only an index into the `-wal`, which SQLite builds again on open. No one writes the
+/// file meanwhile (the caller holds `daemon.lock`).
+fn copy_database_files(database_path: &Path, copy_path: &Path) -> Result<(), StoreError> {
+    std::fs::copy(database_path, copy_path).map_err(|error| not_writable(copy_path, &error))?;
+    let wal_path = companion_path(database_path, WAL_FILE_SUFFIX);
+    if !wal_path.exists() {
+        return Ok(());
+    }
+    let wal_copy_path = companion_path(copy_path, WAL_FILE_SUFFIX);
+    std::fs::copy(&wal_path, &wal_copy_path).map_err(|error| not_writable(&wal_copy_path, &error))?;
+    Ok(())
 }
 
 /// `rastai.db-wal` for `rastai.db`: SQLite names a database's companion files this way.
@@ -720,6 +788,63 @@ fn not_writable(path: &Path, error: &std::io::Error) -> StoreError {
     }
 }
 
+// ---- Comparing a rebuilt index with the live one ----
+
+/// How `rebuilt` differs from `live` beyond what a rebuild can't bring back: one line per difference, none when they
+/// match. Every table must be in both; a table of `TABLES_NOT_REBUILT` must be empty in `rebuilt`, and every other
+/// one must hold the same rows once the `COLUMNS_NOT_REBUILT` are left out. `tests/rebuild_index.rs` (here and in
+/// rastai-cli) checks a rebuild with it.
+pub fn rebuilt_table_differences(live: &[TableRows], rebuilt: &[TableRows]) -> Vec<String> {
+    let live_names: Vec<&str> = live.iter().map(|table| table.table_name.as_str()).collect();
+    let rebuilt_names: Vec<&str> = rebuilt.iter().map(|table| table.table_name.as_str()).collect();
+    if live_names != rebuilt_names {
+        return vec![format!(
+            "the tables differ: live {live_names:?}, rebuilt {rebuilt_names:?}"
+        )];
+    }
+    let mut differences = Vec::new();
+    for (live_table, rebuilt_table) in live.iter().zip(rebuilt) {
+        let table_name = &live_table.table_name;
+        if TABLES_NOT_REBUILT.contains(&table_name.as_str()) {
+            if !rebuilt_table.rows.is_empty() {
+                differences.push(format!("{table_name} should start empty: {:?}", rebuilt_table.rows));
+            }
+            continue;
+        }
+        let live_rows = rebuildable_rows(live_table);
+        let rebuilt_rows = rebuildable_rows(rebuilt_table);
+        if live_rows != rebuilt_rows {
+            differences.push(format!(
+                "table {table_name} differs: live {live_rows:?}, rebuilt {rebuilt_rows:?}"
+            ));
+        }
+    }
+    differences
+}
+
+/// The table's rows without the columns no source holds, sorted again.
+fn rebuildable_rows(table: &TableRows) -> Vec<Vec<String>> {
+    let skipped: &[&str] = match COLUMNS_NOT_REBUILT
+        .iter()
+        .find(|columns| columns.table_name == table.table_name)
+    {
+        Some(columns) => columns.column_names,
+        None => &[],
+    };
+    let mut kept_rows = Vec::with_capacity(table.rows.len());
+    for row in &table.rows {
+        let mut kept = Vec::new();
+        for (value, column_name) in row.iter().zip(&table.column_names) {
+            if !skipped.contains(&column_name.as_str()) {
+                kept.push(value.clone());
+            }
+        }
+        kept_rows.push(kept);
+    }
+    kept_rows.sort();
+    kept_rows
+}
+
 // ---- The test-only pause ----
 
 /// Stops this process with SIGSTOP when `options.pause_at` names `point`, so the kill -9 test's SIGKILL lands
@@ -740,10 +865,19 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use crate::sqlite::Migration;
+    use crate::sqlite::{Migration, SqlValue, execute, integer_value, open_database_for_reading, text_value};
 
     // The migration a newer app would have added; this build doesn't know it.
     const NEWER_MIGRATION_SQL: &str = "CREATE TABLE added_by_a_newer_app (note TEXT NOT NULL) STRICT;";
+    // A creator and the token it made, both live when the damage happens.
+    const CREATOR_TOKEN_ID: &str = "tok_01JA2B3C4D5E6F7G8H9J0K1M2A";
+    const CHILD_TOKEN_ID: &str = "tok_01JA2B3C4D5E6F7G8H9J0K1M2B";
+    const TOKEN_CREATED_UNIX_MS: i64 = 1_791_700_000_000;
+    const TOKEN_REVOKED_UNIX_MS: i64 = 1_791_700_100_000;
+    // Damage that loses a revoke's cascade, or the creator's row, which the store's own writes never do.
+    const REVOKE_CREATOR_ALONE_SQL: &str = "UPDATE tokens SET revoked_unix_ms = ?1 WHERE token_id = ?2";
+    const DELETE_CREATOR_SQL: &str = "DELETE FROM tokens WHERE token_id = ?1";
+    const TOKEN_REVOKED_CODE: &str = "RRS-C1006";
 
     fn test_paths(test_name: &str) -> DataPaths {
         let root = std::env::temp_dir().join(format!("rastai-store-rebuild-{}-{test_name}", std::process::id()));
@@ -788,6 +922,141 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, ["rastai.db"], "a newer app's index was copied or set aside");
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // An older index is migrated to be read, but only in the scratch copy: the kept old index is the file as it was,
+    // so its schema and bytes are the ones the user had (RRS-S0003 is the reason to keep it).
+    #[test]
+    fn the_kept_old_index_is_the_file_as_it_was_when_its_schema_is_older() {
+        let paths = test_paths("older-schema");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let older_migrations = &INDEX_MIGRATIONS[..INDEX_MIGRATIONS.len() - 1];
+        let index_path = rastai_db_path(&paths);
+        drop(open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, older_migrations).unwrap());
+        let bytes_before = std::fs::read(&index_path).unwrap();
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        let old_index_path = report.old_index_path.unwrap();
+        assert_eq!(
+            std::fs::read(&old_index_path).unwrap(),
+            bytes_before,
+            "the kept old index was changed"
+        );
+        assert!(
+            !rastai_db_salvage_path(&paths).exists(),
+            "the scratch copy was left behind"
+        );
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // A daemon killed with rows still in rastai.db-wal: the scratch copy takes the -wal along, so those rows are
+    // kept, and the kept old index has its -wal under its own name.
+    #[test]
+    fn rows_still_in_the_old_index_wal_are_kept_and_the_wal_is_kept_with_it() {
+        let killed_paths = test_paths("wal-killed-daemon");
+        let paths = test_paths("wal-rebuilt");
+        std::fs::create_dir_all(&killed_paths.data).unwrap();
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let killed_index_path = rastai_db_path(&killed_paths);
+        let connection =
+            open_database_for_writing(&killed_index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap();
+        let transaction = begin_transaction(&connection).unwrap();
+        insert_token(&transaction, &live_token(CREATOR_TOKEN_ID, "owner")).unwrap();
+        commit_transaction(transaction).unwrap();
+        // Copied while the connection is open, as a kill leaves them: the token is only in the -wal.
+        let killed_wal_path = companion_path(&killed_index_path, WAL_FILE_SUFFIX);
+        let wal_bytes = std::fs::read(&killed_wal_path).unwrap();
+        assert!(!wal_bytes.is_empty(), "the commit went straight into the database file");
+        std::fs::copy(&killed_index_path, rastai_db_path(&paths)).unwrap();
+        std::fs::write(companion_path(&rastai_db_path(&paths), WAL_FILE_SUFFIX), &wal_bytes).unwrap();
+        drop(connection);
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        assert_eq!(report_codes(&report), Vec::<String>::new());
+        assert!(rebuilt_token(&paths, CREATOR_TOKEN_ID).revoked_unix_ms.is_none());
+        let kept_wal_path = companion_path(&report.old_index_path.unwrap(), WAL_FILE_SUFFIX);
+        assert_eq!(std::fs::read(kept_wal_path).unwrap(), wal_bytes);
+        assert!(!companion_path(&rastai_db_path(&paths), WAL_FILE_SUFFIX).exists());
+        std::fs::remove_dir_all(killed_paths.data.parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    fn live_token(token_id: &str, created_by: &str) -> TokenRow {
+        TokenRow {
+            token_id: token_id.to_string(),
+            name: token_id.to_string(),
+            token_hash: format!("blake3:{token_id}"),
+            scopes: vec!["chat".to_string()],
+            created_unix_ms: TOKEN_CREATED_UNIX_MS,
+            revoked_unix_ms: None,
+            created_by: created_by.to_string(),
+        }
+    }
+
+    /// An old index whose creator token made a live child, then lost its creator's state by `damage_sql`.
+    fn write_damaged_token_index(paths: &DataPaths, damage_sql: &str, damage_parameters: &[SqlValue]) {
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let index_path = rastai_db_path(paths);
+        let connection = open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap();
+        let transaction = begin_transaction(&connection).unwrap();
+        insert_token(&transaction, &live_token(CREATOR_TOKEN_ID, "owner")).unwrap();
+        let created_by = format!("token:{CREATOR_TOKEN_ID}");
+        insert_token(&transaction, &live_token(CHILD_TOKEN_ID, &created_by)).unwrap();
+        execute(&transaction, damage_sql, damage_parameters).unwrap();
+        commit_transaction(transaction).unwrap();
+    }
+
+    /// The rebuilt index's row for `token_id`.
+    fn rebuilt_token(paths: &DataPaths, token_id: &str) -> TokenRow {
+        let reader = IndexReader {
+            connection: open_database_for_reading(&rastai_db_path(paths)).unwrap(),
+        };
+        let tokens = list_tokens(&reader).unwrap();
+        tokens.into_iter().find(|token| token.token_id == token_id).unwrap()
+    }
+
+    fn report_codes(report: &RebuildReport) -> Vec<String> {
+        report.diagnostics.iter().map(|item| item.code.clone()).collect()
+    }
+
+    // A damaged file that kept a revoked creator's child live: the rebuild fails closed and revokes the child too.
+    #[test]
+    fn a_live_token_of_a_revoked_creator_is_rebuilt_revoked_with_rrs_c1006() {
+        let paths = test_paths("token-creator-revoked");
+        let parameters = [integer_value(TOKEN_REVOKED_UNIX_MS), text_value(CREATOR_TOKEN_ID)];
+        write_damaged_token_index(&paths, REVOKE_CREATOR_ALONE_SQL, &parameters);
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        assert_eq!(report_codes(&report), [TOKEN_REVOKED_CODE]);
+        let child = rebuilt_token(&paths, CHILD_TOKEN_ID);
+        assert!(
+            child.revoked_unix_ms.is_some(),
+            "the child of a revoked creator is live: {child:?}"
+        );
+        assert_eq!(child.created_by, format!("token:{CREATOR_TOKEN_ID}"));
+        let creator = rebuilt_token(&paths, CREATOR_TOKEN_ID);
+        assert_eq!(creator.revoked_unix_ms, Some(TOKEN_REVOKED_UNIX_MS));
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // A damaged file that lost the creator's row: a creator that is gone admits no one, so the child is revoked.
+    #[test]
+    fn a_live_token_whose_creator_is_gone_is_rebuilt_revoked_with_rrs_c1006() {
+        let paths = test_paths("token-creator-gone");
+        write_damaged_token_index(&paths, DELETE_CREATOR_SQL, &[text_value(CREATOR_TOKEN_ID)]);
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        assert_eq!(report_codes(&report), [TOKEN_REVOKED_CODE]);
+        let child = rebuilt_token(&paths, CHILD_TOKEN_ID);
+        assert!(
+            child.revoked_unix_ms.is_some(),
+            "the child of a missing creator is live: {child:?}"
+        );
         std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
     }
 }
