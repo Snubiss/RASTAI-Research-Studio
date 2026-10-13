@@ -49,6 +49,18 @@
       "license": "Apache-2.0",
       "reason": "protobuf-es's generator, which buf runs for packages/proto in `just codegen` (target js+dts, ADR-0036); brings @bufbuild/protoplugin and its own typescript 5.4.5, used only to write the .d.ts files"
     },
+    "@connectrpc/connect": {
+      "version": "2.2.0",
+      "category": "compatibility",
+      "license": "Apache-2.0",
+      "reason": "connect-es, the Connect protocol client @rastai/client's connection.js builds its CommandService and EventService clients with (spec §27 protobuf row; contracts 2.5); the client's tests serve the fake daemon with its in-memory router (testing/fake-daemon.js). Replacement path: a hand-written Connect client over fetch, the six messages and the stream envelope the daemon already speaks (control-plane layout 11.3)"
+    },
+    "@connectrpc/connect-web": {
+      "version": "2.2.0",
+      "category": "compatibility",
+      "license": "Apache-2.0",
+      "reason": "connect-es's fetch transport for the Connect protocol, imported only by packages/client/src/connection.js (contracts 2.5); it works in the browser, the Tauri webview and Node scripts. Replacement path: the same hand-written client over fetch as @connectrpc/connect"
+    },
     "@bufbuild/protobuf": {
       "version": "2.15.0",
       "category": "compatibility",

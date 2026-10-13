@@ -1,0 +1,33 @@
+{
+  "format_version": 1,
+  "about": "URL fragments the web app is opened with (frontend layout 2.6), with the login code readLoginCode reads and the fragment removeLoginCodeFromUrl leaves. A fragment that doesn't start with / is a bare query whose route is #/home. login_code is null when there is none, and fragment_after_removal is null when removal changes nothing. `search` is the page's real query string, which is never read for a code. login.test.js in @rastai/client reads every case; apps/web's route.test.js adds its expected route to the same table.",
+  "cases": [
+    { "fragment": "#login=abc", "search": "", "login_code": "abc", "fragment_after_removal": "#/home" },
+    {
+      "fragment": "#/open?path=x&login=abc",
+      "search": "",
+      "login_code": "abc",
+      "fragment_after_removal": "#/open?path=x"
+    },
+    { "fragment": "#/home?login=abc", "search": "", "login_code": "abc", "fragment_after_removal": "#/home" },
+    {
+      "fragment": "#/open?login=abc&path=%2Fhome%2Fana%2Fmy%20notes.rrsmodel",
+      "search": "",
+      "login_code": "abc",
+      "fragment_after_removal": "#/open?path=%2Fhome%2Fana%2Fmy%20notes.rrsmodel"
+    },
+    {
+      "fragment": "#login=4f1c9a7e2b6d8053c1e9f7a24d6b8c0e3f5a7b9d1c2e4f6a8b0c2d4e6f8a0b2c",
+      "search": "",
+      "login_code": "4f1c9a7e2b6d8053c1e9f7a24d6b8c0e3f5a7b9d1c2e4f6a8b0c2d4e6f8a0b2c",
+      "fragment_after_removal": "#/home"
+    },
+    { "fragment": "#/open?path=x", "search": "", "login_code": null, "fragment_after_removal": null },
+    { "fragment": "#/home", "search": "", "login_code": null, "fragment_after_removal": null },
+    { "fragment": "", "search": "", "login_code": null, "fragment_after_removal": null },
+    { "fragment": "", "search": "?login=abc", "login_code": null, "fragment_after_removal": null },
+    { "fragment": "#/home", "search": "?wire=json&login=abc", "login_code": null, "fragment_after_removal": null },
+    { "fragment": "#/open?path=login%3Dabc", "search": "", "login_code": null, "fragment_after_removal": null },
+    { "fragment": "#login=", "search": "", "login_code": null, "fragment_after_removal": "#/home" }
+  ]
+}

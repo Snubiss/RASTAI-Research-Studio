@@ -182,9 +182,20 @@ JS_LIBRARY_FILES = {
         "apps/viewer/src/*",
     ],
     "react-dom": ["packages/ui/src/*", "apps/web/src/*"],
-    "@connectrpc/connect": ["packages/client/src/connection.js", "packages/proto/*"],
+    # The client's tests reach the libraries through its fake daemon (connect-es's in-memory router, frontend
+    # layout 3.5); only the golden test, which re-encodes what the client decoded, imports protobuf-es itself.
+    "@connectrpc/connect": [
+        "packages/client/src/connection.js",
+        "packages/client/src/testing/fake-daemon.js",
+        "packages/proto/*",
+    ],
     "@connectrpc/connect-web": ["packages/client/src/connection.js"],
-    "@bufbuild/protobuf": ["packages/client/src/connection.js", "packages/proto/*"],
+    "@bufbuild/protobuf": [
+        "packages/client/src/connection.js",
+        "packages/client/src/testing/fake-daemon.js",
+        "packages/client/src/proto-golden.test.js",
+        "packages/proto/*",
+    ],
     "vitest": TESTS_ONLY,
     "node:": TESTS_ONLY,
 }
