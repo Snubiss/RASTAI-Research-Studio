@@ -1,27 +1,26 @@
 // The status bar (design 3.5): the connection, the node's telemetry, the running jobs with their progress, and the
 // locked egress badge on the right. The badge shows only while data leaves the machine, and the setting
 // privacy.show_egress_badge hides it. Each figure comes from the daemon's events and commands; the bar only formats them.
+// A running job is a button that opens its run's page. The bar lists the first few and says how many more run.
 
 import { EgressBadge } from "@rastai/ui/security";
 import { useStore } from "@rastai/plugin";
 import { useEffect, useState } from "react";
 
-import { ACTIVE_JOB_STATES } from "../constants.js";
+import { ACTIVE_JOB_STATES, HOME_SECTION_ID, JOB_KIND_SECTIONS } from "../constants.js";
 import { useShell } from "../app/shell-context.js";
+import { navigateTo } from "../routing/navigate.js";
+import { sectionRoute } from "../routing/route.js";
 import { readSetting } from "../state/settings.js";
 import { activeEgress } from "./egress-state.js";
 
-/**
- * @typedef {object} JobSummary   a job.list entry (contracts 6.4, the JSON field names)
- * @property {string} job_id
- * @property {string} kind
- * @property {string} run_id
- * @property {string} state
- */
-
-/** @typedef {{ fraction: number, message: string }} JobProgressSample */
+/** @typedef {import("@rastai/formats").JobSummary} JobSummary */
+/** @typedef {import("../routing/route.js").Route} Route */
+/** @typedef {import("@rastai/proto").JobProgress} JobProgress */
 
 const BYTES_PER_GIB = 1024 * 1024 * 1024;
+// The running jobs the bar lists by name; the rest are counted ("2 more running"), so a busy node can't fill the bar.
+const STATUS_BAR_JOB_LIMIT = 3;
 // The egress list is re-checked this often while it has entries, so a held entry drops off after its hold time.
 const EGRESS_RECHECK_MS = 1000;
 /** @type {Object<string, string>} */
@@ -47,6 +46,8 @@ export function StatusBar() {
   const badgeOn = readSetting(settings.values, "privacy.show_egress_badge", true) === true;
   const held = activeEgress(egress, now);
   const runningJobs = jobs.filter((job) => ACTIVE_JOB_STATES.includes(job.state));
+  const listedJobs = runningJobs.slice(0, STATUS_BAR_JOB_LIMIT);
+  const unlistedCount = runningJobs.length - listedJobs.length;
   const node = nodes[0] ?? null;
   const connectionWord = CONNECTION_WORDS[connection.status] ?? connection.status;
   return (
@@ -59,9 +60,10 @@ export function StatusBar() {
       <span className="rr-status-bar__jobs">
         {runningJobs.length === 0 ? "No jobs running" : `${runningJobs.length} running`}
       </span>
-      {runningJobs.map((job) => (
+      {listedJobs.map((job) => (
         <RunningJob key={job.job_id} job={job} progress={jobProgress[job.job_id] ?? null} />
       ))}
+      {unlistedCount > 0 ? <span className="rr-status-bar__more">{`${unlistedCount} more running`}</span> : null}
       <span className="rr-status-bar__spacer" />
       {badgeOn && held.length > 0 ? (
         <EgressBadge activeEgress={held} onOpen={() => shell.stores.overlay.set("egress")} />
@@ -72,19 +74,33 @@ export function StatusBar() {
 }
 
 /**
- * One running job: its name and, once the daemon has sent progress for it, a mini progress bar.
+ * One running job: a button that opens it, with its name and, once the daemon has sent progress for it, a mini bar.
  * @param {object} props
  * @param {JobSummary} props.job
- * @param {JobProgressSample | null} props.progress
+ * @param {JobProgress | null} props.progress
  */
 function RunningJob({ job, progress }) {
   const name = jobName(job);
   return (
-    <span className="rr-status-bar__job">
+    <button type="button" className="rr-status-bar__job" onClick={() => navigateTo(jobRouteOf(job))}>
       <span>{name}</span>
       {progress === null ? null : <progress max={1} value={progress.fraction} aria-label={`${name} progress`} />}
-    </span>
+    </button>
   );
+}
+
+/**
+ * The page a running job opens: its run's page in the job kind's section (the training section for a train job).
+ * No job page exists yet, so a job without a run opens its section's page, and a kind with no section opens Home.
+ * @param {JobSummary} job
+ * @returns {Route}
+ */
+export function jobRouteOf(job) {
+  const sectionId = JOB_KIND_SECTIONS[job.kind];
+  if (sectionId === undefined) {
+    return sectionRoute(HOME_SECTION_ID);
+  }
+  return { sectionId, path: job.run_id ? [job.run_id] : [], query: {} };
 }
 
 /**

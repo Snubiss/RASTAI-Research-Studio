@@ -12,6 +12,7 @@ import { egressReportOf, heldEgress, recordEgress } from "../frame/egress-state.
 import { watchRoute } from "../routing/navigate.js";
 import { createAppStores } from "../state/app-stores.js";
 import { globalMode } from "../state/mode.js";
+import { withJobProgress, withoutEndedJob } from "../state/job-progress.js";
 import { emptySettings } from "../state/settings.js";
 import { applyTheme, themeTokensFor, watchMediaQuery } from "../state/theme.js";
 import { pluginDiagnostic } from "@rastai/plugin";
@@ -116,6 +117,7 @@ function subscribeShellEvents(shell) {
   const refreshSettings = coalesce(() => shell.refreshSettings());
   shell.hub.subscribe({ eventTypes: ["job.state_changed"], subjectIds: [] }, refreshJobs);
   shell.hub.subscribe({ eventTypes: ["job.progress"], subjectIds: [] }, (event) => keepJobProgress(shell, event));
+  shell.hub.subscribe({ eventTypes: ["job.state_changed"], subjectIds: [] }, (event) => forgetEndedJob(shell, event));
   shell.hub.subscribe({ eventTypes: ["node.state_changed"], subjectIds: [] }, refreshNodes);
   shell.hub.subscribe({ eventTypes: ["plugin.state_changed"], subjectIds: [] }, refreshPlugins);
   shell.hub.subscribe({ eventTypes: ["command.finished"], subjectIds: [] }, (event) => {
@@ -242,11 +244,16 @@ function keepTelemetry(shell, event) {
  * @param {BusEvent} event
  */
 function keepJobProgress(shell, event) {
-  const payload = /** @type {any} */ (event.payload)?.payload;
-  if (payload?.case === "jobProgress") {
-    const progress = { fraction: payload.value.fraction, message: payload.value.message };
-    shell.stores.jobProgress.set({ ...shell.stores.jobProgress.get(), [event.subjectId]: progress });
-  }
+  shell.stores.jobProgress.set(withJobProgress(shell.stores.jobProgress.get(), event));
+}
+
+/**
+ * A job that ended has no progress to draw, so its entry leaves the map when job.state_changed moves it to a final state.
+ * @param {Shell} shell
+ * @param {BusEvent} event
+ */
+function forgetEndedJob(shell, event) {
+  shell.stores.jobProgress.set(withoutEndedJob(shell.stores.jobProgress.get(), event));
 }
 
 /**

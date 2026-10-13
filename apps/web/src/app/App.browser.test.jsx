@@ -2,6 +2,7 @@
 // of design 3.7, the empty and error states, the status bar, and the touch targets and phone width of design 6.
 // The daemon is a fake: its answers are set per test, and its event stream is driven by the test.
 
+import { JobState } from "@rastai/proto";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
@@ -358,6 +359,79 @@ describe("the status bar from the daemon", () => {
       document.querySelector('progress[aria-label="train progress"]')
     );
     expect(bar?.value).toBe(0.25);
+  });
+});
+
+describe("the running jobs on the status bar", () => {
+  /**
+   * @param {number} count
+   * @returns {any[]} that many running train jobs, each in its own run
+   */
+  function runningTrainJobs(count) {
+    return Array.from({ length: count }, (_, index) => ({
+      job_id: `job_0${index + 1}`,
+      node_id: "node_local",
+      kind: "train",
+      run_id: `run_0${index + 1}`,
+      state: "running",
+    }));
+  }
+
+  test("a progress event is keyed by the job in its source, so a run-id subject still reaches its job's bar", async () => {
+    const { stream } = await renderApp({
+      answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
+    const progress = { payload: { case: "jobProgress", value: { fraction: 0.5, message: "" } } };
+    await inAct(() => stream.emit(busEvent("job.progress", "run_01", progress, "job:job_01")));
+    const bar = /** @type {HTMLProgressElement | null} */ (
+      document.querySelector('progress[aria-label="train · run_01 progress"]')
+    );
+    expect(bar?.value).toBe(0.5);
+  });
+
+  test("the bar lists three running jobs and counts the rest", async () => {
+    await renderApp({ answers: { "job.list": answered({ jobs: runningTrainJobs(5) }) } });
+    await vi.waitFor(() => expect(document.querySelectorAll(".rr-status-bar__job")).toHaveLength(3));
+    expect(document.querySelector(".rr-status-bar__jobs")?.textContent).toBe("5 running");
+    expect(document.querySelector(".rr-status-bar__more")?.textContent).toBe("2 more running");
+  });
+
+  test("with three or fewer running jobs nothing is counted as more", async () => {
+    await renderApp({ answers: { "job.list": answered({ jobs: runningTrainJobs(2) }) } });
+    await vi.waitFor(() => expect(document.querySelectorAll(".rr-status-bar__job")).toHaveLength(2));
+    expect(document.querySelector(".rr-status-bar__more")).toBeNull();
+  });
+
+  test("clicking a running job opens its run's page in its section", async () => {
+    await renderApp({ answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) } });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
+    await inAct(async () => /** @type {HTMLButtonElement} */ (document.querySelector(".rr-status-bar__job")).click());
+    expect(window.location.hash).toBe("#/training/run_01");
+  });
+
+  test("a running job with no run opens its section's page", async () => {
+    const job = { job_id: "job_09", node_id: "node_local", kind: "train", run_id: "", state: "running" };
+    await renderApp({ answers: { "job.list": answered({ jobs: [job] }) } });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
+    await inAct(async () => /** @type {HTMLButtonElement} */ (document.querySelector(".rr-status-bar__job")).click());
+    expect(window.location.hash).toBe("#/training");
+  });
+
+  test("a job that ends loses its progress bar", async () => {
+    const { stream } = await renderApp({ answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) } });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
+    const progress = { payload: { case: "jobProgress", value: { fraction: 0.5, message: "" } } };
+    await inAct(() => stream.emit(busEvent("job.progress", "run_01", progress, "job:job_01")));
+    expect(document.querySelector("progress")).not.toBeNull();
+    const ended = {
+      payload: {
+        case: "jobStateChanged",
+        value: { jobId: "job_01", fromState: JobState.RUNNING, toState: JobState.SUCCEEDED },
+      },
+    };
+    await inAct(() => stream.emit(busEvent("job.state_changed", "job_01", ended, "job:job_01")));
+    expect(document.querySelector("progress")).toBeNull();
   });
 });
 

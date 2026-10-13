@@ -198,6 +198,51 @@
   background: var(--rr-color-success);
 }
 
+/* A running job is a button that looks like its text, so the bar stays calm; its focus ring is the frame's. */
+.rr-status-bar__job {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rr-space-1);
+  min-height: var(--rr-space-6);
+  padding: 0 var(--rr-space-1);
+  border: none;
+  border-radius: var(--rr-radius-small);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rr-status-bar__job:hover {
+  color: var(--rr-color-text);
+}
+
+/* The bar's progress bars are drawn from the tokens, not the browser's default look. */
+.rr-status-bar progress {
+  appearance: none;
+  width: calc(var(--rr-space-7) * 1.5);
+  height: var(--rr-space-2);
+  border: none;
+  border-radius: var(--rr-radius-small);
+  background: var(--rr-color-divider);
+  color: var(--rr-color-accent);
+}
+
+.rr-status-bar progress::-webkit-progress-bar {
+  border-radius: var(--rr-radius-small);
+  background: var(--rr-color-divider);
+}
+
+.rr-status-bar progress::-webkit-progress-value {
+  border-radius: var(--rr-radius-small);
+  background: var(--rr-color-accent);
+}
+
+.rr-status-bar progress::-moz-progress-bar {
+  border-radius: var(--rr-radius-small);
+  background: var(--rr-color-accent);
+}
+
 .rr-home {
   display: grid;
   gap: var(--rr-space-4);

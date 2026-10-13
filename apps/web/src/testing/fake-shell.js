@@ -100,9 +100,10 @@ export function fakeStream() {
  * @param {string} eventType
  * @param {string} subjectId
  * @param {any} [payload]
+ * @param {string} [source]   "daemon" unless the test names a job's source, as job.progress has
  */
-export function busEvent(eventType, subjectId, payload = undefined) {
-  return { busSequence: 1n, eventType, subjectId, source: "daemon", payload };
+export function busEvent(eventType, subjectId, payload = undefined, source = "daemon") {
+  return { busSequence: 1n, eventType, subjectId, source, payload };
 }
 
 /**
