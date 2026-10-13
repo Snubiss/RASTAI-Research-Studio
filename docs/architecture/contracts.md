@@ -185,6 +185,7 @@ RASTAI/
     spec/                    the product and technical scope
     architecture/            README.md, contracts.md (this file), layout/, flows/
     adr/                     ADRs 0001–0037 (§30)
+    design/                  ui-design.md (the UI design, version 1.0; proposals in its §10)
     plan/                    implementation plan, backlog.json
     security/                threat-model.md (M1-56)
     reference/               generated: commands, events, error catalog, extension points, settings

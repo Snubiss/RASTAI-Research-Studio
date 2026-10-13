@@ -937,6 +937,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Dev tooling (CI service, test-only) | MinIO | The S3-compatible target for the archive's blob tests (M11). A CI service only, never shipped, never a runtime dependency | A folder target plus a stub S3 server in the tests |
 | License entry (not code) | pillow (MIT-CMU / HPND) | A transitive package of `torchvision` (ADR-0037). It gets a named license entry in `deps/allowlist-python.json`, because the license may not match the allowlist's standard identifiers. No Rastai file imports it | — |
 | License entry (not code) | torch (`Apache-2.0 WITH LLVM-exception`) | Part of PyTorch's compound license, because PyTorch vendors LLVM code. The exception only widens Apache-2.0. It gets a named license entry in `deps/allowlist-python.json`, because it isn't one of the allowlist's standard identifiers and torch is a direct foundation package, not a transitive one | — |
+| Asset (not code) | Geist and Geist Mono (SIL OFL 1.1, from github.com/vercel/geist-font; files `Geist[wght].woff2`, `Geist-Italic[wght].woff2`, `GeistMono[wght].woff2` and `OFL.txt`, in `packages/ui/src/fonts/`; owner approval of 2026-10-13) | The interface and mono typefaces (UI design §4.5, decision 1). Bundled, never fetched at runtime; no code. Its license text ships beside the files | Swap the files, `OFL.txt` and the two `font_family` tokens for another OFL pair (the DM Sans + DM Mono or Red Hat pairs in the design's §4.5) |
 | Data (not code) | Gemma Scope 2, Llama Scope SAE weights; Neuronpedia labels | Pretrained dictionaries and labels | Train our own with the SAE recipe |
 | Service (Phase 3) | Payment provider / merchant of record (e.g. Paddle or Stripe) | Payments and global tax are compliance-critical; never built in-house | Another provider |
 
@@ -1342,6 +1343,10 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4.5 (owner approval of 2026-10-13, DESIGN-01; the status line stays v5.4)**
+- §27: Geist and Geist Mono (SIL OFL 1.1, github.com/vercel/geist-font) are bundled UI typefaces, recorded as an "Asset (not code)" row beside the license entries. Their files and `OFL.txt` go in `packages/ui/src/fonts/`. Replacement path: swap the files and the two `font_family` tokens.
+- The UI design is `docs/design/ui-design.md` (version 1.0, owner approval of 2026-10-13). ADR-0039 records the second-window sign-in approval (Accepted, 2026-10-13); its contract shapes come in a later contract PR.
+
 **v5.4.4 (owner approval of 2026-10-13, M1-51; the status line stays v5.4)**
 - §27: `@types/react` and `@types/react-dom` (MIT, 19.3.0) are checker-only dev tooling: React's type declarations, read only by `tsc --noEmit` in `checkJs` mode (`just check-js`), never imported by code and never shipped. React ships no type declarations, so without them every JSX element fails the checker (TS7026). Replacement path: drop them with the checker.
 

@@ -1,0 +1,1 @@
+- **DESIGN-01:** contracts §1 (repository tree) lists `docs/design/` beside `docs/adr/`, for `ui-design.md` (the UI design, version 1.0). It is a folder name only: no other name and no shape change. The design's proposed names are listed in its §10 and register here or in the PR that first uses each one.

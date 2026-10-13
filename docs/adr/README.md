@@ -7,6 +7,7 @@ Decisions already made for Rastai Research Studio. Build from them; don't re-lit
 - **0024–0032** record other spec decisions that an implementer would otherwise reopen.
 - **0033–0037** record the owner decisions of 2026-10-10 (spec v5.4, contracts v1.1): the one `unsafe` exception, sign-in, the long-term archive, the frontend language and the borrowed decoders.
 - **0038** records the owner decisions of 2026-10-11: CI-enforced names and command schemas, and independent verification before work is closed.
+- **0039** records the owner approval of 2026-10-13: a second window signs in only after the owner approves a locked prompt.
 
 Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the shared contracts (v1.2)](../architecture/contracts.md), then the layout and flow docs, these ADRs and the plan. [The spike results](../../spike/README.md) are the source for measured numbers. The ADRs use the contracts' names exactly; contracts.md is the only list of names.
 
@@ -51,6 +52,7 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 | [0035](0035-mysql-long-term-archive.md) | An optional long-term archive in the owner's MySQL or MariaDB; SQLite stays the live store | Accepted, 2026-10-10. Supersedes 0003 decision 6 in part; amends 0002 decision 7 |
 | [0036](0036-frontend-plain-javascript.md) | The frontend is plain JavaScript + React, with short JSDoc types checked by `checkJs` | Accepted, 2026-10-10. Supersedes 0023's TypeScript section and 0019 decision 5 in part |
 | [0037](0037-borrowed-decoders-and-parser-fuzzing.md) | Borrowed decoders for DEFLATE and images; one implementation and a fuzz target for every in-house parser | Accepted, 2026-10-10. Supersedes 0029 decision 1 in part |
+| [0039](0039-second-window-sign-in-approval.md) | A second window signs in only after the owner approves a locked prompt | Accepted, 2026-10-13. Settles contracts open question 24 |
 | [0038](0038-naming-and-schema-enforcement.md) | Names and command schemas are enforced by CI (`check-names`, `check-schema-diff` in M1); work is closed only after independent verification | Accepted, 2026-10-11. Amends 0017 decision 5 (closing needs independent verification); moves the schema-diff check of 0005's note into M1. Decision 4 amended 2026-10-11 (PROC-01) |
 
 ## By topic
@@ -59,7 +61,7 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 |---|---|
 | Processes, durability, storage | 0001, 0002, 0003, 0024, 0033, 0035 |
 | Contracts, formats and schemas | 0004, 0005, 0029, 0030, 0032, 0037, 0038 |
-| UI and security | 0006, 0007, 0019, 0034, 0036 |
+| UI and security | 0006, 0007, 0019, 0034, 0036, 0039 |
 | Inference and runtimes | 0008, 0010, 0013, 0025, 0026, 0027 |
 | Training and evaluation | 0020, 0021, 0022, 0028 |
 | Platforms, environments, remote | 0009, 0011, 0014, 0031 |
