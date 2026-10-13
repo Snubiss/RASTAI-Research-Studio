@@ -1,0 +1,12 @@
+# Not a package: the settings for the three-surfaces test in this folder (plan M1-49; frontend layout 8.7).
+# ruff uses the same rules as python/ (owner decision 7). pytest runs the test_*.py files here with the same options
+# as python/, plus this folder on the import path so the tests can load their helper modules. `just e2e-surfaces`
+# builds the `rastai` binary first, then runs pytest here with the cpu environment's Python.
+
+[tool.ruff]
+extend = "../../../python/pyproject.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+pythonpath = ["."]
+addopts = ["--strict-markers", "--import-mode=importlib"]

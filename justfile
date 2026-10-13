@@ -75,7 +75,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: it reads a pull request's
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
-check: fmt-check lint check-js test-rust test-node-jobs test-daemon-jobs test-crash test-python test-js wasm deny \
+check: fmt-check lint check-js test-rust test-node-jobs test-daemon-jobs test-crash e2e-surfaces test-python test-js wasm deny \
     proto-check check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript \
     check-fuzz-locks codegen-check check-names check-schema-diff
 
@@ -120,17 +120,28 @@ test-crash: env-cpu
     cargo test --locked -p rastai-crash-tests -- --ignored --test-threads=1
     cd tests/crash && "{{cpu_python}}" -m pytest
 
+# M1's exit criterion 3 (plan M1-49): one `rastai serve --headless` in a temporary RASTAI_HOME, and system.status,
+# train.start and job.get over Connect JSON on HTTP, as `rastai` verbs and through `rastai mcp`, checked against each
+# other and against the golden transcripts in fixtures/mcp/e2e/. pytest runs it (settings in
+# tests/e2e/three_surfaces/pyproject.toml) with the cpu environment's Python, which also runs the real TextCNN jobs.
+# Linux only, like the job tests above. CI runs it as its own `e2e-surfaces` job; while CI is manual-only, `check`
+# runs it too (plan 3.6). It grows with each milestone's main action.
+# The same commands give the same outcomes over HTTP, the CLI and MCP, against a real daemon.
+e2e-surfaces: env-cpu
+    cargo build --locked -p rastai-cli
+    cd tests/e2e/three_surfaces && "{{cpu_python}}" -m pytest
+
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
 # tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml,
-# crates/rastai-node/tests/support/ruff.toml and tests/crash/pyproject.toml extend it), JavaScript, JSON, CSS and YAML
-# by prettier (.prettierrc.json, .prettierignore). All three use 120 columns. Generated code is left as its generator
-# wrote it: rustfmt doesn't follow include!, ruff skips the generated Python (python/pyproject.toml) and prettier
-# src/generated/.
+# crates/rastai-node/tests/support/ruff.toml, tests/crash/pyproject.toml and tests/e2e/three_surfaces/pyproject.toml
+# extend it), JavaScript, JSON, CSS and YAML by prettier (.prettierrc.json, .prettierignore). All three use 120
+# columns. Generated code is left as its generator wrote it: rustfmt doesn't follow include!, ruff skips the generated
+# Python (python/pyproject.toml) and prettier src/generated/.
 # Fails if any file isn't formatted.
 fmt-check: env-cpu env-js
     cargo fmt --all --check
     "{{cpu_environment}}/bin/ruff" format --check python tools/checks tools/codegen tools/fixtures tools/github \
-        crates/rastai-node/tests/support tests/crash
+        crates/rastai-node/tests/support tests/crash tests/e2e/three_surfaces
     pnpm exec prettier --check .
 
 # The rastai-formats-wasm bindings and their wasm-bindgen step join this recipe in M4.
@@ -143,7 +154,7 @@ wasm:
 lint: env-cpu
     cargo clippy --workspace --all-targets --locked -- -D warnings
     "{{cpu_environment}}/bin/ruff" check python tools/checks tools/codegen tools/fixtures tools/github \
-        crates/rastai-node/tests/support tests/crash
+        crates/rastai-node/tests/support tests/crash tests/e2e/three_surfaces
 
 # This is the same `uv sync --frozen` the node runs from M2-16 (the node also leaves out the dev group, so pytest
 # and ruff never reach a user's machine). --frozen installs exactly the lock and never resolves, so after one

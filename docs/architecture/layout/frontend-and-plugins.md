@@ -3480,7 +3480,8 @@ export function recordVote(host, voteArgs) {
 | Unit (desktop) | `apps/desktop/src-tauri/tests/` | cargo test | launch line, fragments, single instance, navigation guard |
 | Unit (Rust SDK) | `crates/rastai-plugin/tests/` | cargo test | provider round trip |
 | Templates | `just test-templates` | rastai CLI | every template: new, codegen, lint, test, pack |
-| E2E | `tests/e2e/*.spec.js`, `tests/e2e/three_surfaces/` | Playwright | the table in 8.7 |
+| E2E | `tests/e2e/*.spec.js` | Playwright | the table in 8.7 |
+| Three surfaces | `tests/e2e/three_surfaces/` | pytest in the cpu environment (`just e2e-surfaces`), driving `rastai serve --headless`, `rastai` verbs and `rastai mcp`; the UI leg joins through Playwright | the same commands over HTTP, the CLI and MCP give the same outcomes (8.7, M1-49) |
 | Crash | `tests/e2e/reconnect.spec.js` (UI side of `tests/crash/`) | Playwright | kill -9 the daemon mid-stream; resume or resync; nothing lost |
 | Latency (M4) | `tests/e2e/psychology-latency.spec.js` | Playwright on the owner's box | slider round trip p95 under 50 ms (14.3) |
 | Performance (nightly) | `packages/canvas/bench/`, `packages/viz/bench/` | Chrome + WebKitGTK via `rastai-desktop --open-url` | refresh-cap gates (5.5, 6.5) |

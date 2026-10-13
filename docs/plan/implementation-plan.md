@@ -1882,7 +1882,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.j
 
 ```json
 {
-  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-js", "test-js-macos", "test-crash"] },
+  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-crash", "test-js", "test-js-macos", "e2e-surfaces"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 1, "dismiss_stale_reviews": true },
   "required_linear_history": true,
@@ -1895,7 +1895,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.j
 
 The first contexts become available with M1-06; until then, protection without required checks still forces PRs and review.
 
-Not applied yet (found by M1-06, 2026-10-11): on the current GitHub plan, a private repository has no branch protection or rulesets. `gh api repos/Snubiss/RASTAI-Research-Studio/branches/main/protection` and `.../rulesets` return `403 Upgrade to GitHub Pro or make this repository public`. So `main` has no rule yet, and none of the contexts above is required (eleven since M1-48 added `test-crash`). The `contexts` list already matches `ci.yml` (`tests/workspace/ci-workflows.test.js` keeps them equal), so the command above applies unchanged once the owner settles section 12 row 16.
+Not applied yet (found by M1-06, 2026-10-11): on the current GitHub plan, a private repository has no branch protection or rulesets. `gh api repos/Snubiss/RASTAI-Research-Studio/branches/main/protection` and `.../rulesets` return `403 Upgrade to GitHub Pro or make this repository public`. So `main` has no rule yet, and none of the contexts above is required (twelve: `test-crash` came with M1-48 and `e2e-surfaces` with M1-49). The `contexts` list already matches `ci.yml` (`tests/workspace/ci-workflows.test.js` keeps them equal), so the command above applies unchanged once the owner settles section 12 row 16.
 
 ### 8.5 The PR template
 
@@ -1918,7 +1918,7 @@ After the merge, the issue stays open until the verification comment of 3.6 clos
 
 ### 8.7 CI jobs by milestone
 
-Each job is one `just` recipe; the workflow files stay thin (contracts §1). While the repository is private, `ci.yml` and `nightly.yml` run only when started by hand (`workflow_dispatch`; owner decision of 2026-10-11, PROC-01), and no job is required (8.4). The Trigger and Required columns are what each job returns to when CI does; a job added before then still lands in its workflow file with its jobs, and `just check` covers the Linux side locally (3.6).
+Each job is one `just` recipe; the workflow files stay thin (contracts §1). While the repository is private, `ci.yml` and `nightly.yml` run only when started by hand (`workflow_dispatch`; owner decision of 2026-10-11, PROC-01), and no job is required (8.4). The Trigger and Required columns are what each job returns to when CI does; a job added before then still lands in its workflow file with its jobs, and `just check` covers the Linux side locally (3.6); the two recipes that leave `check` when CI returns are (so far `test-crash`, M1-48, and `e2e-surfaces`, M1-49).
 
 | Job | Workflow | Runs on | Trigger | Added by | Required on `main` |
 |---|---|---|---|---|---|

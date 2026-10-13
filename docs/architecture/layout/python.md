@@ -2115,6 +2115,7 @@ Warm reinstall from the uv cache took under 1 s for every backend (spike). The c
 | `tests/mysql/` | the MySQL reader (and, from M11, the archive) against MySQL 8.4, 9.7 and MariaDB | the CI job `mysql-archive` only (M11-E07) |
 | `python/<package>/tests/` marked `fuzz` | seeded mutation tests of in-house parsers (rule 1.4.13): `yaml_subset.py`, the `run_logs/` readers, the CSV and JSONL readers, the image-decode wrapper | every CI run, with a fixed seed and a small mutation count |
 | `tests/crash/` | kill -9 and SIGTERM tests for workers (sections 5.4 and 7.5) | every CI run (CPU) |
+| `tests/e2e/three_surfaces/` | the three-surfaces test (plan M1-49): one `rastai serve --headless` in a temporary `RASTAI_HOME`, the same commands over Connect JSON on HTTP, as `rastai` verbs and through `rastai mcp`, compared with each other and with `fixtures/mcp/e2e/`; standard library only, its own `pyproject.toml`; it kills every process group it started on every exit path | `just e2e-surfaces` (in `just check`; CI job `e2e-surfaces`), Linux |
 | `tests/loop/` | the full CPU loop under 10 minutes: TextCNN design → compile → train → eval → ONNX export → re-import with matching outputs; and a tiny decoder: branch pair → DPO or SFT with anchors → suite with a scripted judge → drift | every CI run |
 | `fixtures/ops/` | one golden file per ModelSpec op (shapes, parameter count, FLOPs), read by `rastai_models/tests/test_op_fixtures.py` and by Rust live stats | every CI run |
 
