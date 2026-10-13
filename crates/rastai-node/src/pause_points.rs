@@ -2,10 +2,12 @@
 //! `tests/crash/` names a point in the daemon, the embedded node or the worker, and the process that reaches it stops
 //! itself there, so the test's SIGKILL lands at that point every time instead of somewhere near it.
 //!
-//! - **Stopped, not sleeping.** The process sends itself SIGSTOP, so every thread freezes at once: no other task of
-//!   the daemon commits a batch or answers a call after the point. The test sees the stop in `/proc/<pid>/stat`
-//!   (state `T`), kills the process, or lets it go on with SIGCONT. The stop goes through the `kill` tool, as every
-//!   signal of this crate does (jobs/signals.rs): `libc` would need `unsafe`.
+//! - **Stopped, not sleeping.** The process sends itself SIGSTOP, so every thread freezes: no other task of the
+//!   daemon commits a batch or answers a call after the point. The test sees the stop in `/proc/<pid>/stat` (state
+//!   `T`), kills the process, or lets it go on with SIGCONT. The stop goes through the `kill` tool, as every signal of
+//!   this crate does (jobs/signals.rs): `libc` would need `unsafe`.
+//! - **The thread at the point stops first.** The signal is addressed to the id of the thread that reached the point,
+//!   not to the process id (see `stop_this_process`), so that thread never runs past the point.
 //! - **Once per process.** A process let go with SIGCONT runs past the point the next time it reaches it.
 //! - **Debug builds only.** Every test build is one; a release build compiles `pause_at` to nothing and never hands
 //!   the variable to a worker, so a shipped daemon never stops itself whatever its environment says. The worker's
@@ -23,6 +25,9 @@ pub const TEST_PAUSE_VARIABLE: &str = "RASTAI_TEST_PAUSE_AT";
 const KILL_TOOL: &str = "kill";
 #[cfg(debug_assertions)]
 const STOP_SIGNAL: &str = "STOP";
+/// Links to `<pid>/task/<tid>` for whichever thread reads it (Linux).
+#[cfg(debug_assertions)]
+const THREAD_SELF_LINK: &str = "/proc/thread-self";
 
 /// Set once this process has stopped at its point, so it doesn't stop there again after SIGCONT.
 #[cfg(debug_assertions)]
@@ -64,23 +69,59 @@ pub fn worker_test_pause_variable(node_variables: &[(String, String)]) -> Option
 }
 
 /// SIGSTOP to this process. The line on stderr is for the test's output file, so a failing row shows where its
-/// processes stopped. The kill tool's own wait returns only after the stop is delivered and lifted again: the
-/// kernel stops every thread before this one can return from waiting for the tool.
+/// processes stopped.
+///
+/// SIGSTOP stops the whole process whichever of its ids it is sent to, but Linux hands it to the thread it was
+/// addressed to, which then stops before it runs another line and makes the others stop too. Sent to the process id,
+/// the main thread took it, and under load this thread came back from waiting for the tool and committed its batch
+/// before the main thread got round to stopping the rest (row 2 of the kill -9 matrix found the batch indexed). So
+/// it goes to this thread's own id; without `/proc/thread-self` (not Linux) it goes to the process id as before.
 #[cfg(debug_assertions)]
 fn stop_this_process(point: &str) {
-    let pid = std::process::id();
+    let pid = std::process::id().to_string();
+    let target = match calling_thread_id() {
+        Some(thread_id) => thread_id,
+        None => pid.clone(),
+    };
     eprintln!("{TEST_PAUSE_VARIABLE}: process {pid} paused at {point}");
     let stopped = std::process::Command::new(KILL_TOOL)
-        .args(["-s", STOP_SIGNAL, &pid.to_string()])
+        .args(["-s", STOP_SIGNAL, &target])
         .status();
     if !matches!(stopped, Ok(status) if status.success()) {
         eprintln!("{TEST_PAUSE_VARIABLE}: process {pid} couldn't stop itself at {point}: {stopped:?}");
     }
 }
 
+/// The id of the thread that calls this, the last part of the `/proc/thread-self` link. None where there is no such
+/// link.
+#[cfg(debug_assertions)]
+fn calling_thread_id() -> Option<String> {
+    let link = std::fs::read_link(THREAD_SELF_LINK).ok()?;
+    let thread_id = link.file_name()?.to_str()?;
+    Some(thread_id.to_string())
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// The stop is addressed to the thread at the point: on a thread of its own, that is its id, one of this
+    /// process's tasks, and not the process id the main thread has.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_stop_goes_to_the_calling_thread() {
+        let (thread_id, is_a_task_of_this_process) = std::thread::spawn(id_and_task_check).join().unwrap();
+        assert_ne!(thread_id, std::process::id().to_string());
+        assert!(is_a_task_of_this_process);
+    }
+
+    /// Run on the thread itself: a thread's task entry goes once it has ended.
+    fn id_and_task_check() -> (String, bool) {
+        let thread_id = calling_thread_id().unwrap();
+        let is_a_task_of_this_process = std::path::Path::new("/proc/self/task").join(&thread_id).exists();
+        (thread_id, is_a_task_of_this_process)
+    }
 
     #[test]
     fn only_the_named_point_pauses() {
