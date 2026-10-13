@@ -32,7 +32,7 @@ const PURE_COMPUTE_PACKAGES = ["rastai_formats", "rastai_models", "rastai_data",
 // whose proto-check and check-schema-diff read the merge base with the pull request's base, so it needs the history
 // and names that base in RASTAI_BASE_REF.
 const CHECKS_JOB = "checks";
-const CHECKS_TOOLS = ["just", "uv", "node", "cargo-deny", "buf", "protoc-gen-prost", "protoc-gen-tonic"];
+const CHECKS_TOOLS = ["just", "uv", "node", "cargo-deny", "buf", "protoc-gen-prost", "protoc-gen-tonic", "browsers"];
 const INSTALL_TOOLS_LINE = /^ *run: tools\/ci\/install-dev-tools (.*)$/;
 const FULL_HISTORY_LINE = "fetch-depth: 0";
 const BASE_REF_LINE = "RASTAI_BASE_REF: origin/${{ github.base_ref || 'main' }}";
@@ -371,6 +371,7 @@ test("the justfile reaches the cpu environment's Python only through cpu_python"
 
 test("install-dev-tools installs the versions the repo pins elsewhere", () => {
   expect(installScriptConstant("NODE_VERSION")).toBe(packageFile.engines.node);
+  expect(installScriptConstant("PLAYWRIGHT_VERSION")).toBe(packageFile.devDependencies.playwright);
   expect(installScriptConstant("UV_VERSION")).toBe(findValue(PYTHON_WORKSPACE, /^required-version = "==([^"]+)"/));
   expect(installScriptConstant("CARGO_DENY_VERSION")).toBe(justfileVariable("cargo_deny_version"));
   expect(installScriptConstant("BUF_VERSION")).toBe(justfileVariable("buf_version"));

@@ -61,8 +61,8 @@ jobs:
             ~/.cargo/bin/protoc-gen-prost
             ~/.cargo/bin/protoc-gen-tonic
           key: protoc-plugins-${{ runner.os }}-${{ hashFiles('tools/ci/install-dev-tools') }}
-      - name: Install just, uv, Node.js, pnpm, cargo-deny, buf and the protoc plugins
-        run: tools/ci/install-dev-tools just uv node cargo-deny buf protoc-gen-prost protoc-gen-tonic
+      - name: Install just, uv, Node.js, pnpm, cargo-deny, buf, the protoc plugins and the test browsers
+        run: tools/ci/install-dev-tools just uv node cargo-deny buf protoc-gen-prost protoc-gen-tonic browsers
       - &cargo-cache
         name: Restore the cargo cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -201,8 +201,8 @@ jobs:
     steps:
       - *checkout
       - &install-just-node
-        name: Install just, Node.js and pnpm
-        run: tools/ci/install-dev-tools just node
+        name: Install just, Node.js, pnpm and the test browsers
+        run: tools/ci/install-dev-tools just node browsers
       - *pnpm-cache
       - &test-js
         name: just test-js

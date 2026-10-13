@@ -932,6 +932,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Dev tooling | the Tauri CLI | Builds and packages the desktop shell. Dev tooling only, never shipped | — |
 | Dev tooling | ruff, prettier | Python and JavaScript formatting and linting (M1) | — |
 | Dev tooling (checker only) | the `typescript` package | Runs `tsc --noEmit` in `checkJs` mode over `jsconfig.json` in `just check`, checking the JSDoc types in plain JavaScript. Never ships; nobody writes TypeScript (§0.22) | Drop the check; the code is plain JavaScript either way |
+| Dev tooling (checker only) | `@types/react`, `@types/react-dom` | React's type declarations, read only by that checker: React ships none, and without them every JSX element fails `checkJs` (TS7026). Never imported by code, never shipped. Added by M1-51, pending the owner's approval | Drop them with the checker |
 | Dev tooling (CI services) | MySQL 8.4 and 9.7, MariaDB | Archive and reader tests (M11); test targets only, never shipped | — |
 | Dev tooling (CI service, test-only) | MinIO | The S3-compatible target for the archive's blob tests (M11). A CI service only, never shipped, never a runtime dependency | A folder target plus a stub S3 server in the tests |
 | License entry (not code) | pillow (MIT-CMU / HPND) | A transitive package of `torchvision` (ADR-0037). It gets a named license entry in `deps/allowlist-python.json`, because the license may not match the allowlist's standard identifiers. No Rastai file imports it | — |

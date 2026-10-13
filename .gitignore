@@ -30,5 +30,8 @@ python/rastai_formats/rastai_formats/_native.*
 # Rust: rustfmt backups
 **/*.rs.bk
 
+# vitest browser mode's screenshots of failed tests
+.vitest/
+
 # Throwaway data directory for `just serve-dev` (RASTAI_HOME=.dev)
 .dev/

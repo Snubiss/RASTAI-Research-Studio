@@ -467,7 +467,8 @@
     "@rastai/catalog",
     "@rastai/client",
     "@rastai/formats",
-    "@rastai/proto"
+    "@rastai/proto",
+    "@rastai/ui"
   ],
   "python_packages": [
     "rastai_data",

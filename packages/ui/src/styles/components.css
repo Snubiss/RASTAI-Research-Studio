@@ -1,0 +1,394 @@
+/*
+ * One block per @rastai/ui component, every class prefixed rr- (layout frontend-and-plugins.md 4.1). Values come
+ * only from --rr-* variables, so a theme switch restyles everything with no React render. The diagnostic's severity
+ * colors and the security UI's focus ring are --rr-locked-* variables, which no theme sets (2.10).
+ */
+
+/* ---- Button ---- */
+
+.rr-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--rr-space-1);
+  /* One line of body text plus padding: at least 24 px in both densities (WCAG 2.2 target size, layout 2.9). */
+  min-height: calc(var(--rr-font-size-md) * var(--rr-line-height-body) + 2 * var(--rr-space-1));
+  padding: var(--rr-space-1) var(--rr-space-3);
+  border: var(--rr-focus-ring-width) solid var(--rr-color-border-strong);
+  border-radius: var(--rr-radius-medium);
+  background: var(--rr-color-surface-raised);
+  color: var(--rr-color-text);
+  font-weight: var(--rr-font-weight-medium);
+  cursor: pointer;
+  transition:
+    background var(--rr-motion-fast) var(--rr-motion-easing),
+    border-color var(--rr-motion-fast) var(--rr-motion-easing);
+}
+
+.rr-button:hover {
+  border-color: var(--rr-color-accent);
+}
+
+.rr-button--primary {
+  border-color: var(--rr-color-accent);
+  background: var(--rr-color-accent);
+  color: var(--rr-color-text-on-accent);
+}
+
+.rr-button--primary:hover {
+  border-color: var(--rr-color-accent-hover);
+  background: var(--rr-color-accent-hover);
+}
+
+.rr-button--primary:active {
+  background: var(--rr-color-accent-active);
+}
+
+.rr-button--quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--rr-color-text-muted);
+}
+
+.rr-button:disabled {
+  border-color: var(--rr-color-border);
+  background: var(--rr-color-surface-sunken);
+  color: var(--rr-color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* ---- Fields: TextField, NumberField, Select, Checkbox ---- */
+
+.rr-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rr-space-1);
+  margin-bottom: var(--rr-space-3);
+}
+
+.rr-field--inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.rr-field--inline .rr-field__help {
+  flex-basis: 100%;
+}
+
+.rr-field__label {
+  color: var(--rr-color-text);
+  font-weight: var(--rr-font-weight-medium);
+}
+
+.rr-field__required {
+  color: var(--rr-color-text-muted);
+}
+
+.rr-field__help {
+  margin: 0;
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-sm);
+}
+
+.rr-input {
+  min-height: calc(var(--rr-font-size-md) * var(--rr-line-height-body) + 2 * var(--rr-space-1));
+  padding: var(--rr-space-1) var(--rr-space-2);
+  border: 1px solid var(--rr-color-border-strong);
+  border-radius: var(--rr-radius-small);
+  background: var(--rr-color-surface-sunken);
+  color: var(--rr-color-text);
+}
+
+.rr-input--mono {
+  font-family: var(--rr-font-mono);
+  line-height: var(--rr-line-height-code);
+}
+
+.rr-input:disabled {
+  color: var(--rr-color-text-disabled);
+}
+
+.rr-checkbox {
+  width: calc(var(--rr-font-size-md) * var(--rr-line-height-body));
+  height: calc(var(--rr-font-size-md) * var(--rr-line-height-body));
+  margin: 0;
+  accent-color: var(--rr-color-accent);
+}
+
+/* ---- FieldForm ---- */
+
+.rr-form {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Table ---- */
+
+.rr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.rr-table__caption {
+  padding-bottom: var(--rr-space-1);
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-sm);
+  text-align: start;
+}
+
+.rr-table th,
+.rr-table td {
+  padding: var(--rr-space-1) var(--rr-space-2);
+  border-bottom: 1px solid var(--rr-color-divider);
+  text-align: start;
+}
+
+.rr-table th {
+  color: var(--rr-color-text-muted);
+  font-weight: var(--rr-font-weight-medium);
+}
+
+.rr-table .rr-table__cell--end {
+  text-align: end;
+}
+
+.rr-table__empty {
+  color: var(--rr-color-text-muted);
+}
+
+/* ---- Dialog ---- */
+
+.rr-dialog {
+  min-width: min(90vw, calc(var(--rr-space-7) * 8));
+  max-width: 90vw;
+  padding: var(--rr-space-4);
+  border: 1px solid var(--rr-color-border);
+  border-radius: var(--rr-radius-large);
+  background: var(--rr-color-surface-raised);
+  color: var(--rr-color-text);
+  box-shadow: var(--rr-elevation-3);
+}
+
+.rr-dialog::backdrop {
+  background: color-mix(in srgb, var(--rr-color-overlay) 60%, transparent);
+}
+
+.rr-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rr-space-3);
+  margin-bottom: var(--rr-space-3);
+}
+
+.rr-dialog__title {
+  margin: 0;
+}
+
+.rr-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--rr-space-2);
+  margin-top: var(--rr-space-4);
+}
+
+/* ---- Toast ---- */
+
+.rr-toasts {
+  position: fixed;
+  right: var(--rr-space-4);
+  bottom: var(--rr-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--rr-space-2);
+}
+
+.rr-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--rr-space-3);
+  padding: var(--rr-space-2) var(--rr-space-3);
+  border: 1px solid var(--rr-color-border);
+  border-left: calc(2 * var(--rr-focus-ring-width)) solid var(--rr-color-accent);
+  border-radius: var(--rr-radius-medium);
+  background: var(--rr-color-surface-raised);
+  color: var(--rr-color-text);
+  box-shadow: var(--rr-elevation-2);
+}
+
+.rr-toast--success {
+  border-left-color: var(--rr-color-success);
+}
+
+/* Errors keep the locked error color, as DiagnosticView does. */
+.rr-toast--error {
+  border-left-color: var(--rr-locked-severity-error);
+}
+
+.rr-toast__message {
+  margin: 0;
+}
+
+/* ---- CommandPaletteView ---- */
+
+.rr-palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rr-space-2);
+  padding: var(--rr-space-3);
+  border: 1px solid var(--rr-color-border);
+  border-radius: var(--rr-radius-large);
+  background: var(--rr-color-surface-raised);
+  box-shadow: var(--rr-elevation-3);
+}
+
+.rr-palette__list {
+  max-height: calc(var(--rr-space-7) * 8);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.rr-palette__entry {
+  display: flex;
+  align-items: baseline;
+  gap: var(--rr-space-2);
+  padding: var(--rr-space-1) var(--rr-space-2);
+  border-radius: var(--rr-radius-small);
+  cursor: pointer;
+}
+
+.rr-palette__entry--active {
+  background: var(--rr-color-selection);
+}
+
+.rr-palette__detail {
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-sm);
+}
+
+.rr-palette__shortcut {
+  margin-left: auto;
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-xs);
+}
+
+.rr-palette__empty {
+  margin: 0;
+  color: var(--rr-color-text-muted);
+}
+
+/* ---- PanelChrome and its menu ---- */
+
+.rr-panel-chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--rr-space-2);
+  padding: var(--rr-space-1) var(--rr-space-2);
+  border-bottom: 1px solid var(--rr-color-divider);
+  background: var(--rr-color-surface);
+}
+
+.rr-panel-chrome__title {
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--rr-font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rr-panel-chrome__menu {
+  position: relative;
+}
+
+.rr-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1;
+  min-width: calc(var(--rr-space-7) * 4);
+  margin: 0;
+  padding: var(--rr-space-1);
+  border: 1px solid var(--rr-color-border);
+  border-radius: var(--rr-radius-medium);
+  background: var(--rr-color-surface-raised);
+  box-shadow: var(--rr-elevation-2);
+  list-style: none;
+}
+
+.rr-menu__item {
+  width: 100%;
+  min-height: calc(var(--rr-font-size-md) * var(--rr-line-height-body) + 2 * var(--rr-space-1));
+  padding: var(--rr-space-1) var(--rr-space-2);
+  border: 0;
+  border-radius: var(--rr-radius-small);
+  background: transparent;
+  color: var(--rr-color-text);
+  text-align: start;
+  cursor: pointer;
+}
+
+.rr-menu__item:hover {
+  background: var(--rr-color-selection);
+}
+
+/* ---- DiagnosticView: severity colors are locked ---- */
+
+.rr-diagnostic {
+  padding: var(--rr-space-2) var(--rr-space-3);
+  border: 1px solid var(--rr-color-border);
+  border-left: calc(2 * var(--rr-focus-ring-width)) solid var(--rr-locked-severity-error);
+  border-radius: var(--rr-radius-medium);
+  background: var(--rr-color-surface);
+  color: var(--rr-color-text);
+}
+
+.rr-diagnostic--warning {
+  border-left-color: var(--rr-locked-severity-warning);
+}
+
+.rr-diagnostic--info {
+  border-left-color: var(--rr-locked-severity-info);
+}
+
+.rr-diagnostic__severity {
+  color: var(--rr-locked-severity-error);
+  font-weight: var(--rr-font-weight-bold);
+}
+
+.rr-diagnostic--warning .rr-diagnostic__severity {
+  color: var(--rr-locked-severity-warning);
+}
+
+.rr-diagnostic--info .rr-diagnostic__severity {
+  color: var(--rr-locked-severity-info);
+}
+
+.rr-diagnostic__details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--rr-space-1) var(--rr-space-3);
+  margin: 0 0 var(--rr-space-2);
+  font-size: var(--rr-font-size-sm);
+}
+
+.rr-diagnostic__details dt {
+  color: var(--rr-color-text-muted);
+}
+
+.rr-diagnostic__details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- The security UI's focus ring: locked, like the rest of its colors ---- */
+
+.rr-locked :focus-visible,
+.rr-locked:focus-visible {
+  outline: 2px solid var(--rr-locked-security-text);
+  outline-offset: 2px;
+}
