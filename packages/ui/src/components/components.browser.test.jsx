@@ -142,6 +142,27 @@ describe("FieldForm", () => {
     expect(labels).toEqual(["cpu", "cuda:0"]);
     await mounted.unmount();
   });
+
+  test("a choice whose value is empty or not one of the choices shows Choose…, never the first choice", async () => {
+    /** @type {FieldSpec[]} */
+    const fields = [
+      { name: "device", label: "Device", kind: "choice", required: true, help: "", choices: ["cpu", "cuda:0"] },
+    ];
+    // "" and a stale value the choices no longer hold: the browser would select "cpu" while the form reports these.
+    for (const unknownValue of ["", "tpu"]) {
+      /** @type {Array<Object<string, any>>} */
+      const changes = [];
+      const mounted = await mount(
+        <FormHarness fields={fields} initialValues={{ device: unknownValue }} changes={changes} />,
+      );
+      const select = /** @type {HTMLSelectElement} */ (mounted.container.querySelector("select"));
+      expect(select.value).toBe("");
+      expect(select.selectedOptions[0].textContent).toBe("Choose…");
+      expect(select.validity.valueMissing).toBe(true);
+      expect(changes).toEqual([]);
+      await mounted.unmount();
+    }
+  });
 });
 
 describe("Table", () => {

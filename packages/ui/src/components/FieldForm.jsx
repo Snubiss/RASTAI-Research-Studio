@@ -72,7 +72,7 @@ function FieldControl({ field, value, onChange }) {
         <Select
           {...shared}
           required={field.required}
-          value={typeof value === "string" ? value : ""}
+          value={field.choices.includes(value) ? value : ""}
           options={choiceOptions(field.choices, value)}
           onChange={(choice) => onChange(field.name, choice)}
         />
@@ -101,15 +101,16 @@ function FieldControl({ field, value, onChange }) {
 }
 
 /**
- * The choices as Select options, led by an empty "Choose…" option while no choice is made. The empty value is what
- * makes a native required <select> invalid.
+ * The choices as Select options, led by an empty "Choose…" option while the value is not one of the choices: no
+ * value, "", or a stale value the choices no longer hold. The browser would otherwise select the first choice, so the
+ * form would show a value it doesn't report. The empty value is what makes a native required <select> invalid.
  * @param {string[]} choices
  * @param {any} value
  * @returns {import("./Select.jsx").SelectOption[]}
  */
 function choiceOptions(choices, value) {
   const options = choices.map((choice) => ({ value: choice, label: choice }));
-  if (typeof value === "string") {
+  if (choices.includes(value)) {
     return options;
   }
   return [{ value: "", label: NO_CHOICE_LABEL }, ...options];
