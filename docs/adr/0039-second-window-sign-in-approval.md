@@ -13,7 +13,7 @@
 
 1. **The opener hands its session key to a window it opened only after the owner approves a locked prompt.** The prompt, "Let a new window sign in as you?", shows the window's title, its address, which window opened it, and what it can do ("do everything you can").
 2. **Deny is the default.** Esc denies. Focus starts on Deny. Enter approves only when the focused button is Approve, so a stray Enter never approves.
-3. **The key travels only by `postMessage` to the opener's own origin.** It never goes into a URL. The opener accepts a reply only when `event.source` is the window handle its `window.open` call returned and `event.origin` is its own origin; any other message is ignored. A denied or unanswered window shows `SignedOutScreen` and cannot run commands.
+3. **The key travels only by `postMessage` to the opener's own origin.** It never goes into a URL. The opener accepts a reply only when `event.source` is the window handle its `window.open` call returned and `event.origin` is its own origin; any other message is ignored. The new window accepts the key only from an `event.origin` equal to its own origin. A denied or unanswered window shows `SignedOutScreen` and cannot run commands.
 4. **The prompt is a new locked component, `SessionApproval`, in `@rastai/ui/security`.** It is drawn only with `--rr-locked-*` tokens and the fixed system font, as the other locked components are (contracts §5.6).
 5. **The desktop-shell case signs in again.** A second `WebviewWindow` that has no `window.opener` signs in again with a new login code, as a reload does (frontend layout 9.3). It is not given the key.
 6. **The mechanism is built before any second window ships.** Second windows are built only through this mechanism. The desktop work (M1-55) opens second windows no other way.
@@ -24,7 +24,7 @@
 - A second window can act for the owner only after a person sees and approves a prompt that names the window and what it can do.
 - A window opened by a hostile page cannot get the key: the owner sees the opener and the address, and the default answer is no.
 - Desktop second windows sign in again, which costs one extra step. The shell keeps `window.opener` where it can, and the case that cannot keep it is the one where a fresh sign-in is the safe choice.
-- The tests that prove this are required when the mechanism is built: an end-to-end test that a denied window cannot run a command; a test that a key message from a window other than the handle `window.open` returned, or from another origin, is ignored; and a screenshot test of `SessionApproval` under the hostile theme (`security.test.jsx`).
+- The tests that prove this are required when the mechanism is built: an end-to-end test that a denied window cannot run a command; a test that a key message from a window other than the handle `window.open` returned, or from another origin, is ignored; and a screenshot test of `SessionApproval` under the hostile theme (`packages/ui/src/security/security.browser.test.jsx`).
 
 ## Alternatives considered
 

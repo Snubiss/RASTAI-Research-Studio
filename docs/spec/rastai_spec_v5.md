@@ -1080,13 +1080,14 @@ tests/{parity,e2e,gpu,crash,loop}
 14. **Platform tiers:** Linux NVIDIA + AMD + CPU at tier 1; macOS and Windows at tier 2 with portability rules.
 15. **Plugins and licensing:** WASM tier deferred; Apache-2.0 + DCO (decided, §0.12); dependency license allowlist.
 
-ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five, and v5.4.1 adds one more (ADR-0038):
+ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five, v5.4.1 adds one more (ADR-0038), and v5.4.5 adds one more (ADR-0039):
 - **ADR-0033:** `unsafe` allowed for one `statvfs` call in `rastai-store/src/disk_space.rs` only.
 - **ADR-0034:** sign-in with one-time login codes and an HttpOnly session cookie bound to its origin, the loopback Host rule, refusing a too-open `owner.token`, the reattach order; cross-origin browser clients refused in v1. Supersedes parts of ADR-0001, ADR-0006 and ADR-0007.
 - **ADR-0035:** the optional MySQL/MariaDB long-term archive. Supersedes ADR-0003 decision 6 in part (still no server for the live store, but an optional archive) and amends ADR-0002 decision 7 (a rebuild may read pruned runs from the archive).
 - **ADR-0036:** frontend language: plain JavaScript + React with JSDoc checked by `checkJs`. Supersedes ADR-0023's TypeScript section and, in part, ADR-0019 decision 5 ("a renderer is a TS class"); other ADRs get language-name fixes as notes since acceptance.
 - **ADR-0037:** borrowed decoders: `miniz_oxide` for DEFLATE and `torchvision.io.decode_image` for images, each behind one wrapper file; one implementation per in-house parser (Python calls the `rastai_formats` wheel for safetensors headers); a fuzz target for every remaining in-house parser of untrusted input. Supersedes ADR-0029 decision 1 in part.
 - **ADR-0038 (v5.4.1):** names and command schemas are enforced by CI. `check-schema-diff` and `check-names` run in M1 as part of `just check`; build agents get contracts.md, the generated schemas and the owning layout section; every PR has a separate reviewer agent with a naming and schema lens; a task is closed only after independent verification with evidence. Related to ADR-0004, ADR-0005 and ADR-0017; it moves the schema-diff check from Phase 2 into M1.
+- **ADR-0039 (v5.4.5):** a second window signs in only after the owner approves a locked prompt. The opener hands its session key over by `postMessage` to its own origin only, never in a URL; the new window accepts it only from its own origin. Built before any second window ships (UI design §6.9, ADR-0039).
 
 ---
 

@@ -14,7 +14,7 @@ nothing from it. The second-window sign-in approval is recorded in ADR-0039.
   (`docs/architecture/layout/frontend-and-plugins.md`). Where a layout name is not yet in contracts, §10 marks it.
 - **Decisions.** §8 records each decision with its date and quotes the owner's words, verbatim. Row 8 is an orchestrator
   proposal.
-- **Values.** Token values in §4 are the design's values. Where the code on a branch differs, §4 says "now".
+- **Values.** Token values in §4 are the design's values. Where the code on main differs, §4 says "now".
 
 Sources: spec v5.4 §1–3, §6–11, §13; layout `frontend-and-plugins.md` §2, §4, §8; contracts §5.6, §6.3, §6.4, §7.3, §9, §11.2, §15.6;
 `schemas/rastai.theme/1.json`; the M1-51 tokens on main (PR #256, merged 2026-10-13: `packages/ui/src/tokens/*`, `security/locked-styles.js`);
@@ -220,7 +220,9 @@ nothing is fetched at runtime. The fallbacks cover the moment before the files l
 
 Control height is `--rr-space-6`: 32 px comfortable, 24 px compact (the WCAG 2.2 target minimum). No new token needed.
 
-### 4.4 New token keys (approved 2026-10-13; proposal until the schema change lands in its own contract PR)
+### 4.4 New token keys (approved 2026-10-13; registered in contracts by DESIGN-02 (#275))
+
+DESIGN-02 (#275) registered `typography.font_sizes_px.xxl` as an optional key (a theme that leaves it out gets `xl`) and `colors.confidence_tint` in the contracts §5.6 Chat group, with provisional built-in values (#fff1c2 light, #4a3b12 dark). DESIGN-03 (#267) sets the final values from this section: xxl 28 in all three built-ins, and confidence_tint #c75300 / #f0883e / #ffb070 with the 16/30/46% mix.
 
 | Key | Light / Dark / HC | Why |
 |---|---|---|
@@ -231,7 +233,7 @@ Nothing is renamed.
 
 ### 4.5 Type: Geist + Geist Mono (chosen 2026-10-13)
 
-**Chosen:** pairing A, **Geist + Geist Mono**. Owner, 2026-10-13: "A text schema is fine we can revisit later if needed".
+**Chosen:** pairing A, **Geist + Geist Mono**. Owner, 2026-10-13: "A text schema is fine we can revisit later if needed.".
 
 | | Geist + Geist Mono |
 |---|---|
@@ -436,7 +438,7 @@ Every change is `settings.set`; `command.finished` refreshes all windows.
 ### 6.9 Locked security UI (board 9)
 
 Three prompts over a dimmed Settings › API tokens page. The board's theme tweak includes a "Hostile test theme" that
-sets every role to one grey: the app becomes unreadable, the three prompts do not change (security.test.jsx's rule).
+sets every role to one grey: the app becomes unreadable, the three prompts do not change (security.browser.test.jsx's rule).
 
 1. **Let a new window sign in as you?** (**approved; ADR-0039 Accepted 2026-10-13**; decision 6): window title, address, opened by, "It can: do everything you can". Deny is default.
 2. **Create the token "navi"?**: "It can" lists each granted scope in plain words; "It cannot" lists the rest that matter; then the show-once box with Copy. Data: `token.create` (with a dry run, R13).
@@ -520,12 +522,14 @@ Changes no code and no contract shape. Its one name, the `docs/design/` folder, 
 
 ### (b) Contract PR: the new token keys and the high-contrast theme value
 
+Status: done. DESIGN-02 (#275) registered `typography.font_sizes_px.xxl` as an optional key (a theme that leaves it out gets `xl`) and `colors.confidence_tint` in the contracts §5.6 Chat group, with provisional built-in values (#fff1c2 light, #4a3b12 dark). DESIGN-03 (#267) sets the final values from this section: xxl 28 in all three built-ins, and confidence_tint #c75300 / #f0883e / #ffb070 with the 16/30/46% mix.
+
 Only shapes, no code that uses them. Add a contracts-changes entry for the task id. It contains:
 - **`rastai.theme/1`** (the `rastai-formats` source and the generated `schemas/rastai.theme/1.json`):
-  - `typography.font_sizes_px.xxl` (integer, CSS pixels), required beside xs…xl;
+  - `typography.font_sizes_px.xxl` (integer, CSS pixels), optional, falls back to xl beside xs…xl;
   - `colors.confidence_tint` (`#rrggbb`, "Token confidence shading in chat"), an optional role like every color role.
 - **Contracts §5.6**:
-  - add `confidence_tint` to the color role table (group "Data");
+  - add `confidence_tint` to the color role table (group "Chat");
   - add `--rr-font-size-xxl` and `--rr-color-confidence-tint` to the CSS variable list;
   - record that the high-contrast built-in ships now rather than at M8.
 - **Contracts §11.2**: `ui.theme` gains the value `high_contrast` beside `system`, `light`, `dark` and the plugin
@@ -566,7 +570,7 @@ This is DESIGN-03 (#267), a follow-up PR on main after M1-51 (PR #256, merged 20
   - `palettes.test.js`: the §4.1 pairs (accent and focus ring vs `background` and `surface`, `text_on_accent` vs
     `accent` and `accent_hover`, `border_strong` 3:1, canvas node border and edge 3:1), run on all three built-ins;
   - `tokens.test.js`: every role, including `confidence_tint`, resolves in all three;
-  - `security.test.jsx`: screenshots of TokenConfirm under the hostile theme;
+  - `security.browser.test.jsx`: screenshots of TokenConfirm under the hostile theme;
   - a test that the font files and `OFL.txt` are present and that base.css names them.
 
 ### (d) M1-53, M1-54 and M1-55 on top
@@ -623,9 +627,6 @@ are not listed here.
 | `StatePill`, `SegmentedControl`, `StatTile`, `ThemeCard`, `ContextChip` | UI components (new, §5.2) | §5.2, §6 | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15.3, `@rastai/ui` row) |
 | `TokenConfirm` | locked component in `@rastai/ui/security` | §5.2, §6.9 | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15.3, its `@rastai/ui/security` entry) |
 | `SessionApproval` | locked component in `@rastai/ui/security` | §5.2, §6.9, ADR-0039 | the contract PR before second windows, §9 (d) (ADR-0039 decision 7; with its threat-model row) |
-| `high_contrast` | `ui.theme` value (beside `system`, `light`, `dark`) | §6.8, §8 decision 4 | §9 (b), DESIGN-02 (#266) (contracts §11.2) |
-| `confidence_tint` | colour role of `rastai.theme/1` | §4.1, §4.4 | §9 (b), DESIGN-02 (#266) (`rastai.theme/1`, contracts §5.6) |
-| `font_sizes_px.xxl` | typography key of `rastai.theme/1` | §4.2, §4.4 | §9 (b), DESIGN-02 (#266) (`rastai.theme/1`, contracts §5.6) |
 | `packages/ui/src/fonts/` | bundled font path | §4.5, §9 (c) | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15) |
 | `tokens/high-contrast.theme.json` | token file path | §9 (c) | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15.8) |
 | `eta_seconds`, `step`, `total_steps`, `epoch`, `total_epochs` | fields of `job.progress` or `run.get` (time left and step/epoch totals; today `JobProgress` has only `fraction` and `message`) | §6.5, §7 R5 | the Training milestone's contract PR |
@@ -641,7 +642,7 @@ are not listed here.
 | Command requests R1–R14 (other than those above) | commands and fields | §7 | each joins the milestone of the area it extends |
 | `IconButton`, `Slider`, `Toggle`, `Tabs`, `SidebarNav`, `StatusBarView`, `EmptyState`, `KeyHint`, `ProgressBar` and the other planned components of §5.2 | layout names (frontend layout 4.1) | §3, §5.2 | not in contracts; a component joins contracts when it is built |
 | `contextStore`, `state/theme.js` | module names (frontend layout 2) | §3.6, §6.3 | not in contracts; the frontend layout doc owns them |
-| `security.test.jsx`, `basic-advanced.spec.js`, `theme.spec.js`, `palette.spec.js` | test and spec file names | §9 (c), §9 (d) | DESIGN-03 (#267) and M1-53 to M1-55 PRs |
+| `basic-advanced.spec.js`, `theme.spec.js`, `palette.spec.js` | test and spec file names | §9 (c), §9 (d) | DESIGN-03 (#267) and M1-53 to M1-55 PRs |
 
 The existing files `tokens/built-in-themes.js`, `tokens/palettes.test.js`, `tokens/tokens.test.js`, `security/locked-styles.js`
 and `security/permission-text.js` are on main; §9 (c) extends them, so they need no registration.
