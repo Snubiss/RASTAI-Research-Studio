@@ -74,6 +74,45 @@ export const TEXT_STYLE = {
   color: lockedColor("security-text"),
 };
 
+/** A label above a list, such as "It can" (ui-design.md 6.9). */
+/** @type {CSSProperties} */
+export const LABEL_STYLE = {
+  ...TEXT_STYLE,
+  fontWeight: BOLD,
+};
+
+/** The "Rastai security check" line above a locked prompt's title (ui-design.md 5.2). */
+/** @type {CSSProperties} */
+export const HEADER_STYLE = {
+  ...FIXED_TEXT,
+  display: "flex",
+  alignItems: "center",
+  gap: "6px",
+  margin: "0 0 8px",
+  fontSize: SMALL_FONT_SIZE,
+  fontWeight: BOLD,
+  color: lockedColor("security-text"),
+};
+
+/** The lock glyph in the header: a fixed size, drawn in the header's own color. */
+/** @type {CSSProperties} */
+export const LOCK_GLYPH_STYLE = {
+  width: "12px",
+  height: "12px",
+  flexShrink: 0,
+};
+
+/** The box that shows a new token once (ui-design.md 6.9): a locked border around the value. */
+/** @type {CSSProperties} */
+export const SHOW_ONCE_BOX_STYLE = {
+  ...FIXED_TEXT,
+  margin: "0 0 8px",
+  padding: "8px",
+  border: `2px solid ${lockedColor("security-text")}`,
+  borderRadius: "4px",
+  color: lockedColor("security-text"),
+};
+
 /** @type {CSSProperties} */
 export const DANGER_TEXT_STYLE = {
   ...FIXED_TEXT,
@@ -112,32 +151,15 @@ export const PRIMARY_BUTTON_STYLE = {
   color: lockedColor("security-surface"),
 };
 
-/** A disabled button keeps the locked colors and changes its outline, so it is told apart without a theme color. */
+/**
+ * A disabled button is the outlined button with a dashed border: no fill, so it reads as off beside the filled
+ * Approve. The colors are locked, so no theme can make a disabled button look enabled.
+ */
 /** @type {CSSProperties} */
 export const DISABLED_BUTTON_STYLE = {
-  ...PRIMARY_BUTTON_STYLE,
+  ...BUTTON_STYLE,
   borderStyle: "dashed",
   cursor: "not-allowed",
-};
-
-/** @type {CSSProperties} */
-export const CHECKBOX_STYLE = {
-  ...FIXED_TEXT,
-  width: "16px",
-  height: "16px",
-  margin: "0 8px 0 0",
-  accentColor: lockedColor("security-text"),
-  cursor: "pointer",
-};
-
-/** @type {CSSProperties} */
-export const CHECKBOX_LABEL_STYLE = {
-  ...TEXT_STYLE,
-  display: "flex",
-  alignItems: "flex-start",
-  gap: "0",
-  minHeight: MIN_TARGET_SIZE,
-  cursor: "pointer",
 };
 
 /** @type {CSSProperties} */
@@ -178,4 +200,13 @@ export const CODE_STYLE = {
   fontFamily: SECURITY_CODE_FONT,
   fontSize: SMALL_FONT_SIZE,
   color: lockedColor("security-text"),
+};
+
+/** The token value itself, in the code face, wrapped so a long token never widens the prompt. */
+/** @type {CSSProperties} */
+export const TOKEN_VALUE_STYLE = {
+  ...CODE_STYLE,
+  display: "block",
+  margin: "0 0 8px",
+  wordBreak: "break-all",
 };

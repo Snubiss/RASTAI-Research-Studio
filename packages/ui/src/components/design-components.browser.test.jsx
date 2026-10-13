@@ -131,6 +131,54 @@ describe("SegmentedControl", () => {
     expect(changes).toEqual(["warnings"]);
     await mounted.unmount();
   });
+
+  test("the arrow keys move focus between options and wrap at the ends, without pressing anything", async () => {
+    /** @type {string[]} */
+    const changes = [];
+    const mounted = await mount(<SegmentHarness changes={changes} />);
+    const buttons = /** @type {HTMLElement[]} */ ([...mounted.container.querySelectorAll("button")]);
+    buttons[0].focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(buttons[1]);
+    await userEvent.keyboard("{ArrowRight}{ArrowRight}");
+    expect(document.activeElement).toBe(buttons[0]);
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toBe(buttons[2]);
+    await userEvent.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(buttons[1]);
+    await userEvent.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(buttons[2]);
+    expect(changes).toEqual([]);
+    await mounted.unmount();
+  });
+
+  test("the group is one Tab stop: the pressed option is in the Tab order and the others are not", async () => {
+    const mounted = await mount(<SegmentHarness changes={[]} />);
+    const buttons = [...mounted.container.querySelectorAll("button")];
+    expect(buttons.map((button) => button.tabIndex)).toEqual([0, -1, -1]);
+    await mounted.unmount();
+  });
+
+  test("a disabled group presses nothing and shows its options in the disabled text color", async () => {
+    /** @type {string[]} */
+    const changes = [];
+    const mounted = await mount(
+      <SegmentedControl
+        label="Log stream"
+        options={LOG_OPTIONS}
+        value="all"
+        onChange={(next) => changes.push(next)}
+        disabled
+      />,
+    );
+    const buttons = /** @type {HTMLButtonElement[]} */ ([...mounted.container.querySelectorAll("button")]);
+    expect(buttons.every((button) => button.disabled)).toBe(true);
+    buttons[1].click();
+    expect(changes).toEqual([]);
+    const colors = builtInTheme("light", OPTIONS).colors;
+    expect(getComputedStyle(buttons[1]).color).toBe(cssRgb(colors.text_disabled));
+    await mounted.unmount();
+  });
 });
 
 describe("StatTile", () => {

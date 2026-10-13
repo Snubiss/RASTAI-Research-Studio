@@ -1,4 +1,4 @@
-// builtInTheme(base, options): a built-in theme resolved with the user's density, motion and colorblind settings
+// builtInTheme(name, options): a built-in theme resolved with the user's density, motion and colorblind settings
 // (layout frontend-and-plugins.md 2.10 step 3; contracts 5.6). Plugin themes (M8) go through the same
 // resolveTheme, with their missing roles taken from their base.
 

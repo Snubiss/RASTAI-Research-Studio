@@ -1,6 +1,7 @@
 // A panel's title bar: its title, the Basic/Advanced override for this panel and the panel menu (layout
 // frontend-and-plugins.md 2.4). apps/web's PanelFrame renders it above the panel and turns the override into the
-// panel's ModeProvider.
+// panel's ModeProvider. The menu follows the WAI-ARIA menu-button pattern: the items are not Tab stops, the arrow,
+// Home and End keys move among them, and Escape or Tab closes it.
 
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -65,14 +66,35 @@ export function PanelChrome({
     onMenuSelect(itemId);
   }
 
+  // Keys are handled only while the menu is open: a closed menu must not swallow an Escape meant for a dialog around it.
   /** @param {import("react").KeyboardEvent} event */
   function handleMenuKeyDown(event) {
+    if (!menuOpen) {
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
+      closeMenu();
+    } else if (event.key === "Tab") {
+      // Focus returns to the menu button first, so the browser's own Tab step leaves the menu from there.
       closeMenu();
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       moveMenuFocus(menuRef.current, event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const items = menuItemsOf(menuRef.current);
+      items[event.key === "Home" ? 0 : items.length - 1]?.focus();
+    }
+  }
+
+  // Focus that leaves the menu for something outside it (a click elsewhere) closes the menu too.
+  /** @param {import("react").FocusEvent} event */
+  function handleMenuBlur(event) {
+    const next = event.relatedTarget;
+    const leavingMenu = !(next instanceof Node) || !event.currentTarget.contains(next);
+    if (menuOpen && leavingMenu) {
+      setMenuOpen(false);
     }
   }
 
@@ -92,7 +114,7 @@ export function PanelChrome({
         ))}
       </select>
       {menuItems.length > 0 ? (
-        <div className="rr-panel-chrome__menu" onKeyDown={handleMenuKeyDown}>
+        <div className="rr-panel-chrome__menu" onKeyDown={handleMenuKeyDown} onBlur={handleMenuBlur}>
           <button
             ref={triggerRef}
             type="button"
@@ -108,7 +130,13 @@ export function PanelChrome({
             <ul ref={menuRef} className="rr-menu" id={menuId} role="menu" aria-label={menuLabel}>
               {menuItems.map((item) => (
                 <li key={item.id} role="none">
-                  <button type="button" role="menuitem" className="rr-menu__item" onClick={() => selectItem(item.id)}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="rr-menu__item"
+                    tabIndex={-1}
+                    onClick={() => selectItem(item.id)}
+                  >
                     {item.label}
                   </button>
                 </li>

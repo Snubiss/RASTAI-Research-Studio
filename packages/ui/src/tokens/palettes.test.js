@@ -1,5 +1,5 @@
 // The contrast rules of layout frontend-and-plugins.md 2.9 (WCAG 2.2 AA: 4.5:1 for text, 3:1 for UI parts, chart
-// marks and the focus ring) on both built-in themes, with and without the colorblind palette, and on the locked
+// marks and the focus ring) on all three built-in themes, with and without the colorblind palette, and on the locked
 // security-UI colors. The colorblind palette must also stay distinguishable under simulated protanopia and
 // deuteranopia (layout 4.5).
 
@@ -177,6 +177,28 @@ function contrastFailures(rules, foregroundColors, backgroundColors) {
   return failures;
 }
 
+// Chat text sits on the confidence shading (ui-design.md 6.4 and 9 (b)): the tint mixed into the surface at each of
+// the three strengths the design uses. Only text is checked here; text_muted fails at the two stronger steps.
+const CONFIDENCE_STRENGTHS = [0.16, 0.3, 0.46];
+
+/**
+ * A "#rrggbb" color mixed toward another by a share from 0 to 1, in sRGB like the design's shading.
+ * @param {string} base
+ * @param {string} tint
+ * @param {number} share
+ * @returns {string}
+ */
+function mixHex(base, tint, share) {
+  const channels = [1, 3, 5].map((start) => {
+    const from = Number.parseInt(base.slice(start, start + 2), 16);
+    const to = Number.parseInt(tint.slice(start, start + 2), 16);
+    return Math.round(from * (1 - share) + to * share)
+      .toString(16)
+      .padStart(2, "0");
+  });
+  return `#${channels.join("")}`;
+}
+
 describe("contrast", () => {
   for (const { name, base } of THEMES) {
     test(`${name}: every role pair meets its ratio, plain and colorblind`, () => {
@@ -193,6 +215,15 @@ describe("contrast", () => {
       expect(contrastFailures(severityRule, locked, BUILT_IN_THEMES[name].colors)).toEqual([]);
       const badgeRule = [{ foregrounds: ["egress"], backgrounds: PANEL_BACKGROUNDS, ratio: UI_CONTRAST }];
       expect(contrastFailures(badgeRule, locked, BUILT_IN_THEMES[name].colors)).toEqual([]);
+    });
+
+    test(`${name}: chat text keeps 4.5:1 on the confidence shading at every strength`, () => {
+      const colors = BUILT_IN_THEMES[name].colors;
+      for (const strength of CONFIDENCE_STRENGTHS) {
+        const shaded = mixHex(colors.surface, colors.confidence_tint, strength);
+        const ratio = contrastRatio(colors.text, shaded);
+        expect(ratio, `${strength * 100}% shading`).toBeGreaterThanOrEqual(TEXT_CONTRAST);
+      }
     });
   }
 

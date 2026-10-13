@@ -472,6 +472,14 @@
   color: var(--rr-color-text);
 }
 
+/* Disabled comes after the hover and pressed rules so it wins at equal specificity (ui-design.md 5.1). */
+.rr-segmented__option:disabled {
+  color: var(--rr-color-text-disabled);
+  background: transparent;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
 /* ---- StatTile: a label and one big number in the mono face (ui-design.md 4.2) ---- */
 
 .rr-stat-tile {

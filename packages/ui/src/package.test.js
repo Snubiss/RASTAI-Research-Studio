@@ -70,6 +70,20 @@ describe("stylesheets", () => {
   });
 });
 
+// The bundled Geist faces (ui-design.md 9 (c)): each file is declared by base.css, and the SIL license ships with them.
+const FONT_FILES = ["Geist[wght].woff2", "Geist-Italic[wght].woff2", "GeistMono[wght].woff2"];
+
+describe("bundled fonts", () => {
+  test("base.css declares every bundled face, and OFL.txt ships beside them", () => {
+    const baseCss = readFileSync(new URL("styles/base.css", SOURCE_FOLDER), "utf8");
+    for (const file of FONT_FILES) {
+      expect(baseCss, file).toContain(file);
+    }
+    const license = readFileSync(new URL("fonts/OFL.txt", SOURCE_FOLDER), "utf8");
+    expect(license).toContain("SIL OPEN FONT LICENSE");
+  });
+});
+
 describe("no HTML from strings", () => {
   test("no source file builds HTML from strings", () => {
     for (const file of sourceFiles("")) {
