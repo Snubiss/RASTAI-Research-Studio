@@ -17,6 +17,8 @@ import { useQuery } from "../react/use-query.js";
 import { registerPluginUi, registeredPluginUi } from "../ui-registry.js";
 import { sampleBusEvent } from "./host-contract.js";
 import { createMockHost } from "./mock-host.js";
+
+/** @typedef {import("./mock-host.js").MockHost} MockHost */
 import { inAct, mount } from "./render.js";
 
 /** @typedef {import("@rastai/client/testing/fake-daemon").FakeDaemon} FakeDaemon */
@@ -139,7 +141,7 @@ async function appHost() {
 
 /**
  * The mock host with the same answers canned.
- * @returns {ReturnType<typeof createMockHost>}
+ * @returns {MockHost}
  */
 function mockHost() {
   /** @type {Object<string, () => ExecuteOutcome>} */

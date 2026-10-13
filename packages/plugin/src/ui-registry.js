@@ -55,14 +55,19 @@ const NAMESPACED_LISTS = ["panels", "lensViews", "metricViews", "settingsPages"]
 const registeredUis = new Map();
 
 /**
- * Registers a plugin's in-process UI, replacing an earlier registration of the same plugin. Throws on a malformed
- * UI; the app's loader turns that into RRS-P4105 and starts without the plugin (layout 10.2).
+ * Registers a plugin's in-process UI, once per plugin id. A second registration is refused, whatever its source,
+ * so nothing can replace an earlier one: not a plugin, and not the core sections under the id `core`. Throws on a
+ * malformed UI or a repeated id; the app's loader turns that into RRS-P4105 and starts without the plugin (layout
+ * 10.2). The app calls it from one place only, its plugin loader.
  * @param {PluginUi} ui
  */
 export function registerPluginUi(ui) {
   const problem = pluginUiProblem(ui);
   if (problem !== null) {
     throw new Error(`The plugin UI of ${String(ui?.pluginId)} can't be registered: ${problem}`);
+  }
+  if (registeredUis.has(ui.pluginId)) {
+    throw new Error(`The plugin UI of ${ui.pluginId} is already registered; a registration is never replaced.`);
   }
   registeredUis.set(ui.pluginId, ui);
 }

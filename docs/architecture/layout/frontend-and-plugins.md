@@ -2027,6 +2027,8 @@ apps/web/
                                 egress.active; renders StatusBarView and EgressBadge (from @rastai/ui/security)
 ```
 
+As built in M1-53 (the tree above is the target; these files are the shell's own additions): `app/shell.js` (the window's stores, hub and refresh functions, the object the App reads), `app/shell-context.js`, `app/keyboard.js` (the global keys as one pure step function), `app/OfflineScreen.jsx`, `state/layouts.js`, `workspace/SectionPage.jsx`, `sections/not-available.js` and `sections/NotAvailableSection.jsx` (the RRS-C0010 state), `sections/home/*`, and `frame/TopBar.jsx`, `frame/SectionRail.jsx`, `frame/Overlays.jsx`, `frame/CommandPalette.jsx` (the entry only; M1-54 builds the palette) and `frame/palette-match.js`. `plugin-host/core-sections.jsx` holds JSX, so it has the `.jsx` extension (the Node test project transforms JSX only in `.jsx`). `pluginDiagnostic` is the one catalog Diagnostic builder (`@rastai/plugin`, contracts 15.3).
+
 The security components (`EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen`) live once, in `@rastai/ui/security` (4.1). The app imports them; it never keeps its own copy, so their locked tokens can't be bypassed by a local variant.
 
 ### 8.2 Tree: core sections

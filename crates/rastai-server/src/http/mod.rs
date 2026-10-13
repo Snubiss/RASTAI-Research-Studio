@@ -12,3 +12,4 @@ pub mod listeners;
 pub mod mcp_endpoint;
 pub mod router;
 pub mod sessions;
+pub mod web_assets;

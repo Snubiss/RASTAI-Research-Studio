@@ -25,13 +25,12 @@ function sampleUi() {
 }
 
 describe("registerPluginUi", () => {
-  test("registers a UI under its plugin id, and a second registration replaces the first", () => {
+  test("registers a UI under its plugin id, and a second registration for that id is refused", () => {
     const first = sampleUi();
-    const second = sampleUi();
     registerPluginUi(first);
     expect(registeredPluginUi("psychology")).toBe(first);
-    registerPluginUi(second);
-    expect(registeredPluginUi("psychology")).toBe(second);
+    expect(() => registerPluginUi(sampleUi())).toThrow(/already registered/);
+    expect(registeredPluginUi("psychology")).toBe(first);
     expect(registeredPluginUi("eval")).toBeNull();
   });
 

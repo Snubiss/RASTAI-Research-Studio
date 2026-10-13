@@ -31,6 +31,18 @@
       "license": "Apache-2.0",
       "reason": "the checkJs checker only: `just check-js` runs tsc --noEmit over jsconfig.json; never emits or ships, nobody writes TypeScript (ADR-0036)"
     },
+    "vite": {
+      "version": "8.3.1",
+      "category": "dev",
+      "license": "MIT",
+      "reason": "the frontend build of apps/web (`pnpm --filter @rastai/web build`, run by `just web-embed` so rastai-server embeds the result); the same vite vitest already brings in, named here because apps/web's vite.config.js imports it directly (spec §27 dev tooling row: vite)"
+    },
+    "axe-core": {
+      "version": "4.13.0",
+      "category": "dev",
+      "license": "MPL-2.0",
+      "reason": "automated accessibility checks (WCAG 2.2 AA, frontend layout 2.9) in apps/web's browser tests, which run it on the rendered frame in Chromium and WebKit; spec §27 dev tooling row: axe-core. Never ships. Version 4.13.0: the newest release at least 14 days old (the workspace's minimumReleaseAge)"
+    },
     "vitest": {
       "version": "5.0.2",
       "category": "dev",
