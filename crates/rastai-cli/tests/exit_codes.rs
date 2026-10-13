@@ -5,7 +5,7 @@
 //!
 //! | Outcome | Exit code |
 //! |---|---|
-//! | a sync command that succeeded; a job that `succeeded`; `--detach` | 0 `EXIT_OK` |
+//! | a sync command that succeeded; a stream command's session id (followed from M3); a job that `succeeded`; `--detach` | 0 `EXIT_OK` |
 //! | `ok: false`; a job that `failed` while running, or was `cancelled` | 1 `EXIT_FAILED` |
 //! | an unknown verb; a flag the command doesn't have; `--set` on a verb | 2 `EXIT_USAGE` |
 //! | no daemon and `--no-start`; a daemon without an API package the CLI calls | 3 `EXIT_DAEMON_UNAVAILABLE` |
@@ -84,6 +84,19 @@ fn a_sync_command_that_succeeded_exits_0_and_prints_its_result() {
     let first_line: Value = serde_json::from_str(result.stdout.lines().next().unwrap()).unwrap();
     assert_eq!(first_line, json!({"node_count": 1}));
     assert_eq!(final_line(&result), json!({"exit_code": 0, "diagnostics": []}));
+    // The help cache keeps this version's commands.
+    assert!(help_cache(&home, APP_VERSION).exists());
+}
+
+#[test]
+fn a_stream_command_prints_its_session_id_and_subscribes_to_nothing_until_m3() {
+    let home = test_home("stream");
+    let daemon = start_fake_daemon(&home, healthy());
+    let result = run_rastai(&home, &["chat", "send", "--json"]);
+    assert_eq!(result.exit_code, 0, "{result:?}");
+    let first_line: Value = serde_json::from_str(result.stdout.lines().next().unwrap()).unwrap();
+    assert_eq!(first_line, json!({"session_id": "ses_a"}));
+    assert!(!requests_of(&daemon).iter().any(|line| line.contains(SUBSCRIBE_PATH)));
 }
 
 #[test]
@@ -134,6 +147,11 @@ fn a_flag_the_command_does_not_have_exits_2_before_anything_is_sent() {
     let result = run_rastai(&home, &["system", "status", "--colour", "red", "--json"]);
     assert_eq!(result.exit_code, 2, "{result:?}");
     assert_eq!(final_codes(&result), ["RRS-C0002", "RRS-C0002"]);
+    let message = final_line(&result)["diagnostics"][0]["message"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(message.contains("this command takes none"), "{message}");
     assert!(!requests_of(&daemon).iter().any(|line| line.contains(EXECUTE_PATH)));
 }
 
@@ -181,6 +199,9 @@ fn a_daemon_of_another_version_is_used_with_warning_rrs_c0006() {
     assert_eq!(result.exit_code, 0, "{result:?}");
     assert_eq!(final_codes(&result), ["RRS-C0006"]);
     assert_eq!(final_line(&result)["diagnostics"][0]["severity"], "warning");
+    // Another version's commands aren't this version's help.
+    assert!(!help_cache(&home, "0.0.9").exists());
+    assert!(!help_cache(&home, APP_VERSION).exists());
 }
 
 #[test]
@@ -259,6 +280,11 @@ fn the_request_carries_the_arguments_and_a_fresh_idempotency_key() {
 }
 
 // ---- The fake daemon ----
+
+/// `<cache>/commands-<version>.json` under the test's `RASTAI_HOME` (contracts 8.1).
+fn help_cache(home: &Path, version: &str) -> PathBuf {
+    home.join("cache").join(format!("commands-{version}.json"))
+}
 
 fn healthy() -> FakeHealth {
     FakeHealth {
@@ -360,6 +386,7 @@ fn fake_commands() -> Vec<CommandDescriptor> {
         command("token.list", CommandKind::Sync, &no_arguments),
         command("node.list", CommandKind::Sync, &no_arguments),
         command("train.start", CommandKind::Job, &recipe),
+        command("chat.send", CommandKind::Stream, &no_arguments),
     ]
 }
 
@@ -369,6 +396,11 @@ async fn answer_execute(stream: &mut UnixStream, request: &ExecuteRequest, jobs:
         "system.status" | "system.shutdown" => ExecuteResponse {
             ok: true,
             result_json: json!({"node_count": 1}).to_string(),
+            ..ExecuteResponse::default()
+        },
+        "chat.send" => ExecuteResponse {
+            ok: true,
+            result_json: json!({"session_id": "ses_a"}).to_string(),
             ..ExecuteResponse::default()
         },
         "plugin.list" => refused("RRS-C0010", &[("command_id", "plugin.list")]),

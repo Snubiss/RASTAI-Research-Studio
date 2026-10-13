@@ -1,22 +1,27 @@
 //! `run_verb` (layout: rust-control-plane.md 9.3): words to a registry command, flags to arguments JSON, `Execute`,
-//! then the result printed, the job followed or the stream printed until it ends. No verb is written here: every one
-//! comes from the daemon's `ListCommands`, so a new command or an enabled plugin's is a verb at once.
+//! then the result printed or the job followed until it ends. No verb is written here: every one comes from the
+//! daemon's `ListCommands`, so a new command or an enabled plugin's is a verb at once.
+//!
+//! (M3) A `stream` command's result is printed like a `sync` one's: it is the session id. Printing the session's
+//! ephemeral events as they arrive (layout 9.3 step 6) lands with the first core stream command, `chat.send`,
+//! whose events (`chat.token`) and end are defined there.
 
 use rastai_core::commands::naming::{cli_words, command_id_from_cli_words};
 use rastai_core::commands::registry::{CommandRegistry, find_command};
 use rastai_core::error::CoreError;
 use rastai_core::paths::DataPaths;
 use rastai_core::random::random_bytes;
+use rastai_core::versions::APP_VERSION;
 use rastai_core::wire::diagnostic_from_proto;
-use rastai_diag::diagnostic::{Diagnostic, diagnostic, has_errors};
+use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_proto::commands::v1::{CommandDescriptor, CommandKind, ExecuteRequest, ExecuteResponse};
 use rastai_proto::common::v1::JobState;
 use serde_json::{Value, json};
 
-use crate::arguments::{NODE_FLAG, ParsedArguments, SET_FLAG};
+use crate::arguments::ParsedArguments;
 use crate::command_cache::save_command_cache;
 use crate::daemon_client::{DaemonClient, execute, list_commands};
-use crate::error::{CliError, not_available_yet, usage_error};
+use crate::error::CliError;
 use crate::exit_codes::{EXIT_OK, exit_code_for_failure, exit_code_for_job};
 use crate::follow::{EventStream, follow_job, open_job_events};
 use crate::output::{OutputSettings, output_settings, print_line, print_result};
@@ -32,12 +37,12 @@ const PROGRAM_NAME: &str = "rastai";
 /// Random bytes in an idempotency key, written as hex: enough that two invocations never share one.
 const IDEMPOTENCY_KEY_BYTES: usize = 16;
 const JOB_ID_KEY: &str = "job_id";
-const SET_ONLY_WITH_SERVE: &str = "--set only with rastai serve, or settings set for a running daemon";
 
 /// How a verb ended (layout 9.2).
 #[derive(Debug, Clone, PartialEq)]
 pub enum VerbOutcome {
-    /// A `sync` command's answer, or any command the daemon refused or that failed (`ok: false`).
+    /// A `sync` command's answer, a `stream` command's session id, or any command the daemon refused or that
+    /// failed (`ok: false`).
     Finished(ExecuteResponse),
     /// A followed job reached a terminal state. `from_state` is the state it left, which tells a job that failed
     /// before it ran from one that failed while running.
@@ -47,8 +52,6 @@ pub enum VerbOutcome {
         from_state: JobState,
         diagnostics: Vec<Diagnostic>,
     },
-    /// A `stream` command's events ended.
-    StreamEnded { diagnostics: Vec<Diagnostic> },
     /// `--detach`: the job runs on, unfollowed.
     Detached { job_id: String },
 }
@@ -62,19 +65,22 @@ pub async fn run_verb(
 ) -> Result<VerbOutcome, CliError> {
     let settings = output_settings(&arguments.global);
     let commands = list_commands(client).await?;
-    save_command_cache(paths, &client.daemon_version, &commands);
+    // The cache is this version's commands (contracts 8.1), which help reads while no daemon runs; a daemon of
+    // another version has other commands, so its list isn't kept.
+    if client.daemon_version == APP_VERSION {
+        save_command_cache(paths, APP_VERSION, &commands);
+    }
     let registry = CommandRegistry { commands };
     let command = find_verb(&registry, words)?;
     let request = execute_request(command, arguments)?;
-    let follows_events = follows_events(command, arguments);
     // Subscribed before Execute, so no event of the job can fall between its start and the subscription.
-    let events = if follows_events {
+    let events = if follows_job(command, arguments) {
         Some(open_job_events(client).await?)
     } else {
         None
     };
     let response = execute(client, &request).await?;
-    finish_verb(command, response, events, settings).await
+    finish_verb(response, events, settings).await
 }
 
 /// The command the leading words name. An unknown verb is `RRS-C0001`, with the closest verbs as its fix.
@@ -88,14 +94,8 @@ pub fn find_verb<'a>(registry: &'a CommandRegistry, words: &[String]) -> Result<
 }
 
 fn execute_request(command: &CommandDescriptor, arguments: &ParsedArguments) -> Result<ExecuteRequest, CliError> {
+    // `--node` and `--set` were refused when the mode was chosen (modes.rs), before any daemon was started.
     let global = &arguments.global;
-    if global.node.is_some() {
-        return Err(not_available_yet(NODE_FLAG));
-    }
-    // Settings flags are the daemon's start-up layer (contracts 11.1); a verb can't change a running daemon's.
-    if let Some(set_flag) = global.set.first() {
-        return Err(usage_error(&format!("{SET_FLAG} {set_flag}"), SET_ONLY_WITH_SERVE));
-    }
     let schema: Value = serde_json::from_str(&command.arguments_schema_json).unwrap_or(Value::Null);
     let arguments_json = build_arguments_json(command, &schema, arguments).map_err(CliError::Usage)?;
     let idempotency_key = match &global.idempotency_key {
@@ -112,14 +112,12 @@ fn execute_request(command: &CommandDescriptor, arguments: &ParsedArguments) -> 
     })
 }
 
-/// A job or a stream is followed unless `--detach`; a dry run starts nothing to follow.
-fn follows_events(command: &CommandDescriptor, arguments: &ParsedArguments) -> bool {
-    let starts_work = matches!(command.kind(), CommandKind::Job | CommandKind::Stream);
-    starts_work && !arguments.global.detach && !arguments.global.dry_run
+/// A job is followed unless `--detach`; a dry run starts nothing to follow. A stream isn't followed yet (M3).
+fn follows_job(command: &CommandDescriptor, arguments: &ParsedArguments) -> bool {
+    command.kind() == CommandKind::Job && !arguments.global.detach && !arguments.global.dry_run
 }
 
 async fn finish_verb(
-    command: &CommandDescriptor,
     response: ExecuteResponse,
     events: Option<EventStream>,
     settings: OutputSettings,
@@ -134,8 +132,7 @@ async fn finish_verb(
     let Some(events) = events else {
         return Ok(VerbOutcome::Detached { job_id });
     };
-    let ends_with_stream = command.kind() == CommandKind::Stream;
-    follow_job(events, &job_id, ends_with_stream, settings).await
+    follow_job(events, &job_id, settings).await
 }
 
 fn print_command_result(response: &ExecuteResponse, settings: OutputSettings) {
@@ -157,8 +154,7 @@ pub fn outcome_exit_code(outcome: &VerbOutcome) -> u8 {
             from_state,
             ..
         } => exit_code_for_job(*final_state, *from_state),
-        VerbOutcome::StreamEnded { diagnostics } if has_errors(diagnostics) => exit_code_for_failure(diagnostics),
-        VerbOutcome::StreamEnded { .. } | VerbOutcome::Detached { .. } => EXIT_OK,
+        VerbOutcome::Detached { .. } => EXIT_OK,
     }
 }
 
@@ -166,7 +162,7 @@ pub fn outcome_exit_code(outcome: &VerbOutcome) -> u8 {
 pub fn outcome_diagnostics(outcome: &VerbOutcome) -> Vec<Diagnostic> {
     match outcome {
         VerbOutcome::Finished(response) => response_diagnostics(response),
-        VerbOutcome::JobEnded { diagnostics, .. } | VerbOutcome::StreamEnded { diagnostics } => diagnostics.clone(),
+        VerbOutcome::JobEnded { diagnostics, .. } => diagnostics.clone(),
         VerbOutcome::Detached { .. } => Vec::new(),
     }
 }

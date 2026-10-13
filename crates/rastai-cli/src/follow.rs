@@ -1,4 +1,4 @@
-//! Following a job or a stream through `EventService.Subscribe` until it ends (layout: rust-control-plane.md 9.3
+//! Following a job through `EventService.Subscribe` until it ends (layout: rust-control-plane.md 9.3
 //! step 6): its state changes, progress and log lines are printed as they arrive, and the terminal state decides
 //! the exit code.
 //!
@@ -70,23 +70,16 @@ pub async fn open_job_events(client: &DaemonClient) -> Result<EventStream, CliEr
     })
 }
 
-/// Prints the job's events until it reaches a terminal state. A stream command's events end with the stream
-/// itself, so for one (`ends_with_stream`) a clean end is its outcome rather than a lost daemon.
+/// Prints the job's events until it reaches a terminal state. A stream that ends first lost its daemon.
 pub async fn follow_job(
     mut events: EventStream,
     job_id: &str,
-    ends_with_stream: bool,
     settings: OutputSettings,
 ) -> Result<VerbOutcome, CliError> {
     let mut last_state = JobState::Queued;
     loop {
         let event = match next_event(&mut events).await? {
             StreamItem::Event(event) => *event,
-            StreamItem::Ended if ends_with_stream => {
-                return Ok(VerbOutcome::StreamEnded {
-                    diagnostics: Vec::new(),
-                });
-            }
             StreamItem::Ended => return Err(stream_ended(&events)),
         };
         if !is_about_job(&event, job_id) {

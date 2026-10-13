@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used)]
 
 use rastai_cli::arguments::{CommandLineItem, GlobalFlags, ParsedArguments, leading_words, parse_command_line};
-use rastai_cli::modes::{LocalCommand, Mode, OpenFlags, ServeFlags, choose_mode};
+use rastai_cli::modes::{LocalCommand, Mode, OpenFlags, ServeFlags, choose_mode, mode_words};
 use rastai_core::commands::naming::CLI_MODE_WORDS;
 
 fn words(line: &str) -> Vec<String> {
@@ -185,7 +185,6 @@ fn everything_else_is_a_verb() {
         ("doctor", owned(&["doctor"])),
         ("node list", owned(&["node", "list"])),
         ("storage gc", owned(&["storage", "gc"])),
-        ("--print-url", Vec::new()),
     ];
     for (line, expected) in table {
         assert_eq!(mode_of(line), Mode::Verb(expected), "{line:?}");
@@ -211,6 +210,38 @@ fn a_misused_flag_is_a_usage_error() {
     ] {
         assert_eq!(refusal_exit_code(line), 2, "{line:?}");
     }
+}
+
+/// Refused when the mode is chosen, before main.rs starts any daemon: flags with no command, `--node` (M9) and
+/// `--set` on a verb.
+#[test]
+fn a_line_that_cannot_be_a_verb_is_refused_before_a_daemon_starts() {
+    let table = [
+        ("--frob", 2, "RRS-C0002"),
+        ("--print-url", 2, "RRS-C0002"),
+        ("--frob=1 system status", 2, "RRS-C0002"),
+        ("system status --node gpu-box", 1, "RRS-C0010"),
+        ("system status --set ui.theme=dark", 2, "RRS-C0002"),
+    ];
+    for (line, exit_code, code) in table {
+        let refusal = choose_mode(&parse(line)).unwrap_err();
+        assert_eq!(refusal.exit_code(), exit_code, "{line:?}");
+        assert_eq!(refusal.diagnostics()[0].code, code, "{line:?}");
+    }
+    let refusal = choose_mode(&parse("--frob")).unwrap_err();
+    assert!(refusal.diagnostics()[0].message.contains("--frob"));
+}
+
+#[test]
+fn every_mode_names_its_own_words() {
+    for fixed_words in CLI_MODE_WORDS {
+        let line = match *fixed_words {
+            "validate" => "validate a.json".to_string(),
+            other => other.to_string(),
+        };
+        assert_eq!(mode_words(&mode_of(&line)), *fixed_words);
+    }
+    assert_eq!(mode_words(&mode_of("system status")), "system status");
 }
 
 #[test]

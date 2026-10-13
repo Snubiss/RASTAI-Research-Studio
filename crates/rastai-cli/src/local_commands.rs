@@ -14,11 +14,10 @@ use serde_json::json;
 
 use crate::error::{CliError, not_available_yet};
 use crate::exit_codes::{EXIT_FAILED, EXIT_OK};
-use crate::modes::LocalCommand;
+use crate::modes::{LocalCommand, Mode, mode_words};
 use crate::output::{OutputSettings, print_document_report, print_line};
 
 const CODE_SOURCE_UNREADABLE: &str = "RRS-D3001";
-const REBUILD_INDEX_WORDS: &str = "storage rebuild-index";
 
 /// Runs a local command and returns its exit code.
 pub fn run_local_command(command: &LocalCommand, settings: OutputSettings) -> Result<u8, CliError> {
@@ -28,7 +27,7 @@ pub fn run_local_command(command: &LocalCommand, settings: OutputSettings) -> Re
             print_line(settings, APP_VERSION, &json!({ "version": APP_VERSION }));
             Ok(EXIT_OK)
         }
-        LocalCommand::RebuildIndex { .. } => Err(not_available_yet(REBUILD_INDEX_WORDS)),
+        LocalCommand::RebuildIndex { .. } => Err(not_available_yet(&mode_words(&Mode::Local(command.clone())))),
     }
 }
 

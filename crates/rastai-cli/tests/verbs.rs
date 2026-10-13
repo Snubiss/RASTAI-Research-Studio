@@ -3,7 +3,8 @@
 //!   each command's flags taken from its argument schema (`schemas/commands/`, or, for a command not built yet, a
 //!   schema of the example's own value kinds);
 //! - flags of every kind, positionals, `--arguments-json` and its key-by-key override;
-//! - a verb with no daemon running starts one, and help lists the verbs from the command cache once it is gone.
+//! - a verb with no daemon running starts one, and help lists the verbs from the command cache once it is gone;
+//! - a daemon that can't start reports its own reason, read from its final `--json` line, and exit 3.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -21,7 +22,7 @@ use rastai_core::versions::APP_VERSION;
 use rastai_proto::commands::v1::CommandDescriptor;
 use serde_json::{Map, Value, json};
 
-use common::{DaemonGuard, daemon_answers, daemon_processes, final_line, run_rastai, test_home};
+use common::{DaemonGuard, daemon_answers, daemon_processes, final_codes, final_line, run_rastai, test_home};
 
 const COPY_AS_GOLDEN: &str = "fixtures/command-golden/copy-as.json";
 const SCHEMAS_FOLDER: &str = "schemas/commands";
@@ -280,10 +281,48 @@ fn a_verb_with_no_daemon_running_starts_one() {
     wait_for_no_daemon(&home);
 
     // Help still lists the verbs from the command cache, and starts nothing.
-    let help = run_rastai(&home, &["help"]);
+    assert_help_lists_system_status(&home);
+    assert!(daemon_processes(&home).is_empty());
+    drop(guard);
+}
+
+/// `rastai help` as text and as JSON, with no daemon running: both list `system status` from the command cache.
+fn assert_help_lists_system_status(home: &Path) {
+    let help = run_rastai(home, &["help"]);
     assert_eq!(help.exit_code, 0, "{help:?}");
     assert!(help.stdout.contains("rastai system status"), "{}", help.stdout);
-    assert!(daemon_processes(&home).is_empty());
+    let help_json = run_rastai(home, &["help", "--json"]);
+    assert_eq!(help_json.exit_code, 0, "{help_json:?}");
+    let overview: Value = serde_json::from_str(help_json.stdout.lines().next().unwrap()).unwrap();
+    let verbs: Vec<&str> = overview["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|command| command["verb"].as_str())
+        .collect();
+    assert!(verbs.contains(&"system status"), "{overview}");
+    assert_eq!(final_line(&help_json), json!({"exit_code": 0, "diagnostics": []}));
+}
+
+/// An `owner.token` others can read stops the start (`RRS-C1008`, contracts 8.1); the CLI reports the daemon's own
+/// reason from its final `--json` line and exits `EXIT_DAEMON_UNAVAILABLE`.
+#[cfg(unix)]
+#[test]
+fn a_daemon_that_cannot_start_reports_its_reason_and_exits_3() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = test_home("start-fails");
+    let guard = DaemonGuard { home: home.clone() };
+    let auth_folder = home.join("config").join("auth");
+    fs::create_dir_all(&auth_folder).unwrap();
+    let token_path = auth_folder.join("owner.token");
+    fs::write(&token_path, format!("{}\n", "a".repeat(64))).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let result = run_rastai(&home, &["system", "status", "--json"]);
+    assert_eq!(result.exit_code, 3, "{result:?}");
+    assert_eq!(final_codes(&result), ["RRS-C1008"]);
+    assert!(!daemon_answers(&home));
     drop(guard);
 }
 

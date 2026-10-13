@@ -5,8 +5,8 @@
 
 use rastai_core::commands::naming::CLI_MODE_WORDS;
 
-use crate::arguments::{CommandLineItem, ParsedArguments, leading_words, shown_flag};
-use crate::error::{CliError, usage_error};
+use crate::arguments::{CommandLineItem, NODE_FLAG, ParsedArguments, SET_FLAG, leading_words, shown_flag};
+use crate::error::{CliError, not_available_yet, usage_error};
 
 // The fixed words of CLI_MODE_WORDS, each matched once below.
 const OPEN_WORDS: &str = "open";
@@ -31,6 +31,8 @@ const PORT_FLAG: &str = "--port";
 const VERIFY_BLOBS_FLAG: &str = "--verify-blobs";
 
 const EXPECTED_NO_WORDS: &str = "no further words";
+const EXPECTED_COMMAND_FIRST: &str = "a command or mode word before its flags";
+const SET_ONLY_WITH_SERVE: &str = "--set only with rastai serve, or settings set for a running daemon";
 const EXPECTED_FILES: &str = "one or more document files";
 const EXPECTED_PORT: &str = "a port number from 0 to 65535";
 
@@ -92,11 +94,48 @@ pub fn choose_mode(arguments: &ParsedArguments) -> Result<Mode, CliError> {
         return Ok(Mode::OpenUi(OpenFlags::default()));
     }
     let Some(mode_words) = fixed_words_of(&words) else {
-        return Ok(Mode::Verb(words));
+        return verb_mode(words, arguments);
     };
     let word_count = mode_words.split(' ').count();
     let rest = &arguments.items[word_count..];
     mode_from_words(mode_words, rest, arguments)
+}
+
+/// A verb's words, refused here when the line can't be a verb, so no daemon is started only to refuse it: flags
+/// with no command before them, `--node` (M9), and settings flags, which are the daemon's start-up layer (contracts
+/// 11.1) that a verb can't change on a running daemon.
+fn verb_mode(words: Vec<String>, arguments: &ParsedArguments) -> Result<Mode, CliError> {
+    if words.is_empty()
+        && let Some(first) = arguments.items.first()
+    {
+        return Err(usage_error(&shown_item(first), EXPECTED_COMMAND_FIRST));
+    }
+    if arguments.global.node.is_some() {
+        return Err(not_available_yet(NODE_FLAG));
+    }
+    if let Some(set_flag) = arguments.global.set.first() {
+        return Err(usage_error(&format!("{SET_FLAG} {set_flag}"), SET_ONLY_WITH_SERVE));
+    }
+    Ok(Mode::Verb(words))
+}
+
+/// The words that name a mode, for a refusal that has to say which: the fixed words, or a verb's own.
+pub fn mode_words(mode: &Mode) -> String {
+    let fixed = match mode {
+        Mode::OpenUi(_) => OPEN_WORDS,
+        Mode::Serve(_) => SERVE_WORDS,
+        Mode::NodeServe => NODE_SERVE_WORDS,
+        Mode::NodeInit => NODE_INIT_WORDS,
+        Mode::NodeCheckUpdate => NODE_CHECK_UPDATE_WORDS,
+        Mode::Tunnel => TUNNEL_WORDS,
+        Mode::McpBridge => MCP_WORDS,
+        Mode::Local(LocalCommand::Validate(_)) => VALIDATE_WORDS,
+        Mode::Local(LocalCommand::Version) => VERSION_WORDS,
+        Mode::Local(LocalCommand::RebuildIndex { .. }) => REBUILD_INDEX_WORDS,
+        Mode::Help(_) => HELP_WORDS,
+        Mode::Verb(words) => return words.join(" "),
+    };
+    fixed.to_string()
 }
 
 /// The longest entry of `CLI_MODE_WORDS` the leading words start with.
@@ -228,12 +267,17 @@ fn port_number(text: &str) -> Result<u16, CliError> {
 
 /// A word or flag the mode doesn't take, with the flags it does.
 fn unexpected(item: &CommandLineItem, allowed_flags: &[&str]) -> CliError {
-    let found = match item {
-        CommandLineItem::Word(word) => word.clone(),
-        CommandLineItem::Flag { name, inline_value } => shown_flag(name, inline_value),
-    };
+    let found = shown_item(item);
     if allowed_flags.is_empty() {
         return usage_error(&found, EXPECTED_NO_WORDS);
     }
     usage_error(&found, &allowed_flags.join(", "))
+}
+
+/// An item as the user typed it.
+fn shown_item(item: &CommandLineItem) -> String {
+    match item {
+        CommandLineItem::Word(word) => word.clone(),
+        CommandLineItem::Flag { name, inline_value } => shown_flag(name, inline_value),
+    }
 }
