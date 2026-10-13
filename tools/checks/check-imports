@@ -170,6 +170,11 @@ JS_FOLDER_DEPS = {
 # The only subpath imports of our packages, and the folders that may use each one.
 JS_SUBPATH_FOLDERS = {
     "@rastai/ui/security": ["apps/web/src/"],
+    # The typed wrappers reach plugins only through @rastai/plugin, which re-exports them (frontend layout 7.1).
+    "@rastai/client/commands": ["packages/plugin/src/"],
+    # The client's shared executor table and its fake daemon, for the plugin hosts' contract tests (layout 7.5).
+    "@rastai/client/testing": ["packages/plugin/src/testing/"],
+    "@rastai/client/testing/fake-daemon": ["packages/plugin/src/testing/"],
 }
 # External library -> path patterns of the files that may import it (fnmatch: * also crosses folders).
 JS_LIBRARY_FILES = {
@@ -181,7 +186,8 @@ JS_LIBRARY_FILES = {
         "apps/web/src/*",
         "apps/viewer/src/*",
     ],
-    "react-dom": ["packages/ui/src/*", "apps/web/src/*"],
+    # @rastai/plugin mounts components only in its browser tests, through testing/render.js (as @rastai/ui does).
+    "react-dom": ["packages/ui/src/*", "apps/web/src/*", "packages/plugin/src/testing/render.js"],
     # The client's tests reach the libraries through its fake daemon (connect-es's in-memory router, frontend
     # layout 3.5); only the golden test, which re-encodes what the client decoded, imports protobuf-es itself.
     "@connectrpc/connect": [

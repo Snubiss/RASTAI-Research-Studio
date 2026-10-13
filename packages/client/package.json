@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.js",
     "./commands": "./src/generated/commands.js",
-    "./testing": "./src/testing/executor-contract.js"
+    "./testing": "./src/testing/executor-contract.js",
+    "./testing/fake-daemon": "./src/testing/fake-daemon.js"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.15.0",

@@ -1,0 +1,21 @@
+{
+  "name": "@rastai/plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The JavaScript plugin SDK: the PluginHost shape every section and plugin UI codes against, its in-process and mock hosts, UI registration, the state tools, CommandForm, JobProgress and the re-exported typed command wrappers.",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@rastai/catalog": "workspace:*",
+    "@rastai/client": "workspace:*",
+    "@rastai/ui": "workspace:*",
+    "react": "19.3.0"
+  },
+  "devDependencies": {
+    "@rastai/formats": "workspace:*",
+    "@rastai/proto": "workspace:*",
+    "react-dom": "19.3.0"
+  }
+}
