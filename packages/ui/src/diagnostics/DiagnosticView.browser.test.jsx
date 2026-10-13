@@ -111,6 +111,13 @@ describe("DiagnosticView", () => {
     await basic.unmount();
   });
 
+  test("a fix command with no handler means no button either, so nothing looks clickable that does nothing", async () => {
+    const mounted = await mount(<DiagnosticView diagnostic={diagnostic({})} />);
+    expect(mounted.container.querySelector("button")).toBeNull();
+    expect(mounted.container.textContent).toContain(POLICY_ENTRY.fix_text);
+    await mounted.unmount();
+  });
+
   test("no fix command means no fix button, but the fix sentence still shows", async () => {
     const mounted = await mount(<DiagnosticView diagnostic={diagnostic({ fixCommandId: "" })} onFix={() => {}} />);
     expect(mounted.container.querySelector("button")).toBeNull();

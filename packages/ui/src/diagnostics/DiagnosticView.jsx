@@ -17,13 +17,14 @@ const DEFAULT_FIX_LABEL = "Fix it";
 /**
  * @param {object} props
  * @param {Diagnostic} props.diagnostic
- * @param {(commandId: string, argumentsJson: string) => void} props.onFix
+ * @param {((commandId: string, argumentsJson: string) => void) | undefined} [props.onFix]
+ *   runs the diagnostic's fix. Without it there is no button, only the fix sentence: a button that does nothing would lie.
  * @param {string} [props.fixLabel]   the fix button's text
  */
 export function DiagnosticView({ diagnostic, onFix, fixLabel = DEFAULT_FIX_LABEL }) {
   const mode = useMode();
   const text = diagnosticText(diagnostic);
-  const hasFix = diagnostic.fixCommandId !== "";
+  const hasFix = diagnostic.fixCommandId !== "" && onFix !== undefined;
   return (
     <div
       className={`rr-diagnostic rr-diagnostic--${text.severity}`}
@@ -37,7 +38,7 @@ export function DiagnosticView({ diagnostic, onFix, fixLabel = DEFAULT_FIX_LABEL
       {hasFix || text.fixText ? (
         <div className="rr-diagnostic__fix">
           {hasFix ? (
-            <Button variant="primary" onClick={() => onFix(diagnostic.fixCommandId, diagnostic.fixArgumentsJson)}>
+            <Button variant="primary" onClick={() => onFix?.(diagnostic.fixCommandId, diagnostic.fixArgumentsJson)}>
               {fixLabel}
             </Button>
           ) : null}

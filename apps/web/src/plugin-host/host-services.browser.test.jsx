@@ -25,8 +25,10 @@ const DARK_COMPACT = builtInTheme("dark", { density: "compact", reducedMotion: t
 async function windowTarget(grantedScopes) {
   const { shell, client, stream } = await testShell({
     commands: COMMANDS,
-    answers: { "job.list": answered({ jobs: [] }) },
+    answers: { "job.list": answered({ jobs: [] }), "node.list": answered({ nodes: [] }) },
   });
+  // The shell's own boot reads (job.list, node.list) happen before the plugin exists; the plugin's calls start after.
+  const bootCalls = client.calls.length;
   const host = createInProcessHost(HOST_CONTRACT_PLUGIN_ID, grantedScopes, hostServicesOf(shell));
   return {
     host,
@@ -35,7 +37,7 @@ async function windowTarget(grantedScopes) {
     /** @param {any} mode @param {any} theme */
     setDisplay: (mode, theme) => shell.stores.display.set({ mode, theme }),
     get calls() {
-      return client.calls;
+      return client.calls.slice(bootCalls);
     },
     get routes() {
       return [window.location.hash];

@@ -12,6 +12,8 @@ import {
 } from "@rastai/client";
 import { pluginDiagnostic } from "@rastai/plugin";
 
+import { CODE_DAEMON_UNREACHABLE } from "../constants.js";
+
 /** @typedef {import("@rastai/client").DaemonClient} DaemonClient */
 /** @typedef {import("@rastai/proto").Diagnostic} Diagnostic */
 /** @typedef {import("@rastai/proto").CommandDescriptor} CommandDescriptor */
@@ -30,6 +32,16 @@ export async function signIn(location) {
   const result = await exchangeLoginCode(location.origin, code);
   removeLoginCodeFromUrl();
   return result;
+}
+
+/**
+ * What a window with no session shows (layout 8.3): RRS-U0001 means the daemon can't be reached, so the offline screen;
+ * a rejected or expired code (RRS-U0002), or no code at all, is the signed-out screen with that code.
+ * @param {Diagnostic | null} diagnostic   what signIn returned
+ * @returns {"offline" | "signed_out"}
+ */
+export function noSessionScreen(diagnostic) {
+  return diagnostic?.code === CODE_DAEMON_UNREACHABLE ? "offline" : "signed_out";
 }
 
 /**

@@ -27,7 +27,7 @@ async function auditFrame(mode, route) {
   const { shell } = await testShell({
     settings: { ui: { mode } },
     answers: {
-      "command.list": answered({ commands: [{ commandId: "hf.login" }] }),
+      "command.list": answered({ commands: [{ command_id: "hf.login" }] }),
       "settings.get": answered({ values: { ui: { mode } }, sources: [] }),
     },
   });

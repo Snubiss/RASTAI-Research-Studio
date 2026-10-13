@@ -431,3 +431,16 @@ describe("what the security components say", () => {
     await mounted.unmount();
   });
 });
+
+describe("SignedOutScreen's code", () => {
+  test("a rejected sign-in link shows RRS-U0002's text and code; without a code it is RRS-U0003", async () => {
+    const rejected = await mount(<SignedOutScreen code="RRS-U0002" />);
+    expect(rejected.container.textContent).toContain("This sign-in link no longer works.");
+    expect(rejected.container.textContent).toContain("RRS-U0002");
+    await rejected.unmount();
+
+    const plain = await mount(<SignedOutScreen />);
+    expect(plain.container.textContent).toContain("RRS-U0003");
+    await plain.unmount();
+  });
+});

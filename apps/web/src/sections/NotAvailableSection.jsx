@@ -14,7 +14,7 @@ export function NotAvailableSection({ sectionId }) {
   return (
     <div className="rr-not-available">
       <p>This section isn't available in this version of Rastai yet.</p>
-      <DiagnosticView diagnostic={diagnostic} onFix={() => {}} />
+      <DiagnosticView diagnostic={diagnostic} />
     </div>
   );
 }

@@ -18,13 +18,13 @@ import { emptySettings } from "./settings.js";
  * @property {import("@rastai/plugin").Store} context      { [pluginId]: { [key]: value } } from setContext
  * @property {import("@rastai/plugin").Store} display      { mode, theme }: the window's resolved display
  * @property {import("@rastai/plugin").Store} jobs         JobSummary[] (job.list), kept fresh by job.state_changed
- * @property {import("@rastai/plugin").Store} nodes        NodeSummary[] (node.list)
+ * @property {import("@rastai/plugin").Store} nodes        NodeSummary[] (node.list), kept fresh by node.state_changed
+ * @property {import("@rastai/plugin").Store} jobProgress  { [jobId]: { fraction, message } }, the latest job.progress
  * @property {import("@rastai/plugin").Store} telemetry    the last NodeTelemetry of each node, from node.heartbeat
  * @property {import("@rastai/plugin").Store} egress       the egress tracker's entries (frame/egress-state.js)
  * @property {import("@rastai/plugin").Store} notices      ToastEntry[] for the toast list
  * @property {import("@rastai/plugin").Store} palette      { open: boolean, query: string }
  * @property {import("@rastai/plugin").Store} overlay      "" | "shortcuts" | "egress": the open dialog
- * @property {import("@rastai/plugin").Store} signedOut    true once the window has no session
  */
 
 /**
@@ -44,11 +44,11 @@ export function createAppStores(start = { mode: DEFAULT_MODE }) {
     display: createStore({ mode: start.mode, theme: null }),
     jobs: createStore([]),
     nodes: createStore([]),
+    jobProgress: createStore({}),
     telemetry: createStore({}),
     egress: createStore([]),
     notices: createStore([]),
     palette: createStore({ open: false, query: "" }),
     overlay: createStore(""),
-    signedOut: createStore(false),
   };
 }

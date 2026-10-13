@@ -175,12 +175,14 @@ JS_SUBPATH_FOLDERS = {
     # The client's shared executor table and its fake daemon, for the plugin hosts' contract tests (layout 7.5).
     "@rastai/client/testing": ["packages/plugin/src/testing/"],
     "@rastai/client/testing/fake-daemon": ["packages/plugin/src/testing/"],
-    # The plugin host's shared host table, which the app runs against its real window services (frontend 8.7).
+    # The plugin host's shared host table, which the app's tests run against its real window services (frontend 8.7).
     "@rastai/plugin/testing/host-contract": ["apps/web/src/"],
     # The two stylesheets the app loads once, in main.jsx (layout 4, frontend 8.3).
     "@rastai/ui/styles/base.css": ["apps/web/src/"],
     "@rastai/ui/styles/components.css": ["apps/web/src/"],
 }
+# Subpaths only test files may import, wherever their folder allows them (the folder rule above still applies).
+JS_SUBPATH_TEST_FILES = ["@rastai/plugin/testing/host-contract"]
 # External library -> path patterns of the files that may import it (fnmatch: * also crosses folders).
 JS_LIBRARY_FILES = {
     "react": [
@@ -456,6 +458,8 @@ def js_internal_problem(specifier: str, is_type_only: bool, path: str, package: 
     subpath_folders = JS_SUBPATH_FOLDERS.get(specifier)
     if subpath_folders and not path.startswith(tuple(subpath_folders)):
         return f"only {', '.join(subpath_folders)} may import it (frontend layout 2.10)"
+    if specifier in JS_SUBPATH_TEST_FILES and not path.endswith(JS_TEST_SUFFIXES):
+        return f"`{specifier}` is for test files only"
     allowed = js_allowed_internal_deps(path, package)
     if imported == package or imported in allowed:
         return None

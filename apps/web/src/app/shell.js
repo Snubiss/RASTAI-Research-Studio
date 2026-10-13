@@ -13,7 +13,7 @@ import { watchRoute } from "../routing/navigate.js";
 import { createAppStores } from "../state/app-stores.js";
 import { globalMode } from "../state/mode.js";
 import { emptySettings } from "../state/settings.js";
-import { applyTheme, themeTokensFor, watchColorScheme } from "../state/theme.js";
+import { applyTheme, themeTokensFor, watchMediaQuery } from "../state/theme.js";
 import { pluginDiagnostic } from "@rastai/plugin";
 
 /** @typedef {import("@rastai/client").DaemonClient} DaemonClient */
@@ -25,6 +25,8 @@ import { pluginDiagnostic } from "@rastai/plugin";
 
 const DARK_SCHEME_QUERY = "(prefers-color-scheme: dark)";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+// The command whose completion means the settings changed (layout 2.3, 8.1). Other commands leave them as they were.
+const SETTINGS_SET = "settings.set";
 
 /**
  * @typedef {object} Shell
@@ -33,7 +35,8 @@ const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
  * @property {EventHub} hub
  * @property {PluginHost} coreHost            the host of the core sections
  * @property {string[]} loadedPluginIds     the plugin ids whose UIs registered, core first (set once at boot)
- * @property {() => void} start              starts the stream, the route, the OS scheme and the visibility watch
+ * @property {() => void} start              starts the stream, the route, the OS scheme and the visibility watch, and fetches
+ *                                          the jobs and nodes already running, so they show without an event
  * @property {() => void} stop
  * @property {(result: any) => void} applySettings   stores settings.get's result and resolves the display
  * @property {() => Promise<void>} refreshSettings
@@ -90,19 +93,38 @@ export function createShell(client, options = {}) {
  */
 function startShell(shell) {
   watchRoute(shell.stores.route);
-  shell.hub.subscribe(
-    { eventTypes: ["job.state_changed"], subjectIds: [] },
-    coalesce(() => shell.refreshJobs()),
-  );
-  shell.hub.subscribe(
-    { eventTypes: ["command.finished"], subjectIds: [] },
-    coalesce(() => shell.refreshSettings()),
-  );
-  shell.hub.subscribe({ eventTypes: ["node.heartbeat"], subjectIds: [] }, (event) => keepTelemetry(shell, event));
-  shell.hub.subscribe({ eventTypes: ["egress.active"], subjectIds: [] }, (event) => keepEgress(shell, event));
-  watchColorScheme(window.matchMedia(DARK_SCHEME_QUERY), () => applySettings(shell, shell.stores.settings.get()));
+  subscribeShellEvents(shell);
+  // The OS scheme and reduced motion both feed the display: a change re-resolves it with the stored settings.
+  const reapply = () => applySettings(shell, shell.stores.settings.get());
+  watchMediaQuery(window.matchMedia(DARK_SCHEME_QUERY), reapply);
+  watchMediaQuery(window.matchMedia(REDUCED_MOTION_QUERY), reapply);
   document.addEventListener("visibilitychange", () => shell.hub.setHidden(document.hidden));
   shell.hub.start();
+  // The stream only reports changes from now on, so what is already running is fetched once here.
+  shell.refreshJobs();
+  shell.refreshNodes();
+}
+
+/**
+ * The listeners of the one stream: each event type refreshes the store it changes, or keeps what its payload carries.
+ * @param {Shell} shell
+ */
+function subscribeShellEvents(shell) {
+  const refreshJobs = coalesce(() => shell.refreshJobs());
+  const refreshNodes = coalesce(() => shell.refreshNodes());
+  const refreshPlugins = coalesce(() => shell.refreshPlugins());
+  const refreshSettings = coalesce(() => shell.refreshSettings());
+  shell.hub.subscribe({ eventTypes: ["job.state_changed"], subjectIds: [] }, refreshJobs);
+  shell.hub.subscribe({ eventTypes: ["job.progress"], subjectIds: [] }, (event) => keepJobProgress(shell, event));
+  shell.hub.subscribe({ eventTypes: ["node.state_changed"], subjectIds: [] }, refreshNodes);
+  shell.hub.subscribe({ eventTypes: ["plugin.state_changed"], subjectIds: [] }, refreshPlugins);
+  shell.hub.subscribe({ eventTypes: ["command.finished"], subjectIds: [] }, (event) => {
+    if (finishedCommandId(event) === SETTINGS_SET) {
+      refreshSettings();
+    }
+  });
+  shell.hub.subscribe({ eventTypes: ["node.heartbeat"], subjectIds: [] }, (event) => keepTelemetry(shell, event));
+  shell.hub.subscribe({ eventTypes: ["egress.active"], subjectIds: [] }, (event) => keepEgress(shell, event));
 }
 
 /**
@@ -191,16 +213,39 @@ async function refreshPlugins(shell) {
 }
 
 /**
+ * The command a command.finished event is about, or "" for any other event.
+ * @param {BusEvent} event
+ * @returns {string}
+ */
+function finishedCommandId(event) {
+  const payload = /** @type {any} */ (event.payload)?.payload;
+  return payload?.case === "commandFinished" ? payload.value.commandId : "";
+}
+
+/**
  * Keeps the last telemetry sample of each node (node.heartbeat carries NodeTelemetry).
  * @param {Shell} shell
  * @param {BusEvent} event
  */
 function keepTelemetry(shell, event) {
-  // The payload is a oneof; the case names which field holds the sample (contracts 4.3).
-  const payload = /** @type {any} */ (event.payload);
+  // The bus event's payload is an EventPayload, whose oneof (the `payload` field) names the sample (contracts 4.3).
+  const payload = /** @type {any} */ (event.payload)?.payload;
   const sample = payload?.case === "nodeHeartbeat" ? payload.value : null;
   if (sample !== null) {
     shell.stores.telemetry.set({ ...shell.stores.telemetry.get(), [event.subjectId]: sample });
+  }
+}
+
+/**
+ * Keeps the latest progress of each job (job.progress, ephemeral): the status bar draws it for the running jobs.
+ * @param {Shell} shell
+ * @param {BusEvent} event
+ */
+function keepJobProgress(shell, event) {
+  const payload = /** @type {any} */ (event.payload)?.payload;
+  if (payload?.case === "jobProgress") {
+    const progress = { fraction: payload.value.fraction, message: payload.value.message };
+    shell.stores.jobProgress.set({ ...shell.stores.jobProgress.get(), [event.subjectId]: progress });
   }
 }
 

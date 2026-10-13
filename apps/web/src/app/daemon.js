@@ -27,11 +27,12 @@ export async function connectDaemon(baseUrl, sessionKey) {
  * The problem with the daemon's version, or null when it is this build's. A build with no version (tests) has
  * nothing to compare, so it has no problem.
  * @param {string} daemonVersion
+ * @param {string} [appVersion]   this build's version; the window's own by default
  * @returns {Diagnostic | null}
  */
-export function versionProblem(daemonVersion) {
-  if (APP_VERSION === "" || daemonVersion === APP_VERSION) {
+export function versionProblem(daemonVersion, appVersion = APP_VERSION) {
+  if (appVersion === "" || daemonVersion === appVersion) {
     return null;
   }
-  return pluginDiagnostic(CODE_VERSION_DIFFERS, { app_version: APP_VERSION, daemon_version: daemonVersion });
+  return pluginDiagnostic(CODE_VERSION_DIFFERS, { app_version: appVersion, daemon_version: daemonVersion });
 }

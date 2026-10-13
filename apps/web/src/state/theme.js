@@ -1,6 +1,7 @@
 // The theme state (layout frontend-and-plugins.md 2.10; design 4). It picks the built-in theme from ui.theme and the
 // OS color scheme, resolves it with ui.density, ui.reduced_motion and ui.colorblind_palette, and writes the --rr-*
-// variables. `system` follows the OS with no command: a change of prefers-color-scheme re-resolves here.
+// variables. `system` follows the OS with no command: a change of prefers-color-scheme (or of reduced motion)
+// re-resolves here.
 // The locked security tokens never reach a plugin or a component through the theme (withoutLockedTokens).
 
 import { applyThemeTokens, builtInTheme, LOCKED_TOKENS } from "@rastai/ui";
@@ -80,13 +81,14 @@ export function applyTheme(tokens) {
 }
 
 /**
- * Calls onChange whenever the OS color scheme changes, so `system` follows it without a command.
+ * Calls onChange whenever a media query changes: the OS color scheme (so `system` follows it) and reduced motion, with
+ * no command either way.
  * @param {{ matches: boolean, addEventListener: (type: string, listener: () => void) => void, removeEventListener: (type: string, listener: () => void) => void }} query
- *   a MediaQueryList for (prefers-color-scheme: dark)
- * @param {(prefersDark: boolean) => void} onChange
+ *   a MediaQueryList
+ * @param {(matches: boolean) => void} onChange
  * @returns {() => void} stops listening
  */
-export function watchColorScheme(query, onChange) {
+export function watchMediaQuery(query, onChange) {
   const listener = () => onChange(query.matches);
   query.addEventListener("change", listener);
   return () => query.removeEventListener("change", listener);
