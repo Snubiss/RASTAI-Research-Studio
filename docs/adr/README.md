@@ -52,8 +52,8 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 | [0035](0035-mysql-long-term-archive.md) | An optional long-term archive in the owner's MySQL or MariaDB; SQLite stays the live store | Accepted, 2026-10-10. Supersedes 0003 decision 6 in part; amends 0002 decision 7 |
 | [0036](0036-frontend-plain-javascript.md) | The frontend is plain JavaScript + React, with short JSDoc types checked by `checkJs` | Accepted, 2026-10-10. Supersedes 0023's TypeScript section and 0019 decision 5 in part |
 | [0037](0037-borrowed-decoders-and-parser-fuzzing.md) | Borrowed decoders for DEFLATE and images; one implementation and a fuzz target for every in-house parser | Accepted, 2026-10-10. Supersedes 0029 decision 1 in part |
-| [0039](0039-second-window-sign-in-approval.md) | A second window signs in only after the owner approves a locked prompt | Accepted, 2026-10-13. Settles contracts open question 24 |
 | [0038](0038-naming-and-schema-enforcement.md) | Names and command schemas are enforced by CI (`check-names`, `check-schema-diff` in M1); work is closed only after independent verification | Accepted, 2026-10-11. Amends 0017 decision 5 (closing needs independent verification); moves the schema-diff check of 0005's note into M1. Decision 4 amended 2026-10-11 (PROC-01) |
+| [0039](0039-second-window-sign-in-approval.md) | A second window signs in only after the owner approves a locked prompt | Accepted, 2026-10-13. Settles contracts open question 24 |
 
 ## By topic
 

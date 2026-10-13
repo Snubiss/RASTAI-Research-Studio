@@ -183,7 +183,7 @@ grid reads at screenshot scale; the token values above are the proposal.
 severity-warning 4.9:1 / 11.3:1, severity-info 6.3:1 / 8.4:1, egress text on egress 7.4:1 / 12.8:1, security text on
 security surface 17.8:1 / 15.9:1, security danger on security surface 6.3:1 / 7.6:1. HC uses the dark set.
 
-**Colorblind palette: unchanged** (`COLORBLIND_COLORS`).
+**Colorblind palette: unchanged** (the existing colour-blind series palette).
 
 ### 4.2 Typography
 
@@ -621,6 +621,8 @@ change adds it. None is used in code yet. A name leaves this table when its chan
 | `font_sizes_px.xxl` | typography key of `rastai.theme/1` | §4.2, §4.4 | §9 (b) contract PR (`rastai.theme/1`, contracts §5.6) |
 | `packages/ui/src/fonts/` | bundled font path | §4.5, §9 (c) | §9 (b) contract PR (contracts §15) |
 | `tokens/high-contrast.theme.json` | token file path | §9 (c) | the UI kit PR |
+| `eta_seconds`, `step`, `total_steps`, `epoch`, `total_epochs` | fields of `job.progress` or `run.get` (time left and step/epoch totals; today `JobProgress` has only `fraction` and `message`) | §6.5, §7 R5 | the Training milestone's contract PR |
+| `section=training`, `focus=canvas` | shortcut context keys (where a binding applies; §3.7), not wire names | §3.7 | the shortcut contract PR that registers the keymap |
 | `ui.mode` | setting key (Basic / Advanced) | §3.4, §3.2 | §9 (b) contract PR (contracts §11.2) |
 | `classification.accuracy` | metric name | §6.5, §7 R14 | contracts §15.7 confirmation (R14) |
 | `theme.list` | command | §7 R12 | the milestone that adds themes (M8) |
