@@ -154,13 +154,14 @@ function blobRefOfReply(client, body) {
 
 /**
  * size_bytes as protobuf JSON writes a uint64: a decimal string, or absent when it is 0; a reader also accepts a
- * plain number. Null for anything else, which BigInt would throw on or read as a size no uint64 holds.
+ * plain number, and null as the default 0 (as media_type's null reads as ""). Null for anything else, which BigInt
+ * would throw on or read as a size no uint64 holds.
  * @param {any} value
  * @returns {bigint | null}
  */
 function sizeBytesOf(value) {
   let sizeBytes = null;
-  if (value === undefined) {
+  if (value === undefined || value === null) {
     sizeBytes = 0n;
   } else if (typeof value === "string" && DECIMAL_DIGITS.test(value)) {
     sizeBytes = BigInt(value);

@@ -117,7 +117,7 @@ describe("uploadBlob", () => {
   test("a BlobRef whose size_bytes isn't a uint64 resolves to RRS-U0001 instead of throwing", async () => {
     const client = await connect();
     // Each of these made BigInt throw, or read as a size no uint64 holds.
-    const malformedSizes = ["12.5", "abc", "", "-1", "1e3", 1.5, -1, null, true, "18446744073709551616"];
+    const malformedSizes = ["12.5", "abc", "", "-1", "1e3", 1.5, -1, true, "18446744073709551616"];
     for (const size of malformedSizes) {
       daemon.uploadAnswer = JSON.stringify({ hash: UPLOADED_BLOB_HASH, size_bytes: size, media_type: "" });
       const result = await uploadBlob(client, new Blob(["x"]), () => {});
@@ -125,7 +125,7 @@ describe("uploadBlob", () => {
     }
   });
 
-  test("size_bytes as a number, or left out for 0 as protobuf JSON does, is read", async () => {
+  test("size_bytes as a number, or left out or null for 0 as protobuf JSON does, is read", async () => {
     const client = await connect();
     daemon.uploadAnswer = JSON.stringify({ hash: UPLOADED_BLOB_HASH, size_bytes: 12 });
     const counted = await uploadBlob(client, new Blob(["x"]), () => {});
@@ -133,6 +133,9 @@ describe("uploadBlob", () => {
     daemon.uploadAnswer = JSON.stringify({ hash: UPLOADED_BLOB_HASH });
     const empty = await uploadBlob(client, new Blob([]), () => {});
     expect("hash" in empty && [empty.sizeBytes, empty.mediaType]).toEqual([0n, ""]);
+    daemon.uploadAnswer = JSON.stringify({ hash: UPLOADED_BLOB_HASH, size_bytes: null, media_type: null });
+    const nulls = await uploadBlob(client, new Blob([]), () => {});
+    expect("hash" in nulls && [nulls.sizeBytes, nulls.mediaType]).toEqual([0n, ""]);
   });
 
   test("a refused session is RRS-U0003 and an unreachable daemon RRS-U0001", async () => {
