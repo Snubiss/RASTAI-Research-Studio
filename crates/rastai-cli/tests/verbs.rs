@@ -22,7 +22,9 @@ use rastai_core::versions::APP_VERSION;
 use rastai_proto::commands::v1::CommandDescriptor;
 use serde_json::{Map, Value, json};
 
-use common::{DaemonGuard, daemon_answers, daemon_processes, final_codes, final_line, run_rastai, test_home};
+use common::{
+    DaemonGuard, daemon_answers, daemon_processes, final_codes, final_line, run_rastai, run_rastai_in, test_home,
+};
 
 const COPY_AS_GOLDEN: &str = "fixtures/command-golden/copy-as.json";
 const SCHEMAS_FOLDER: &str = "schemas/commands";
@@ -261,15 +263,23 @@ fn an_unknown_verb_is_rrs_c0001() {
 fn a_verb_with_no_daemon_running_starts_one() {
     let home = test_home("auto-start");
     let guard = DaemonGuard { home: home.clone() };
+    // Inside the test's home, so the guard removes it too.
+    let working_folder = home.join("work");
+    fs::create_dir_all(&working_folder).unwrap();
     assert!(!daemon_answers(&home));
 
-    let started = run_rastai(&home, &["system", "status", "--json"]);
+    let started = run_rastai_in(&home, &working_folder, &["system", "status", "--json"]);
     assert_eq!(started.exit_code, 0, "{started:?}");
     let status: Value = serde_json::from_str(started.stdout.lines().next().unwrap()).unwrap();
     assert_eq!(status["app_version"], APP_VERSION);
     assert_eq!(final_line(&started), json!({"exit_code": 0, "diagnostics": []}));
     assert!(daemon_answers(&home));
-    assert_eq!(daemon_processes(&home).len(), 1, "one daemon runs on");
+    let daemons = daemon_processes(&home);
+    assert_eq!(daemons.len(), 1, "one daemon runs on");
+    // The daemon runs in its data folder (or the nearest one above it), never in the CLI's working folder.
+    let daemon_folder = fs::read_link(format!("/proc/{}/cwd", daemons[0])).unwrap();
+    assert!(daemon_folder.starts_with(&home), "{daemon_folder:?}");
+    assert!(!daemon_folder.starts_with(&working_folder), "{daemon_folder:?}");
 
     // The next verb finds it and starts no second one.
     let again = run_rastai(&home, &["system", "status", "--no-start", "--json"]);

@@ -99,7 +99,7 @@ pub async fn ensure_daemon_running(paths: &DataPaths, no_start: bool) -> Result<
                 &socket_path,
             )]));
         }
-        Err(_) => start_daemon(&socket_path).await?,
+        Err(_) => start_daemon(paths, &socket_path).await?,
     };
     client_for(socket_path, health)
 }
@@ -152,8 +152,8 @@ fn client_for(socket_path: PathBuf, health: DaemonHealth) -> Result<DaemonClient
 /// that stops before answering left its reason in its final `--json` line. Health is still awaited after that until
 /// the deadline: two CLIs starting a daemon at once both spawn one, and the loser stops with `RRS-S0001` while the
 /// winner comes up (flows/platform.md 2.1).
-async fn start_daemon(socket_path: &Path) -> Result<DaemonHealth, CliError> {
-    let mut child = spawn_daemon(socket_path)?;
+async fn start_daemon(paths: &DataPaths, socket_path: &Path) -> Result<DaemonHealth, CliError> {
+    let mut child = spawn_daemon(paths, socket_path)?;
     let deadline = Instant::now() + Duration::from_secs(DAEMON_LOCK_WAIT_SECONDS);
     let mut reasons = Vec::new();
     while Instant::now() < deadline {
@@ -171,7 +171,7 @@ async fn start_daemon(socket_path: &Path) -> Result<DaemonHealth, CliError> {
     Err(CliError::DaemonUnavailable(reasons))
 }
 
-fn spawn_daemon(socket_path: &Path) -> Result<Child, CliError> {
+fn spawn_daemon(paths: &DataPaths, socket_path: &Path) -> Result<Child, CliError> {
     let program = std::env::current_exe().map_err(|_| CliError::DaemonUnavailable(vec![not_listening(socket_path)]))?;
     let mut command = Command::new(program);
     command
@@ -179,10 +179,30 @@ fn spawn_daemon(socket_path: &Path) -> Result<Child, CliError> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if let Some(folder) = daemon_working_folder(paths) {
+        command.current_dir(folder);
+    }
     detach_from_terminal(&mut command);
     command
         .spawn()
         .map_err(|_| CliError::DaemonUnavailable(vec![not_listening(socket_path)]))
+}
+
+/// The folder a started daemon runs in: its data folder, or the nearest folder above it that exists yet (the daemon
+/// creates the rest, with its own permissions). The daemon outlives the CLI, so it must not keep the CLI's working
+/// folder busy: a drive that then can't be unmounted, a folder that can't be removed. When any data root is
+/// relative (a relative `RASTAI_HOME` or XDG variable) the daemon stays in the CLI's folder, where it means the same.
+fn daemon_working_folder(paths: &DataPaths) -> Option<PathBuf> {
+    let roots = [&paths.config, &paths.data, &paths.cache, &paths.state, &paths.runtime];
+    if roots.iter().any(|root| !root.is_absolute()) {
+        return None;
+    }
+    for folder in paths.data.ancestors() {
+        if folder.is_dir() {
+            return Some(folder.to_path_buf());
+        }
+    }
+    None
 }
 
 /// Its own process group, so a Ctrl-C meant for this CLI doesn't stop the daemon it started.
