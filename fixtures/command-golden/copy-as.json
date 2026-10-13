@@ -51,6 +51,41 @@
         "name": "eval__test",
         "arguments": { "suite": "evals/facts.rrseval", "model": "ckpt:ckpt_01JA2B3C4D5E6F7G8H9J0K1M2N" }
       }
+    },
+    {
+      "command_id": "job.cancel",
+      "arguments": { "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2N" },
+      "cli": "rastai job cancel --job-id job_01JA2B3C4D5E6F7G8H9J0K1M2N",
+      "python": "rastai.connect().execute(\"job.cancel\", {\"job_id\": \"job_01JA2B3C4D5E6F7G8H9J0K1M2N\"})",
+      "javascript": "await client.execute(\"job.cancel\", { job_id: \"job_01JA2B3C4D5E6F7G8H9J0K1M2N\" })",
+      "mcp": { "name": "job__cancel", "arguments": { "job_id": "job_01JA2B3C4D5E6F7G8H9J0K1M2N" } }
+    },
+    {
+      "command_id": "token.list",
+      "arguments": { "include_revoked": true },
+      "cli": "rastai token list --include-revoked",
+      "python": "rastai.connect().execute(\"token.list\", {\"include_revoked\": True})",
+      "javascript": "await client.execute(\"token.list\", { include_revoked: true })",
+      "mcp": { "name": "token__list", "arguments": { "include_revoked": true } }
+    },
+    {
+      "command_id": "command.list",
+      "arguments": { "basic_only": false, "section": "train" },
+      "cli": "rastai command list --no-basic-only --section train",
+      "python": "rastai.connect().execute(\"command.list\", {\"basic_only\": False, \"section\": \"train\"})",
+      "javascript": "await client.execute(\"command.list\", { basic_only: false, section: \"train\" })",
+      "mcp": { "name": "command__list", "arguments": { "basic_only": false, "section": "train" } }
+    },
+    {
+      "command_id": "token.create",
+      "arguments": { "name": "ci bot's token", "preset": "mcp-default", "scopes": ["training", "eval"] },
+      "cli": "rastai token create --name 'ci bot'\\''s token' --preset mcp-default --scopes training --scopes eval",
+      "python": "rastai.connect().execute(\"token.create\", {\"name\": \"ci bot's token\", \"preset\": \"mcp-default\", \"scopes\": [\"training\", \"eval\"]})",
+      "javascript": "await client.execute(\"token.create\", { name: \"ci bot's token\", preset: \"mcp-default\", scopes: [\"training\", \"eval\"] })",
+      "mcp": {
+        "name": "token__create",
+        "arguments": { "name": "ci bot's token", "preset": "mcp-default", "scopes": ["training", "eval"] }
+      }
     }
   ]
 }

@@ -13,7 +13,15 @@ Each entry of `examples` holds:
 | `javascript` | `await client.execute("<command_id>", {...})` |
 | `mcp` | the `tools/call` parameters: `name` is `mcp_tool_name` of the id, `arguments` the call's arguments |
 
-This is the seed (M1-21): commands chosen for their naming cases (an underscore in the noun: `login_code`, `crash_report`; in a flag: `max_new_tokens`; a plugin command: `eval.test`), with argument fields the contracts already name (§6.4–6.5 and the frontend layout's example). The CLI lines use only text and whole-number values; the CLI's syntax for true/false flags, lists and quoting belongs to `rastai-cli` (M1-31), which adds those cases here.
+The seed (M1-21) holds commands chosen for their naming cases (an underscore in the noun: `login_code`, `crash_report`; in a flag: `max_new_tokens`; a plugin command: `eval.test`), with argument fields the contracts already name (§6.4–6.5 and the frontend layout's example). `rastai-cli` (M1-31) added the cases of its syntax (control-plane layout §9.4):
+
+| Value | CLI | Python | JavaScript |
+|---|---|---|---|
+| `true` | the flag alone: `--include-revoked` | `True` | `true` |
+| `false` | the off flag: `--no-basic-only` | `False` | `false` |
+| a list | the flag once per element, in order: `--scopes training --scopes eval` | a list | an array |
+| a positional field | its flag, never the position: `--job-id job_...` | | |
+| text that isn't only letters, digits and `-_./:@=,+` | in single quotes, a quote inside written `'\''` as a POSIX shell reads it: `--name 'ci bot'\''s token'` | | |
 
 **Who reads it.**
 

@@ -30,6 +30,8 @@ const STORE_WRITE_OPERATION: &str = "This write";
 const UNKNOWN_NEEDED_BYTES: &str = "some";
 const UNKNOWN_FREE_BYTES: &str = "an unknown number";
 const WRITER_STOPPED_REASON: &str = "the index writer has stopped";
+/// What `RRS-C0002` says a listen address should be.
+const LISTEN_ADDRESS_EXPECTED: &str = "an address of this machine and a port this user may open";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerError {
@@ -77,6 +79,54 @@ impl ServerError {
             ServerError::Node(error) => error.code(),
         }
     }
+}
+
+/// A startup error as the catalog diagnostic of its code, every placeholder of the code's message filled.
+/// `rastai serve` in rastai-cli prints it when the daemon can't start.
+pub fn server_error_diagnostic(error: &ServerError) -> Diagnostic {
+    match error {
+        ServerError::OwnerTokenTooOpen { path, .. } | ServerError::RuntimeFileNotWritable { path, .. } => {
+            diagnostic(error.code(), &[("path", &path_text(path))])
+        }
+        ServerError::OwnerTokenUnusable { path, reason } => {
+            diagnostic(error.code(), &[("path", &path_text(path)), ("reason", reason)])
+        }
+        ServerError::ListenAddressUnusable { address, reason } => {
+            let found = format!("{address} ({reason})");
+            diagnostic(
+                error.code(),
+                &[("found", &found), ("expected", LISTEN_ADDRESS_EXPECTED)],
+            )
+        }
+        ServerError::InvalidSetFlag { message } => {
+            // The flag parser already built the whole message; only its words are kept.
+            let mut refusal = diagnostic(error.code(), &[]);
+            refusal.message = message.clone();
+            refusal
+        }
+        ServerError::Core(CoreError::RandomUnavailable { reason }) => diagnostic(error.code(), &[("reason", reason)]),
+        ServerError::Core(CoreError::InvalidTimestamp { text, reason }) => {
+            diagnostic(error.code(), &[("found", text), ("expected", reason)])
+        }
+        ServerError::Store(store_error) => store_error_diagnostic(store_error),
+        ServerError::Transport(transport_error) => transport_error_diagnostic(transport_error),
+        ServerError::NoFreePort { .. } | ServerError::Core(CoreError::HomeNotFound) => diagnostic(error.code(), &[]),
+    }
+}
+
+/// The socket path and reason a transport error knows, as its message's placeholders.
+fn transport_error_diagnostic(error: &TransportError) -> Diagnostic {
+    let (path, reason) = match error {
+        TransportError::SocketNotReachable { socket_path, reason }
+        | TransportError::SocketNotCreated { socket_path, reason } => (path_text(socket_path), reason.clone()),
+        TransportError::SocketFolderInsecure { folder, reason } => (path_text(folder), reason.clone()),
+        TransportError::ConnectionFailed { reason } => (String::new(), reason.clone()),
+        other => (String::new(), format!("{other:?}")),
+    };
+    diagnostic(
+        error.code(),
+        &[("path", &path), ("reason", &reason), ("platform", std::env::consts::OS)],
+    )
 }
 
 /// A store error as the catalog diagnostic of its code, every placeholder of the code's message filled.
@@ -231,6 +281,30 @@ mod tests {
         assert_eq!(no_port.code(), "RRS-C1001");
         assert_eq!(not_writable.code(), "RRS-S0004");
         assert_eq!(bad_flag.code(), "RRS-C0002");
+    }
+
+    #[test]
+    fn a_startup_diagnostic_fills_its_placeholders() {
+        let path = PathBuf::from("/home/user/.config/rastai/auth/owner.token");
+        let unusable = ServerError::OwnerTokenUnusable {
+            path: path.clone(),
+            reason: "permission denied".to_string(),
+        };
+        let shown = server_error_diagnostic(&unusable);
+        assert_eq!(shown.code, "RRS-C1010");
+        assert!(shown.message.contains("owner.token") && shown.message.contains("permission denied"));
+        let bad_flag = ServerError::InvalidSetFlag {
+            message: "the flag message".to_string(),
+        };
+        assert_eq!(server_error_diagnostic(&bad_flag).message, "the flag message");
+        let held = ServerError::Store(StoreError::DaemonLockHeld {
+            path: path.clone(),
+            holder_pid: Some(42),
+        });
+        assert!(server_error_diagnostic(&held).message.contains("42"));
+        for error in [unusable, held, ServerError::OwnerTokenTooOpen { path, mode: 0o644 }] {
+            assert!(!server_error_diagnostic(&error).message.contains('{'), "{error:?}");
+        }
     }
 
     #[test]
