@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from daemon_process import kill_group, kill_processes_of_home, make_home, processes_of_home, remove_home
 
 # Long enough to outlive the test by far: only the cleanup can end it.
@@ -22,6 +24,10 @@ START_LIMIT_SECONDS = 30
 POLL_SECONDS = 0.05
 # The stand-in and its child.
 STAND_IN_PROCESS_COUNT = 2
+
+# The daemon reads /proc and signals process groups, and the node's sockets are Unix ones. pytest reads
+# `pytestmark` only in a test module (never in conftest.py), so each test module carries it.
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the daemon's job tests need Linux")
 
 
 def start_stand_in_worker(job_file: str) -> subprocess.Popen:

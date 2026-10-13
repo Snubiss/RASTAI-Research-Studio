@@ -3,7 +3,7 @@ HTTP and CLI surfaces, the scoped tokens, and an MCP bridge per token. Every pro
 when it ends, however it ends, and none may be left (issue #244)."""
 
 import os
-import sys
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -36,9 +36,6 @@ TOKEN_ARGUMENTS = {
 }
 MCP_LOG_FILE = "mcp-{token}.log"
 
-# The daemon reads /proc and signals process groups, and the node's sockets are Unix ones.
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the daemon's job tests need Linux")
-
 
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
@@ -55,10 +52,21 @@ def daemon() -> Iterator[RunningDaemon]:
         link_cpu_environment(home, CPU_PYTHON)
         process = spawn_daemon(RASTAI_BINARY, home)
         yield wait_until_healthy(RASTAI_BINARY, home, process)
-    finally:
-        left = stop_daemon(RASTAI_BINARY, home, process)
-        remove_home(home)
-        assert left == [], f"processes outlived the test: {left}"
+    except BaseException as error:
+        # The session's own error stays the one reported: a process it left behind goes in a note on that error.
+        left = stop_and_remove(home, process)
+        if left:
+            error.add_note(f"processes outlived the test: {left}")
+        raise
+    left = stop_and_remove(home, process)
+    assert left == [], f"processes outlived the test: {left}"
+
+
+def stop_and_remove(home: Path, process: subprocess.Popen | None) -> list[str]:
+    """Stops the daemon and whatever works in its home, removes the home, and returns the processes left over."""
+    left = stop_daemon(RASTAI_BINARY, home, process)
+    remove_home(home)
+    return left
 
 
 @pytest.fixture(scope="session")

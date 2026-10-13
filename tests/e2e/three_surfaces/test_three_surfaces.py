@@ -21,6 +21,7 @@ What differs between the surfaces by design, and is not compared:
 
 import json
 import sqlite3
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,6 +68,10 @@ TOKEN_PRINCIPAL = "token:{token_id}"
 RASTAI_DB = "data/rastai.db"
 # The tokens refused train.start: the chat-only preset of the acceptance test, and a read token.
 REFUSED_TOKENS = ("chat-only", "read")
+
+# The daemon reads /proc and signals process groups, and the node's sockets are Unix ones. pytest reads
+# `pytestmark` only in a test module (never in conftest.py), so each test module carries it.
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="the daemon's job tests need Linux")
 
 
 @dataclass
