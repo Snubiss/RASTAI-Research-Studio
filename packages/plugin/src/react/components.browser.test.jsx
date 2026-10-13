@@ -10,6 +10,7 @@ import { sampleBusEvent } from "../testing/host-contract.js";
 import { createMockHost } from "../testing/mock-host.js";
 import { inAct, mount } from "../testing/render.js";
 import { CommandForm } from "./CommandForm.jsx";
+import { DiagnosticList } from "./DiagnosticList.jsx";
 import { JobProgress } from "./JobProgress.jsx";
 import { PluginHostProvider } from "./PluginHostProvider.jsx";
 
@@ -191,5 +192,39 @@ describe("JobProgress", () => {
     expect(page.container.textContent).toContain("failed");
     expect(page.container.querySelector("[role=alert]")).not.toBeNull();
     expect(page.container.textContent).toContain("RRS-J1002");
+  });
+
+  test("shows the Diagnostic of a job that failed before it opened, from job.get's error_code", async () => {
+    const failedJob = { job_id: "job_01", node_id: "local", kind: "train", state: "failed", error_code: "RRS-J1002" };
+    const mock = createMockHost("core", { "job.get": () => okOutcome({ job: failedJob }) });
+    const page = await show(
+      <PluginHostProvider host={mock.host}>
+        <JobProgress jobId="job_01" />
+      </PluginHostProvider>,
+    );
+    await settle();
+    expect(page.container.textContent).toContain("failed");
+    expect(page.container.querySelector("[role=alert]")).not.toBeNull();
+    expect(page.container.textContent).toContain("This computer ran out of memory");
+  });
+});
+
+describe("DiagnosticList", () => {
+  test("a fix whose arguments aren't a JSON object shows an invalid arguments Diagnostic and runs nothing", async () => {
+    const mock = createMockHost("core", {});
+    const diagnostic = {
+      ...pluginDiagnostic("RRS-J0005", { job_id: "job_404" }),
+      fixCommandId: "job.list",
+      fixArgumentsJson: "{not json",
+    };
+    const page = await show(
+      <PluginHostProvider host={mock.host}>
+        <DiagnosticList diagnostics={[diagnostic]} />
+      </PluginHostProvider>,
+    );
+    await inAct(() => /** @type {HTMLElement} */ (page.container.querySelector("button")).click());
+    await settle();
+    expect(mock.calls).toEqual([]);
+    expect(mock.shownDiagnostics.map((shown) => shown.map((item) => item.code))).toEqual([["RRS-C0002"]]);
   });
 });

@@ -4,10 +4,11 @@
 // host and the in-process host now, the iframe guest from M8. Plain data and plain functions, no test library:
 // each case does one thing with a host and returns what it saw, and the test compares that with `expected`.
 
-import { builtInTheme } from "@rastai/ui";
+import { builtInTheme, LOCKED_TOKENS } from "@rastai/ui";
 
 /** @typedef {import("../host-api.js").BusEvent} BusEvent */
 /** @typedef {import("./mock-host.js").MockHost} MockHost */
+/** @typedef {import("../host-api.js").ThemeTokens} ThemeTokens */
 
 /**
  * The plugin every case's host is built for. A host under test is a MockHost-shaped object: the host, plus the
@@ -23,6 +24,8 @@ export const HOST_CONTRACT_PLUGIN_ID = "psychology";
  */
 
 const ANY_SUBJECT = /** @type {string[]} */ ([]);
+// The CSS variable prefix of the locked tokens (@rastai/ui tokens/locked.js); a theme must never carry it.
+const LOCKED_VARIABLE_PREFIX = "--rr-locked-";
 const DARK_THEME = builtInTheme("dark", { density: "compact", reducedMotion: true, colorblind: false });
 const SAMPLE_DIAGNOSTIC = /** @type {import("../host-api.js").Diagnostic} */ ({
   $typeName: "rastai.common.v1.Diagnostic",
@@ -70,6 +73,22 @@ function deliveredEvents(target, eventTypes, subjectIds, events) {
   events.forEach((event) => target.emit(event));
   unsubscribe();
   return delivered;
+}
+
+/**
+ * The locked token names a theme carries: any LOCKED_TOKENS key (light or dark) among its colors, and the locked
+ * variable prefix anywhere in it. A plugin's theme must have none; the security UI's colors stay with the shell.
+ * @param {ThemeTokens} theme
+ * @returns {string[]}
+ */
+function lockedTokensIn(theme) {
+  const colorNames = Object.keys(theme.colors ?? {});
+  const lockedNames = [...Object.keys(LOCKED_TOKENS.light), ...Object.keys(LOCKED_TOKENS.dark)];
+  const found = colorNames.filter((name) => lockedNames.includes(name));
+  if (JSON.stringify(theme).includes(LOCKED_VARIABLE_PREFIX)) {
+    found.push(LOCKED_VARIABLE_PREFIX);
+  }
+  return found;
 }
 
 /** @type {HostContractCase[]} */
@@ -136,8 +155,8 @@ export const HOST_CONTRACT_CASES = [
   },
   {
     name: "the theme carries no locked security token",
-    run: (target) => JSON.stringify(target.host.theme()).includes("locked"),
-    expected: false,
+    run: (target) => lockedTokensIn(target.host.theme()),
+    expected: [],
   },
   {
     name: "navigate passes the route to the shell",

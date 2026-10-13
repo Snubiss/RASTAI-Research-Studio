@@ -160,7 +160,9 @@ function cannedOutcomeFor(contractCase) {
     ok: response.ok ?? false,
     result: response.ok && response.resultJson ? JSON.parse(response.resultJson) : null,
     jobId: response.jobId || null,
-    diagnostics: (response.diagnostics ?? []).map((/** @type {any} */ d) => pluginDiagnostic(d.code, {})),
+    diagnostics: (response.diagnostics ?? []).map((/** @type {any} */ diagnostic) =>
+      pluginDiagnostic(diagnostic.code, {}),
+    ),
     journalId: response.journalId || null,
   };
 }
