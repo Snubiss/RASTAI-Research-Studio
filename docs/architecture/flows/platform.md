@@ -1501,7 +1501,7 @@ sequenceDiagram
 
 ### 7.2 Plugin states
 
-The plugin host in `rastai-server` owns these states; they are stored in `plugins.state` from `installing` on.
+The plugin host in `rastai-server` owns these states. `plugins.state` keeps what the user decided, from `installing` on (an install, a load that enables the plugin, `disable_plugin`). The host's own outcomes (`incompatible`, `failed`, a `disabled` for `RRS-P1002`, `RRS-P1003` or `RRS-P3001`) are not saved: the host decides them again at every start, so a plugin comes back once its cause is fixed (layout/rust-control-plane.md 12.1).
 
 ```mermaid
 stateDiagram-v2
@@ -1576,7 +1576,7 @@ flowchart TD
 - **Manifest consistency** is checked at install (the dry run) and again at every load (layout/rust-control-plane.md 16.4): command ids inside the plugin's own namespace and outside the reserved core areas (`RRS-P0004`), a type in `types.json` for every command (`RRS-P0005`), and contributions only to extension points the manifest requires (`RRS-P0006`). A failure leaves the plugin `incompatible`.
 - `plugin.dev` loads an unpacked plugin from `plugins.dev_paths` through the same checks.
 
-**Persisted:** `plugins.state` (durable); `plugin.state_changed` events. Registered contributions are in memory and rebuilt at every start.
+**Persisted:** `plugins.state`, the user's decision (durable); every move as a `plugin.state_changed` record in the daemon log, which indexing does not copy into `plugins.state`. Registered contributions are in memory and rebuilt at every start.
 
 **Tests:** fixture plugins: engines `>=99` → `RRS-P1001`; requires `psychology.lens@9` → `RRS-P1002`; Psychology disabled → a dependent lens plugin disabled; a module that crashes on start → `RRS-P4003` after four crashes, while other commands keep working. **Namespaces:** with the namespace probe forced off (a test setting), the preinstalled Psychology module starts with `RRS-P2005` and a third-party fixture module without network permission is `disabled` with `RRS-P2001`; with namespaces on, a network-off fixture module can't open a TCP socket; the `.deb` install test on Ubuntu 24.04 loads the AppArmor profile and the probe succeeds.
 
