@@ -19,7 +19,7 @@ use rastai_core::scopes::Scope;
 use rastai_core::states::plugin_state_name;
 use rastai_proto::commands::v1::ExecuteResponse;
 use rastai_proto::common::v1::PluginState;
-use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
+use rastai_server::daemon::{DaemonOptions, RunningDaemon};
 use rastai_server::http::connect_json::execute_response_from_json;
 use rastai_server::plugin_host::load::disable_plugin;
 use rastai_server::server_state::{Server, TokenCreatePause};
@@ -34,7 +34,7 @@ use tokio::task::JoinHandle;
 
 use common::{
     ANY_FREE_PORT, created_token_principal, execute_request, ok_result, owner_bearer, refusal_code, remove_test_folder,
-    response_codes, run_command, send_to_port, start_test_daemon, stop_test_daemon, test_paths,
+    response_codes, run_command, send_to_port, start_daemon_in_test, start_test_daemon, stop_test_daemon, test_paths,
 };
 
 const EXECUTE_PATH: &str = "/rastai.commands.v1.CommandService/Execute";
@@ -202,10 +202,10 @@ fn options_with_dev_folders(folders: &[&Path]) -> DaemonOptions {
     }
 }
 
+/// Through `start_daemon_in_test`: these tests start a daemon again on the same folders, and the lock the stopped
+/// one released can stay held for an instant by a child another test's embedded node was starting (#250).
 async fn start_with_dev_folders(paths: &DataPaths, folders: &[&Path]) -> RunningDaemon {
-    start_daemon(paths.clone(), &options_with_dev_folders(folders))
-        .await
-        .unwrap()
+    start_daemon_in_test(paths, &options_with_dev_folders(folders)).await
 }
 
 /// What `plugin.list` says the plugin's state is.
