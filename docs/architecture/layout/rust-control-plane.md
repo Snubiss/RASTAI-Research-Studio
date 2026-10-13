@@ -2381,6 +2381,7 @@ pub struct Server {
     pub nodes: NodeLinks,
     pub plugins: PluginHost,
     pub plugin_host_lock: tokio::sync::Mutex<()>, // contracts 8.2: a plugin's token.create against its disable
+    pub token_create_pause: Mutex<Option<TokenCreatePause>>, // test seam, None in a daemon: stops a create in that window
     pub catalog: RwLock<RuntimeCatalog>,          // third-party plugin codes
     pub gateway: GatewayState,                    // from rastai-gateway
     pub auth: AuthState,                          // login codes, sessions, cached token hashes
@@ -2758,7 +2759,7 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Event handlers | `tests/plugin_event_handlers.rs`, `tests/crash/` | a fixture plugin's module is down when `checkpoint.saved` is indexed: the call stays pending, and on `plugin.state_changed → enabled` it runs exactly once; a re-sent record queues no second call; a call whose command already finished is not run again (idempotency key); kill -9 the daemon between the index commit and the delivery: after restart the handler runs once (a new row for the flows/platform.md 6.5 matrix) |
 | Analysis and policy | `tests/layer_placement.rs`, `tests/data_policy.rs`, `tests/chains.rs` | placement tables on fake GPUs; every cell of the 8.3 policy table; `next_chain_action` over child outcomes, gates and optional steps |
 | MCP | `tests/mcp_endpoint.rs` | tools filtered by token scopes; a call lands in the journal with the token principal |
-| Token creators | `tests/token_creators.rs` | threat model R28 over HTTP and `/mcp`: revoking a token revokes what it made and nothing above or beside it; a create after or racing its creator's revoke leaves no live token; a token that sets `acting_plugin_id` is `RRS-C1005` and makes nothing; a dev or installed plugin's tokens die when it is disabled, and a dropped dev path's at the next start |
+| Token creators | `tests/token_creators.rs` | threat model R28 over HTTP and `/mcp`: revoking a token revokes what it made and nothing above or beside it; a create after or racing its creator's revoke leaves no live token; a token that sets `acting_plugin_id` is `RRS-C1005` and makes nothing; a dev or installed plugin's tokens die when it is disabled, and a dropped dev path's at the next start; a disable put between a plugin's create's check and its insert (`Server.token_create_pause`) still sweeps the new token |
 | Analysis | `tests/modelspec_stats.rs` | parameter counts match `fixtures/models/<family>/expected_counts.json` (written by a Python test from the real modules); per-op parameter counts and FLOPs match `fixtures/ops/<op>.json`, the same goldens the Python compiler checks |
 | End to end | `tests/e2e/`, `tests/crash/` | the same command through HTTP, CLI and MCP; the kill -9 matrix |
 
