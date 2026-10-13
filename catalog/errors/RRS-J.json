@@ -30,6 +30,17 @@
     "retired": false
   },
   {
+    "code": "RRS-J0005",
+    "severity": "error",
+    "title": "No such job",
+    "message": "No job {job_id} is known to this daemon.",
+    "basic_text": "Rastai doesn't know this task.",
+    "fix_text": "Refresh the job list and pick a job from it.",
+    "fix_command_id": "job.list",
+    "docs_anchor": "rrs-j0005",
+    "retired": false
+  },
+  {
     "code": "RRS-J1001",
     "severity": "error",
     "title": "Job killed by a signal",

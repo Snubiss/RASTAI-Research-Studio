@@ -447,6 +447,20 @@ stateDiagram-v2
   running --> cancelled : job.cancel, or KILL after a grace period
   failed --> resuming : train.resume with a complete checkpoint
   cancelled --> resuming : train.resume with a complete checkpoint
+  created --> failed : job ended before its first record
+  created --> cancelled : job.cancel while queued, or CANCEL before the entry ran
+  created --> preempted : SIGTERM before the entry ran
+  checkpointing --> paused : full disk, RRS-T2001
+  checkpointing --> preempted : SIGTERM, after the checkpoint
+  checkpointing --> completed : train.stop, this checkpoint is the final one
+  checkpointing --> failed : crash, OOM or a SIGKILL from elsewhere
+  checkpointing --> cancelled : job.cancel, or KILL after a grace period
+  paused --> completed : train.stop
+  paused --> preempted : SIGTERM
+  paused --> failed : crash, SIGKILL or exit 4
+  paused --> cancelled : job.cancel or KILL
+  resuming --> cancelled : job.cancel
+  resuming --> preempted : SIGTERM
   completed --> [*]
   failed --> [*]
   cancelled --> [*]
@@ -456,6 +470,7 @@ Not obvious:
 - `train.stop` ends a run early with a final checkpoint and counts as `completed` (reason `stopped`). `job.cancel` ends it at the next step boundary without a new checkpoint (`cancelled`).
 - **A worker killed with SIGKILL** can't write its own state, so the daemon writes the run's final state (contracts §4.4, platform flow 5.5). A `KILL` the node sent after a grace period gives job and run `cancelled`. A SIGKILL from anywhere else (the kernel's OOM killer, a user's `kill -9`) gives job and run `failed` with `RRS-J1001` (`RRS-J1002` for the kernel's OOM killer). Power loss leaves the job `lost`, then `failed` when the node comes back.
 - **`train.resume` reopens a `failed` or `cancelled` run** that has a complete checkpoint, as well as a `preempted` one. Other flow docs rely on this too (platform flow 6.5 row 15, designer-gym-remote B8), and contracts §9.5 has both transitions: `failed` and `cancelled` are terminal only when no complete checkpoint exists, and `completed` is the only state that is always terminal.
+- **A job can end in any live state**, so every live run state has a way to each end (contracts §9.5, M1-47): a run that is `checkpointing` or `paused` when its job is stopped, preempted, cancelled, killed or crashes goes straight to that end, and a job that ends before the worker's first record leaves the run `created` → `failed`, `cancelled` or `preempted`. `preempted` stays resumable, and its only exit is `resuming` until the owner decides contracts §14 row 25. The daemon writes a final state only for a job that ended without one (contracts §9.5, "Who writes the final state"), and only along these edges.
 - `verifying` exists only on chain runs (section 6).
 - `train.resume` starts a new job under the same `run_id`. It appends to the same `events.log` after truncating a torn tail, so sequence numbers continue and the log still has one writer at a time.
 - **A full disk pauses the run** (`running → paused`) with the training state still in memory and the lease kept; the job stays `running`. That covers both a checkpoint write (`RRS-T2001`) and an event-log append (`RRS-S3002`, platform flow 6.1). Resume after `storage.gc` retries the write.

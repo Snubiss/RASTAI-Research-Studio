@@ -1426,6 +1426,25 @@ Source: `catalog/errors/RRS-N.json`.
 - **In plain words:** Your Rastai and this computer couldn't confirm each other.
 - **Fix:** Check that the clocks of both computers are right, then connect again.
 
+<a id="rrs-n0008"></a>
+
+### RRS-N0008: No such node
+
+- **Severity:** error
+- **Message:** No node {node_id} is known to this daemon.
+- **In plain words:** Rastai doesn't know this computer.
+- **Fix:** Refresh the node list and pick a node from it.
+- **Fix command:** `node.list`
+
+<a id="rrs-n0009"></a>
+
+### RRS-N0009: Node call without a valid session token
+
+- **Severity:** error
+- **Message:** A {service} call was refused: it carried no session token of the current handshake.
+- **In plain words:** Rastai and this computer lost track of their connection.
+- **Fix:** Wait a moment: the connection is made again on its own. If it keeps happening, restart Rastai.
+
 <a id="rrs-n1001"></a>
 
 ### RRS-N1001: SSH authentication failed
@@ -1961,6 +1980,16 @@ Source: `catalog/errors/RRS-J.json`.
 - **Message:** Signal {signal} wasn't delivered to job {job_id}: {reason}.
 - **In plain words:** Rastai couldn't pass this request on to the task.
 - **Fix:** Refresh the job list; if the task is still running, try again.
+
+<a id="rrs-j0005"></a>
+
+### RRS-J0005: No such job
+
+- **Severity:** error
+- **Message:** No job {job_id} is known to this daemon.
+- **In plain words:** Rastai doesn't know this task.
+- **Fix:** Refresh the job list and pick a job from it.
+- **Fix command:** `job.list`
 
 <a id="rrs-j1001"></a>
 

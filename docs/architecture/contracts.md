@@ -499,9 +499,9 @@ Not obvious from the picture:
 | CLI → daemon | Unix socket `daemon.sock` | Connect (JSON, plus binary for `Subscribe`), plain HTTP over the local socket | Peer credentials (`SO_PEERCRED`, same uid); the socket directory is 0700 |
 | Navi, scripts → gateway | HTTP on loopback, `/v1/*` | OpenAI and Anthropic HTTP APIs | Bearer scoped token (`chat` scope, optionally `gateway.spend`) |
 | MCP client → daemon | `rastai mcp` stdio bridge, or HTTP `/mcp` | MCP JSON-RPC (Streamable HTTP on `/mcp`) | Bearer scoped token |
-| Daemon → embedded node | Unix socket `node.sock` | gRPC (tonic), `NodeService` + `SandboxService` | Peer credentials + handshake token |
+| Daemon → embedded node | Unix socket `node.sock` | gRPC (tonic), `NodeService` + `SandboxService` | Peer credentials + handshake token (the session token in the gRPC metadata key `rastai-session-token` on every call after `Handshake`, 4.4) |
 | Daemon → remote node | OpenSSH child process forwarding `<runtime>/remote/<node_id>/node.sock` to the remote `node.sock` (`ssh -N -L`) | gRPC, same services | SSH with the host key pinned in `<data>/node/ssh_known_hosts`; the handshake proves the node's Ed25519 identity (signed challenge) and the daemon's |
-| Node → daemon | the embedded node calls `node-hub.sock` directly; a remote node calls a fresh `<runtime>/node-hub-<session_id>.sock` on its side, reverse-forwarded (`-R`) in the same SSH session | gRPC, `NodeHubService` | Socket peer + node session token from the handshake |
+| Node → daemon | the embedded node calls `node-hub.sock` directly; a remote node calls a fresh `<runtime>/node-hub-<session_id>.sock` on its side, reverse-forwarded (`-R`) in the same SSH session | gRPC, `NodeHubService` | Socket peer + node session token from the handshake, in the gRPC metadata key `rastai-session-token` (4.4) |
 | Node → worker job | per-job Unix socket `jobs/<job_id>.sock` | gRPC, `WorkerService` (worker serves, grpcio) | `RASTAI_JOB_TOKEN` (32 random bytes, as 64 lowercase hex characters) in the gRPC metadata key `rastai-job-token` (4.5); socket dir 0700; only BLAKE3(token) is on disk (`job.json` `job_token_hash`) |
 | Worker job → node | per-node Unix socket `worker-host.sock` | gRPC, `WorkerHostService` (node serves) | the same job token in the same metadata key; the node maps token → job → permissions |
 | Worker job → event log | file `runs/<run_id>/events.log` | append-only frames (section 7) | file ownership (one writer) |
@@ -746,6 +746,8 @@ Files `event_service.proto`, `event_record.proto` and `payloads.proto`. Golden m
 | `HeartbeatRequest` / `HeartbeatResponse` | `node_hub_service.proto` | `node_id`, `NodeTelemetry telemetry`, `repeated JobInfo jobs` (leases, models, sandboxes and `tokenization_overrides_hash` join in M3 and M5) / no fields yet (`tokenization_overrides` joins in M3) |
 
 `NodeHubService.ExecuteCommand` takes `rastai.commands.v1.ExecuteRequest` and returns `ExecuteResponse`, so a command looks the same from a node as from any other client.
+
+**The session token in metadata** (M1-47). The token a `HandshakeResponse` hands out travels in the gRPC metadata key `rastai-session-token`, as text, on every later call of that session: the daemon sends it on each `NodeService` call after `Handshake`, and the node on each `NodeHubService` call. The daemon's `NodeHubService` refuses a call without the token of its current session with that node with `RRS-N0009` (gRPC status `UNAUTHENTICATED`, because the call never ran). The node's own check of the token on `NodeService` calls is open risk R6 of the threat model and lands before any remote node exists (M9-E02); until then every caller of `node.sock` has passed the same-user check. `Handshake` itself never carries the key. In M1 `ExecuteCommand` answers `ok: false` with `RRS-P1004`: a call names its plugin only once plugin modules exist (M4), and the daemon runs no command without a principal.
 
 ### 4.5 `rastai.worker.v1`
 
@@ -1440,7 +1442,7 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 | `job.state_changed` | durable | node | job_id, from_state, to_state, reason, exit_code, Diagnostic |
 | `job.progress` | ephemeral | worker | fraction, message |
 | `job.log_line` | ephemeral | node | stream (stdout/stderr), text |
-| `run.state_changed` | durable | worker, chain driver | reason, run state (9.5) or eval run state (9.6) |
+| `run.state_changed` | durable | worker, chain driver, daemon | reason, run state (9.5) or eval run state (9.6); the daemon writes, in its own log, only the final state of a run whose job ended without one (9.5) |
 | `run.metrics` | durable | worker | step, `values{name: f64}` (names in 15.7) |
 | `run.tags_changed` | durable | daemon | run_id, tags |
 | `run.imported` (M5) | durable | worker (`data_import`, mode `run_logs`) | source kind, source id, imported run id, config and metrics blob refs |
@@ -1869,6 +1871,13 @@ States: `created`, `preparing` (environment, data snapshot, transfers, model loa
 - failed → resuming and cancelled → resuming (`train.resume`, only with a complete checkpoint). The new job runs under the same `run_id` and continues the same `events.log`.
 - running → verifying → completed. running → completed / failed / cancelled. `STOP` (`train.stop`) gives `completed` with reason `stopped`; `CANCEL` (`job.cancel`) gives `cancelled` (4.4).
 - Chain runs (Teach it, RLHF, sweeps) are sequenced by the daemon's chain driver, one Python job per step (`chain.step_started`, `chain.step_finished`).
+- **A job can end in any live state** (9.1: `KILL` in any live state, a crash or OOM at any moment), so every live run state has a way to each end (M1-47):
+  - created → failed (a spawn error, a bad launch, no `Register`, or a `KILL` before the worker's first record), created → cancelled (`job.cancel` of a queued job, or a `CANCEL` before the job's entry ran), created → preempted (SIGTERM before the entry ran);
+  - checkpointing → paused (`RRS-T2001`, a full disk), preempted (SIGTERM: the checkpoint finishes, then the run is preempted), completed (`STOP`: that checkpoint is the final one), failed (a crash, OOM, a SIGKILL the node didn't send, or `RRS-T2001` on the SIGTERM path), cancelled (`CANCEL`, or `KILL` after the grace period);
+  - paused → completed (`STOP`, reason `stopped`), preempted (SIGTERM), failed (a crash, a SIGKILL, exit 4), cancelled (`CANCEL` or `KILL`): a paused worker still answers `Control` and signals;
+  - resuming → cancelled (`job.cancel`) and resuming → preempted (SIGTERM), before the resume restored its checkpoint.
+- **preempted** is, like `failed` and `cancelled`, an ended but resumable state; until the owner decides 14 row 25, its only exit is resuming.
+- **Who writes the final state.** The worker's edge writes it whenever the worker lives to the end (python layout 7.5). A job that ends without one (a `KILL`, a SIGKILL from elsewhere, a crash before the worker's first record, a spawn error, `job.cancel` of a queued job) has its run's final state written by the daemon, into its own log (7.3's emitter `daemon`), once the job's state is final and the run's tail has read the log to its end: `cancelled` for a cancelled job, `failed` for a failed one, and only when the run's indexed state isn't already `completed`, `failed`, `cancelled` or `preempted` and the move is one this section allows. A job that failed with `RRS-J3006` gets nothing written: the run belongs to the running copy (9.1).
 
 ### 9.6 Eval run
 
@@ -2135,6 +2144,8 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-N0005` | error | Node, transfer or Hugging Face command not available yet (L0 stub, ADR-0017) |
 | `RRS-N0006` | error | An identity key (`node.key`, `daemon.key`) or the pinned daemon keys (`paired_daemons.json`) can't be read, created or written, are damaged, or are open to group or others |
 | `RRS-N0007` | error | Handshake refused: the daemon's clock is more than 5 minutes off the node's, or its nonce was used before |
+| `RRS-N0008` | error | No such node: `node.status` named a node id this daemon doesn't know |
+| `RRS-N0009` | error | A node call carried no session token, or not the current handshake's (`rastai-session-token`, 4.4); refused with gRPC status `UNAUTHENTICATED` |
 | `RRS-N1001` | error | SSH authentication failed |
 | `RRS-N1002` | error | SSH host key changed; refused |
 | `RRS-N1003` | info | Unknown SSH host key; confirm the fingerprint |
@@ -2205,6 +2216,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-J0001` | error | Job process could not be started |
 | `RRS-J0002` | error | Worker didn't register in time |
 | `RRS-J0004` | error | Signal not delivered to a job: no such job, the job has ended, no signal named, a `Control` value before the worker registered, or the `Control` call or the `kill` tool failed (`SignalJobResponse.diagnostic`, 4.4) |
+| `RRS-J0005` | error | No such job: `job.get` or `job.cancel` named a job id this daemon doesn't know |
 | `RRS-J1001` | error | Job killed by a signal |
 | `RRS-J1002` | error | Job killed by the kernel's out-of-memory killer |
 | `RRS-J1003` | error | Job killed by the node |
@@ -2833,6 +2845,7 @@ Each has the default to use until the owner decides. Docs and code follow the de
 | 17 | **Archive rows with no project** (daemon-level runs, the command journal) under the data policy. | Follow the user-level `privacy.data_policy`; with the default `local-only` they stay local until the owner changes it (8.7). |
 | 18 | **MariaDB version in the archive CI matrix** (M11-E07). | The current MariaDB LTS (11.4) beside MySQL 8.4 and 9.7, plus MinIO for the S3 target. |
 | 24 | **How a second window gets the session key** (ADR-0034 decision 10). A window from `view.window.open` shares the cookie but not the opener's memory, so without the key it can't run commands. | The opener hands the key to the window it opened with `postMessage`, targeting its own origin only; the key never goes into a URL. Settled when second windows are built (frontend layout 8.4 "Second window", 8.9 step 5 and 9.8 step 5); the desktop shell's second `WebviewWindow` must keep `window.opener`, or that window signs in again with a new code as a reload does (9.3). |
+| 25 | **Can a preempted run be abandoned without a resume** (preempted → cancelled, 9.5)? A preempted run whose user doesn't want it resumed has no way to say so. | Not yet: `preempted` stays an ended but resumable state whose only exit is `resuming`, like `failed` and `cancelled`; the run list shows it as resumable. Decided when `train.resume` and the run views land (M5). |
 
 **Gaps left to the tasks that build them** (owner, 2026-10-11). Each is small and is settled in its owning task's contract PR, not now. Each owning task lists its gap in its backlog body so it isn't lost. Until then `check-names` needs the milestone marker on any draft name below.
 

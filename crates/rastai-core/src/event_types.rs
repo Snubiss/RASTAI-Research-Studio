@@ -53,7 +53,7 @@ pub const EVENT_TYPES: &[EventTypeRow] = &[
         "run.state_changed",
         EventClass::Durable,
         "rastai.events.v1.RunStateChanged",
-        "worker, chain driver",
+        "worker, chain driver, daemon",
     ),
     m1_row(
         "run.metrics",

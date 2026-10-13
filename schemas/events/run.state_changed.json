@@ -1,5 +1,5 @@
 {
-  "emitter": "worker, chain driver",
+  "emitter": "worker, chain driver, daemon",
   "event_class": "durable",
   "event_type": "run.state_changed",
   "fields": [
