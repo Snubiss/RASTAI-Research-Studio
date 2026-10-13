@@ -12,11 +12,13 @@
 //!   A copy that can't be made stops the rebuild before it changes anything: an old file that can't be read is
 //!   `RRS-S0006` naming it, a copy that can't be written `RRS-S0004` (`RRS-S3002` for a full disk).
 //! - **Crash-safe.** The new index is written to `rastai.db.rebuilding` and only takes the old one's place once it
-//!   is whole and has passed `quick_check`. The old file is linked to `rastai.db.broken-<unix_ms>` first and stays
+//!   is whole and has passed `quick_check`. The old file is copied to `rastai.db.broken-<unix_ms>` first and stays
 //!   at `rastai.db` until the rename, so a kill at any point leaves a usable index: the old one, or the new one. A
 //!   rebuild started again removes the `rastai.db.rebuilding` and `rastai.db.salvage` a killed one left. A rebuild
-//!   killed after the link leaves its `rastai.db.broken-<unix_ms>` behind, and every finished rebuild keeps one: they
-//!   are the user's to delete, and the report names only the one this rebuild made.
+//!   killed after the copy leaves its `rastai.db.broken-<unix_ms>` behind, and every finished rebuild keeps one: they
+//!   are the user's to delete, and the report names only the one this rebuild made. The files the rebuild creates
+//!   (`.rebuilding`, `.salvage`, `broken-*`) are never written through a symbolic link planted at their path, and the
+//!   kept copy takes the old file's mode.
 //! - **Reading is tolerant.** A torn tail ends a log; a corrupt frame (`RRS-S2002`), a sequence gap (`RRS-S2003`)
 //!   or a record a run's log may not carry (`RRS-S2004`) ends it with that code in the report, and the rebuild goes
 //!   on with the next log. A run folder with no `run.json` was never indexed (`submit_job` writes the record before
@@ -38,7 +40,7 @@
 //!   (M4), the HF cache scan for `models` (M2), `archive.pruned` stubs (M11) and copies from `transfer.finished` (M9)
 //!   arrive with the milestones that write those rows live.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -66,15 +68,15 @@ use crate::event_log::daemon_log::daemon_log_segments;
 use crate::event_log::reader::{EventLogReader, FrameRead, open_event_log, read_next_frame};
 use crate::index::artifacts::{delete_artifact, list_artifact_blobs};
 use crate::index::kept_tables::{
-    NodeRow, PluginRow, ProjectRow, TokenRow, insert_token, list_nodes, list_plugins, list_projects, list_tokens,
-    upsert_node, upsert_plugin, upsert_project,
+    NodeRow, PluginRow, ProjectRow, TOKEN_CREATOR_PREFIX, TokenRow, insert_token, list_nodes, list_plugins,
+    list_projects, list_tokens, upsert_node, upsert_plugin, upsert_project,
 };
 use crate::index::reads::{IndexReader, TableRows};
 use crate::index::runs::{JobRow, RunRow, read_job_run_id, upsert_job, upsert_run};
 use crate::indexer::{apply_daemon_events, apply_run_events};
 use crate::sqlite::{
     SqliteConnection, SqliteTransaction, begin_transaction, commit_transaction, finish_database_file,
-    open_database_for_salvage, open_database_for_writing, run_in_savepoint,
+    open_database_for_rebuilding, open_database_for_salvage, run_in_savepoint,
 };
 use crate::store::{INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS};
 
@@ -207,7 +209,7 @@ fn write_rebuilt_index(
     options: &RebuildOptions,
     report: &mut RebuildReport,
 ) -> Result<(), StoreError> {
-    let fresh = open_database_for_writing(rebuilding_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS)?;
+    let fresh = open_database_for_rebuilding(rebuilding_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS)?;
     let kept = read_kept_tables(paths, report)?;
     let home_node_id = embedded_node_id(&kept.nodes);
     write_kept_tables(&fresh, &kept, report)?;
@@ -216,6 +218,7 @@ fn write_rebuilt_index(
     rebuild_from_daemon_log(paths, &fresh, report)?;
     drop_rows_with_missing_blobs(paths, &fresh, &home_node_id, options, report)?;
     finish_database_file(fresh)?;
+    match_old_index_mode(&rastai_db_path(paths), rebuilding_path)?;
     sync_file(rebuilding_path)
 }
 
@@ -311,11 +314,38 @@ fn write_kept_tables(fresh: &SqliteConnection, kept: &KeptRows, report: &mut Reb
         let written = run_in_savepoint(&transaction, KEPT_ROW_SAVEPOINT, |inner| upsert_plugin(inner, plugin));
         report_problem(written, report);
     }
-    // Oldest first (list_tokens), so a creator is written before the tokens it made.
-    for token in &kept.tokens {
-        write_kept_token(&transaction, token, report);
-    }
+    write_kept_tokens(&transaction, &kept.tokens, report);
     commit_transaction(transaction)
+}
+
+/// Writes the tokens with every creator before the tokens it made, whatever their times: a child can be older than
+/// its creator, and the creator check refuses a child written first. Each pass writes the tokens whose creator is not
+/// still waiting to be written. A damaged file whose tokens name each other has no such token, so the rest go in
+/// order, and the creator check revokes what it refuses.
+fn write_kept_tokens(transaction: &SqliteTransaction<'_>, tokens: &[TokenRow], report: &mut RebuildReport) {
+    let mut waiting: Vec<&TokenRow> = tokens.iter().collect();
+    while !waiting.is_empty() {
+        let mut ready: Vec<&TokenRow> = waiting
+            .iter()
+            .copied()
+            .filter(|token| !waits_for_creator(token, &waiting))
+            .collect();
+        if ready.is_empty() {
+            ready = waiting.clone();
+        }
+        for token in &ready {
+            write_kept_token(transaction, token, report);
+        }
+        waiting.retain(|token| !ready.iter().any(|written| written.token_id == token.token_id));
+    }
+}
+
+/// Whether the token's creator is one of the `waiting` tokens, not yet written.
+fn waits_for_creator(token: &TokenRow, waiting: &[&TokenRow]) -> bool {
+    match token.created_by.strip_prefix(TOKEN_CREATOR_PREFIX) {
+        Some(creator_token_id) => waiting.iter().any(|other| other.token_id == creator_token_id),
+        None => false,
+    }
 }
 
 /// Writes one token as the old file had it. A live token whose creator is revoked or gone is written revoked now,
@@ -727,18 +757,29 @@ fn swap_in_rebuilt_index(
     Ok(old_index_path)
 }
 
-/// A second name for the old file: a hard link costs no space; a filesystem without links gets a copy. A link shares
-/// the old file's bytes, which is safe because nothing writes them: the rebuild read a copy (`read_kept_tables`), and
-/// after the rename no one opens the old file under `rastai.db` again.
+/// Keeps the old file under its kept name as a copy of its own. Not a hard link: a link shares the old file's bytes,
+/// so a daemon killed before the rename and started again would write its rows into the kept index too, and the kept
+/// index would no longer be the file the user had (contracts 8.1).
 fn keep_old_file(path: &Path, kept_path: &Path) -> Result<(), StoreError> {
     if !path.exists() {
         return Ok(());
     }
-    if std::fs::hard_link(path, kept_path).is_ok() {
-        return Ok(());
-    }
     copy_file(path, kept_path)?;
     sync_file(kept_path)
+}
+
+/// Gives the new index the old index's mode, so a 0600 index stays 0600. The kept copy has the old mode already.
+fn match_old_index_mode(index_path: &Path, rebuilding_path: &Path) -> Result<(), StoreError> {
+    if !index_path.exists() {
+        return Ok(());
+    }
+    let old_permissions = std::fs::metadata(index_path)
+        .map_err(|error| old_file_unreadable(index_path, &error))?
+        .permissions();
+    let rebuilding = File::open(rebuilding_path).map_err(|error| write_error(rebuilding_path, &error))?;
+    rebuilding
+        .set_permissions(old_permissions)
+        .map_err(|error| write_error(rebuilding_path, &error))
 }
 
 /// Copies a database file and its `-wal`, if it has one, to `copy_path`, so the copy holds every committed page.
@@ -757,7 +798,11 @@ fn copy_database_files(database_path: &Path, copy_path: &Path) -> Result<(), Sto
 /// (`RRS-S0004`, or `RRS-S3002` for a full disk), which `std::fs::copy` reports alike.
 fn copy_file(source: &Path, destination: &Path) -> Result<(), StoreError> {
     let mut source_file = File::open(source).map_err(|error| old_file_unreadable(source, &error))?;
-    let mut copy = File::create(destination).map_err(|error| write_error(destination, &error))?;
+    let permissions = source_file
+        .metadata()
+        .map_err(|error| old_file_unreadable(source, &error))?
+        .permissions();
+    let mut copy = create_new_file(destination, &permissions)?;
     let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
     loop {
         let read_bytes = match source_file.read(&mut buffer) {
@@ -769,6 +814,25 @@ fn copy_file(source: &Path, destination: &Path) -> Result<(), StoreError> {
         copy.write_all(&buffer[..read_bytes])
             .map_err(|error| write_error(destination, &error))?;
     }
+}
+
+/// Creates a file that is not there yet, with the mode `permissions` gives. What is at the path now, a symbolic link
+/// included, is removed first, and the file is made with `create_new`, which refuses a path that exists: a link
+/// planted in between is refused, never written through.
+fn create_new_file(path: &Path, permissions: &std::fs::Permissions) -> Result<File, StoreError> {
+    remove_file_if_present(path)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(std::os::unix::fs::PermissionsExt::mode(permissions));
+    }
+    let file = options.open(path).map_err(|error| write_error(path, &error))?;
+    // The umask can only clear bits of the mode above, so the exact mode is set here.
+    file.set_permissions(permissions.clone())
+        .map_err(|error| write_error(path, &error))?;
+    Ok(file)
 }
 
 /// `rastai.db-wal` for `rastai.db`: SQLite names a database's companion files this way.
@@ -908,7 +972,10 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use crate::sqlite::{Migration, SqlValue, execute, integer_value, open_database_for_reading, text_value};
+    use crate::sqlite::{
+        Migration, SqlValue, execute, integer_value, open_database_for_reading, open_database_for_salvage,
+        open_database_for_writing, text_value,
+    };
 
     // The migration a newer app would have added; this build doesn't know it.
     const NEWER_MIGRATION_SQL: &str = "CREATE TABLE added_by_a_newer_app (note TEXT NOT NULL) STRICT;";
@@ -921,11 +988,18 @@ mod tests {
     const REVOKE_CREATOR_ALONE_SQL: &str = "UPDATE tokens SET revoked_unix_ms = ?1 WHERE token_id = ?2";
     const DELETE_CREATOR_SQL: &str = "DELETE FROM tokens WHERE token_id = ?1";
     const TOKEN_REVOKED_CODE: &str = "RRS-C1006";
+    // A child token made this many milliseconds before its creator, as an old clock can record it.
+    const CHILD_EARLIER_BY_MS: i64 = 1_000;
+    // The unix time the kept copies of these tests are named after.
+    const KEPT_UNIX_MS: i64 = 1_791_700_200_000;
     // An old index no one but root can read, and the mode that lets the test remove it again.
     #[cfg(unix)]
     const UNREADABLE_MODE: u32 = 0o000;
     #[cfg(unix)]
     const READABLE_MODE: u32 = 0o600;
+    // The mode of an index only its owner reads, which a rebuild must keep.
+    #[cfg(unix)]
+    const PRIVATE_MODE: u32 = 0o600;
 
     fn test_paths(test_name: &str) -> DataPaths {
         let root = std::env::temp_dir().join(format!("rastai-store-rebuild-{}-{test_name}", std::process::id()));
@@ -1153,6 +1227,119 @@ mod tests {
             child.revoked_unix_ms.is_some(),
             "the child of a missing creator is live: {child:?}"
         );
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // A child made before its creator, as an old clock can record it: the creator is written first all the same, so
+    // the child stays live. Written in list order, the child would be refused and revoked with RRS-C1006.
+    #[test]
+    fn a_child_token_older_than_its_creator_stays_live() {
+        let paths = test_paths("token-child-older");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let connection =
+            open_database_for_writing(&rastai_db_path(&paths), &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap();
+        let transaction = begin_transaction(&connection).unwrap();
+        insert_token(&transaction, &live_token(CREATOR_TOKEN_ID, "owner")).unwrap();
+        let mut child = live_token(CHILD_TOKEN_ID, &format!("token:{CREATOR_TOKEN_ID}"));
+        child.created_unix_ms = TOKEN_CREATED_UNIX_MS - CHILD_EARLIER_BY_MS;
+        insert_token(&transaction, &child).unwrap();
+        commit_transaction(transaction).unwrap();
+        drop(connection);
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        assert_eq!(report_codes(&report), Vec::<String>::new());
+        assert!(rebuilt_token(&paths, CHILD_TOKEN_ID).revoked_unix_ms.is_none());
+        assert!(rebuilt_token(&paths, CREATOR_TOKEN_ID).revoked_unix_ms.is_none());
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // A kept copy that is a hard link would share the live index's bytes: a daemon killed before the rename would
+    // write its rows into the kept copy too. The kept copy must go on being the old file, whatever the live one gets.
+    #[test]
+    fn the_kept_copy_does_not_change_when_the_live_index_is_written() {
+        let paths = test_paths("kept-copy-own-bytes");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let index_path = rastai_db_path(&paths);
+        std::fs::write(&index_path, b"the old index's bytes").unwrap();
+        let kept_path = rastai_db_broken_path(&paths, KEPT_UNIX_MS);
+        keep_old_file(&index_path, &kept_path).unwrap();
+        let kept_bytes = std::fs::read(&kept_path).unwrap();
+
+        let mut live = OpenOptions::new().append(true).open(&index_path).unwrap();
+        live.write_all(b" and the rows a daemon wrote after the kill").unwrap();
+
+        assert_eq!(std::fs::read(&kept_path).unwrap(), kept_bytes);
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // A link planted at the kept name is replaced by the copy; the file it points at is never written.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_planted_at_the_kept_path_is_replaced_and_its_target_is_left_alone() {
+        use std::os::unix::fs::symlink;
+        let paths = test_paths("kept-link-planted");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let index_path = rastai_db_path(&paths);
+        std::fs::write(&index_path, b"the old index's bytes").unwrap();
+        let victim_path = paths.data.join("victim.txt");
+        std::fs::write(&victim_path, b"not the index").unwrap();
+        let kept_path = rastai_db_broken_path(&paths, KEPT_UNIX_MS);
+        symlink(&victim_path, &kept_path).unwrap();
+
+        keep_old_file(&index_path, &kept_path).unwrap();
+
+        assert_eq!(std::fs::read(&victim_path).unwrap(), b"not the index");
+        assert!(!std::fs::symlink_metadata(&kept_path).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&kept_path).unwrap(), b"the old index's bytes");
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // SQLite would create or migrate the empty file a link points at, so the open itself must refuse the link.
+    #[cfg(unix)]
+    #[test]
+    fn the_new_and_scratch_indexes_are_never_opened_through_a_planted_link() {
+        use std::os::unix::fs::symlink;
+        let paths = test_paths("index-link-planted");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let victim_path = paths.data.join("victim.db");
+        std::fs::write(&victim_path, b"").unwrap();
+        let rebuilding_path = rastai_db_rebuilding_path(&paths);
+        let salvage_path = rastai_db_salvage_path(&paths);
+        symlink(&victim_path, &rebuilding_path).unwrap();
+        symlink(&victim_path, &salvage_path).unwrap();
+
+        assert!(open_database_for_rebuilding(&rebuilding_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).is_err());
+        assert!(open_database_for_salvage(&salvage_path, INDEX_MIGRATIONS).is_err());
+
+        assert_eq!(
+            std::fs::metadata(&victim_path).unwrap().len(),
+            0,
+            "the link's target was written"
+        );
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // The mode a user set on the index (0600 here) is the mode of the rebuilt index and of its kept copy.
+    #[cfg(unix)]
+    #[test]
+    fn a_rebuild_keeps_the_mode_of_the_old_index_and_of_its_kept_copy() {
+        use std::os::unix::fs::PermissionsExt;
+        let paths = test_paths("keeps-mode");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let index_path = rastai_db_path(&paths);
+        drop(open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap());
+        std::fs::set_permissions(&index_path, std::fs::Permissions::from_mode(PRIVATE_MODE)).unwrap();
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        let mode_of = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode_of(&index_path),
+            PRIVATE_MODE,
+            "the rebuilt index is not the old one's mode"
+        );
+        assert_eq!(mode_of(&report.old_index_path.unwrap()), PRIVATE_MODE);
         std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
     }
 }

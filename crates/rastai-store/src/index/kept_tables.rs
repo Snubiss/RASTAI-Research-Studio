@@ -54,7 +54,7 @@ const SELECT_ALL_TOKENS: &str =
     "SELECT token_id, name, token_hash, scopes, created_unix_ms, revoked_unix_ms, created_by
     FROM tokens ORDER BY created_unix_ms, token_id";
 /// How `created_by` names a token that made another (`principal_label`, contracts 6.3).
-const TOKEN_CREATOR_PREFIX: &str = "token:";
+pub(crate) const TOKEN_CREATOR_PREFIX: &str = "token:";
 
 const UPSERT_NODE: &str = "INSERT INTO nodes (node_id, name, transport, address, state, protocol_version,
         capabilities, last_heartbeat_unix_ms)

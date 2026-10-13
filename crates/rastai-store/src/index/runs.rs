@@ -43,9 +43,10 @@ const SELECT_RUN_ACKED_SEQUENCE: &str = "SELECT acked_sequence FROM runs WHERE r
 const SET_RUN_STATE: &str = "UPDATE runs SET state = ?2, finished_unix_ms = ?3 WHERE run_id = ?1";
 const SET_RUN_PINNED: &str = "UPDATE runs SET pinned = ?2 WHERE run_id = ?1";
 // A job the daemon never recorded (a rebuild has no jobs rows to start from) gets the record's run and '' for the
-// node and kind, which the record doesn't carry. A job the daemon recorded keeps its own.
+// node and kind, which the record doesn't carry. A job the daemon recorded keeps its own. A run with no row (a rebuild
+// left its run.json out) gets no job row either, as INSERT_RUN_TAG skips its tags: a job row must name a run row.
 const UPSERT_JOB_STATE: &str = "INSERT INTO jobs (job_id, run_id, node_id, kind, state, exit_code, error_code)
-    VALUES (?1, ?2, '', '', ?3, ?4, ?5)
+    SELECT ?1, ?2, '', '', ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM runs WHERE run_id = ?2)
     ON CONFLICT (job_id) DO UPDATE SET state = excluded.state, exit_code = excluded.exit_code,
         error_code = excluded.error_code";
 // Keyed by (run_id, sequence, name), so a re-sent record never counts twice (contracts 7.1).
