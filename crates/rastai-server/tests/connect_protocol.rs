@@ -209,8 +209,8 @@ mod end_to_end {
     use serde_json::Value;
 
     use crate::common::{
-        header_value, owner_bearer, refusal_code, remove_test_folder, send_to_port, start_test_daemon,
-        stop_test_daemon, test_paths,
+        header_value, owner_bearer, refusal_code, remove_test_folder, send_to_port, start_quiet_test_daemon,
+        start_test_daemon, stop_test_daemon, test_paths,
     };
 
     const EXECUTE_PATH: &str = "/rastai.commands.v1.CommandService/Execute";
@@ -261,7 +261,8 @@ mod end_to_end {
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_answers_in_the_codec_it_was_asked_in() {
         let paths = test_paths("cp-execute");
-        let running = start_test_daemon(&paths).await;
+        // A quiet node: system.status names its last heartbeat, which must not move between the two answers.
+        let running = start_quiet_test_daemon(&paths, &[]).await;
         let bearer = owner_bearer(&paths);
         let request = ExecuteRequest {
             command_id: "system.status".to_string(),

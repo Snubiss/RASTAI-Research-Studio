@@ -65,6 +65,10 @@ const UPSERT_NODE: &str = "INSERT INTO nodes (node_id, name, transport, address,
 const SELECT_NODE_BY_ID: &str = "SELECT node_id, name, transport, address, state, protocol_version, capabilities,
         last_heartbeat_unix_ms
     FROM nodes WHERE node_id = ?1";
+// The embedded node first (contracts 6.5, `NodeListResult`), then the others by id.
+const SELECT_ALL_NODES: &str = "SELECT node_id, name, transport, address, state, protocol_version, capabilities,
+        last_heartbeat_unix_ms
+    FROM nodes ORDER BY transport <> 'local', node_id";
 
 // node.state_changed moves only the state: the rows themselves are kept tables (13.2). plugin.state_changed moves
 // nothing: a plugin's saved state is the user's decision, written whole with UPSERT_PLUGIN (layout 6.4).
@@ -285,10 +289,25 @@ fn token_from_columns(row: &[SqlValue]) -> Result<TokenRow, StoreError> {
 
 pub fn get_node(reader: &IndexReader, node_id: &str) -> Result<Option<NodeRow>, StoreError> {
     let rows = query_rows(&reader.connection, SELECT_NODE_BY_ID, &[text_value(node_id)])?;
-    let Some(row) = rows.first() else {
-        return Ok(None);
-    };
-    Ok(Some(NodeRow {
+    match rows.first() {
+        Some(row) => Ok(Some(node_from_columns(row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Every node, the embedded one (`local`) first.
+pub fn list_nodes(reader: &IndexReader) -> Result<Vec<NodeRow>, StoreError> {
+    let rows = query_rows(&reader.connection, SELECT_ALL_NODES, &[])?;
+    let mut nodes = Vec::with_capacity(rows.len());
+    for row in &rows {
+        nodes.push(node_from_columns(row)?);
+    }
+    Ok(nodes)
+}
+
+/// Columns in the order of `SELECT_NODE_BY_ID` and `SELECT_ALL_NODES`.
+fn node_from_columns(row: &[SqlValue]) -> Result<NodeRow, StoreError> {
+    Ok(NodeRow {
         node_id: read_text(row, 0)?,
         name: read_text(row, 1)?,
         transport: read_text(row, 2)?,
@@ -297,7 +316,7 @@ pub fn get_node(reader: &IndexReader, node_id: &str) -> Result<Option<NodeRow>, 
         protocol_version: read_integer(row, 5)?,
         capabilities: read_word_list(row, 6)?,
         last_heartbeat_unix_ms: read_optional_integer(row, 7)?,
-    }))
+    })
 }
 
 pub fn get_plugin(reader: &IndexReader, plugin_id: &str) -> Result<Option<PluginRow>, StoreError> {

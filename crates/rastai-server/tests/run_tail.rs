@@ -46,6 +46,9 @@ const EMBEDDED_NODE_ID: &str = "node_local";
 const REMOTE_NODE_ID: &str = "node_01JA2B3C4D5E6F7G8H9J0K1M2N";
 const CONTENT_HASH: &str = "blake3:0101010101010101010101010101010101010101010101010101010101010101";
 const RECORD_TIME_UNIX_MS: i64 = 1_791_700_000_000;
+/// The table the embedded node's heartbeats keep writing (every_stored_row), and the event they publish (published).
+const NODES_TABLE: &str = "nodes";
+const NODE_HEARTBEAT_EVENT: &str = "node.heartbeat";
 /// How long a test waits for a tail running on its own task: up to 200 steps of 25 ms.
 const WAIT_ATTEMPTS: usize = 200;
 const WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(25);
@@ -228,11 +231,15 @@ fn table_rows(running: &RunningDaemon, table_name: &str) -> Vec<Vec<String>> {
     list_table_rows(&reader, table_name).unwrap()
 }
 
-/// Every row of every table of rastai.db, as text: what "nothing twice" compares.
+/// Every row of every table of rastai.db, as text: what "nothing twice" compares. The `nodes` table is left out: the
+/// embedded node's heartbeats move its row's `last_heartbeat_unix_ms` while the test runs.
 fn every_stored_row(running: &RunningDaemon) -> Vec<String> {
     let reader = open_index_reader(&running.server.store.index_readers).unwrap();
     let mut rows = Vec::new();
     for table in list_table_columns(&reader).unwrap() {
+        if table.table_name == NODES_TABLE {
+            continue;
+        }
         for row in list_table_rows(&reader, &table.table_name).unwrap() {
             rows.push(format!("{}\t{}", table.table_name, row.join("\t")));
         }
@@ -240,11 +247,14 @@ fn every_stored_row(running: &RunningDaemon) -> Vec<String> {
     rows
 }
 
-/// The events published so far, without waiting.
+/// The events published so far, without waiting, but the embedded node's telemetry, which its heartbeats publish
+/// whenever they come.
 fn published(live: &mut broadcast::Receiver<BusEvent>) -> Vec<BusEvent> {
     let mut events = Vec::new();
     while let Ok(event) = live.try_recv() {
-        events.push(event);
+        if event.event_type != NODE_HEARTBEAT_EVENT {
+            events.push(event);
+        }
     }
     events
 }
@@ -546,12 +556,15 @@ fn append_to_daemon_log(paths: &DataPaths, records: Vec<EventRecord>) {
 async fn daemon_log_records_after_the_cursor_are_indexed_before_the_listener_opens() {
     let paths = test_paths("daemon-log-replay");
     let running = start_test_daemon(&paths).await;
-    // A journaled command's command.finished is logged and indexed: the log's first record, and its cursor.
+    // A journaled command's command.finished is logged and indexed: the log's next record, and its cursor. The
+    // records before it are the embedded node's connection (node.state_changed).
+    let before = log_sequences(&daemon_events_log_path(&paths)).len() as u64;
     let request = execute_request("token.create", r#"{"name": "ci", "preset": "chat-only"}"#);
     let created = run_command(&running.server, &owner_principal(), request).await;
     ok_result(&created);
-    assert_eq!(log_sequences(&daemon_events_log_path(&paths)), [1]);
-    assert_eq!(daemon_cursor(&running), Some(1));
+    let logged = log_sequences(&daemon_events_log_path(&paths));
+    assert_eq!(logged.last(), Some(&(before + 1)));
+    assert_eq!(daemon_cursor(&running), Some(before + 1));
     // A command that was running when the daemon died: started, never finished in rastai.db.
     let interrupted = JournalStartedRow {
         journal_id: "jrn_01JB2B3C4D5E6F7G8H9J0K1M2N".to_string(),
@@ -577,8 +590,13 @@ async fn daemon_log_records_after_the_cursor_are_indexed_before_the_listener_ope
     );
 
     let restarted = start_test_daemon(&paths).await;
-    // Nothing is awaited here: the listener is open, so the rows must be there already.
-    assert_eq!(daemon_cursor(&restarted), Some(3));
+    // Nothing is awaited here: the listener is open, so the rows must be there already. The two appended records
+    // were indexed, and so were the node's connection records of this start, which came after them.
+    assert!(
+        daemon_cursor(&restarted) >= Some(before + 3),
+        "{:?}",
+        daemon_cursor(&restarted)
+    );
     let reader = open_index_reader(&restarted.server.store.index_readers).unwrap();
     let finished = get_journal(&reader, &interrupted.journal_id).unwrap().unwrap();
     assert_eq!(finished.ok, Some(true));

@@ -30,6 +30,8 @@ use rastai_diag::logger::log_diagnostic;
 use rastai_formats::hashing::hash_bytes;
 use rastai_proto::node::v1::{HandshakeRequest, HandshakeResponse};
 use serde_json::{Value, json};
+use tonic::Request;
+use tonic::metadata::{MetadataMap, MetadataValue};
 
 use crate::error::{NodeError, node_error_diagnostic};
 use crate::heartbeat::request_heartbeat;
@@ -38,6 +40,9 @@ use crate::identity::{
 };
 use crate::node::{NodeState, current_hardware};
 
+/// The gRPC metadata key the session token travels in on every call after the handshake: the daemon's
+/// `NodeService` calls and the node's `NodeHubService` calls (contracts 3.2 and 4.4).
+pub const SESSION_TOKEN_METADATA_KEY: &str = "rastai-session-token";
 /// The first field of every signed handshake message.
 const HANDSHAKE_DOMAIN: &str = "rastai-node-handshake-v1";
 /// The daemon's clock may differ from ours by this much (the proto comment on `sent_unix_ms`). A recorded handshake
@@ -104,6 +109,20 @@ pub fn answer_handshake(state: &NodeState, request: &HandshakeRequest) -> Handsh
         }
     }
     response
+}
+
+/// The session token a call carries, if it carries one that is text.
+pub fn session_token_from_metadata(metadata: &MetadataMap) -> Option<String> {
+    let value = metadata.get(SESSION_TOKEN_METADATA_KEY)?;
+    value.to_str().ok().map(str::to_string)
+}
+
+/// A request that carries the session token in its metadata. The error says why the token can't be a metadata value.
+pub fn request_with_session_token<T>(message: T, session_token: &str) -> Result<Request<T>, String> {
+    let value = MetadataValue::try_from(session_token).map_err(|_| "the session token isn't plain text".to_string())?;
+    let mut request = Request::new(message);
+    request.metadata_mut().insert(SESSION_TOKEN_METADATA_KEY, value);
+    Ok(request)
 }
 
 /// The current daemon session, if a daemon has handshaken.
@@ -426,6 +445,15 @@ mod tests {
 
     fn refusal_code(setup: &Setup, request: &HandshakeRequest) -> &'static str {
         accept_handshake(&setup.node, request, NOW_MS).unwrap_err().code()
+    }
+
+    #[test]
+    fn the_session_token_travels_in_its_metadata_key() {
+        let token = "A".repeat(52);
+        let request = request_with_session_token((), &token).unwrap();
+        assert_eq!(session_token_from_metadata(request.metadata()), Some(token));
+        assert_eq!(session_token_from_metadata(&MetadataMap::new()), None);
+        assert!(request_with_session_token((), "line\nbreak").is_err());
     }
 
     #[test]

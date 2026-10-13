@@ -784,12 +784,14 @@ dependencies = [
  "rastai-diag",
  "rastai-formats",
  "rastai-mcp",
+ "rastai-node",
  "rastai-proto",
  "rastai-store",
  "rastai-transport",
  "serde",
  "serde_json",
  "tokio",
+ "tonic",
 ]
 
 [[package]]

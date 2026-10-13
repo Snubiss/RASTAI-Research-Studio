@@ -110,7 +110,8 @@ pub struct JobOptions {
     /// How long a job reattached after a node restart has to register again (`RRS-J3003` after it).
     pub host_reconnect_timeout: Duration,
     /// The environments this node can run jobs in. Until uv environments land (M2-16), whoever starts the node names
-    /// them: the embedded node's start (M1-47) gives it the cpu environment that `just env-cpu` syncs.
+    /// them: the embedded node's start (rastai-server's daemon.rs) gives it one per folder of `<data>/envs/`, where a
+    /// developer links the cpu environment that `just env-cpu` syncs.
     pub environments: Vec<JobEnvironment>,
 }
 

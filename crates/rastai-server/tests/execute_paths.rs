@@ -253,12 +253,12 @@ async fn read_commands_are_not_journaled_and_the_others_are() {
         json!({"recipe": "sft", "design_path": "d", "dataset_path": "x"}),
     )
     .await;
-    // A command not built yet fails with its area's code and is journaled like any other.
-    assert_eq!(response_codes(&started), ["RRS-T0006"]);
+    // A failed command is journaled like any other: M1 trains only the classification recipe.
+    assert_eq!(response_codes(&started), ["RRS-T0002"]);
     let row = journal_row(&running, &started.journal_id);
     assert_eq!(
         (row.ok, row.code.as_str(), row.principal.as_str()),
-        (Some(false), "RRS-T0006", "owner")
+        (Some(false), "RRS-T0002", "owner")
     );
     assert!(row.finished_unix_ms.is_some());
     stop_test_daemon(running).await;

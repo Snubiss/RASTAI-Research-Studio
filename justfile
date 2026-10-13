@@ -71,7 +71,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: it reads a pull request's
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
-check: fmt-check lint check-js test-rust test-node-jobs test-python test-js wasm deny proto-check \
+check: fmt-check lint check-js test-rust test-node-jobs test-daemon-jobs test-python test-js wasm deny proto-check \
     check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript check-fuzz-locks \
     codegen-check check-names check-schema-diff
 
@@ -96,6 +96,12 @@ test-rust:
 # rastai-node's job, reattach and train-job tests that go through Register, Hello and Control, with the cpu environment.
 test-node-jobs: env-cpu
     cargo test --locked -p rastai-node --test jobs --test reattach --test train_job -- --ignored
+
+# The real TextCNN train job through the daemon: train.start, the embedded node, the run tail, job.cancel and a
+# restart mid-run (plan M1-47). Like test-node-jobs, it needs the cpu environment's Python.
+# The daemon's #[ignore]d train job tests (crates/rastai-server/tests/train_jobs.rs).
+test-daemon-jobs: env-cpu
+    cargo test --locked -p rastai-server --test train_jobs -- --ignored
 
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
 # tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml and

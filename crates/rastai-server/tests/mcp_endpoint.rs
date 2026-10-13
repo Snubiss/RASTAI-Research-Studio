@@ -133,7 +133,7 @@ async fn an_experimental_command_is_unknown_to_mcp_while_the_setting_is_off() {
     assert!(!tool_names(&replies[1]).contains(&"job__list".to_string()));
     assert_eq!(tool_error_code(&replies[2]), "RRS-C0001");
 
-    // With the setting on it is listed, and the call reaches its handler (an L0 stub until jobs land).
+    // With the setting on it is listed, and the call reaches its handler, which lists no job yet.
     let set = json!({"key": "plugins.experimental_apis", "value": true});
     ok_result(
         &run_command(
@@ -145,7 +145,9 @@ async fn an_experimental_command_is_unknown_to_mcp_while_the_setting_is_off() {
     );
     let replies = run_bridge_on_lines(&paths, &token.token, &[INITIALIZE, TOOLS_LIST, &call]).await;
     assert!(tool_names(&replies[1]).contains(&"job__list".to_string()));
-    assert_eq!(tool_error_code(&replies[2]), "RRS-C0010");
+    let result = &replies[2]["result"];
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["jobs"], json!([]), "{result}");
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }

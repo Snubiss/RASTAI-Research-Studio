@@ -11,10 +11,11 @@ use rastai_store::index::journal::{
     JournalFinishedRow, JournalStartedRow, find_journal_by_idempotency_key, get_journal,
 };
 use rastai_store::index::kept_tables::{
-    NodeRow, PluginRow, ProjectRow, TokenRow, find_token_by_hash, get_node, get_plugin, get_project, list_tokens,
+    NodeRow, PluginRow, ProjectRow, TokenRow, find_token_by_hash, get_node, get_plugin, get_project, list_nodes,
+    list_tokens,
 };
 use rastai_store::index::reads::open_index_reader;
-use rastai_store::index::runs::{JobRow, RunFilter, RunRow, get_job, get_run, list_runs};
+use rastai_store::index::runs::{JobFilter, JobRow, RunFilter, RunRow, get_job, get_run, list_jobs, list_runs};
 use rastai_store::index::writes::IndexWrite;
 use rastai_store::store::{Store, close_store, open_store};
 use rastai_store::writer_thread::{IndexWriter, write_index, writer_batch_count};
@@ -301,6 +302,64 @@ fn runs_and_jobs_read_back_and_the_ack_never_moves_back() {
     remove_test_folder(&paths);
 }
 
+fn job_row(job_id: &str, run_id: &str, node_id: &str, state: &str) -> JobRow {
+    JobRow {
+        job_id: job_id.to_string(),
+        run_id: run_id.to_string(),
+        node_id: node_id.to_string(),
+        kind: "train".to_string(),
+        state: state.to_string(),
+        pid: None,
+        process_group_id: None,
+        exit_code: None,
+        error_code: String::new(),
+    }
+}
+
+// The scheduler and the job handlers read jobs by run, state and node; ids carry their time, so newest first is
+// the reverse of the order they were submitted in.
+#[test]
+fn jobs_are_listed_newest_first_by_run_state_and_node() {
+    let runtime = multi_thread_runtime();
+    let paths = test_paths("joblist");
+    let store = open_store(&paths).unwrap();
+    write(&runtime, &store, IndexWrite::UpsertRun(run_row("run_a", 5)));
+    write(&runtime, &store, IndexWrite::UpsertRun(run_row("run_b", 6)));
+    let older = job_row("job_01A", "run_a", "node_local", "queued");
+    let newer = job_row("job_01B", "run_a", "node_local", "running");
+    let other_node = job_row("job_01C", "run_b", "node_box", "queued");
+    for job in [&older, &newer, &other_node] {
+        write(&runtime, &store, IndexWrite::UpsertJob(job.clone()));
+    }
+
+    let reader = open_index_reader(&store.index_readers).unwrap();
+    let ids = |filter: JobFilter| -> Vec<String> {
+        let jobs = list_jobs(&reader, &filter).unwrap();
+        jobs.into_iter().map(|job| job.job_id).collect()
+    };
+    assert_eq!(ids(JobFilter::default()), ["job_01C", "job_01B", "job_01A"]);
+    let of_run_a = JobFilter {
+        run_id: "run_a".to_string(),
+        ..JobFilter::default()
+    };
+    assert_eq!(ids(of_run_a), ["job_01B", "job_01A"]);
+    let queued = JobFilter {
+        state: "queued".to_string(),
+        ..JobFilter::default()
+    };
+    assert_eq!(ids(queued), ["job_01C", "job_01A"]);
+    let queued_here = JobFilter {
+        state: "queued".to_string(),
+        node_id: "node_local".to_string(),
+        ..JobFilter::default()
+    };
+    assert_eq!(ids(queued_here), ["job_01A"]);
+    assert_eq!(list_jobs(&reader, &JobFilter::default()).unwrap()[1], newer);
+    drop(reader);
+    runtime.block_on(close_store(store));
+    remove_test_folder(&paths);
+}
+
 #[test]
 fn journal_rows_are_found_by_key_and_unfinished_ones_are_closed() {
     let runtime = multi_thread_runtime();
@@ -461,6 +520,14 @@ fn the_kept_tables_read_back() {
         source: "preinstalled".to_string(),
     };
     write(&runtime, &store, IndexWrite::UpsertProject(project.clone()));
+    // A paired node whose id sorts first still comes after the embedded one.
+    let remote = NodeRow {
+        node_id: "node_box".to_string(),
+        transport: "ssh".to_string(),
+        address: "user@box".to_string(),
+        ..node.clone()
+    };
+    write(&runtime, &store, IndexWrite::UpsertNode(remote.clone()));
     write(&runtime, &store, IndexWrite::UpsertNode(node.clone()));
     write(&runtime, &store, IndexWrite::UpsertPlugin(plugin.clone()));
     write(&runtime, &store, IndexWrite::InsertToken(token_row("tok_a")));
@@ -475,7 +542,8 @@ fn the_kept_tables_read_back() {
     let reader = open_index_reader(&store.index_readers).unwrap();
     let token = find_token_by_hash(&reader, "blake3:tok_a").unwrap().unwrap();
     assert_eq!(get_project(&reader, "prj_a").unwrap(), Some(project));
-    assert_eq!(get_node(&reader, "node_local").unwrap(), Some(node));
+    assert_eq!(get_node(&reader, "node_local").unwrap(), Some(node.clone()));
+    assert_eq!(list_nodes(&reader).unwrap(), vec![node, remote]);
     assert_eq!(get_plugin(&reader, "rastai.psychology").unwrap(), Some(plugin));
     assert_eq!(token.scopes, token_row("tok_a").scopes);
     assert_eq!(token.revoked_unix_ms, Some(11));
