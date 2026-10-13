@@ -23,6 +23,8 @@
 //! The gate's cache follows the database: a new token goes into the cache before its insert is sent (nobody holds
 //! its text until `token.create` answers) and comes out again if the insert fails, and a revoke marks its tokens only
 //! after its write committed. So a sweep always finds the entry it must mark, and no create puts a live one back.
+//! The token `token.revoke` names is marked without a read; the rest of a sweep is read back from `rastai.db`, and
+//! when that read fails every scoped token is marked revoked, so the gate fails closed until the next start.
 //!
 //! A login code is owner-only (flows/platform.md 4.1): its session is the owner's, with every scope, so a code made
 //! for a token or a plugin, even one holding `system.admin`, would turn that principal into the owner. Every principal
@@ -35,6 +37,7 @@ use rastai_core::random::random_bytes;
 use rastai_core::scopes::{Scope, parse_scope, scope_name, scopes_allow, token_preset_scopes};
 use rastai_core::time::now_unix_ms;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic, diagnostic_at};
+use rastai_diag::logger::log_warn;
 use rastai_formats::commands::result_json;
 use rastai_formats::commands::token::{
     TokenCreateArgs, TokenCreateResult, TokenListArgs, TokenListResult, TokenLoginCodeCreateArgs,
@@ -53,7 +56,8 @@ use crate::auth_files::lowercase_hex;
 use crate::commands::arguments::invalid_arguments;
 use crate::commands::context::{CommandContext, core_failure, store_failure, sync_result};
 use crate::http::sessions::{
-    ScopedToken, add_scoped_token, create_login_code, remove_scoped_token, revoke_scoped_token,
+    AuthState, ScopedToken, add_scoped_token, create_login_code, remove_scoped_token, revoke_all_scoped_tokens,
+    revoke_scoped_token,
 };
 use crate::plugin_host::load::plugin_status;
 use crate::server_state::Server;
@@ -218,8 +222,9 @@ pub(crate) async fn revoke(
     Ok(sync_result(result_json(&result)))
 }
 
-/// Revokes the token's whole chain in one write, then marks every revoked token in the gate's cache. Returns the
-/// named token's revoke time: its first one when it was already revoked.
+/// Revokes the token's whole chain in one write, then marks it in the gate's cache. Returns the named token's revoke
+/// time: its first one when it was already revoked. Once the write has committed the revoke has happened, so the
+/// answer is a success even when the cache had to fail closed.
 async fn revoke_now(server: &Server, row: &TokenRow) -> Result<i64, Vec<Diagnostic>> {
     let revoked_unix_ms = now_unix_ms();
     let write = IndexWrite::RevokeToken {
@@ -229,21 +234,50 @@ async fn revoke_now(server: &Server, row: &TokenRow) -> Result<i64, Vec<Diagnost
     write_index(&server.store.index, write)
         .await
         .map_err(|error| store_failure(&error))?;
-    mark_revoked_tokens_in_cache(server).map_err(|error| store_failure(&error))?;
+    mark_revoked_tokens_in_cache(server, Some(&row.token_id));
     Ok(row.revoked_unix_ms.unwrap_or(revoked_unix_ms))
 }
 
-/// Marks every token `rastai.db` holds as revoked as revoked in the gate's cache too. Called after a revoke's write
-/// has committed, so a token a cascade swept is refused (`RRS-C1006`) from its next request on. Marking one already
-/// marked changes nothing, so this reads the small table whole rather than asking the write which ids it swept.
-pub(crate) fn mark_revoked_tokens_in_cache(server: &Server) -> Result<(), StoreError> {
-    let reader = open_index_reader(&server.store.index_readers)?;
-    for row in list_tokens(&reader)? {
+/// Puts a revoke whose write has committed into the gate's cache, so every token it swept is refused (`RRS-C1006`)
+/// from its next request on. `named_token_id` is the token `token.revoke` named; a plugin's sweep names none. The
+/// rest of the sweep is read back from `rastai.db`: marking a token twice changes nothing, so this reads the small
+/// table whole rather than asking the write which ids it swept.
+pub(crate) fn mark_revoked_tokens_in_cache(server: &Server, named_token_id: Option<&str>) {
+    let rows_read_back = read_token_rows(server);
+    if let Err(error) = &rows_read_back {
+        log_warn(
+            "the revoked tokens could not be read back, so every scoped token is refused until the daemon restarts",
+            &[("code", error.code())],
+        );
+    }
+    apply_committed_revoke(&server.auth, named_token_id, rows_read_back);
+}
+
+/// The order that keeps a committed revoke from leaving a usable token: the named token first, as it needs no read;
+/// then every row read back as revoked. When the read failed, the cache can't tell which tokens the sweep reached, so
+/// every scoped token is marked revoked: the gate fails closed until the next start loads the cache from `rastai.db`.
+fn apply_committed_revoke(
+    auth: &AuthState,
+    named_token_id: Option<&str>,
+    rows_read_back: Result<Vec<TokenRow>, StoreError>,
+) {
+    if let Some(token_id) = named_token_id {
+        revoke_scoped_token(auth, token_id);
+    }
+    let Ok(rows) = rows_read_back else {
+        revoke_all_scoped_tokens(auth);
+        return;
+    };
+    for row in rows {
         if row.revoked_unix_ms.is_some() {
-            revoke_scoped_token(&server.auth, &row.token_id);
+            revoke_scoped_token(auth, &row.token_id);
         }
     }
-    Ok(())
+}
+
+fn read_token_rows(server: &Server) -> Result<Vec<TokenRow>, StoreError> {
+    let reader = open_index_reader(&server.store.index_readers)?;
+    list_tokens(&reader)
 }
 
 /// A plugin, or the owner narrowed to its UI, makes a token only while the plugin is enabled. The narrowing already
@@ -486,6 +520,69 @@ mod tests {
                 "{}",
                 refusal[0].message
             );
+        }
+    }
+
+    fn cached_token(token_id: &str) -> ScopedToken {
+        ScopedToken {
+            token_id: token_id.to_string(),
+            token_hash: format!("blake3:{token_id}"),
+            scopes: vec![Scope::Read],
+            revoked: false,
+        }
+    }
+
+    fn stored_token(token_id: &str, revoked_unix_ms: Option<i64>) -> TokenRow {
+        TokenRow {
+            token_id: token_id.to_string(),
+            name: token_id.to_string(),
+            token_hash: format!("blake3:{token_id}"),
+            scopes: vec!["read".to_string()],
+            created_unix_ms: 1,
+            revoked_unix_ms,
+            created_by: "owner".to_string(),
+        }
+    }
+
+    /// The gate's cache with tok_named, its child tok_child and the unrelated tok_other, all live.
+    fn auth_with_three_tokens() -> AuthState {
+        let auth = crate::http::sessions::new_auth_state("blake3:owner".to_string(), "0123abcd");
+        for token_id in ["tok_named", "tok_child", "tok_other"] {
+            add_scoped_token(&auth, cached_token(token_id));
+        }
+        auth
+    }
+
+    fn revoked_in_cache(auth: &AuthState, token_id: &str) -> bool {
+        let hash = format!("blake3:{token_id}");
+        crate::http::sessions::find_scoped_token(auth, &hash).unwrap().revoked
+    }
+
+    #[test]
+    fn a_committed_revoke_marks_the_named_token_and_what_the_read_shows_revoked() {
+        let auth = auth_with_three_tokens();
+        // The write swept tok_child with tok_named. tok_named's row is left live in the read back, so only the
+        // step that needs no read can mark it.
+        let rows = vec![
+            stored_token("tok_named", None),
+            stored_token("tok_child", Some(5)),
+            stored_token("tok_other", None),
+        ];
+        apply_committed_revoke(&auth, Some("tok_named"), Ok(rows));
+        assert!(revoked_in_cache(&auth, "tok_named"));
+        assert!(revoked_in_cache(&auth, "tok_child"));
+        assert!(!revoked_in_cache(&auth, "tok_other"));
+    }
+
+    #[test]
+    fn a_committed_revoke_whose_read_back_fails_refuses_every_scoped_token() {
+        let auth = auth_with_three_tokens();
+        let read_failed = StoreError::DatabaseReadFailed {
+            reason: "disk I/O error".to_string(),
+        };
+        apply_committed_revoke(&auth, Some("tok_named"), Err(read_failed));
+        for token_id in ["tok_named", "tok_child", "tok_other"] {
+            assert!(revoked_in_cache(&auth, token_id), "{token_id}");
         }
     }
 
