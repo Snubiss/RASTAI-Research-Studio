@@ -766,6 +766,7 @@ dependencies = [
  "libc",
  "prost",
  "rastai-core",
+ "rastai-diag",
  "rastai-formats",
  "rastai-proto",
  "rusqlite",
