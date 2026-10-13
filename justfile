@@ -59,6 +59,9 @@ protoc_gen_tonic_version := "0.5.0"
 base_branch := env("RASTAI_BASE_REF", "origin/main")
 # The cpu environment for development, CI and the M1 embedded node (contracts 15.8; git-ignored).
 cpu_environment := justfile_directory() / ".dev/envs/cpu"
+# The CPU threads each test worker may use: torch reads OMP_NUM_THREADS, and the crash rows and the daemon-job tests run
+# several training workers at once, which oversubscribe the machine at the full thread count (issue #263).
+test_worker_threads := "2"
 # The cpu environment's interpreter. A virtual environment keeps it in Scripts\ on Windows and bin/ elsewhere; the
 # Windows CI job needs it for test-python-portable.
 cpu_python := if os() == "windows" { cpu_environment / "Scripts/python.exe" } else { cpu_environment / "bin/python" }
@@ -105,7 +108,8 @@ test-node-jobs: env-cpu
 # restart mid-run (plan M1-47). Like test-node-jobs, it needs the cpu environment's Python.
 # The daemon's #[ignore]d train job tests (crates/rastai-server/tests/train_jobs.rs).
 test-daemon-jobs: env-cpu
-    cargo test --locked -p rastai-server --test train_jobs -- --ignored
+    RASTAI_TEST_WORKER_THREADS={{test_worker_threads}} cargo test --locked -p rastai-server --test train_jobs \
+        -- --ignored
 
 # The kill -9 matrix of flows/platform.md 6.5 (plan M1-48): rastai-crash-tests' rows kill real daemon and worker
 # processes at named points (RASTAI_TEST_PAUSE_AT), restart and check them; they run the real worker in the cpu
@@ -117,8 +121,9 @@ test-daemon-jobs: env-cpu
 # kill -9 tests.
 test-crash: env-cpu
     cargo build --locked -p rastai-cli
-    cargo test --locked -p rastai-crash-tests -- --ignored --test-threads=1
-    cd tests/crash && "{{cpu_python}}" -m pytest
+    RASTAI_TEST_WORKER_THREADS={{test_worker_threads}} cargo test --locked -p rastai-crash-tests \
+        -- --ignored --test-threads=1
+    cd tests/crash && OMP_NUM_THREADS={{test_worker_threads}} "{{cpu_python}}" -m pytest
 
 # M1's exit criterion 3 (plan M1-49): one `rastai serve --headless` in a temporary RASTAI_HOME, and system.status,
 # train.start and job.get over Connect JSON on HTTP, as `rastai` verbs and through `rastai mcp`, checked against each

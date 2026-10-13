@@ -52,6 +52,10 @@ const CUDA_DEVICE_ORDER: &str = "PCI_BUS_ID";
 const ON: &str = "1";
 /// The variable that carries the job token to the worker (contracts 3.2).
 const JOB_TOKEN_VARIABLE: &str = "RASTAI_JOB_TOKEN";
+/// The test-only CPU thread cap, named in the test environment (`just test-crash`, `just test-daemon-jobs`).
+const TEST_WORKER_THREADS_VARIABLE: &str = "RASTAI_TEST_WORKER_THREADS";
+/// What torch reads for its CPU threads; the cap is handed to the worker under this name.
+const THREAD_COUNT_VARIABLE: &str = "OMP_NUM_THREADS";
 /// What a `{:?}` prints in place of the job token. The token lets whoever holds it act as the job's worker, and a
 /// struct printed into a log or a test failure must not hand it out, so every struct that holds it has a
 /// hand-written Debug that prints this instead.
@@ -159,6 +163,21 @@ pub fn node_variables() -> Vec<(String, String)> {
         .collect()
 }
 
+/// The CPU thread cap a test names for its workers, from the node's own environment. Several test workers on one
+/// machine would each start a thread per core, so the crash rows and the daemon-job tests cap them. Only a test build
+/// passes it on: a release node never does, so a shipped worker keeps torch's own default.
+fn worker_test_threads(node_variables: &[(String, String)]) -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    for (name, value) in node_variables {
+        if name == TEST_WORKER_THREADS_VARIABLE && !value.is_empty() {
+            return Some(value.clone());
+        }
+    }
+    None
+}
+
 /// The job's environment: the copied variables, then the job's own (layout 7.4's table).
 pub fn worker_variables(node_variables: &[(String, String)], inputs: &WorkerVariableInputs) -> WorkerVariables {
     let mut variables: Vec<(String, String)> = node_variables
@@ -184,6 +203,9 @@ pub fn worker_variables(node_variables: &[(String, String)], inputs: &WorkerVari
     // The kill -9 tests' pause point, in debug builds only (pause_points.rs): a worker point stops the worker.
     if let Some((name, point)) = worker_test_pause_variable(node_variables) {
         push_variable(&mut variables, &name, point);
+    }
+    if let Some(threads) = worker_test_threads(node_variables) {
+        push_variable(&mut variables, THREAD_COUNT_VARIABLE, threads);
     }
     let removed_gfx_override = node_variables.iter().any(|(name, _)| name == GFX_OVERRIDE_VARIABLE);
     WorkerVariables {
@@ -482,6 +504,18 @@ mod tests {
             value_of(&result, "RASTAI_TEST_PAUSE_AT"),
             Some("worker.event_log.mid_metrics_frame")
         );
+    }
+
+    // Several test workers train at once; the cap the test names must reach each worker as its thread count, and a
+    // worker started without a test environment gets none, so a shipped node is unchanged.
+    #[test]
+    fn the_test_thread_cap_reaches_the_worker_as_omp_num_threads() {
+        assert_eq!(value_of(&worker_variables(&node(), &inputs()), "OMP_NUM_THREADS"), None);
+        let mut capped = node();
+        capped.push(("RASTAI_TEST_WORKER_THREADS".to_string(), "2".to_string()));
+        let result = worker_variables(&capped, &inputs());
+        assert_eq!(value_of(&result, "OMP_NUM_THREADS"), Some("2"));
+        assert_eq!(value_of(&result, "RASTAI_TEST_WORKER_THREADS"), None);
     }
 
     // A token printed with {:?} would end up in a log or a test failure, where anyone reading it could act as the
