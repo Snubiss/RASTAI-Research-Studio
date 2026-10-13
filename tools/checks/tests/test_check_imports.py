@@ -85,6 +85,13 @@ const url = "http://localhost"; // a string that isn't an import
 EXECUTE_TEST = """import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 """
+FAKE_DAEMON = """import { create } from "@bufbuild/protobuf";
+import { createConnectRouter } from "@connectrpc/connect";
+import { createFetchHandler } from "@connectrpc/connect/protocol";
+"""
+PROTO_GOLDEN_TEST = """import { toBinary } from "@bufbuild/protobuf";
+import { expect, test } from "vitest";
+"""
 BOOT = """import { connectToDaemon } from "@rastai/client";
 import { EgressBadge } from "@rastai/ui/security";
 const lazy = () => import("./sections/home/Home.jsx");
@@ -103,6 +110,8 @@ PASSING_JAVASCRIPT = (
         "packages/client/src/connection.js": CONNECTION,
         "packages/client/src/execute.js": EXECUTE,
         "packages/client/src/execute.test.js": EXECUTE_TEST,
+        "packages/client/src/testing/fake-daemon.js": FAKE_DAEMON,
+        "packages/client/src/proto-golden.test.js": PROTO_GOLDEN_TEST,
         "packages/viz/src/flow/data-flow-view.js": 'import { createContext } from "@rastai/canvas";\n',
         "apps/web/src/app/boot.js": BOOT,
         "apps/web/src/sections/home/Home.jsx": HOME_SECTION,
@@ -139,6 +148,22 @@ FAILING_JAVASCRIPT = [
         "packages/client/src/execute.js",
         'import { Code } from "@connectrpc/connect";\n',
         "`@connectrpc/connect` is imported only in",
+    ),
+    # The client's other tests go through the fake daemon; only proto-golden.test.js re-encodes with protobuf-es.
+    (
+        "packages/client/src/execute.test.js",
+        'import { createRouterTransport } from "@connectrpc/connect";\n',
+        "`@connectrpc/connect` is imported only in",
+    ),
+    (
+        "packages/client/src/event-stream.test.js",
+        'import { create } from "@bufbuild/protobuf";\n',
+        "`@bufbuild/protobuf` is imported only in",
+    ),
+    (
+        "packages/client/src/testing/executor-contract.js",
+        'import { createConnectTransport } from "@connectrpc/connect-web";\n',
+        "`@connectrpc/connect-web` is imported only in",
     ),
     ("packages/client/src/login.js", 'import { readFileSync } from "node:fs";\n', "is for tests only"),
     ("packages/ui/src/components/Table.jsx", 'import sortBy from "lodash/sortBy";\n', "not a §27 library"),

@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The thin daemon client. For now only the generated typed command wrappers and the two JSDoc files they name (CommandExecutor, ExecuteOutcome); the connection, sign-in, execute and the event stream join in M1-50.",
+  "description": "The thin daemon client: transport, credential, sign-in, commands, the event stream with resume, blobs and the generated typed command wrappers. No React, no UI.",
   "exports": {
-    "./commands": "./src/generated/commands.js"
+    ".": "./src/index.js",
+    "./commands": "./src/generated/commands.js",
+    "./testing": "./src/testing/executor-contract.js"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-web": "2.2.0",
     "@rastai/formats": "workspace:*",
     "@rastai/proto": "workspace:*"
   }
