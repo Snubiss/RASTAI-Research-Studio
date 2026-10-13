@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use rastai_core::error::CoreError;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
-use rastai_node::error::NodeError;
+use rastai_node::error::{NodeError, node_error_diagnostic};
 use rastai_store::error::StoreError;
 use rastai_transport::error::TransportError;
 
@@ -110,6 +110,7 @@ pub fn server_error_diagnostic(error: &ServerError) -> Diagnostic {
         }
         ServerError::Store(store_error) => store_error_diagnostic(store_error),
         ServerError::Transport(transport_error) => transport_error_diagnostic(transport_error),
+        ServerError::Node(node_error) => node_error_diagnostic(node_error),
         ServerError::NoFreePort { .. } | ServerError::Core(CoreError::HomeNotFound) => diagnostic(error.code(), &[]),
     }
 }
@@ -305,6 +306,20 @@ mod tests {
         for error in [unusable, held, ServerError::OwnerTokenTooOpen { path, mode: 0o644 }] {
             assert!(!server_error_diagnostic(&error).message.contains('{'), "{error:?}");
         }
+    }
+
+    #[test]
+    fn a_node_startup_error_is_its_identity_diagnostic() {
+        let unusable_key = ServerError::from(NodeError::IdentityFileUnusable {
+            path: PathBuf::from("/home/user/.local/share/rastai/daemon.key"),
+            reason: "permission denied".to_string(),
+        });
+        let shown = server_error_diagnostic(&unusable_key);
+        assert_eq!(shown.code, "RRS-N0006");
+        assert_eq!(
+            shown.message,
+            "The identity file /home/user/.local/share/rastai/daemon.key can't be used: permission denied."
+        );
     }
 
     #[test]

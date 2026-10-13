@@ -2869,6 +2869,7 @@ crates/rastai-cli/
     arguments.rs              the parser table
     verbs.rs                  every CLI line in fixtures/command-golden/copy-as.json parses to its command id and arguments
     exit_codes.rs             each outcome kind maps to its exit code, against a fake daemon on a temp socket
+    follow_real_daemon.rs     a job that ended before its follower subscribed is read with the real daemon's job.get
     local_commands.rs         `rastai validate` gives the corpus codes; rebuild-index refuses while a daemon holds the lock
 ```
 

@@ -25,6 +25,9 @@ const ANY_FREE_PORT: &str = "0";
 const HOME_VARIABLE: &str = "RASTAI_HOME";
 /// A daemon gets this long to stop after `system.shutdown` before the guard kills it.
 const SHUTDOWN_WAIT_SECONDS: u64 = 20;
+/// The name a `rastai` process has in `/proc/<pid>/comm`. The daemon's children (the embedded node's `nvidia-smi`
+/// sampler, a job's worker) inherit `RASTAI_HOME` too, but they aren't daemons.
+const RASTAI_PROCESS_NAME: &str = "rastai";
 
 /// What one run of the binary gave.
 #[derive(Debug)]
@@ -161,11 +164,19 @@ pub fn daemon_processes(home: &Path) -> Vec<u32> {
         let names_home = environment
             .split(|byte| *byte == 0)
             .any(|pair| pair == wanted.as_bytes());
-        if names_home && process_id != std::process::id() {
+        if names_home && process_id != std::process::id() && is_rastai_process(&entry.path()) {
             found.push(process_id);
         }
     }
     found
+}
+
+/// Whether the process under `/proc/<pid>` runs the `rastai` binary.
+fn is_rastai_process(process_folder: &Path) -> bool {
+    let Ok(name) = fs::read_to_string(process_folder.join("comm")) else {
+        return false;
+    };
+    name.trim_end() == RASTAI_PROCESS_NAME
 }
 
 fn kill_process_group(process_id: u32) {
