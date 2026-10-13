@@ -1,9 +1,9 @@
 //! Keeping the daemon's job and run rows in step with a node (layout: rust-control-plane.md 8.1; flows/platform.md
 //! 2.3, 5.2 and 5.4; contracts 9.1 and 9.5).
 //!
-//! - **After a connect**, `reconcile_node` starts the tail of every open run on the node (each claimed before the
-//!   next step), then compares `ListJobs` with the `jobs` rows. A live job the node no longer knows ended while no
-//!   node watched and nothing recorded its end: it fails with `RRS-J3002`.
+//! - **After a connect**, `reconcile_node` lists the node's jobs (`ListJobs`), starts the open runs' tails (each
+//!   claimed before the next step), then compares the list with the `jobs` rows. A live job the node no longer knows
+//!   ended while no node watched and nothing recorded its end: it fails with `RRS-J3002`.
 //! - **Job states come from the node** (its `ListJobs` and heartbeats); they are in no log (contracts 7.3). Each
 //!   difference from a `jobs` row becomes one `job.state_changed` record in the daemon log, which indexes the row.
 //!   A row in a final state never moves again.
@@ -14,7 +14,10 @@
 //!   ends, and skips a run that still has one), only when the run's indexed state hasn't already ended, and only along
 //!   a move 9.5 allows. A job that failed with `RRS-J3006` gets nothing: the run belongs to the copy still running.
 //! - **One at a time.** Every comparison and record here happens under `Scheduler.job_state_lock`, so a heartbeat, a
-//!   launch, a cancel and a settle never record one move twice.
+//!   launch, a cancel and a settle never record one move twice. That lock is never held across a node call, so a
+//!   heartbeat never waits on one. A launch holds `Scheduler.launch_lock` instead, from its queue check to its
+//!   recorded answer (scheduler/launch.rs): the cancel of a queued job and a settle take it first, so a cancel never
+//!   lands while the node may be starting the job, and a run's end is never written while its tail is about to start.
 
 use std::sync::Arc;
 
@@ -32,9 +35,10 @@ use rastai_proto::node::v1::JobInfo;
 use rastai_store::error::StoreError;
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::runs::{JobFilter, JobRow, RunRow, get_run, list_jobs};
+use tokio::task::JoinHandle;
 
 use crate::events::daemon_events::record_daemon_event;
-use crate::indexing::run_tail::{open_run_ids, spawn_run_tail};
+use crate::indexing::run_tail::{spawn_run_tail, start_run_tails};
 use crate::nodes::node_links::{list_jobs_on_node, run_event_source};
 use crate::scheduler::queue::wake_scheduler;
 use crate::server_state::Server;
@@ -72,7 +76,8 @@ pub enum SnapshotScope {
     TheseJobs,
 }
 
-/// After a connect: tail every open run on the node, then take the node's job states (see the top).
+/// After a connect: lists the node's jobs, starts the open runs' tails, then compares (see the top). The tails start
+/// before the comparison, so a run whose job it ends is settled only once its tail has read the log to the end.
 pub async fn reconcile_node(server: &Arc<Server>, node_id: &str) {
     let listed = list_jobs_on_node(server, node_id).await;
     tail_open_runs(server, node_id);
@@ -159,7 +164,8 @@ pub async fn mark_running_jobs_lost(server: &Arc<Server>, node_id: &str) {
     record_changes(server, changes).await;
 }
 
-/// A queued job that can't be launched (its `run.json` is missing or damaged) fails with the reason.
+/// A queued job that can't be launched (its `run.json` is missing or damaged) fails with the reason. The launch
+/// calls it holding `Scheduler.launch_lock`. A job that left the queue meanwhile is left as it is.
 pub async fn fail_unlaunchable_job(server: &Arc<Server>, job: &JobRow, problem: Diagnostic) {
     log_warn(
         "a queued job can't be launched",
@@ -171,17 +177,24 @@ pub async fn fail_unlaunchable_job(server: &Arc<Server>, job: &JobRow, problem: 
     );
     let ended_runs = {
         let _held = server.scheduler.job_state_lock.lock().await;
-        let change = moved(job, JobState::Failed, Some(&problem));
-        record_changes(server, vec![(job.run_id.clone(), change)]).await
+        let Some(row) = read_job(server, &job.job_id) else {
+            return;
+        };
+        if row.state != job_state_name(JobState::Queued) {
+            return;
+        }
+        let change = moved(&row, JobState::Failed, Some(&problem));
+        record_changes(server, vec![(row.run_id.clone(), change)]).await
     };
     settle_runs_later(server, ended_runs);
 }
 
 /// `job.cancel` of a job that hasn't started: no process, so no signal (contracts 9.1, queued → cancelled), and the
 /// run, which no record reached, ends `cancelled` too. False when the job left the queue meanwhile; the caller then
-/// signals the node.
+/// signals the node. A launch in flight is waited for (see the top): the job is then started, and the caller signals.
 pub async fn cancel_queued_job(server: &Server, job_id: &str) -> bool {
     let ended_runs = {
+        let _launching = server.scheduler.launch_lock.lock().await;
         let _held = server.scheduler.job_state_lock.lock().await;
         let Some(row) = read_job(server, job_id) else {
             return false;
@@ -204,15 +217,9 @@ pub fn tail_then_settle(server: &Arc<Server>, node_id: &str, run_id: &str) {
     let Some(source) = run_event_source(server, node_id) else {
         return;
     };
-    let Some(tail) = spawn_run_tail(server, &source, run_id) else {
-        return;
-    };
-    let server = server.clone();
-    let run_id = run_id.to_string();
-    tokio::spawn(async move {
-        let _ = tail.await;
-        settle_run(&server, &run_id).await;
-    });
+    if let Some(tail) = spawn_run_tail(server, &source, run_id) {
+        settle_after_tail(server, run_id.to_string(), tail);
+    }
 }
 
 /// The daemon-written end of a run whose job ended without one (see the top). Safe to call at any time and twice:
@@ -221,6 +228,8 @@ pub async fn settle_run(server: &Server, run_id: &str) {
     if run_id.is_empty() || *server.shutdown.borrow() {
         return;
     }
+    // A launch in flight starts its run's tail before it lets go of this lock, so the check below then sees it.
+    let _launching = server.scheduler.launch_lock.lock().await;
     let _held = server.scheduler.job_state_lock.lock().await;
     if run_has_tail(server, run_id) {
         return;
@@ -272,18 +281,23 @@ pub fn daemon_written_run_end(current: RunState, job_state: JobState, error_code
 
 // ---- Helpers ----
 
+/// Tails every open run on the node that has no tail yet, and settles each run once its tail ends.
 fn tail_open_runs(server: &Arc<Server>, node_id: &str) {
-    match open_run_ids(server, node_id) {
-        Ok(run_ids) => {
-            for run_id in run_ids {
-                tail_then_settle(server, node_id, &run_id);
-            }
-        }
-        Err(error) => log_warn(
-            "the open runs can't be listed; no run is tailed",
-            &[("node_id", node_id), ("code", error.code())],
-        ),
+    let Some(source) = run_event_source(server, node_id) else {
+        return;
+    };
+    for (run_id, tail) in start_run_tails(server, &source) {
+        settle_after_tail(server, run_id, tail);
     }
+}
+
+/// Settles the run once its tail's task has ended, on a task of its own.
+fn settle_after_tail(server: &Arc<Server>, run_id: String, tail: JoinHandle<()>) {
+    let server = server.clone();
+    tokio::spawn(async move {
+        let _ = tail.await;
+        settle_run(&server, &run_id).await;
+    });
 }
 
 /// Settles each run on a task of its own, after the caller let go of the job lock.

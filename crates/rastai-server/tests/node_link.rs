@@ -2,7 +2,8 @@
 //! 9.5), without the training environment: the daemon starts the node and reaches it over node.sock with the
 //! handshake, lists it, and takes its heartbeats only with the session token; `job.*` and `node.*` answer their
 //! codes; `job.cancel` needs the scope of the command that started the job; a queued job is cancelled without a
-//! signal; and a job its node refuses ends its run `failed`, written by the daemon.
+//! signal; a job its node refuses ends its run `failed`, written by the daemon; a restart fails a running job the
+//! node no longer lists (`ListJobs`); and a heartbeat's effects survive the node giving up on the call.
 //!
 //! The real TextCNN train job through all of this is `tests/train_jobs.rs`, which needs the cpu environment.
 
@@ -18,8 +19,9 @@ use rastai_core::principal::owner_principal;
 use rastai_core::scopes::Scope;
 use rastai_core::time::now_unix_ms;
 use rastai_node::handshake::request_with_session_token;
-use rastai_proto::node::v1::HeartbeatRequest;
+use rastai_proto::common::v1::JobState;
 use rastai_proto::node::v1::node_hub_service_client::NodeHubServiceClient;
+use rastai_proto::node::v1::{HeartbeatRequest, JobInfo};
 use rastai_server::daemon::RunningDaemon;
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::runs::{JobRow, RunRow, get_job, get_run};
@@ -42,6 +44,12 @@ const ELSEWHERE_NODE_ID: &str = "node_elsewhere";
 /// `nodes.heartbeat_seconds` (5).
 const HEARTBEAT_WAIT: Duration = Duration::from_secs(20);
 const WAIT_STEP: Duration = Duration::from_millis(50);
+/// How long a test waits for a job's or a run's end that the daemon records on its own.
+const END_WAIT: Duration = Duration::from_secs(20);
+/// Shorter than any wait in the hub: a call given up after this was still being handled.
+const GIVE_UP_AFTER: Duration = Duration::from_millis(300);
+/// Well under the node's hub client timeout (5 s): a heartbeat must be answered within it.
+const PROMPT_ANSWER: Duration = Duration::from_secs(2);
 
 async fn run(
     running: &RunningDaemon,
@@ -110,6 +118,43 @@ async fn insert_run_and_job(running: &RunningDaemon, node_id: &str, job_state: &
     write_index(&running.server.store.index, write).await.unwrap();
 }
 
+/// The embedded node's current session token, as its own heartbeats carry it.
+fn session_token(running: &RunningDaemon) -> String {
+    let links = running.server.nodes.links.lock().unwrap();
+    links[0].session_token.clone()
+}
+
+/// A hub client on node-hub.sock, and a heartbeat from the embedded node with the session token and these jobs.
+async fn hub_and_heartbeat(
+    running: &RunningDaemon,
+    paths: &rastai_core::paths::DataPaths,
+    jobs: Vec<JobInfo>,
+) -> (
+    NodeHubServiceClient<tonic::transport::Channel>,
+    tonic::Request<HeartbeatRequest>,
+) {
+    let channel = connect_grpc_channel(&node_hub_socket_path(paths)).await.unwrap();
+    let beat = HeartbeatRequest {
+        node_id: embedded_node_id(running),
+        jobs,
+        ..HeartbeatRequest::default()
+    };
+    let request = request_with_session_token(beat, &session_token(running)).unwrap();
+    (NodeHubServiceClient::new(channel), request)
+}
+
+/// Waits until the job and its run both reach `state`.
+async fn wait_for_job_and_run(running: &RunningDaemon, state: &'static str) {
+    let server = running.server.clone();
+    wait_until(END_WAIT, "the job's and the run's end", move || {
+        let reader = open_index_reader(&server.store.index_readers).unwrap();
+        let job_ended = get_job(&reader, JOB_ID).unwrap().is_some_and(|row| row.state == state);
+        let run_ended = get_run(&reader, RUN_ID).unwrap().is_some_and(|row| row.state == state);
+        job_ended && run_ended
+    })
+    .await;
+}
+
 // flows/platform.md 2.1: the daemon starts its node and reaches it over node.sock with the signed handshake; the
 // node is listed, connected, and its heartbeats bring telemetry.
 #[tokio::test(flavor = "multi_thread")]
@@ -164,10 +209,7 @@ async fn the_hub_refuses_a_heartbeat_without_the_session_token() {
     let refused = hub.heartbeat(forged).await.unwrap_err();
     assert_eq!(refused.code(), tonic::Code::Unauthenticated);
 
-    let token = {
-        let links = running.server.nodes.links.lock().unwrap();
-        links[0].session_token.clone()
-    };
+    let token = session_token(&running);
     assert!(!token.is_empty());
     let accepted = request_with_session_token(beat, &token).unwrap();
     hub.heartbeat(accepted).await.unwrap();
@@ -284,6 +326,71 @@ async fn a_job_the_node_refuses_fails_and_the_daemon_ends_its_run() {
     let got = ok_result(&run(&running, "job.get", json!({"job_id": job_id})).await);
     assert_eq!(got["job"]["state"], "failed");
     assert_eq!(got["job"]["kind"], "train");
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+// flows/platform.md 2.3 and contracts 9.5: a job the daemon has as running, which its node no longer knows, ended
+// while no node watched. The reconciliation after the restart's connect compares ListJobs with the jobs rows: the
+// job fails with RRS-J3002, and the daemon writes its run's end once the run's tail has read the (empty) log. The
+// node's heartbeats name only the jobs it has, so only ListJobs can find this one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_fails_a_running_job_the_node_no_longer_lists() {
+    let paths = test_paths("nl-vanished");
+    let running = start_test_daemon(&paths).await;
+    let node_id = embedded_node_id(&running);
+    insert_run_and_job(&running, &node_id, "running").await;
+    stop_test_daemon(running).await;
+
+    let restarted = start_test_daemon(&paths).await;
+    wait_for_job_and_run(&restarted, "failed").await;
+    let job = job_row(&restarted, JOB_ID).unwrap();
+    assert_eq!(job.error_code, "RRS-J3002");
+    stop_test_daemon(restarted).await;
+    remove_test_folder(&paths);
+}
+
+// The node's hub client gives up on a call after 5 s and the server then drops the call's handler. A heartbeat that
+// reported a job's end must still record it and settle the job's run, however long it waited for the job lock.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_heartbeat_the_node_gave_up_on_still_ends_the_job_and_its_run() {
+    let paths = test_paths("nl-gave-up");
+    let running = start_test_daemon(&paths).await;
+    let node_id = embedded_node_id(&running);
+    insert_run_and_job(&running, &node_id, "running").await;
+    let failed = JobInfo {
+        job_id: JOB_ID.to_string(),
+        state: JobState::Failed as i32,
+        exit_code: Some(1),
+        ..JobInfo::default()
+    };
+    let (mut hub, beat) = hub_and_heartbeat(&running, &paths, vec![failed]).await;
+
+    // The job lock is busy, so the beat waits for it; the caller gives up meanwhile.
+    let held = running.server.scheduler.job_state_lock.lock().await;
+    let answered = tokio::time::timeout(GIVE_UP_AFTER, hub.heartbeat(beat)).await;
+    assert!(answered.is_err(), "the beat was answered while the job lock was held");
+    tokio::time::sleep(GIVE_UP_AFTER).await;
+    drop(held);
+
+    wait_for_job_and_run(&running, "failed").await;
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+// A launch holds the launch lock across StartJob, which may take up to the node call timeout. A heartbeat never
+// waits for it, so it is answered long before the node's hub client gives up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_heartbeat_never_waits_for_a_launch_in_flight() {
+    let paths = test_paths("nl-launching");
+    let running = start_test_daemon(&paths).await;
+    let (mut hub, beat) = hub_and_heartbeat(&running, &paths, Vec::new()).await;
+
+    let launching = running.server.scheduler.launch_lock.lock().await;
+    let answered = tokio::time::timeout(PROMPT_ANSWER, hub.heartbeat(beat)).await;
+    assert!(answered.is_ok(), "the beat waited for the launch");
+    answered.unwrap().unwrap();
+    drop(launching);
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }

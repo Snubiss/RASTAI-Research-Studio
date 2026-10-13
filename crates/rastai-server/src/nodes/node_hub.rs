@@ -9,7 +9,10 @@
 //!   `HANDSHAKE_SETTLE_MS` for the session before it is judged.
 //! - **`Heartbeat`** notes the beat (the link's watch counts missed ones, node_links.rs), publishes the telemetry as
 //!   the ephemeral `node.heartbeat`, and turns the node's job list into `job.state_changed` records (reconcile.rs):
-//!   the node's job states are in no log, so heartbeats are how the daemon learns them (contracts 7.3).
+//!   the node's job states are in no log, so heartbeats are how the daemon learns them (contracts 7.3). The effects
+//!   run on a task of their own: the node's hub client gives up on a call after a few seconds, and the server then
+//!   drops the call's handler, which must never stop a beat halfway (a job's end recorded but its run never
+//!   settled). The answer still waits for them, so a beat that was answered has been applied.
 //! - **`ExecuteCommand`** answers `RRS-P1004` in M1: a call names its plugin only once plugin modules exist (M4), and
 //!   the daemon runs no command without a principal.
 //!
@@ -90,7 +93,11 @@ impl NodeHubService for NodeHubHandler {
         if !session_is_current(&server, &beat.node_id, session_token.as_deref()).await {
             return Err(token_refused(HEARTBEAT_CALL));
         }
-        apply_heartbeat(&server, beat).await;
+        let node_id = beat.node_id.clone();
+        let effects = tokio::spawn(async move { apply_heartbeat(&server, beat).await });
+        if effects.await.is_err() {
+            log_warn("a heartbeat's effects stopped halfway", &[("node_id", &node_id)]);
+        }
         Ok(Response::new(HeartbeatResponse {}))
     }
 

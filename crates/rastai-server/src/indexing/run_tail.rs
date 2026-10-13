@@ -149,43 +149,37 @@ impl Drop for TailClaim {
     }
 }
 
-/// Starts a tail for every open run on `node` that has none yet (after a connect or a reconnect) and returns the
-/// new tasks.
-pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<JoinHandle<()>> {
+/// Starts a tail for every open run on `node` that has none yet (after a connect or a reconnect) and returns each
+/// new tail's run id and task. This is the one place that tails a node's open runs; the node links settle each
+/// run once its task ends (nodes/reconcile.rs).
+pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<(String, JoinHandle<()>)> {
     let run_ids = match open_run_ids(server, node.node_id()) {
         Ok(run_ids) => run_ids,
         Err(error) => {
             log_warn(
                 "the open runs can't be listed; no run is tailed",
-                &[("code", error.code())],
+                &[("node_id", node.node_id()), ("code", error.code())],
             );
             return Vec::new();
         }
     };
-    let mut tasks = Vec::new();
+    let mut tails = Vec::new();
     for run_id in run_ids {
         if let Some(task) = spawn_run_tail(server, node, &run_id) {
-            tasks.push(task);
+            tails.push((run_id, task));
         }
     }
-    tasks
+    tails
 }
 
 /// Starts one run's tail on a task of its own and returns the task, or None when the run already has a tail. The
 /// run is claimed before this returns, so a call right after it already sees the run as tailed (the node links
-/// settle a run's end only once its tail is over, nodes/reconcile.rs).
+/// settle a run's end only once its tail is over, nodes/reconcile.rs). The tail runs until the node ends the run's
+/// stream, its log is found damaged, or the daemon stops; a broken stream is watched again after a pause that grows
+/// while nothing gets indexed.
 pub fn spawn_run_tail(server: &Arc<Server>, node: &Arc<dyn RunEventSource>, run_id: &str) -> Option<JoinHandle<()>> {
     let claim = claim_run(server, run_id)?;
     Some(tokio::spawn(tail_claimed_run(claim, node.clone())))
-}
-
-/// Tails one run until the node ends its stream, its log is found damaged, or the daemon stops. A broken stream is
-/// watched again after a pause that grows while nothing gets indexed. Returns at once if the run already has a tail.
-pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id: String) {
-    let Some(claim) = claim_run(&server, &run_id) else {
-        return;
-    };
-    tail_claimed_run(claim, node).await;
 }
 
 /// The run's claim, or None when another tail holds it.

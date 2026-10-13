@@ -72,14 +72,12 @@ pub async fn dispatch(context: &CommandContext<'_>, arguments_json: &str) -> Res
         "token.list" => token::list(context, typed_arguments(command_id, arguments_json)?).await,
         "token.revoke" => token::revoke(context, typed_arguments(command_id, arguments_json)?).await,
         "plugin.list" => plugin::list(context, typed_arguments(command_id, arguments_json)?).await,
-        "job.list" | "job.get" | "job.cancel" | "train.start" | "node.list" | "node.status" => {
-            dispatch_jobs_and_nodes(context, arguments_json).await
-        }
-        _ => forward_to_plugin_host(context),
+        _ => dispatch_jobs_and_nodes(context, arguments_json).await,
     }
 }
 
-/// The job, training and node commands: their own match, so each match stays short enough to read.
+/// The rest of `dispatch`: the job, training and node commands, then the plugin host. Two matches in a row, each id
+/// in one of them, because one match of every arm is past clippy's cognitive-complexity limit (ADR-0023).
 async fn dispatch_jobs_and_nodes(
     context: &CommandContext<'_>,
     arguments_json: &str,
@@ -94,14 +92,6 @@ async fn dispatch_jobs_and_nodes(
         "node.status" => node::status(context, typed_arguments(command_id, arguments_json)?).await,
         _ => forward_to_plugin_host(context),
     }
-}
-
-/// The honest L0 stub: the area's "not available yet" code. Every M1 command has its handler now; the next
-/// milestone's contract task registers its commands as stubs that answer through this again (plan 3.2).
-#[allow(dead_code)]
-pub(crate) fn not_available_yet(command_id: &str) -> Result<CommandOutput, Vec<Diagnostic>> {
-    let code = not_available_code(command_id);
-    Err(vec![diagnostic(code, &[("command_id", command_id)])])
 }
 
 /// The "not available yet" code of a command's area (catalog/README.md).

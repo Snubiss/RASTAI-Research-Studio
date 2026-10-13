@@ -102,10 +102,17 @@ pub fn read_run_job_spec(paths: &DataPaths, run_id: &str) -> Result<JobSpec, Dia
     job_spec_from_json(&spec_json).map_err(|reason| invalid_run_record(&reason))
 }
 
-/// Starts one queued job on its node and begins tailing its run. See the top for what each failure does. The job
-/// lock is held from the queue check to the recorded answer, so a `job.cancel` of the queued job either comes first
-/// (and the job is never started) or finds it started (and signals the node).
+/// Starts one queued job on its node and begins tailing its run. See the top for what each failure does.
+///
+/// `Scheduler.launch_lock` is held from the queue check to the recorded answer, so a `job.cancel` of the queued job
+/// either comes first (and the job is never started) or finds it started (and signals the node). The job lock is
+/// taken only to check and to record, never across `StartJob`, which may take up to the node call timeout: a
+/// heartbeat waits for the job lock, and the node's hub client gives up long before that.
 pub async fn launch_job(server: &Arc<Server>, job: &JobRow) {
+    let _launching = server.scheduler.launch_lock.lock().await;
+    if !is_still_queued(server, &job.job_id).await {
+        return;
+    }
     let spec = match read_run_job_spec(&server.paths, &job.run_id) {
         Ok(spec) if spec.job_id == job.job_id => spec,
         Ok(_) => {
@@ -118,39 +125,50 @@ pub async fn launch_job(server: &Arc<Server>, job: &JobRow) {
             return;
         }
     };
-    let ended_runs = {
-        let _held = server.scheduler.job_state_lock.lock().await;
-        if !is_still_queued(server, &job.job_id) {
+    let info = match start_job_on_node(server, &job.node_id, spec).await {
+        Ok(info) => info,
+        Err(problem) => {
+            log_warn(
+                "a queued job couldn't reach its node; it stays queued",
+                &[
+                    ("job_id", &job.job_id),
+                    ("code", &problem.code),
+                    ("message", &problem.message),
+                ],
+            );
             return;
         }
-        match start_job_on_node(server, &job.node_id, spec).await {
-            Ok(info) => record_start(server, job, info).await,
-            Err(problem) => {
-                log_warn(
-                    "a queued job couldn't reach its node; it stays queued",
-                    &[
-                        ("job_id", &job.job_id),
-                        ("code", &problem.code),
-                        ("message", &problem.message),
-                    ],
-                );
-                return;
-            }
-        }
+    };
+    let ended_runs = {
+        let _held = server.scheduler.job_state_lock.lock().await;
+        record_start(server, job, info).await
     };
     settle_runs_later(server, ended_runs);
 }
 
 /// The tail starts before the job's state is recorded, so a settle the new state asks for waits for the tail to
-/// read the log to its end (nodes/reconcile.rs). Returns the run when the start already ended the job.
+/// read the log to its end (nodes/reconcile.rs). Returns the run when the start already ended the job. The caller
+/// holds the job lock.
+///
+/// A heartbeat that arrived during `StartJob` may have recorded the job's state already; what it brought is at
+/// least as new as this answer, so the answer is then not recorded, which keeps a job from moving back.
 async fn record_start(server: &Arc<Server>, job: &JobRow, info: JobInfo) -> Vec<String> {
     if !is_terminal_job_state(info.state()) {
         tail_then_settle(server, &job.node_id, &job.run_id);
     }
+    if !job_row_is_queued(server, &job.job_id) {
+        return Vec::new();
+    }
     record_job_changes(server, &job.node_id, &[info], SnapshotScope::TheseJobs).await
 }
 
-fn is_still_queued(server: &Server, job_id: &str) -> bool {
+/// Whether the job is still queued, read under the job lock.
+async fn is_still_queued(server: &Server, job_id: &str) -> bool {
+    let _held = server.scheduler.job_state_lock.lock().await;
+    job_row_is_queued(server, job_id)
+}
+
+fn job_row_is_queued(server: &Server, job_id: &str) -> bool {
     let queued = job_state_name(JobState::Queued);
     read_job(server, job_id).is_some_and(|row| row.state == queued)
 }

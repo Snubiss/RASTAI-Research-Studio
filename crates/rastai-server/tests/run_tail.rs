@@ -24,7 +24,7 @@ use rastai_proto::events::v1::{
 };
 use rastai_server::daemon::RunningDaemon;
 use rastai_server::events::bus::subscribe;
-use rastai_server::indexing::run_tail::{RunEventSource, start_run_tails, tail_run};
+use rastai_server::indexing::run_tail::{RunEventSource, spawn_run_tail, start_run_tails};
 use rastai_store::event_log::reader::{FrameRead, open_event_log, read_next_frame};
 use rastai_store::event_log::writer::{SyncPolicy, append_event, create_event_log, open_event_log_for_append};
 use rastai_store::index::journal::{JournalStartedRow, get_journal};
@@ -216,9 +216,11 @@ async fn add_run(running: &RunningDaemon, node_id: &str) {
         .unwrap();
 }
 
+/// Tails the run until its tail ends.
 async fn tail(running: &RunningDaemon, node: &Arc<FakeNode>) {
     let source: Arc<dyn RunEventSource> = node.clone();
-    tail_run(running.server.clone(), source, RUN_ID.to_string()).await;
+    let task = spawn_run_tail(&running.server, &source, RUN_ID).unwrap();
+    task.await.unwrap();
 }
 
 fn run_row(running: &RunningDaemon) -> RunRow {
@@ -347,9 +349,10 @@ async fn a_restart_re_indexes_nothing_twice() {
     // Then the rest of the run arrives once, through start_run_tails, which tails the open run only.
     let rest = Arc::new(fake_node(EMBEDDED_NODE_ID, false, whole_run()));
     let source: Arc<dyn RunEventSource> = rest.clone();
-    let tasks = start_run_tails(&restarted.server, &source);
-    assert_eq!(tasks.len(), 1);
-    for task in tasks {
+    let tails = start_run_tails(&restarted.server, &source);
+    assert_eq!(tails.len(), 1);
+    assert_eq!(tails[0].0, RUN_ID);
+    for (_run_id, task) in tails {
         task.await.unwrap();
     }
     assert_eq!(*rest.watches.lock().unwrap(), [4]);
@@ -473,21 +476,21 @@ async fn a_reconnect_never_starts_a_second_tail_of_a_run() {
     assert_eq!(first.len(), 1);
     // The node link reconnects and calls start_run_tails again while the first tail still watches: no second tail.
     assert!(start_run_tails(&running.server, &source).is_empty());
-    tail_run(running.server.clone(), source.clone(), RUN_ID.to_string()).await;
+    assert!(spawn_run_tail(&running.server, &source, RUN_ID).is_none());
     wait_for_ack(&running, 3).await;
     assert_eq!(*node.watches.lock().unwrap(), [0]);
     assert_eq!(record_sequences(&published(&mut live), &whole_run()), [1, 2, 3]);
 
     // The node ends the stream; the tail ends and frees the run, so the next connect tails it again.
     node.open_streams.lock().unwrap().clear();
-    for task in first {
+    for (_run_id, task) in first {
         task.await.unwrap();
     }
     let again = start_run_tails(&running.server, &source);
     assert_eq!(again.len(), 1);
     wait_for_watches(&node, 2).await;
     node.open_streams.lock().unwrap().clear();
-    for task in again {
+    for (_run_id, task) in again {
         task.await.unwrap();
     }
     assert_eq!(*node.watches.lock().unwrap(), [0, 3]);

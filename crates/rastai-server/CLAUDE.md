@@ -11,8 +11,8 @@ The daemon, and the composition root: the only crate that wires the others toget
   imports prost. Command handlers take `(&CommandContext, Args)` and return `Result<CommandOutput, Vec<Diagnostic>>`.
 - **Every caller ends in `execute_command`** (`commands/execute.rs`, flows/platform.md 3.2): scope before arguments,
   arguments through `check_arguments`, then the journal. A new core command adds one arm to `commands/dispatch.rs`
-  (`tests/dispatch_complete.rs` fails until it does); until its handler exists the arm is `not_available_yet`, its
-  area's code. A handler with side effects makes none on a dry run.
+  (`tests/dispatch_complete.rs` fails until it does); until its handler exists the arm answers its area's
+  `not_available_code` (every M1 command has its handler, so no arm does now). A handler with side effects makes none on a dry run.
 - **The journal never holds a secret.** `secret` and `content` fields are redacted in `arguments_json` and
   `result_json` alike (`commands/journal.rs`); what can't be judged is redacted whole. An idempotent replay returns
   the stored, redacted result.
@@ -48,8 +48,9 @@ The daemon, and the composition root: the only crate that wires the others toget
   the session token, and the hub refuses a call without it (`RRS-N0009`). The embedded node is reached over node.sock
   with the same handshake a remote node gets; it runs on its own thread and runtime (`daemon.rs`).
 - **Job states come from the node; one move is recorded once.** Heartbeats and `ListJobs` become `job.state_changed`
-  records under `Scheduler.job_state_lock` (`nodes/reconcile.rs`), and the launch holds the same lock from its queue
-  check to the recorded answer. A run's end is written by the daemon only for a job that ended without one, only
+  records under `Scheduler.job_state_lock` (`nodes/reconcile.rs`), which is never held across a node call. The launch
+  holds `Scheduler.launch_lock` from its queue check to the recorded answer, and a queued job's cancel and a run's
+  settle take it first. A run's end is written by the daemon only for a job that ended without one, only
   after the run's tail is over, and only along a contracts 9.5 move (`settle_run`, `daemon_written_run_end`).
 - **Queued jobs are rows.** `submit_job` writes `run.json` (with the `JobSpec`), the `runs` row and the `jobs` row
   before it answers; the launch reads the spec back from `run.json`, so a restart loses no queued job.

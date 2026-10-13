@@ -2301,6 +2301,7 @@ crates/rastai-server/
     scheduler/
       queue.rs                submit_job (run.json, the runs and jobs rows, queued); run_scheduler: first in, first out
                               per node, woken on a submit, a connect and a job's end; Scheduler.job_state_lock
+                              and Scheduler.launch_lock
       placement.rs            pick the node and GPUs from compute settings and the latest telemetry (M1: the node
                               compute.default_node names, `local` = the embedded node; the CPU)
       launch.rs               write run.json with the JobSpec at submit; launch: read it back, NodeService.StartJob,
@@ -2314,8 +2315,9 @@ crates/rastai-server/
                               NodeConnection, the node's RunEventSource
       node_hub.rs             NodeHubService server: Heartbeat, ExecuteCommand (M1: RRS-P1004), GatewayGenerate,
                               GetSecret; refuses a call without the session token (RRS-N0009)
-      reconcile.rs            after a connect: the open runs' tails, then ListJobs against the jobs table; heartbeats'
-                              job states as job.state_changed; the run end the daemon writes (contracts 9.5)
+      reconcile.rs            after a connect: ListJobs, the open runs' tails, then the list against the jobs
+                              table; heartbeats' job states as job.state_changed; the run end the daemon writes
+                              (contracts 9.5)
       pairing.rs              node.pair and node.unpair over SSH (rastai-transport)
     plugin_host/
       discovery.rs            find preinstalled, installed and dev plugins; read their manifests
@@ -2508,20 +2510,24 @@ pub trait RunEventSource: Send + Sync {
     fn is_remote(&self) -> bool;                                                 // remote runs get a daemon mirror
     fn watch_run_events(&self, run_id: &str, after_sequence: u64) -> mpsc::Receiver<Result<EventRecord, Diagnostic>>;
 }
-pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id: String)   // one task per open run;
-                                                                                 // returns at once if the run has one
+pub fn spawn_run_tail(server: &Arc<Server>, node: &Arc<dyn RunEventSource>, run_id: &str) -> Option<JoinHandle<()>>
+                                    // one task per open run, claimed before it returns; None if the run has one
 // A record with sequence 0 is the node's report, never a log record (contracts 4.4, node layout 7.5): it is the stream's
 // last, is neither mirrored, indexed nor acknowledged, and marks the run's index incomplete (RRS-S2002, RRS-S2003, RRS-S0006).
-pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<JoinHandle<()>>   // after (re)connect,
-                                    // for every open run on that node without a live tail (Server.tailed_run_ids)
+pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<(String, JoinHandle<()>)>
+                                    // after (re)connect, for every open run on that node without a live tail
+                                    // (Server.tailed_run_ids): each run id and its task; reconcile_node settles each
+                                    // run when its task ends
 
 // scheduler/queue.rs: the job is the generated JobSpec (contracts ยง2.4 rule 3); no second job struct. With `run`, the
 // job starts a new run: its run.json (with the JobSpec) and runs row (created) are written before the jobs row (queued).
 pub async fn submit_job(server: &Server, spec: JobSpec, node_id: &str, run: Option<RunStart>) -> Result<String, Vec<Diagnostic>>
                                                                                  // fills spec.job_id and returns it
 pub async fn run_scheduler(server: Arc<Server>)                                  // wakes on submit, connect and job end
-// scheduler/launch.rs: the job lock is held from the queue check to the recorded answer, so job.cancel of a queued
-// job comes first (never started) or finds it started (signals the node)
+// scheduler/launch.rs: Scheduler.launch_lock is held from the queue check to the recorded answer, StartJob included,
+// so job.cancel of a queued job comes first (never started) or finds it started (signals the node). The job lock
+// (Scheduler.job_state_lock) is taken only to check and to record, never across a node call, so heartbeats never
+// wait on StartJob. Lock order: launch_lock, then job_state_lock.
 pub struct RunStart { pub project_id: String, pub kind: RunKind, pub recipe: String, pub seed: Option<u64> }
 pub async fn launch_job(server: &Arc<Server>, job: &JobRow)                      // read run.json, StartJob, tail the run
 
@@ -2549,7 +2555,9 @@ pub enum NodeTransport { Embedded { socket_path: PathBuf } }                    
 pub struct NodeLink { pub node_id: String, pub state: NodeState, pub transport: NodeTransport,
                       pub protocol_version: u32, pub capabilities: Vec<String>, pub session_token: String,
                       pub last_heartbeat_unix_ms: i64, pub telemetry: Option<NodeTelemetry>,
-                      pub retry_at_unix_ms: i64, pub retry_backoff_seconds: u64, pub connection: Arc<NodeConnection> }
+                      pub retry_at_unix_ms: i64, pub retry_backoff_seconds: u64,
+                      pub was_unreachable: bool,                        // until the next connect logs RRS-N2003
+                      pub connection: Arc<NodeConnection> }
 pub async fn connect_node(server: &Arc<Server>, node_id: &str) -> Result<(), Diagnostic>   // dial, handshake, reconcile
 pub async fn start_job_on_node(server: &Server, node_id: &str, spec: JobSpec) -> Result<JobInfo, Diagnostic>
 pub async fn signal_job_on_node(server: &Server, node_id: &str, job_id: &str, signal: JobSignal) -> Result<(), Diagnostic>
@@ -2558,7 +2566,7 @@ pub async fn watch_node_links(server: Arc<Server>)        // missed heartbeats โ
 pub fn serve_node_hub(server: &Arc<Server>) -> Result<JoinHandle<()>, ServerError>   // tonic server on node-hub.sock,
                                                                                  // holding the server weakly
 // nodes/reconcile.rs
-pub async fn reconcile_node(server: &Arc<Server>, node_id: &str)                 // tails first, then ListJobs
+pub async fn reconcile_node(server: &Arc<Server>, node_id: &str)   // ListJobs, start_run_tails, then compare
 pub async fn apply_job_snapshot(server: &Arc<Server>, node_id: &str, jobs: &[JobInfo], scope: SnapshotScope)
 pub async fn settle_run(server: &Server, run_id: &str)   // the daemon-written end, once the run's tail is over
 pub fn daemon_written_run_end(current: RunState, job_state: JobState, error_code: &str) -> Option<RunState>   // pure
@@ -3323,7 +3331,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  A["tail_run starts for an open run"] --> B["read runs.acked_sequence through open_index_reader"]
+  A["spawn_run_tail starts a tail for an open run"] --> B["read runs.acked_sequence through open_index_reader"]
   B --> C["NodeService.WatchRunEvents after the ack"]
   C --> D["Collect up to 256 records or 100 ms"]
   D --> R{"Run on a remote node?"}
@@ -3347,7 +3355,7 @@ flowchart TD
 ```
 
 - **The ack is the cursor.** `runs.acked_sequence` is committed in the same transaction as the rows it covers, so a crash anywhere re-sends records that the upserts absorb (6.4 lists the keys).
-- **One tail per run.** A tail holds its run in `Server.tailed_run_ids` from its start to its end. The tail re-watches a broken stream itself, and `start_run_tails`, which the node link calls after every connect and reconnect, skips a run whose tail still runs, so a run never has two tails indexing it, publishing it twice or writing its mirror from two writers.
+- **One tail per run.** A tail holds its run in `Server.tailed_run_ids` from its start to its end. The tail re-watches a broken stream itself, and `start_run_tails`, which `reconcile_node` calls after every connect and reconnect (it settles each run whose tail ends, 8.3), skips a run whose tail still runs, so a run never has two tails indexing it, publishing it twice or writing its mirror from two writers.
 - **Vault rows before the ack.** `gateway.request_logged` records go to `vault.db` `gateway_log` (with `run_id`, `finish_reason`, `stop_kind`), which the index writer can't reach. The tail writes them with `vault_writes_for_records` and waits for that commit before `ApplyRunEvents` commits the ack. A crash between the two re-sends the batch, and the upsert by `request_id` absorbs it.
 - **Handler calls with the ack.** The batch's `HandlerCall` rows commit in the same `ApplyRunEvents` transaction, then go out after the commit (12.5), so an indexed `checkpoint.saved` always reaches the Evaluation plugin's handler, even across a crash.
 - **Run logs are untrusted.** `ApplyRunEvents` refuses a record the run's log may not carry with `RRS-S2004` (6.4, contracts 7.1) and commits nothing of its batch. The tail then sends the records before it again, stops tailing that log and reports `RRS-S2004`; after a restart it stops at the same record. Only that run's indexing stops.
