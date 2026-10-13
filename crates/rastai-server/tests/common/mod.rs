@@ -81,9 +81,9 @@ pub async fn start_daemon_in_test(paths: &DataPaths, options: &DaemonOptions) ->
     }
 }
 
-/// The start of a test that expects a refusal (`RRS-C10xx`) on folders an earlier start of the same test released.
-/// It waits out the lock the same way `start_daemon_in_test` does, so the refusal it checks is the one the start
-/// reached, not the lock's.
+/// The start of a test that expects a refusal (`RRS-C10xx`), on folders an earlier start of the same test released or
+/// on fresh ones. It waits out the lock the same way `start_daemon_in_test` does, so the refusal it checks is the one
+/// the start reached, not the lock's.
 pub async fn refused_start_in_test(paths: &DataPaths, options: &DaemonOptions) -> ServerError {
     match start_once_the_lock_is_free(paths, options).await {
         Ok(running) => {
