@@ -97,10 +97,11 @@ pub(crate) fn open_database_for_writing(
 }
 
 /// Opens an existing database whose health is in doubt, to read what it still holds. Only the offline rebuild does
-/// this, on the old `rastai.db` it is about to set aside (rebuild.rs), so a file that fails `quick_check` can still
-/// give up its readable rows. A file migrated by a newer app is refused with `RRS-S0002` and left as it was; an older
-/// one is migrated first, as every open by its writer would, so its rows read in this build's columns. A missing
-/// file is an error, not a new database.
+/// this, on `rastai.db.salvage`, its scratch copy of the old `rastai.db` (rebuild.rs), so a file that fails
+/// `quick_check` can still give up its readable rows. The open writes to the file (an older one is migrated, as
+/// every open by its writer would, so its rows read in this build's columns), which is why it is never the old file
+/// itself. A file migrated by a newer app is refused with `RRS-S0002`. A missing file is an error, not a new
+/// database.
 pub(crate) fn open_database_for_salvage(path: &Path, migrations: &[Migration]) -> Result<SqliteConnection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let connection = open_connection(path, flags, false)?;

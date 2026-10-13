@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rastai_core::ids::{IdPrefix, new_id};
-use rastai_core::states::{job_kind_name, job_state_name};
+use rastai_core::states::{job_kind_name, job_state_name, run_kind_name};
 use rastai_core::time::now_unix_ms;
 use rastai_diag::diagnostic::Diagnostic;
 use rastai_diag::logger::log_warn;
@@ -144,7 +144,7 @@ fn first(mut diagnostics: Vec<Diagnostic>) -> Diagnostic {
 fn new_run_row(spec: &JobSpec, node_id: &str, run: &RunStart, record_hash: String, created_unix_ms: i64) -> RunRow {
     RunRow {
         run_id: spec.run_id.clone(),
-        kind: run.kind_name(),
+        kind: run_kind_name(run.kind),
         state: RUN_CREATED_STATE.to_string(),
         project_id: run.project_id.clone(),
         node_id: node_id.to_string(),

@@ -1771,6 +1771,8 @@ pub fn read_index_schema_version(reader: &IndexReader) -> Result<i64, StoreError
 pub fn list_table_columns(reader: &IndexReader) -> Result<Vec<TableColumns>, StoreError>  // PRAGMA table_info, every table
 pub fn list_table_rows(reader: &IndexReader, table_name: &str) -> Result<Vec<Vec<String>>, StoreError>  // one table as
                                                                     // sorted text rows: idempotence and rebuild checks
+pub fn list_every_table_rows(reader: &IndexReader) -> Result<Vec<TableRows>, StoreError>  // every table, its columns
+                                                                    // and rows as text: whole indexes compared
 pub fn get_conversation_tree(reader: &VaultReader, conversation_id: &str) -> Result<Option<ConversationTree>, StoreError>
 pub fn list_conversations(reader: &VaultReader, filter: &ConversationFilter) -> Result<Vec<ConversationRow>, StoreError>
 pub fn list_gateway_log(reader: &VaultReader, filter: &GatewayLogFilter) -> Result<Vec<GatewayLogEntry>, StoreError>
@@ -1858,6 +1860,8 @@ pub struct RebuildReport { pub runs: u64, pub records: u64, pub artifacts: u64, 
                            pub diagnostics: Vec<Diagnostic> }   // documents (M4), models (M2) and pruned_run_stubs
                                                     // (M11, stubs from archive.pruned; the daemon fills them, 13.2)
 pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError>  // caller holds daemon.lock
+pub fn rebuilt_table_differences(live: &[TableRows], rebuilt: &[TableRows]) -> Vec<String>  // none when a rebuild matches
+                                                    // live, leaving out COLUMNS_NOT_REBUILT and TABLES_NOT_REBUILT
 pub fn take_daemon_lock(paths: &DataPaths) -> Result<DaemonLock, StoreError>           // RRS-S0001 when held; RRS-S0007 for a runtime folder or lock file another user could reach
 pub fn free_bytes(path: &Path) -> Result<u64, StoreError>                              // f_bavail × f_frsize (ADR-0033)
 pub fn check_free_space(path: &Path, needed_bytes: u64, margin_bytes: u64) -> Result<(), StoreError>  // RRS-S3001
@@ -3388,7 +3392,9 @@ flowchart TD
 pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError> {
     let mut report = new_rebuild_report();
     let fresh = create_fresh_index(paths)?;                         // rastai.db.rebuilding, migrated
-    let old_database = open_old_database(paths)?;                   // whatever rastai.db still reads
+    let old_database = open_old_database(paths)?;                   // whatever a copy of rastai.db (rastai.db.salvage,
+                                                                    // migrated if older) still reads; the old file
+                                                                    // itself is never written
     copy_kept_tables(&old_database, &fresh, &mut report);           // tokens, nodes, plugins, projects
     rebuild_from_run_folders(paths, &fresh, &mut report)?;          // run.json, then events.log or its mirror
     rebuild_from_daemon_log(paths, &fresh, &mut report)?;           // every segment, in order; archive.pruned makes stubs
@@ -3420,8 +3426,10 @@ pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<Rebu
 
 Settings are not in this table because they aren't in `rastai.db`: they live in the files of contracts §11.1, which a rebuild never touches.
 
-- **Same code as live indexing.** Steps 3 and 4 call `apply_event_record` on a transaction of the fresh connection, so live and rebuilt rows can't differ. `tests/rebuild_index.rs` (in rastai-store, and in rastai-cli against the real daemon) compares them row by row, skipping only `COLUMNS_NOT_REBUILT`, the columns no durable source holds (contracts 15.1).
-- **Crash-safe (M1-33).** Nothing replaces `rastai.db` until the new index is whole: it is written to `rastai.db.rebuilding`, checked, left in one file, then the old file is linked to `rastai.db.broken-<unix_ms>` and the new one renamed over `rastai.db`. A kill at any point leaves the old index or the new one, and the next rebuild removes a leftover `rastai.db.rebuilding`.
+- **Same code as live indexing.** Steps 3 and 4 call `apply_event_record` on a transaction of the fresh connection, so live and rebuilt rows can't differ. `tests/rebuild_index.rs` (in rastai-store, and in rastai-cli against the real daemon) compares them row by row with `rebuilt_table_differences`, skipping only `COLUMNS_NOT_REBUILT`, the columns no durable source holds (contracts 15.1).
+- **Crash-safe (M1-33).** Nothing replaces `rastai.db` until the new index is whole: it is written to `rastai.db.rebuilding`, checked, left in one file, then the old file is linked to `rastai.db.broken-<unix_ms>` and the new one renamed over `rastai.db`. A kill at any point leaves the old index or the new one, and the next rebuild removes a leftover `rastai.db.rebuilding` or `rastai.db.salvage`. Every finished rebuild keeps one `rastai.db.broken-<unix_ms>`, and a rebuild killed after the link leaves one too; they are the user's to delete, and the report names the one this rebuild made.
+- **The old index is kept as it was.** The kept tables are read from `rastai.db.salvage`, a copy of the old file and its `-wal`, which the read migrates when it is older and which is removed once read. The old file is never opened, so the kept `rastai.db.broken-<unix_ms>` is the user's file byte for byte, even one that failed `quick_check`.
+- **A `run.json` the rebuild can't use** leaves its run out: one the file system won't read with `RRS-S0006`, a value the rebuild can't use (a run id that isn't its folder's, a `created_at` that isn't a time) with `RRS-E2006` at that value. A `job_spec` naming another run's job, or none, leaves that job out the same way (`RRS-E2006` at `/job_spec/job_id`).
 - **Reading is tolerant.** A torn tail ends that log; a corrupt frame ends it with `RRS-S2002` in the report, and a record its run's log may not carry (6.4) with `RRS-S2004`, since step 3 applies run logs through the same check as `ApplyRunEvents`; the rebuild continues with the next run.
 - **Pruned runs come back from the archive** (M11; ADR-0035 decision 8, amending ADR-0002 decision 7). Their local folders are gone, so the offline rebuild can only make the stubs (`RebuildReport.pruned_run_stubs`). The last step, pulling each stub's rows (`runs` columns, `run_tags`, final `jobs` states, `checkpoints` metadata, `artifacts` and `lineage`; not `run_metrics`, which prune freed) from the archive, runs at the next daemon start, before the first sync: the store never imports the archive (contracts §2.4 rule 7), and only the daemon holds archive credentials, which live in the keychain behind `rastai-server`. `rastai storage rebuild-index` prints that step as pending; until it runs, a stub opens with its restore offer like any pruned run.
 - **Persisted:** the new `rastai.db`; the old file stays beside it until the user deletes it. `vault.db` is never touched: it is primary data, not an index. So the rebuild skips the vault side of `gateway.request_logged`, and `gateway_log` rows that retention deleted stay deleted.

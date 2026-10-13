@@ -33,6 +33,7 @@ use rastai_formats::validate::{read_document, write_document};
 use rastai_proto::common::v1::JobState;
 use rastai_proto::node::v1::{JobInfo, JobSpec};
 use rastai_store::config_files::write_config_file;
+use rastai_store::error::store_error_diagnostic;
 use rastai_store::index::runs::JobRow;
 
 use crate::nodes::node_links::start_job_on_node;
@@ -40,7 +41,6 @@ use crate::nodes::reconcile::{
     SnapshotScope, fail_unlaunchable_job, read_job, record_job_changes, settle_runs_later, tail_then_settle,
 };
 use crate::server_state::Server;
-use rastai_store::error::store_error_diagnostic;
 
 /// `runs/<run_id>/run.json` (contracts 8.4).
 const RUN_RECORD_FILE: &str = "run.json";
@@ -62,16 +62,6 @@ pub struct RunStart {
     pub recipe: String,
     /// The run's one seed, as `TrainJobArgs.seed` carries it.
     pub seed: Option<u64>,
-}
-
-impl RunStart {
-    /// The run kind's name in contracts 9.5, as `runs.kind` and `run.json` hold it (`train`).
-    pub fn kind_name(&self) -> String {
-        match serde_json::to_value(self.kind) {
-            Ok(serde_json::Value::String(name)) => name,
-            _ => String::new(),
-        }
-    }
 }
 
 /// Writes the run's `run.json` with `spec` (its `job_id` filled in) and returns the record's content hash, which the
@@ -294,11 +284,6 @@ mod tests {
         let paths = temporary_paths("missing");
         let problem = read_run_job_spec(&paths, "run_01JA2B3C4D5E6F7G8H9J0K1M2P").unwrap_err();
         assert_eq!(problem.code, CODE_INVALID_DOCUMENT);
-    }
-
-    #[test]
-    fn names_are_the_contract_ones() {
-        assert_eq!(train_run().kind_name(), "train");
     }
 
     // The runs row and run.json share one time, so a rebuild reads the row's time back from the file.

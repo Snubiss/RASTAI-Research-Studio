@@ -36,10 +36,10 @@ use rastai_proto::node::v1::{JobKind, JobSpec};
 use rastai_store::event_log::frame::{EVENT_LOG_HEADER, encode_frame};
 use rastai_store::index::journal::{JournalFinishedRow, JournalStartedRow};
 use rastai_store::index::kept_tables::{NodeRow, PluginRow, ProjectRow, TokenRow};
-use rastai_store::index::reads::{list_table_columns, list_table_rows, open_index_reader};
+use rastai_store::index::reads::{TableRows, list_every_table_rows, open_index_reader};
 use rastai_store::index::runs::{JobRow, RunRow};
 use rastai_store::index::writes::IndexWrite;
-use rastai_store::rebuild::{COLUMNS_NOT_REBUILT, RebuildOptions, RebuildReport, TABLES_NOT_REBUILT, rebuild_index};
+use rastai_store::rebuild::{RebuildOptions, RebuildReport, rebuild_index, rebuilt_table_differences};
 use rastai_store::store::{close_store, open_store};
 use rastai_store::writer_thread::write_index;
 
@@ -75,9 +75,6 @@ const DAEMON_LOG_NAME: &str = "daemon:1";
 /// Run A's log record whose frame the corrupt test damages: the third of six (the second metrics record).
 const CORRUPTED_RUN_A_RECORD: usize = 2;
 const TOKEN_REVOKED_UNIX_MS: i64 = 1_791_700_100_000;
-
-/// Every table of an index: its name, its column names and its rows as sorted text.
-type IndexTables = Vec<(String, Vec<String>, Vec<Vec<String>>)>;
 
 // ---- The recipe ----
 
@@ -484,7 +481,7 @@ fn record_hash_of(run_id: &str) -> String {
 }
 
 /// Indexes the copied fixture as a daemon would (see the top), and returns every table.
-fn index_live(paths: &DataPaths) -> IndexTables {
+fn index_live(paths: &DataPaths) -> Vec<TableRows> {
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     let store = open_store(paths).unwrap();
     let daemon = daemon_records();
@@ -519,18 +516,13 @@ fn daemon_write(records: &[EventRecord]) -> IndexWrite {
 
 // ---- Reading and comparing indexes ----
 
-fn read_tables(store: &rastai_store::store::Store) -> IndexTables {
+fn read_tables(store: &rastai_store::store::Store) -> Vec<TableRows> {
     let reader = open_index_reader(&store.index_readers).unwrap();
-    let mut tables = Vec::new();
-    for table in list_table_columns(&reader).unwrap() {
-        let rows = list_table_rows(&reader, &table.table_name).unwrap();
-        tables.push((table.table_name, table.column_names, rows));
-    }
-    tables
+    list_every_table_rows(&reader).unwrap()
 }
 
 /// Every table of the index in `paths`, opened as the daemon opens it (quick_check, migrations).
-fn read_index(paths: &DataPaths) -> IndexTables {
+fn read_index(paths: &DataPaths) -> Vec<TableRows> {
     let store = open_store(paths).unwrap();
     let tables = read_tables(&store);
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
@@ -538,52 +530,13 @@ fn read_index(paths: &DataPaths) -> IndexTables {
     tables
 }
 
-fn rows_of<'a>(tables: &'a IndexTables, table_name: &str) -> &'a Vec<Vec<String>> {
-    &tables.iter().find(|(name, _, _)| name == table_name).unwrap().2
-}
-
-/// The table's rows without the columns no source holds, sorted again.
-fn rebuildable_rows(table_name: &str, column_names: &[String], rows: &[Vec<String>]) -> Vec<Vec<String>> {
-    let skipped: &[&str] = COLUMNS_NOT_REBUILT
-        .iter()
-        .find(|columns| columns.table_name == table_name)
-        .map(|columns| columns.column_names)
-        .unwrap_or(&[]);
-    let mut kept_rows: Vec<Vec<String>> = rows
-        .iter()
-        .map(|row| {
-            let mut kept = Vec::new();
-            for (index, value) in row.iter().enumerate() {
-                if !skipped.contains(&column_names[index].as_str()) {
-                    kept.push(value.clone());
-                }
-            }
-            kept
-        })
-        .collect();
-    kept_rows.sort();
-    kept_rows
+fn rows_of<'a>(tables: &'a [TableRows], table_name: &str) -> &'a Vec<Vec<String>> {
+    &tables.iter().find(|table| table.table_name == table_name).unwrap().rows
 }
 
 /// Every rebuildable table of `rebuilt` equals `live` row by row; the tables a rebuild starts empty are empty.
-fn assert_rebuilt_matches(live: &IndexTables, rebuilt: &IndexTables) {
-    let live_names: Vec<&String> = live.iter().map(|(name, _, _)| name).collect();
-    let rebuilt_names: Vec<&String> = rebuilt.iter().map(|(name, _, _)| name).collect();
-    assert_eq!(live_names, rebuilt_names);
-    for ((table_name, column_names, live_rows), (_, _, rebuilt_rows)) in live.iter().zip(rebuilt) {
-        if TABLES_NOT_REBUILT.contains(&table_name.as_str()) {
-            assert!(
-                rebuilt_rows.is_empty(),
-                "{table_name} should start empty: {rebuilt_rows:?}"
-            );
-            continue;
-        }
-        assert_eq!(
-            rebuildable_rows(table_name, column_names, rebuilt_rows),
-            rebuildable_rows(table_name, column_names, live_rows),
-            "table {table_name} differs"
-        );
-    }
+fn assert_rebuilt_matches(live: &[TableRows], rebuilt: &[TableRows]) {
+    assert_eq!(rebuilt_table_differences(live, rebuilt), Vec::<String>::new());
 }
 
 fn codes(report: &RebuildReport) -> Vec<String> {
@@ -591,7 +544,7 @@ fn codes(report: &RebuildReport) -> Vec<String> {
 }
 
 /// A run's acked sequence as the rebuilt index has it.
-fn acked_sequence(tables: &IndexTables, run_id: &str) -> String {
+fn acked_sequence(tables: &[TableRows], run_id: &str) -> String {
     let quoted = format!("{run_id:?}");
     let run = rows_of(tables, "runs").iter().find(|row| row[0] == quoted).unwrap();
     // Column 7 is acked_sequence (contracts 8.2).
@@ -782,10 +735,37 @@ fn a_run_json_that_names_another_run_is_left_out() {
 
     let report = rebuild(&paths);
 
-    assert_eq!(codes(&report), ["RRS-S0006"]);
+    // The value the rebuild can't use, at its place in the file, as a document check reports it.
+    assert_eq!(codes(&report), ["RRS-E2006"]);
+    let expected_path = format!("{}#/run_id", run_b_record.display());
+    assert_eq!(report.diagnostics[0].path, expected_path);
     let rebuilt = read_index(&paths);
     assert_eq!(rows_of(&rebuilt, "runs").len(), 1);
     // Run A's row is its own run.json's, not the copy's in run B's folder.
     assert_eq!(rows_of(&rebuilt, "runs")[0][6], format!("{:?}", record_hash_of(RUN_A)));
+    remove_test_folder(&paths);
+}
+
+#[test]
+fn a_job_spec_that_names_another_runs_job_leaves_that_job_out_with_rrs_e2006() {
+    let paths = test_paths("rebuild-foreign-job");
+    copy_fixture(&paths);
+    // Run B's run.json claims run A's job, which run A's own run.json (read first, in id order) already holds.
+    let run_b_record = run_dir(&paths, RUN_B).join("run.json");
+    std::fs::write(&run_b_record, run_record_bytes(RUN_B, JOB_A, CREATED_AT_B)).unwrap();
+
+    let report = rebuild(&paths);
+
+    assert_eq!(codes(&report), ["RRS-E2006"]);
+    let expected_path = format!("{}#/job_spec/job_id", run_b_record.display());
+    assert_eq!(report.diagnostics[0].path, expected_path);
+    let rebuilt = read_index(&paths);
+    // Run B keeps its row; run A's job stays run A's.
+    assert_eq!(rows_of(&rebuilt, "runs").len(), 2);
+    let job_a = rows_of(&rebuilt, "jobs")
+        .iter()
+        .find(|row| row[0] == format!("{JOB_A:?}"))
+        .unwrap();
+    assert_eq!(job_a[1], format!("{RUN_A:?}"));
     remove_test_folder(&paths);
 }
