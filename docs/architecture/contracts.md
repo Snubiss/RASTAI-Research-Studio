@@ -414,7 +414,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | OS tool `df` | Foundation: the OS | `rastai-store` | approved; used only if ADR-0033 is ever withdrawn (`free_bytes` fallback) |
 | uv, llama-server, OpenSSH, Docker/Podman | Foundation, Engine | `rastai-node`, `rastai-transport`, `rastai-sandbox` | `environments.rs`; `fast_runtime.rs`; `ssh.rs`; `engine_http.rs` (external binaries, never linked) |
 | typescript (the package) | Dev tooling: checker only | `just check-js` | runs `tsc --noEmit -p jsconfig.json` in checkJs mode; never ships, nobody writes TS syntax |
-| `@types/react`, `@types/react-dom` | Dev tooling: checker only | `just check-js` | React's type declarations, which only the checker reads (no code imports them); they let `tsc` check JSX (M1-51, pending the owner's approval) |
+| `@types/react`, `@types/react-dom` | Dev tooling: checker only | `just check-js` | React's type declarations, which only the checker reads (no code imports them); they let `tsc` check JSX (M1-51, owner approval of 2026-10-13) |
 | vite, vitest, `@vitest/browser` (with its Playwright provider `@vitest/browser-playwright`), pnpm, prettier, Playwright, axe-core, Tauri CLI | Dev tooling | JS workspace | build, tests, formatting, packaging; `vitest.config.js` runs `*.browser.test.jsx` in Chromium and WebKit through Playwright |
 | pytest, ruff | Dev tooling | Python workspace | tests, lint and format |
 | buf, cargo-deny, cargo-fuzz, maturin, wasm-bindgen-cli, dist, release-please, just | Dev tooling | repo | build, codegen, release. buf's plugins (node layout 3.4): `protoc-gen-prost` and `protoc-gen-tonic` (cargo install), `protoc-gen-es` (`package.json`), grpcio-tools (the cpu environment's dev group) |

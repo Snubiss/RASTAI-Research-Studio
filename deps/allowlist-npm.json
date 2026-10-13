@@ -95,13 +95,13 @@
       "version": "19.3.0",
       "category": "dev",
       "license": "MIT",
-      "reason": "React's type declarations for the checkJs checker only (`just check-js`): React ships none, and without them every JSX element fails tsc --noEmit with TS7026 (issue #51, forward note from the M1-04 review). Never ships, never imported by code; nobody writes TypeScript (ADR-0036). Pending owner approval: added to spec §27 beside the typescript checker. Replacement path: drop it together with the checker"
+      "reason": "React's type declarations for the checkJs checker only (`just check-js`): React ships none, and without them every JSX element fails tsc --noEmit with TS7026 (issue #51, forward note from the M1-04 review). Never ships, never imported by code; nobody writes TypeScript (ADR-0036). Owner approval of 2026-10-13: added to spec §27 beside the typescript checker. Replacement path: drop it together with the checker"
     },
     "@types/react-dom": {
       "version": "19.3.0",
       "category": "dev",
       "license": "MIT",
-      "reason": "react-dom's type declarations for the checkJs checker only, like @types/react (the react-dom/client import in the browser tests). Never ships. Pending owner approval with @types/react"
+      "reason": "react-dom's type declarations for the checkJs checker only, like @types/react (the react-dom/client import in the browser tests). Never ships. Owner approval of 2026-10-13, with @types/react"
     }
   }
 }
