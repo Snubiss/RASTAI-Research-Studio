@@ -1,9 +1,11 @@
 // Two to four mutually exclusive options (ui-design.md 5.2): Basic or Advanced, a runtime toggle, a log filter. Each
-// option is a button with aria-pressed, and the group is one Tab stop: the pressed option is the one Tab reaches, and
-// the arrow keys move focus between the others (Home and End go to the ends). Space or Enter presses the focused
-// option, as for any button; the arrows never press, so moving through the group changes nothing.
+// option is a button with aria-pressed, and the group is one Tab stop: the option Tab reaches is the one focus last
+// visited inside the group, or the pressed option when focus has not been inside yet. The arrow keys move focus
+// between the others (Home and End go to the ends), so Shift+Tab after an arrow leaves the group from where the
+// focus is. Space or Enter presses the focused option, as for any button; the arrows never press, so moving through
+// the group changes nothing.
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 // The keys that move to the next option, and to the previous one (both axes, since a group may be a row or a column).
 const NEXT_KEYS = ["ArrowRight", "ArrowDown"];
@@ -25,10 +27,13 @@ const PREVIOUS_KEYS = ["ArrowLeft", "ArrowUp"];
  */
 export function SegmentedControl({ label, options, value, onChange, disabled = false }) {
   const groupRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  // The option focus last visited inside the group; null once focus has left the group.
+  const [focusedIndex, setFocusedIndex] = useState(/** @type {number | null} */ (null));
   const pressedIndex = Math.max(
     0,
     options.findIndex((option) => option.value === value),
   );
+  const tabStopIndex = focusedIndex ?? pressedIndex;
 
   /** @param {import("react").KeyboardEvent} event */
   function handleKeyDown(event) {
@@ -44,16 +49,36 @@ export function SegmentedControl({ label, options, value, onChange, disabled = f
     }
   }
 
+  /**
+   * Focus that leaves the group puts the Tab stop back on the pressed option, so the next Tab into the group lands
+   * where it always does. Focus moving between options keeps the stop where it is.
+   * @param {import("react").FocusEvent} event
+   */
+  function handleBlur(event) {
+    const next = /** @type {Node | null} */ (event.relatedTarget);
+    if (!groupRef.current?.contains(next)) {
+      setFocusedIndex(null);
+    }
+  }
+
   return (
-    <div ref={groupRef} className="rr-segmented" role="group" aria-label={label} onKeyDown={handleKeyDown}>
+    <div
+      ref={groupRef}
+      className="rr-segmented"
+      role="group"
+      aria-label={label}
+      onKeyDown={handleKeyDown}
+      onBlur={handleBlur}
+    >
       {options.map((option, index) => (
         <button
           key={option.value}
           type="button"
           className="rr-segmented__option"
           aria-pressed={option.value === value}
-          tabIndex={index === pressedIndex ? 0 : -1}
+          tabIndex={index === tabStopIndex ? 0 : -1}
           disabled={disabled}
+          onFocus={() => setFocusedIndex(index)}
           onClick={() => onChange(option.value)}
         >
           {option.label}

@@ -1007,7 +1007,7 @@ The theme contract every section, plugin UI, renderer and the static viewer foll
 | Accent | `accent`, `accent_hover`, `accent_active`, `selection`, `focus_ring`, `success` |
 | Data | `series_1` … `series_8`, `sequential_low`, `sequential_high`, `diverging_negative`, `diverging_zero`, `diverging_positive` |
 | Canvas | `canvas_background`, `canvas_grid`, `canvas_node`, `canvas_node_border`, `canvas_node_selected`, `canvas_edge`, `canvas_edge_active`, `canvas_label`, `canvas_port` |
-| Chat | `confidence_tint` (the shading behind chat text by model confidence) |
+| Chat | `confidence_tint` (the saturated base hue of chat text shading by model confidence: the chat mixes it into `surface` at 16, 30 and 46%, as ui-design.md 4.4 sets; the built-ins use #c75300, #f0883e and #ffb070) |
 
 **Other tokens:** typography (font families, weights, sizes, line heights; sizes are `xs` to `xl`, and the optional `xxl` is the display size for headings, which is `xl` when left out; the key is `typography` everywhere: theme files, `ThemeTokens` and `builtInTheme` in `@rastai/ui`, plugin themes and examples. No token group is called `type`, because `type` is the shared header field), density (two spacing scales), radius, motion (two durations and an easing; `ui.reduced_motion` sets both durations to 0), focus ring (width and offset) and elevation (three shadow levels), as in the `rastai.theme/1` row of 5.2.
 

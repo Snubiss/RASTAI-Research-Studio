@@ -2,12 +2,15 @@
 // header, the token's name, "It can" and "It cannot" lists, and Cancel and Create token. The settings page makes the
 // token when Create token is approved, then passes the new value back as tokenValue: the prompt then shows that value
 // once in a box, with Copy. The prompt never makes a token itself. Cancel is outlined and takes the focus first, so a
-// stray Enter declines. Drawn only with locked colors, so a theme can't shrink the lists or hide the value.
+// stray Enter declines. Create token is disabled as soon as it is pressed, so a double click can't approve twice; the
+// caller closes the prompt if creating the token fails. Drawn only with locked colors, so a theme can't shrink the
+// lists or hide the value.
 
 import { useEffect, useId, useRef, useState } from "react";
 
 import {
   BUTTON_STYLE,
+  DISABLED_BUTTON_STYLE,
   HEADING_STYLE,
   LABEL_STYLE,
   LIST_STYLE,
@@ -30,8 +33,10 @@ const COPY_FAILED_TEXT = "Copy did not work. Select the token and copy it by han
  * @param {string | null} [props.tokenValue]       the new token's value, set once Create token is approved
  * @param {string[]} props.canDo                   what the token allows, in plain English
  * @param {string[]} props.cannotDo                what it never allows, in plain English
- * @param {() => void} props.onApprove             Create token was pressed
- * @param {() => void} props.onCancel              closes the prompt, before or after approval (Escape, Cancel, Done)
+ * @param {() => void} props.onApprove             Create token was pressed; the button stays disabled until the prompt closes
+ * @param {() => void} props.onCancel              closes the prompt, before or after approval (Escape, Cancel, Done). The
+ *                                                 caller cannot tell a close after approval from a cancel, so once tokenValue
+ *                                                 has arrived it must already treat the token as created
  */
 export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, onApprove, onCancel }) {
   const dialogRef = useRef(/** @type {HTMLDialogElement | null} */ (null));
@@ -39,6 +44,7 @@ export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, on
   const copyRef = useRef(/** @type {HTMLButtonElement | null} */ (null));
   const titleId = useId();
   const [copyStatus, setCopyStatus] = useState("");
+  const [approving, setApproving] = useState(false);
 
   // The dialog's own focus rule would pick the first control in the page order, so Cancel is focused here, after the
   // dialog opens; autoFocus alone runs before the dialog is open and the focus is lost.
@@ -62,6 +68,11 @@ export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, on
   function handleCancel(event) {
     event.preventDefault();
     onCancel();
+  }
+
+  function approve() {
+    setApproving(true);
+    onApprove();
   }
 
   async function copyToken() {
@@ -118,7 +129,13 @@ export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, on
             <button ref={cancelRef} type="button" className="rr-locked" style={BUTTON_STYLE} onClick={onCancel}>
               Cancel
             </button>
-            <button type="button" className="rr-locked" style={PRIMARY_BUTTON_STYLE} onClick={onApprove}>
+            <button
+              type="button"
+              className="rr-locked"
+              style={approving ? DISABLED_BUTTON_STYLE : PRIMARY_BUTTON_STYLE}
+              disabled={approving}
+              onClick={approve}
+            >
               Create token
             </button>
           </>

@@ -551,7 +551,7 @@ flowchart TD
 **Rules**
 - **Components and plugin UIs read only `--rr-*` variables.** No color, font, spacing, radius, shadow or duration literal in component CSS or JSX. `tools/checks/check-colors` fails CI on a color literal in `packages/canvas/src/`, `packages/viz/src/`, `apps/web/src/sections/` and `plugins/*/ui/src/`; `@rastai/ui`'s own component CSS follows the same rule.
 - **Renderers never pick colors.** They take `CanvasColors` or `VizColors` (plain RGBA arrays) through `setColors`. The spike's hard-coded `#101318` is gone; it seeds the built-in dark theme's `canvas_background`.
-- **Role keys are fixed** (contracts §5.6). A theme may set any of them; missing ones come from its `base`. `@rastai/ui` may not import `@rastai/formats` (contracts §2.3), so `COLOR_ROLES` in `built-in-themes.js` is read from the built-in `light.theme.json`, never typed out by hand. Two tests keep it equal to the schema: `tokens.test.js` compares it and both built-ins with `schemas/rastai.theme/1.json`, and `rastai-formats`' `theme_tokens.rs` validates all three files through `read_document` and checks that they set every role.
+- **Role keys are fixed** (contracts §5.6). A theme may set any of them; missing ones come from its `base`. `@rastai/ui` may not import `@rastai/formats` (contracts §2.3), so `COLOR_ROLES` in `built-in-themes.js` is read from the built-in `light.theme.json`, never typed out by hand. Two tests keep it equal to the schema: `tokens.test.js` compares it and all three built-ins with `schemas/rastai.theme/1.json`, and `rastai-formats`' `theme_tokens.rs` validates all three files through `read_document` and checks that they set every role.
 - **Built-in themes** are `light`, `dark` and `high_contrast`, stored as plain `rastai.theme/1` files (`light.theme.json`, `dark.theme.json`, `high_contrast.theme.json`) that `@rastai/ui/src/tokens/built-in-themes.js` imports. DESIGN-03 added `high_contrast` with its values; the accessibility check that covers it, a follow-OS built-in and a font assets path come in M8.
 - **Plugin themes** (`themes[]`, capability `ui.theme@1`) are refused before M8 with `RRS-P1002`. From M8 the daemon validates the theme file, runs the accessibility check (2.9) and the Appearance page offers a picker.
 - **Per-panel `theme_override`** in `rastai.layout/1` is M8 or Phase 2.
@@ -905,6 +905,7 @@ packages/ui/
       built-in-themes.js       the light, dark and high-contrast themes as rastai.theme/1 data (dark seeded from the spike's colors)
       light.theme.json         the built-in themes as plain rastai.theme/1 files, which built-in-themes.js imports and
       dark.theme.json          rastai-formats' theme_tokens.rs validates through read_document
+      high_contrast.theme.json the high-contrast built-in (base dark, so the dark locked set); the `high_contrast` name in ui.theme
       resolve-tokens.js        builtInTheme(base, options): theme data plus density, motion and colorblind settings
       palettes.js              constants: the colorblind-safe series and diverging colors
       locked.js                LOCKED_TOKENS: security-UI colors, one light and one dark set; no theme reaches them
@@ -912,7 +913,6 @@ packages/ui/
       canvas-colors.js         canvasColors(tokens): plain RGBA arrays for @rastai/canvas
       viz-colors.js            vizColors(tokens): plain RGBA arrays and color maps for @rastai/viz
       color-math.js            hexToRgba (the renderer color functions) and cssRgb (the browser tests)
-      high_contrast.theme.json the high-contrast built-in (base dark), the one the locked set and ui.theme `high_contrast` name
     security/                  exported only from @rastai/ui/security; only apps/web may import it (2.10)
       index.js
       EgressBadge.jsx          "data is leaving this machine": the active {purpose, host} pairs, click for details
@@ -920,7 +920,7 @@ packages/ui/
       PermissionList.jsx       requested and granted permissions
       SignedOutScreen.jsx      RRS-U0003 with "open Rastai again" instructions
       TokenConfirm.jsx         "create token" prompt: what it can and cannot do; after approval, the new value once in a box with Copy
-      LockedFocusRing.jsx      the security UI's focus ring, drawn inside each component with a locked color (not in base.css)
+      LockedFocusRing.jsx      the security UI's focus ring, drawn inside each component with a locked color (not in components.css)
       SecurityCheckHeader.jsx  the "Rastai security check" line with a lock glyph, at the top of each locked prompt (ui-design.md 5.2)
       locked-styles.js         the inline styles: locked colors, and a fixed font, sizes and spacing no theme reaches
       permission-text.js       each manifest permission in plain English, the sensitive ones marked
