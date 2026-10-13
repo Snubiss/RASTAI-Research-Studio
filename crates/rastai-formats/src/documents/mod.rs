@@ -107,7 +107,7 @@ pub const DOCUMENT_TYPES: &[DocumentType] = &[
 
 /// A document that passed layers 1 and 2, as its typed struct. Each type's contract PR adds its variant; the
 /// `match` in `document_header` then fails to compile until the new variant is handled.
-// The variants differ in size (a theme holds 40 color roles), but a document is read once and handed on, never
+// The variants differ in size (a theme holds 41 color roles), but a document is read once and handed on, never
 // kept in large numbers, so boxing each variant would only add a dereference at every use.
 // `untagged` writes a document as its own struct, with no variant name around it, so the JSON is the file's JSON.
 #[allow(clippy::large_enum_variant)]

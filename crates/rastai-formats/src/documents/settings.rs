@@ -136,7 +136,8 @@ pub struct SettingsDocument {
 pub struct SettingsUi {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<UiModeSetting>,
-    /// `system` (follow the OS), `light`, `dark`, or a plugin theme id (M8).
+    /// `system` (follow the OS), `light`, `dark`, `high_contrast` (the built-in high-contrast theme), or a plugin
+    /// theme id (M8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -474,7 +475,7 @@ fn describe_ui() -> TypeDescription {
             key(
                 "theme",
                 FieldKind::String,
-                "system, light, dark, or a plugin theme id (M8).",
+                "system, light, dark, high_contrast (the built-in high-contrast theme), or a plugin theme id (M8).",
             ),
             key("density", enum_of(DENSITY_VALUES), "Spacing scale."),
             key("locale", FieldKind::String, "Interface language."),
@@ -912,6 +913,17 @@ mod tests {
             .iter()
             .map(|value| serde_json::to_value(value).unwrap().as_str().unwrap().to_string())
             .collect()
+    }
+
+    /// The theme setting names the built-in high-contrast value, so a reader of the schema sees it (contracts 11.2).
+    #[test]
+    fn the_theme_setting_names_the_built_in_high_contrast_theme() {
+        let ui = describe_settings_types()
+            .into_iter()
+            .find(|item| item.name == UI_NAME)
+            .unwrap();
+        let theme = ui.fields.iter().find(|item| item.name == "theme").unwrap();
+        assert!(theme.doc.contains("high_contrast"), "{}", theme.doc);
     }
 
     #[test]

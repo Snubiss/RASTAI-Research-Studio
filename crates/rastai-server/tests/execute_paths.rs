@@ -719,6 +719,29 @@ async fn tokens_still_work_after_a_restart() {
     remove_test_folder(&paths);
 }
 
+/// The built-in high-contrast theme is a value of ui.theme (contracts 11.2), so settings.set accepts it and reads it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_set_accepts_the_high_contrast_theme() {
+    let paths = test_paths("x-high-contrast");
+    let running = start_test_daemon(&paths).await;
+    let set = ok_result(
+        &run_as_owner(
+            &running,
+            "settings.set",
+            json!({"key": "ui.theme", "value": "high_contrast"}),
+        )
+        .await,
+    );
+    assert_eq!(
+        set,
+        json!({"key": "ui.theme", "value": "high_contrast", "source": "user"})
+    );
+    let got = ok_result(&run_as_owner(&running, "settings.get", json!({"key": "ui.theme"})).await);
+    assert_eq!(got["values"], json!({"ui": {"theme": "high_contrast"}}));
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_set_writes_the_user_file_and_settings_get_reads_it() {
     let paths = test_paths("x-settings");

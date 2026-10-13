@@ -83,6 +83,7 @@ pub const COLOR_ROLES: &[(&str, &str)] = &[
     ("canvas_edge_active", "Edges carrying data in a live view."),
     ("canvas_label", "Labels on the canvas."),
     ("canvas_port", "Node input and output ports."),
+    ("confidence_tint", "Chat text shading by model confidence."),
 ];
 
 /// One `rastai.theme/1` file.
@@ -194,6 +195,8 @@ pub struct ThemeColors {
     pub canvas_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canvas_port: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_tint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -214,6 +217,7 @@ pub struct ThemeFontWeights {
     pub bold: u32,
 }
 
+/// Font sizes in CSS pixels. `xxl`, the display size for headings, may be left out: then it is `xl` (contracts 5.6).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemeFontSizes {
     pub xs: u32,
@@ -221,6 +225,8 @@ pub struct ThemeFontSizes {
     pub md: u32,
     pub lg: u32,
     pub xl: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xxl: Option<u32>,
 }
 
 /// Unitless CSS line heights (1.5 is one and a half times the font size).
@@ -318,6 +324,7 @@ pub fn set_colors(colors: &ThemeColors) -> Vec<(&'static str, &str)> {
         &colors.canvas_edge_active,
         &colors.canvas_label,
         &colors.canvas_port,
+        &colors.confidence_tint,
     ];
     let mut set = Vec::new();
     for ((role, _), value) in COLOR_ROLES.iter().zip(values) {
@@ -340,12 +347,7 @@ pub fn describe_theme_types() -> Vec<TypeDescription> {
             "Font weights, 100 to 900.",
             integer_fields(&["regular", "medium", "bold"], "CSS font weight."),
         ),
-        type_description(
-            FONT_SIZES_NAME,
-            THEME_SCHEMA_ID,
-            "Font sizes in CSS pixels, smallest first.",
-            integer_fields(&["xs", "sm", "md", "lg", "xl"], "Font size in CSS pixels."),
-        ),
+        describe_theme_font_sizes(),
         type_description(
             LINE_HEIGHTS_NAME,
             THEME_SCHEMA_ID,
@@ -413,6 +415,22 @@ fn describe_theme_colors() -> TypeDescription {
         COLORS_NAME,
         THEME_SCHEMA_ID,
         "Color roles; a role left out comes from the base theme. Locked --rr-locked-* tokens are not roles.",
+        fields,
+    )
+}
+
+fn describe_theme_font_sizes() -> TypeDescription {
+    let mut fields = integer_fields(&["xs", "sm", "md", "lg", "xl"], "Font size in CSS pixels.");
+    fields.push(field(
+        "xxl",
+        FieldKind::Integer,
+        OPTIONAL,
+        "Display size for headings, in CSS pixels. Left out, it is xl.",
+    ));
+    type_description(
+        FONT_SIZES_NAME,
+        THEME_SCHEMA_ID,
+        "Font sizes in CSS pixels, smallest first.",
         fields,
     )
 }
@@ -566,8 +584,8 @@ mod tests {
     }
 
     #[test]
-    fn there_are_forty_roles_and_no_locked_or_type_names() {
-        assert_eq!(COLOR_ROLES.len(), 40);
+    fn there_are_forty_one_roles_and_no_locked_or_type_names() {
+        assert_eq!(COLOR_ROLES.len(), 41);
         for (role, _) in COLOR_ROLES {
             assert!(!role.starts_with("--") && !role.contains("locked"), "{role}");
         }

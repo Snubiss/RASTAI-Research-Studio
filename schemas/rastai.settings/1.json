@@ -515,7 +515,7 @@
           "type": "boolean"
         },
         "theme": {
-          "description": "system, light, dark, or a plugin theme id (M8).",
+          "description": "system, light, dark, high_contrast (the built-in high-contrast theme), or a plugin theme id (M8).",
           "type": "string"
         }
       },
