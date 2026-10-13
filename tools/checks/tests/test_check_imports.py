@@ -159,6 +159,38 @@ FAILING_JAVASCRIPT = [
         'export { EgressBadge, TrustPrompt } from "@rastai/ui/security";\n',
         "only apps/web/src/ may import",
     ),
+    # A comment inside the parentheses or between `from` and the string doesn't hide the import: the check
+    # reads the code around it, and a comment is only whitespace there (FU-273).
+    (
+        "plugins/psychology/ui/src/Live.jsx",
+        'const prompt = await import(/* @vite-ignore */ "@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/psychology/ui/src/Live.jsx",
+        'const prompt = await import(// @vite-ignore\n"@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/evaluation/ui/src/index.js",
+        'export { PermissionList } from /* re-export */ "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/loader.js",
+        'const prompt = await import(/* @vite-ignore */ "@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/loader.js",
+        'const prompt = await import(// @vite-ignore\n"@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/index.js",
+        'export { TrustPrompt } from /* re-export */ "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
     # Sections reach the typed wrappers through @rastai/plugin, and only the plugin hosts' tests use the client's
     # test support.
     (
@@ -259,7 +291,9 @@ def test_each_javascript_rule_fails(write_tree, run_check, path, source, expecte
     root = write_tree(packages | {path: source})
     result = run_check("check-imports", "--root", str(root))
     assert result.returncode == 1
-    assert f"{path}:1: imports" in result.stdout and expected in result.stdout, result.stdout
+    # The specifier is the first double-quoted string in each case, so its line is the lines before it, plus one.
+    line = 1 + source.split('"')[0].count("\n")
+    assert f"{path}:{line}: imports" in result.stdout and expected in result.stdout, result.stdout
 
 
 def test_an_unknown_javascript_package_fails(write_tree, run_check):
