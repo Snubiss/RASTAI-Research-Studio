@@ -1,7 +1,7 @@
 # Rastai Studio UI design, version 1.0 ("Instrument")
 
-**Status:** version 1.0, 2026-10-13. Approved by the owner: every owner decision of 2026-10-13 is recorded in §8, and §9
-is the build plan. The visual reference is the owner's canvas (nine screen boards plus "Type options" and "Keyboard
+**Status:** version 1.0, 2026-10-13. The owner's decisions of 2026-10-13 are recorded in §8 (row 8 is an orchestrator
+proposal, not an owner decision), and §9 is the build plan. The visual reference is the owner's canvas (nine screen boards plus "Type options" and "Keyboard
 shortcuts"), https://claude.ai/artifact/G5H4BFoT9F64VcpVgr8GaB. That canvas is private to the owner; this document copies
 nothing from it. The second-window sign-in approval is recorded in ADR-0039.
 
@@ -12,11 +12,13 @@ nothing from it. The second-window sign-in approval is recorded in ADR-0039.
   even when the owner has approved the design it belongs to (ADR-0038).
 - **Layout names.** Names such as `PanelChrome` or `SidebarNav` come from the frontend layout doc
   (`docs/architecture/layout/frontend-and-plugins.md`). Where a layout name is not yet in contracts, §10 marks it.
-- **Decisions.** "Approved" means the owner approved it on the date given in §8, in the owner's words where quoted.
+- **Decisions.** §8 records each decision with its date. Rows 1, 2, 4, 7 and 9 quote the owner's words. Rows 3, 5 and 6 are
+  plain approvals whose words were not recorded. Row 8 is an orchestrator proposal.
 - **Values.** Token values in §4 are the design's values. Where the code on a branch differs, §4 says "now".
 
 Sources: spec v5.4 §1–3, §6–11, §13; layout `frontend-and-plugins.md` §2, §4, §8; contracts §5.6, §6.3, §6.4, §7.3, §9, §11.2, §15.6;
-`schemas/rastai.theme/1.json`; the M1-51 branch tokens (`packages/ui/src/tokens/*`, `security/locked-styles.js`); `catalog/errors/*.json`.
+`schemas/rastai.theme/1.json`; the M1-51 tokens on main (PR #256, merged 2026-10-13: `packages/ui/src/tokens/*`, `security/locked-styles.js`);
+`catalog/errors/*.json`.
 
 ---
 
@@ -112,7 +114,7 @@ Settings › Keybindings (`workspace.keybindings.set`), and a binding's `when` u
 | ↑ ↓ | Move through results | palette | existing (layout 4.1) | none |
 | Enter | Run the highlighted command, or open its arguments form | palette | existing (layout 2.5) | none |
 | Tab | Move into the arguments form | palette, command needs input | proposed | none |
-| Ctrl . | Copy the highlighted command as CLI | palette | decided 2026-10-13 (revisitable) | None known in Chrome or Firefox. Replaces Ctrl Shift C, which opens the DevTools element picker. |
+| Ctrl . | Copy the highlighted command as CLI | palette | proposed (orchestrator, 2026-10-13, revisitable) | None known in Chrome or Firefox. Replaces Ctrl Shift C, which opens the DevTools element picker. |
 | Ctrl Enter | Send the message (Enter adds a new line) | chat composer | proposed | none |
 | ← → | Move token by token through an answer | a focused answer | proposed | none (same model as the timeline) |
 | Enter | Inspect the focused token | a focused answer | proposed | none |
@@ -134,7 +136,7 @@ Settings › Keybindings (`workspace.keybindings.set`), and a binding's `when` u
 
 ## 4. Tokens
 
-All keys are the existing `rastai.theme/1` role names. "Now" = the value on branch `m1/M1-51`. HC = the
+All keys are the existing `rastai.theme/1` role names. "Now" = the value on main, from M1-51 (PR #256, merged 2026-10-13). HC = the
 High-contrast built-in (base `dark`), approved on 2026-10-13 to ship now, revisited in M8. The palette, including the
 cobalt accent and the blue/orange diverging default, was approved as designed on 2026-10-13. Contrast ratios are WCAG,
 against `surface`.
@@ -279,7 +281,7 @@ a revisit, B is the pick for more warmth and C if legibility at 11 px matters mo
 
 ### 5.2 Inventory
 
-Exists on M1-51: Button, Checkbox, Select, TextField, NumberField, FieldForm, Table, Dialog, Toast (+ showToast,
+Exists on main (M1-51): Button, Checkbox, Select, TextField, NumberField, FieldForm, Table, Dialog, Toast (+ showToast,
 dismissToast), CommandPaletteView, PanelChrome, DiagnosticView, ModeProvider, useMode, AdvancedOnly; security:
 EgressBadge, TrustPrompt, PermissionList, SignedOutScreen.
 
@@ -287,7 +289,7 @@ Planned in layout 4.1, not built yet (used by the boards): IconButton, Slider, T
 Tooltip, Banner, Badge, ProgressBar, Spinner, EmptyState, KeyHint, VirtualList, Tree, FileDropZone, ChartFrame,
 SidebarNav, StatusBarView, DiagnosticList, TermText, Markdown, CodeBlock, Icon.
 
-New, not in the layout or contracts yet (every name here is a proposal, §10):
+New, not in the layout or contracts yet (every name here is a proposal, §10; the PR named there registers it):
 
 | Component | What | Where used |
 |---|---|---|
@@ -340,7 +342,7 @@ As 3.6. Data: `ListCommands` descriptors (title, summary, scope, kind, `default_
 - Empty query: Recent, then the current section's commands.
 - No match: "No command matches 'x'" plus "Search all modes" if Basic is hiding some.
 - `ListCommands` failed: only view actions, with a one-line reason (frontend 2.5).
-- Keyboard: ↑↓ move, Enter run (or focus the form when input is needed), Tab into arguments, Ctrl . copy as CLI (decided 2026-10-13), Esc closes and returns focus. It is a `combobox` + `listbox`; the dialog traps focus.
+- Keyboard: ↑↓ move, Enter run (or focus the form when input is needed), Tab into arguments, Ctrl . copy as CLI (proposed by the orchestrator, 2026-10-13), Esc closes and returns focus. It is a `combobox` + `listbox`; the dialog traps focus.
 - Phone: the detail pane stacks under the list; the palette fills the width minus 16 px.
 
 ### 6.4 Inference (board 4)
@@ -389,7 +391,7 @@ Basic and Advanced side by side for the same run (in the product, one panel show
 | Canvas | TextCNN: token ids → embedding → conv k3/k4/k5 → max pool ×3 → concat → head (collapsed block); selected node and its edges in the active colors; zoom, fit | `GraphRenderer`; `design.edit` for every gesture |
 | Inspector | kind, id, in/out shapes, params; attribute fields; train mode Freeze / LoRA / Train; Advanced: init, dtype, LoRA rank/alpha, observation point, FLOPs, fits per target | `design.stats` per node (R9), `design.edit` |
 | Stats bar | params, weights, FLOPs/token, memory for batch × seq, fits, warnings count | `design.stats_updated` |
-| Warning | "much larger than its training data", Advanced shows RRS-E3003 (draft code, contracts gap 22) | `design.validate` layer 4 |
+| Warning | "much larger than its training data", Advanced shows RRS-E3003 (draft code; contracts §14 open question 22) | `design.validate` layer 4 |
 
 - Example numbers are real for this design: 2,251,654 parameters (embedding 16,384 × 128; three conv banks of 100 filters; a 300 → 2 head), 9.0 MB in fp32.
 - Keyboard: the offscreen `role="tree"` mirror (frontend 2.9); arrows walk the graph, Enter selects, Delete removes, Ctrl Z/Y.
@@ -468,18 +470,19 @@ approve button has focus. Phone: prompts stack full width.
 
 ## 8. Owner decisions
 
-Answered by the owner on **2026-10-13**; the owner's words are in quotes. Row 8 is the one exception (see its note).
+Decided on **2026-10-13**. Rows 1, 2, 4, 7 and 9 quote the owner's words. Rows 3, 5 and 6 are plain approvals whose
+words were not recorded. Row 8 is not an owner decision (see its note).
 
 | # | Question | Decision (2026-10-13) | Follow-up |
 |---|---|---|---|
 | 1 | Fonts | **IBM Plex rejected:** "something a bit more stylish please. not over the top but not 1950's mainframe either." Then, also 2026-10-13: **Geist + Geist Mono chosen**: "A text schema is fine we can revisit later if needed". | §4.2 and §4.5; every board now uses Geist. Spec §27 register row and §37 v5.4.5 (DESIGN-01, this PR); files bundled in §9 (c). Revisitable; B and C stay documented. |
 | 2 | Colors and the cobalt accent | **Approved as designed:** "colors seemed fine". | Values in §4.1 stand. |
-| 3 | Blue/orange diverging scale for everyone | **Approved.** | M1-51 theme data. |
+| 3 | Blue/orange diverging scale for everyone | **Approved** (plain approval; the owner's words were not recorded). | M1-51 theme data. |
 | 4 | High-contrast built-in | **Approved, ship now:** "we'll revisit in M8". | Third built-in theme in M1-51; `ui.theme` gains a high-contrast value (contract PR, §9). |
-| 5 | New keys `font_sizes_px.xxl`, `colors.confidence_tint` | **Approved.** | Own contract PR before code uses them (`rastai.theme/1` schema). |
-| 6 | Locked "let a new window sign in" approval | **Approved, ADR first.** | Status: **approved; ADR-0039 Accepted, 2026-10-13** (§6.9). Settles open question 24 (contracts §14). |
+| 5 | New keys `font_sizes_px.xxl`, `colors.confidence_tint` | **Approved** (plain approval; the owner's words were not recorded). | Own contract PR before code uses them (`rastai.theme/1` schema). |
+| 6 | Locked "let a new window sign in" approval | **Approved, ADR first** (plain approval; the owner's words were not recorded). | Status: **approved; ADR-0039 Accepted, 2026-10-13** (§6.9). Settles open question 24, which is removed from contracts §14. |
 | 7 | Chart smoothing and log scale as display-only options | **Approved:** "probably better for realtime". | In `@rastai/viz`; never feeds a verdict (§6.5). |
-| 8 | Keyboard shortcuts | Owner asked where they were: consolidated in §3.7 and on the "Keyboard shortcuts" board. **Copy as CLI is Ctrl .** (set by the design team on 2026-10-13, revisitable), because Ctrl Shift C opens the DevTools element picker. **Not yet an owner decision:** the owner has not confirmed Ctrl . in words; confirm at review. | The other "proposed" bindings in §3.7 ship as defaults; users can rebind all of them. |
+| 8 | Keyboard shortcuts | Owner asked where they were: consolidated in §3.7 and on the "Keyboard shortcuts" board. **Copy as CLI is Ctrl .**, proposed by the orchestrator on 2026-10-13 (revisitable), because Ctrl Shift C opens the DevTools element picker. **Not an owner decision:** the owner has not confirmed Ctrl . in words; confirm at review. | The other "proposed" bindings in §3.7 ship as defaults; users can rebind all of them. |
 | 9 | Section label | **Approved:** "Chat" in Basic, "Inference" in Advanced. | The rail label follows the effective mode on every board. |
 
 ---
@@ -507,7 +510,7 @@ Changes no code and no contract shape. Its one name, the `docs/design/` folder, 
   - The desktop-shell case (a second `WebviewWindow` without `window.opener` signs in again with a new code, frontend
     layout 9.3).
   - A threat-model row in `docs/security/threat-model.md`. It names `SessionApproval`, which contracts does not list yet,
-    so the row comes with the contract PR (step b), not here.
+    so the row comes with the contract PR before second windows (§9 (d)), not here.
   - Tests (required when the mechanism is built): an e2e that a denied window cannot execute; a screenshot test under
     the hostile theme.
 - **Spec §27 dependency register entry for the fonts**: an "Asset (not code)" row, modelled on the existing "License
@@ -525,18 +528,16 @@ Only shapes, no code that uses them. Add a contracts-changes entry for the task 
   - add `confidence_tint` to the color role table (group "Data");
   - add `--rr-font-size-xxl` and `--rr-color-confidence-tint` to the CSS variable list;
   - record that the high-contrast built-in ships now rather than at M8.
-- **Contracts §11.2**: `ui.theme` gains the value `high_contrast` beside `system`, `light` and `dark`. The exact
-  spelling follows the contracts naming rules; `high_contrast` is the proposal. The settings schema and
-  `check-schema-diff` follow.
-- **Contracts §15** (names): `packages/ui/src/fonts/` (the bundled font path) and the new component names `StatePill`,
-  `SegmentedControl`, `StatTile` and `TokenConfirm`, if the contracts lists hold component names. This also unblocks
-  `SessionApproval` (ADR-0039 is Accepted, 2026-10-13), and the threat-model row for it. Every name in §10 is registered
-  here or in the PR that first uses it.
+- **Contracts §11.2**: `ui.theme` gains the value `high_contrast` beside `system`, `light`, `dark` and the plugin
+  theme ids. The exact spelling follows the contracts naming rules; `high_contrast` is the proposal. The settings
+  schema and `check-schema-diff` follow. `ui.mode` is already a §11.2 key and needs no change.
+- No other name is registered here. The component, path and file names of §10 register in the PR that first uses
+  them (§9 (c) and (d)), because ADR-0038 puts a name that is not a shape in the same PR as its code.
 - No breaking change: every command and event is still `preview`, and both new keys add to the theme document.
 
 ### (c) `@rastai/ui` PR: token values, high contrast, fonts, components
 
-This builds on the open M1-51 work (PR #256), as one follow-up PR or as amendments to its Part 2. It contains:
+This is DESIGN-03 (#267), a follow-up PR on main after M1-51 (PR #256, merged 2026-10-13). It contains:
 - **Token values** (`tokens/light.theme.json`, `tokens/dark.theme.json`) per §4.1 to §4.4:
   - colors: surfaces, text, lines, cobalt accent family, selection, focus ring, success, blue/orange diverging,
     canvas roles, and `confidence_tint`;
@@ -546,6 +547,9 @@ This builds on the open M1-51 work (PR #256), as one follow-up PR or as amendmen
 - **Built-in High contrast** (`tokens/high-contrast.theme.json`, base `dark`, the HC column of §4.1, focus ring
   width 3, outline elevations). `built-in-themes.js` gains it, and `builtInTheme` accepts it.
   `crates/rastai-formats/tests/theme_tokens.rs` validates all three files.
+- **Contracts §15.3 and §15.8, in this same PR** (names, ADR-0038): `StatePill`, `SegmentedControl`, `StatTile`,
+  `ThemeCard`, `ContextChip` and `TokenConfirm` (the last under its `@rastai/ui/security` entry); the path
+  `packages/ui/src/fonts/`; and the file `tokens/high-contrast.theme.json`.
 - **Bundled fonts** in `packages/ui/src/fonts/`: `Geist[wght].woff2`, `Geist-Italic[wght].woff2`,
   `GeistMono[wght].woff2`, `OFL.txt`, unmodified from github.com/vercel/geist-font. `styles/base.css` declares
   `@font-face` for each with `font-display: swap`; nothing is fetched at runtime.
@@ -598,8 +602,9 @@ This builds on the open M1-51 work (PR #256), as one follow-up PR or as amendmen
   "Rastai · <project> · <section>".
 - Ctrl +/- zoom and the OS reduced-motion setting are respected. Ctrl K, Ctrl . and F6 reach the page.
 - Manual check in WebKitGTK on the owner's box: Geist renders and the focus ring matches Chromium.
-- Second windows wait for ADR-0039 to be accepted; then `SessionApproval` lands with the work that builds second
-  windows (frontend layout 8.9 step 5).
+- Second windows are built only through ADR-0039's mechanism (Accepted 2026-10-13). Before this work, a contract PR
+  registers `SessionApproval` and adds its threat-model row (ADR-0039 decision 7). `SessionApproval` lands with the
+  work that builds second windows (frontend layout 8.9 step 5).
 
 **Command requests R1 to R14** (§7) are not part of M1. Each joins the milestone of the command area it extends, through
 that milestone's contract PR.
@@ -609,21 +614,21 @@ that milestone's contract PR.
 ## 10. Names not yet in contracts (proposals)
 
 Each row is a name this design uses that `contracts.md` v1.2 does not list yet. The "Registered in" column says which
-change adds it. None is used in code yet. A name leaves this table when its change lands (ADR-0038).
+change adds it. None is used in code yet. A name leaves this table when its change lands (ADR-0038). Names already in
+contracts (for example `PanelChrome`, `DiagnosticView`, `EgressBadge`, `ui.mode`, `section=training` and `focus=canvas`)
+are not listed here.
 
 | Name | Kind | Used in | Registered in |
 |---|---|---|---|
-| `StatePill`, `SegmentedControl`, `StatTile`, `ThemeCard`, `ContextChip` | UI components (new, §5.2) | §5.2, §6 | §9 (b) contract PR, if contracts lists component names; otherwise the UI kit PR |
-| `SessionApproval` | locked component in `@rastai/ui/security` | §5.2, §6.9, ADR-0039 | §9 (b) contract PR |
-| `TokenConfirm` | locked component in `@rastai/ui/security` | §5.2, §6.9 | §9 (b) contract PR |
-| `high_contrast` | `ui.theme` value (beside `system`, `light`, `dark`) | §6.8, §8 decision 4 | §9 (b) contract PR (contracts §11.2) |
-| `confidence_tint` | colour role of `rastai.theme/1` | §4.1, §4.4 | §9 (b) contract PR (`rastai.theme/1`, contracts §5.6) |
-| `font_sizes_px.xxl` | typography key of `rastai.theme/1` | §4.2, §4.4 | §9 (b) contract PR (`rastai.theme/1`, contracts §5.6) |
-| `packages/ui/src/fonts/` | bundled font path | §4.5, §9 (c) | §9 (b) contract PR (contracts §15) |
-| `tokens/high-contrast.theme.json` | token file path | §9 (c) | the UI kit PR |
+| `StatePill`, `SegmentedControl`, `StatTile`, `ThemeCard`, `ContextChip` | UI components (new, §5.2) | §5.2, §6 | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15.3, `@rastai/ui` row) |
+| `TokenConfirm` | locked component in `@rastai/ui/security` | §5.2, §6.9 | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15.3, its `@rastai/ui/security` entry) |
+| `SessionApproval` | locked component in `@rastai/ui/security` | §5.2, §6.9, ADR-0039 | the contract PR before second windows, §9 (d) (ADR-0039 decision 7; with its threat-model row) |
+| `high_contrast` | `ui.theme` value (beside `system`, `light`, `dark`) | §6.8, §8 decision 4 | §9 (b), DESIGN-02 (#266) (contracts §11.2) |
+| `confidence_tint` | colour role of `rastai.theme/1` | §4.1, §4.4 | §9 (b), DESIGN-02 (#266) (`rastai.theme/1`, contracts §5.6) |
+| `font_sizes_px.xxl` | typography key of `rastai.theme/1` | §4.2, §4.4 | §9 (b), DESIGN-02 (#266) (`rastai.theme/1`, contracts §5.6) |
+| `packages/ui/src/fonts/` | bundled font path | §4.5, §9 (c) | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15) |
+| `tokens/high-contrast.theme.json` | token file path | §9 (c) | §9 (c), DESIGN-03 (#267), in the same PR (contracts §15.8) |
 | `eta_seconds`, `step`, `total_steps`, `epoch`, `total_epochs` | fields of `job.progress` or `run.get` (time left and step/epoch totals; today `JobProgress` has only `fraction` and `message`) | §6.5, §7 R5 | the Training milestone's contract PR |
-| `section=training`, `focus=canvas` | shortcut context keys (where a binding applies; §3.7), not wire names | §3.7 | the shortcut contract PR that registers the keymap |
-| `ui.mode` | setting key (Basic / Advanced) | §3.4, §3.2 | §9 (b) contract PR (contracts §11.2) |
 | `classification.accuracy` | metric name | §6.5, §7 R14 | contracts §15.7 confirmation (R14) |
 | `theme.list` | command | §7 R12 | the milestone that adds themes (M8) |
 | `system.first_run.status` | command | §6.2, §7 R1 | the Home milestone's contract PR |
@@ -635,6 +640,8 @@ change adds it. None is used in code yet. A name leaves this table when its chan
 | `psychology.sae.status` | command | §6.2, §7 R11 | the Psychology milestone's contract PR |
 | Command requests R1–R14 (other than those above) | commands and fields | §7 | each joins the milestone of the area it extends |
 | `IconButton`, `Slider`, `Toggle`, `Tabs`, `SidebarNav`, `StatusBarView`, `EmptyState`, `KeyHint`, `ProgressBar` and the other planned components of §5.2 | layout names (frontend layout 4.1) | §3, §5.2 | not in contracts; a component joins contracts when it is built |
-| `PanelChrome`, `CommandPaletteView`, `DiagnosticView`, `EgressBadge`, `TrustPrompt`, `PermissionList`, `SignedOutScreen` | existing components (M1-51 branch) | §5.2 | not in contracts yet (built on the M1-51 branch) |
-| `contextStore`, `state/theme.js`, `built-in-themes.js`, `permission-text.js`, `locked-styles.js` | file or module names | §3.6, §6.3, §6.9 | layout names (frontend layout 2 and 4); not in contracts |
-| `tokens/*.theme.json`, `security.test.jsx`, `palettes.test.js`, `tokens.test.js`, `basic-advanced.spec.js`, `theme.spec.js`, `palette.spec.js` | test and token file names | §9 | the UI kit and M1-53 to M1-55 PRs |
+| `contextStore`, `state/theme.js` | module names (frontend layout 2) | §3.6, §6.3 | not in contracts; the frontend layout doc owns them |
+| `security.test.jsx`, `basic-advanced.spec.js`, `theme.spec.js`, `palette.spec.js` | test and spec file names | §9 (c), §9 (d) | DESIGN-03 (#267) and M1-53 to M1-55 PRs |
+
+The existing files `tokens/built-in-themes.js`, `tokens/palettes.test.js`, `tokens/tokens.test.js`, `security/locked-styles.js`
+and `security/permission-text.js` are on main; §9 (c) extends them, so they need no registration.
