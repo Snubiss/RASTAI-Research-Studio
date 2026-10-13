@@ -7,8 +7,10 @@
 //!   ones. The kept tables (`tokens`, `nodes`, `plugins`, `projects`) are copied from the old file, whatever of them
 //!   it still reads; a table it can't read starts empty, which fails closed (contracts 8.2).
 //! - **The old file is kept as it was.** The kept tables are read from a copy, `rastai.db.salvage`, which is
-//!   migrated to this build's columns if it is older and removed once read. The old file itself is never opened, so
+//!   migrated to this build's columns if it is older and removed once read. SQLite never opens the old file, so
 //!   `rastai.db.broken-<unix_ms>` holds the very bytes `rastai.db` had (with its `-wal`, if it had one).
+//!   A copy that can't be made stops the rebuild before it changes anything: an old file that can't be read is
+//!   `RRS-S0006` naming it, a copy that can't be written `RRS-S0004` (`RRS-S3002` for a full disk).
 //! - **Crash-safe.** The new index is written to `rastai.db.rebuilding` and only takes the old one's place once it
 //!   is whole and has passed `quick_check`. The old file is linked to `rastai.db.broken-<unix_ms>` first and stays
 //!   at `rastai.db` until the rename, so a kill at any point leaves a usable index: the old one, or the new one. A
@@ -17,9 +19,10 @@
 //!   are the user's to delete, and the report names only the one this rebuild made.
 //! - **Reading is tolerant.** A torn tail ends a log; a corrupt frame (`RRS-S2002`), a sequence gap (`RRS-S2003`)
 //!   or a record a run's log may not carry (`RRS-S2004`) ends it with that code in the report, and the rebuild goes
-//!   on with the next log. A `run.json` that can't be read (`RRS-S0006`) leaves its run out; one with a value the
-//!   rebuild can't use (`RRS-E2006` at that value: a run id that isn't its folder's, a `created_at` that isn't a
-//!   time, a `job_spec` of another run's job) leaves its run, or its job, out.
+//!   on with the next log. A run folder with no `run.json` was never indexed (`submit_job` writes the record before
+//!   the row), so it is passed over quietly. A `run.json` that can't be read (`RRS-S0006`) leaves its run out; one
+//!   with a value the rebuild can't use (`RRS-E2006` at that value: a run id that isn't its folder's, a `created_at`
+//!   that isn't a time, a `job_spec` of another run's job) leaves its run, or its job, out.
 //! - **Blobs.** An artifact whose home is this machine and whose blob is gone is dropped (`RRS-S1002`); with
 //!   `verify_blobs` each such blob is hashed again and a mismatch quarantined first (`RRS-S1001`).
 //!
@@ -36,6 +39,7 @@
 //!   arrive with the milestones that write those rows live.
 
 use std::fs::File;
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use rastai_core::ids::{IdPrefix, id_has_prefix};
@@ -89,6 +93,11 @@ const LOCAL_TRANSPORT: &str = "local";
 /// SQLite's companions of a database file in WAL mode: they belong to the file of the same name.
 const WAL_FILE_SUFFIX: &str = "-wal";
 const SHARED_MEMORY_FILE_SUFFIX: &str = "-shm";
+/// How much of a file `copy_file` holds in memory at once.
+const COPY_BUFFER_BYTES: usize = 64 * 1024;
+/// What the user can do when the old index can't be read, added to its `RRS-S0006` reason. The rebuild stops rather
+/// than drop the kept tables: a fixed permission or a disk that reads again gives them back.
+const OLD_FILE_UNREADABLE_NEXT_STEP: &str = "fix the cause and rebuild again, or move the file aside to rebuild without its tokens, nodes, plugins and projects";
 /// `RRS-S0006`, the store's code for a failed read (crate CLAUDE.md): a `run.json` the file system won't give up.
 const CODE_READ_FAILED: &str = "RRS-S0006";
 /// `RRS-E2006`, "Value isn't in its required form", at the value: what a document check reports for a value it
@@ -177,7 +186,7 @@ struct KeptRows {
 /// can't rebuild from the old file (see the top). The caller holds `daemon.lock`. An error leaves the old index in
 /// place and removes the half-written new one.
 pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError> {
-    std::fs::create_dir_all(&paths.data).map_err(|error| not_writable(&paths.data, &error))?;
+    std::fs::create_dir_all(&paths.data).map_err(|error| write_error(&paths.data, &error))?;
     let rebuilding_path = rastai_db_rebuilding_path(paths);
     remove_database_files(&rebuilding_path)?;
     remove_database_files(&rastai_db_salvage_path(paths))?;
@@ -215,7 +224,9 @@ fn write_rebuilt_index(
 /// The four kept tables as the old file still reads them. No old file: all four start empty. They are read from a
 /// copy, `rastai.db.salvage`, removed afterwards: opening the old file would migrate it and write to it, and the
 /// copy kept at `rastai.db.broken-<unix_ms>` must be the file as it was. A copy that can't be made stops the
-/// rebuild, since going on would drop every token and node.
+/// rebuild, since going on would drop every token and node: an old file that can't be read (a permission, an I/O
+/// error) is `RRS-S0006` naming it, since it may read again once the cause is fixed, and a copy that can't be written
+/// is `RRS-S0004` (`RRS-S3002` for a full disk).
 fn read_kept_tables(paths: &DataPaths, report: &mut RebuildReport) -> Result<KeptRows, StoreError> {
     let old_path = rastai_db_path(paths);
     if !old_path.exists() {
@@ -375,6 +386,9 @@ fn read_run_record(run_folder: &Path, report: &mut RebuildReport) -> Option<RunR
     let file_name = path.display().to_string();
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
+        // A kill between making the folder and writing the record: `submit_job` writes `run.json` before the run's
+        // row, so the live index never had this run either.
+        Err(error) if error.kind() == ErrorKind::NotFound => return None,
         Err(error) => {
             let reason = format!("{file_name}: {error}");
             let unreadable = diagnostic_at(CODE_READ_FAILED, &[("reason", &reason)], &file_name);
@@ -708,7 +722,7 @@ fn swap_in_rebuilt_index(
     pause_if_asked(options, PAUSE_BEFORE_RENAME);
     remove_file_if_present(&companion_path(&index_path, WAL_FILE_SUFFIX))?;
     remove_file_if_present(&companion_path(&index_path, SHARED_MEMORY_FILE_SUFFIX))?;
-    std::fs::rename(rebuilding_path, &index_path).map_err(|error| not_writable(&index_path, &error))?;
+    std::fs::rename(rebuilding_path, &index_path).map_err(|error| write_error(&index_path, &error))?;
     sync_folder(&paths.data)?;
     Ok(old_index_path)
 }
@@ -723,7 +737,7 @@ fn keep_old_file(path: &Path, kept_path: &Path) -> Result<(), StoreError> {
     if std::fs::hard_link(path, kept_path).is_ok() {
         return Ok(());
     }
-    std::fs::copy(path, kept_path).map_err(|error| not_writable(kept_path, &error))?;
+    copy_file(path, kept_path)?;
     sync_file(kept_path)
 }
 
@@ -731,14 +745,30 @@ fn keep_old_file(path: &Path, kept_path: &Path) -> Result<(), StoreError> {
 /// The `-shm` is left: it is only an index into the `-wal`, which SQLite builds again on open. No one writes the
 /// file meanwhile (the caller holds `daemon.lock`).
 fn copy_database_files(database_path: &Path, copy_path: &Path) -> Result<(), StoreError> {
-    std::fs::copy(database_path, copy_path).map_err(|error| not_writable(copy_path, &error))?;
+    copy_file(database_path, copy_path)?;
     let wal_path = companion_path(database_path, WAL_FILE_SUFFIX);
     if !wal_path.exists() {
         return Ok(());
     }
-    let wal_copy_path = companion_path(copy_path, WAL_FILE_SUFFIX);
-    std::fs::copy(&wal_path, &wal_copy_path).map_err(|error| not_writable(&wal_copy_path, &error))?;
-    Ok(())
+    copy_file(&wal_path, &companion_path(copy_path, WAL_FILE_SUFFIX))
+}
+
+/// Copies one file, telling a failed read of `source` (`RRS-S0006`, naming it) from a failed write of the copy
+/// (`RRS-S0004`, or `RRS-S3002` for a full disk), which `std::fs::copy` reports alike.
+fn copy_file(source: &Path, destination: &Path) -> Result<(), StoreError> {
+    let mut source_file = File::open(source).map_err(|error| old_file_unreadable(source, &error))?;
+    let mut copy = File::create(destination).map_err(|error| write_error(destination, &error))?;
+    let mut buffer = vec![0_u8; COPY_BUFFER_BYTES];
+    loop {
+        let read_bytes = match source_file.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(read_bytes) => read_bytes,
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+            Err(error) => return Err(old_file_unreadable(source, &error)),
+        };
+        copy.write_all(&buffer[..read_bytes])
+            .map_err(|error| write_error(destination, &error))?;
+    }
 }
 
 /// `rastai.db-wal` for `rastai.db`: SQLite names a database's companion files this way.
@@ -758,14 +788,14 @@ fn remove_database_files(database_path: &Path) -> Result<(), StoreError> {
 fn remove_file_if_present(path: &Path) -> Result<(), StoreError> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(not_writable(path, &error)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(write_error(path, &error)),
     }
 }
 
 fn sync_file(path: &Path) -> Result<(), StoreError> {
-    let file = File::open(path).map_err(|error| not_writable(path, &error))?;
-    file.sync_all().map_err(|error| not_writable(path, &error))
+    let file = File::open(path).map_err(|error| write_error(path, &error))?;
+    file.sync_all().map_err(|error| write_error(path, &error))
 }
 
 /// Makes a rename in the folder durable.
@@ -780,11 +810,24 @@ fn sync_folder(_folder: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// A file in the data folder that can't be created, linked, renamed or removed: `RRS-S0004`.
-fn not_writable(path: &Path, error: &std::io::Error) -> StoreError {
+/// A file in the data folder that can't be created, written, linked, renamed or removed: `RRS-S0004`, or
+/// `RRS-S3002` for a full disk, whose fix is space rather than permissions.
+fn write_error(path: &Path, error: &std::io::Error) -> StoreError {
+    if error.kind() == ErrorKind::StorageFull {
+        return StoreError::DiskFull {
+            reason: format!("{}: {error}", path.display()),
+        };
+    }
     StoreError::DataDirectoryNotWritable {
         path: path.to_path_buf(),
         reason: error.to_string(),
+    }
+}
+
+/// The old index, or its `-wal`, that can't be read: `RRS-S0006` naming it, with what the user can do next.
+fn old_file_unreadable(path: &Path, error: &std::io::Error) -> StoreError {
+    StoreError::DatabaseReadFailed {
+        reason: format!("{}: {error}; {OLD_FILE_UNREADABLE_NEXT_STEP}", path.display()),
     }
 }
 
@@ -878,6 +921,11 @@ mod tests {
     const REVOKE_CREATOR_ALONE_SQL: &str = "UPDATE tokens SET revoked_unix_ms = ?1 WHERE token_id = ?2";
     const DELETE_CREATOR_SQL: &str = "DELETE FROM tokens WHERE token_id = ?1";
     const TOKEN_REVOKED_CODE: &str = "RRS-C1006";
+    // An old index no one but root can read, and the mode that lets the test remove it again.
+    #[cfg(unix)]
+    const UNREADABLE_MODE: u32 = 0o000;
+    #[cfg(unix)]
+    const READABLE_MODE: u32 = 0o600;
 
     fn test_paths(test_name: &str) -> DataPaths {
         let root = std::env::temp_dir().join(format!("rastai-store-rebuild-{}-{test_name}", std::process::id()));
@@ -923,6 +971,54 @@ mod tests {
             .collect();
         assert_eq!(names, ["rastai.db"], "a newer app's index was copied or set aside");
         std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // An old index the rebuild can't read (a permission here; an I/O error the same way): it may read again once the
+    // cause is fixed, so the rebuild stops with the read code naming it, not RRS-S0004 for the scratch copy, and
+    // leaves the data folder as it was.
+    #[cfg(unix)]
+    #[test]
+    fn an_old_index_that_cannot_be_read_stops_the_rebuild_with_rrs_s0006_naming_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let paths = test_paths("unreadable-old-index");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let index_path = rastai_db_path(&paths);
+        drop(open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap());
+        std::fs::set_permissions(&index_path, std::fs::Permissions::from_mode(UNREADABLE_MODE)).unwrap();
+        if File::open(&index_path).is_ok() {
+            // Root reads any file, so no permission makes this one unreadable.
+            eprintln!("skipped: this user reads files whatever their permissions");
+            std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+            return;
+        }
+
+        let error = rebuild_index(&paths, &RebuildOptions::default()).unwrap_err();
+
+        std::fs::set_permissions(&index_path, std::fs::Permissions::from_mode(READABLE_MODE)).unwrap();
+        assert_eq!(error.code(), "RRS-S0006");
+        let message = store_error_diagnostic(&error).message;
+        assert!(
+            message.contains(&format!("{}: ", index_path.display())),
+            "the message doesn't name the old index: {message}"
+        );
+        assert!(message.contains("move the file aside"), "no next step: {message}");
+        let names: Vec<String> = std::fs::read_dir(&paths.data)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["rastai.db"], "the rebuild left a file behind");
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // std::fs::copy reports both alike; a full disk needs space, not permissions, so it gets its own code.
+    #[test]
+    fn a_full_disk_is_rrs_s3002_and_any_other_failed_write_rrs_s0004() {
+        let path = Path::new("rastai.db.salvage");
+        let disk_full = std::io::Error::from(ErrorKind::StorageFull);
+        let permission_denied = std::io::Error::from(ErrorKind::PermissionDenied);
+
+        assert_eq!(write_error(path, &disk_full).code(), "RRS-S3002");
+        assert_eq!(write_error(path, &permission_denied).code(), "RRS-S0004");
     }
 
     // An older index is migrated to be read, but only in the scratch copy: the kept old index is the file as it was,

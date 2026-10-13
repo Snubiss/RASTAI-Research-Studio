@@ -726,6 +726,22 @@ fn a_data_folder_without_an_index_gets_one_and_what_a_killed_rebuild_left_goes()
     remove_test_folder(&paths);
 }
 
+// A kill between making a run's folder and writing its run.json: the live index never had that run (submit_job
+// writes the record first), so the rebuild passes the folder over without a report.
+#[test]
+fn a_run_folder_without_a_run_json_is_passed_over_quietly() {
+    let paths = test_paths("rebuild-no-record");
+    copy_fixture(&paths);
+    std::fs::remove_file(run_dir(&paths, RUN_B).join("run.json")).unwrap();
+
+    let report = rebuild(&paths);
+
+    assert!(codes(&report).is_empty(), "reported {:?}", codes(&report));
+    assert_eq!(report.runs, 1);
+    assert_eq!(rows_of(&read_index(&paths), "runs").len(), 1);
+    remove_test_folder(&paths);
+}
+
 #[test]
 fn a_run_json_that_names_another_run_is_left_out() {
     let paths = test_paths("rebuild-foreign-record");
