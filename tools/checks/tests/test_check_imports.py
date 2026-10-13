@@ -191,6 +191,22 @@ FAILING_JAVASCRIPT = [
         'export { TrustPrompt } from /* re-export */ "@rastai/ui/security";\n',
         "only apps/web/src/ may import",
     ),
+    # A comment is whitespace, so it can't glue `await` or `return` to `import(` and hide the keyword (FU-273).
+    (
+        "plugins/psychology/ui/src/Live.jsx",
+        'const p = await/**/import("@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/psychology/ui/src/Live.jsx",
+        'function open() {\n  return/**/import("@rastai/ui/security");\n}\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/loader.js",
+        'const p = await/**/import("@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
     # Sections reach the typed wrappers through @rastai/plugin, and only the plugin hosts' tests use the client's
     # test support.
     (

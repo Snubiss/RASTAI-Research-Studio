@@ -404,8 +404,9 @@ def js_imports(text: str) -> list[tuple[int, str, bool]]:
     """(offset, specifier, is_type_only) for each import: strings right after `from` or `import` in code, and
     JSDoc `import("...")` types in comments."""
     imports = []
-    # The code since the last string. A comment adds nothing to it, so a comment between `import(` and the
-    # specifier (`import(/* @vite-ignore */ "x")`) can't hide the `import(` before it.
+    # The code since the last string. A comment is whitespace in JavaScript, so it becomes one space here: the
+    # code on both sides stays apart (`await/**/import(` must still read as `await import(`), and a comment
+    # between `import(` and the specifier (`import(/* @vite-ignore */ "x")`) can't hide the `import(` before it.
     code_before = ""
     for kind, start, end in split_javascript(text):
         if kind == "code":
@@ -414,7 +415,8 @@ def js_imports(text: str) -> list[tuple[int, str, bool]]:
             if SPECIFIER_BEFORE.search(code_before):
                 imports.append((start, text[start + 1 : end - 1], False))
             code_before = ""
-        else:
+        elif kind == "comment":
+            code_before += " "
             imports += type_imports_in_comment(text[start:end], start)
     return imports
 
