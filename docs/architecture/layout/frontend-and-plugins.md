@@ -377,7 +377,7 @@ How the setting reaches a control:
 3. **Context:** `App` renders `<ModeProvider mode={globalMode}>`. Every `PanelFrame` renders `<ModeProvider mode={override ?? globalMode}>` around its panel.
 4. **Components** call `useMode()` to change wording or detail, and wrap extra controls in `<AdvancedOnly>`. Visual density is a separate setting, `ui.density`, carried by the theme tokens (2.10), not by the mode.
 5. **Commands:** in Basic mode the palette and menus show only commands whose `CommandDescriptor.basic` is true.
-6. **Diagnostics:** `DiagnosticView` shows the catalog's `basic_text` and a fix button in Basic mode, and adds the code, path and full message in Advanced.
+6. **Diagnostics:** `DiagnosticView` shows the catalog's `basic_text` and a fix button in Basic mode (a short label, with the catalog's `fix_text` sentence beside it), and adds the code, path and full message in Advanced.
 7. **Iframes** get the mode in the `ui/initialize` result and every change through `rastai/theme_changed`.
 8. **Switching keeps all state.** Controls inside `<AdvancedOnly>` keep their values in the panel's store, not in `useState` inside the Advanced subtree, so switching back restores them. Changing the global mode is `settings.set` on `ui.mode`; the resulting `command.finished` event refreshes every window.
 
@@ -550,8 +550,8 @@ flowchart TD
 **Rules**
 - **Components and plugin UIs read only `--rr-*` variables.** No color, font, spacing, radius, shadow or duration literal in component CSS or JSX. `tools/checks/check-colors` fails CI on a color literal in `packages/canvas/src/`, `packages/viz/src/`, `apps/web/src/sections/` and `plugins/*/ui/src/`; `@rastai/ui`'s own component CSS follows the same rule.
 - **Renderers never pick colors.** They take `CanvasColors` or `VizColors` (plain RGBA arrays) through `setColors`. The spike's hard-coded `#101318` is gone; it seeds the built-in dark theme's `canvas_background`.
-- **Role keys are fixed** (contracts §5.6). A theme may set any of them; missing ones come from its `base`. The list comes from the generated `ThemeDocument` type in `@rastai/formats`; nothing in the frontend re-types it.
-- **Built-in themes** are `light` and `dark`, stored as `rastai.theme/1` data in `@rastai/ui/src/tokens/built-in-themes.js`. Follow-OS high-contrast themes and a font assets path come in M8.
+- **Role keys are fixed** (contracts §5.6). A theme may set any of them; missing ones come from its `base`. `@rastai/ui` may not import `@rastai/formats` (contracts §2.3), so `COLOR_ROLES` in `built-in-themes.js` is read from the built-in `light.theme.json`, never typed out by hand. Two tests keep it equal to the schema: `tokens.test.js` compares it and both built-ins with `schemas/rastai.theme/1.json`, and `rastai-formats`' `theme_tokens.rs` validates both files through `read_document` and checks that they set every role.
+- **Built-in themes** are `light` and `dark`, stored as plain `rastai.theme/1` files (`light.theme.json`, `dark.theme.json`) that `@rastai/ui/src/tokens/built-in-themes.js` imports. Follow-OS high-contrast themes and a font assets path come in M8.
 - **Plugin themes** (`themes[]`, capability `ui.theme@1`) are refused before M8 with `RRS-P1002`. From M8 the daemon validates the theme file, runs the accessibility check (2.9) and the Appearance page offers a picker.
 - **Per-panel `theme_override`** in `rastai.layout/1` is M8 or Phase 2.
 
@@ -940,7 +940,7 @@ packages/ui/
       SidebarNav.jsx  StatusBarView.jsx   view only; apps/web's StatusBar feeds it
       PanelChrome.jsx          panel title bar: title, Basic/Advanced override toggle, panel menu
     diagnostics/
-      DiagnosticView.jsx       Basic: basic_text and fix button. Advanced: adds code, path, message, fix_text.
+      DiagnosticView.jsx       Basic: basic_text, a short fix button, fix_text beside it. Advanced: adds code, path, message.
                                Severity colors from --rr-locked-severity-*
       DiagnosticList.jsx
       catalog-lookup.js        catalog entry for a code, with {placeholders} filled from the Diagnostic

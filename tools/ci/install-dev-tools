@@ -269,10 +269,16 @@ install_browser() {
     mv "$folder" "$PLAYWRIGHT_BROWSERS_DIR/$folder_name"
 }
 
-# Nothing to do when the system already has the library (a CI runner after `playwright install-deps`).
+# Nothing to do when the system already has the library. Only these two packages are handled: a machine missing
+# more of WebKit's libraries (a bare server, perhaps the stock CI runner, unchecked while CI is off) fails the WebKit
+# tests with Playwright's own list of what to install.
 add_webkit_libraries() {
     local webkit_dir="$1"
-    if ldconfig -p | grep -q "$WEBKIT_EXTRA_LIBRARY"; then
+    # Read the cache into a variable first: `ldconfig -p | grep -q` under pipefail can fail even on a match, because
+    # grep -q exits early and ldconfig dies of SIGPIPE.
+    local library_cache
+    library_cache="$(ldconfig -p)"
+    if grep -q "$WEBKIT_EXTRA_LIBRARY" <<<"$library_cache"; then
         return
     fi
     local package_dir="$WORK_DIR/webkit-libraries"

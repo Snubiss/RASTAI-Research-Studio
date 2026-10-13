@@ -7,6 +7,10 @@ import { NumberField } from "./NumberField.jsx";
 import { Select } from "./Select.jsx";
 import { TextField } from "./TextField.jsx";
 
+// A choice field with no value shows this empty option instead of the first choice, so the form never shows a value
+// it doesn't report, and a required choice stays invalid until the user picks one.
+const NO_CHOICE_LABEL = "Choose…";
+
 /**
  * @typedef {object} FieldSpec
  * @property {string} name
@@ -42,7 +46,8 @@ export function FieldForm({ fields, values, onChange }) {
 }
 
 /**
- * The one control a FieldSpec's kind calls for. A missing value shows as empty, unchecked or the first choice.
+ * The one control a FieldSpec's kind calls for. A missing value shows as empty, unchecked or "Choose…". Callers
+ * that want a default put it in `values`.
  * @param {object} props
  * @param {FieldSpec} props.field
  * @param {any} props.value
@@ -67,8 +72,8 @@ function FieldControl({ field, value, onChange }) {
         <Select
           {...shared}
           required={field.required}
-          value={typeof value === "string" ? value : (field.choices[0] ?? "")}
-          options={field.choices.map((choice) => ({ value: choice, label: choice }))}
+          value={typeof value === "string" ? value : ""}
+          options={choiceOptions(field.choices, value)}
           onChange={(choice) => onChange(field.name, choice)}
         />
       );
@@ -93,4 +98,19 @@ function FieldControl({ field, value, onChange }) {
         />
       );
   }
+}
+
+/**
+ * The choices as Select options, led by an empty "Choose…" option while no choice is made. The empty value is what
+ * makes a native required <select> invalid.
+ * @param {string[]} choices
+ * @param {any} value
+ * @returns {import("./Select.jsx").SelectOption[]}
+ */
+function choiceOptions(choices, value) {
+  const options = choices.map((choice) => ({ value: choice, label: choice }));
+  if (typeof value === "string") {
+    return options;
+  }
+  return [{ value: "", label: NO_CHOICE_LABEL }, ...options];
 }

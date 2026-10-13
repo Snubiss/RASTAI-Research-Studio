@@ -37,6 +37,9 @@ const INSTALL_TOOLS_LINE = /^ *run: tools\/ci\/install-dev-tools (.*)$/;
 const FULL_HISTORY_LINE = "fetch-depth: 0";
 const BASE_REF_LINE = "RASTAI_BASE_REF: origin/${{ github.base_ref || 'main' }}";
 const PROTOC_PLUGIN_CACHE_LINES = ["~/.cargo/bin/protoc-gen-prost", "~/.cargo/bin/protoc-gen-tonic"];
+// A pipe into an early-exiting grep (`-q`, `-m`) in code, not a comment. The script runs under `set -o pipefail`,
+// where the writer dies of SIGPIPE once grep stops reading, so the pipeline fails even when grep matched.
+const EARLY_EXIT_GREP_PIPE = /^[^#]*\|\s*grep\s+-[a-zA-Z]*[qm]/;
 
 // A job id: a key indented by exactly two spaces. `jobs:` is the last top-level key of ci.yml, so after it every
 // such key is a job.
@@ -367,6 +370,11 @@ test("nightly.yml keeps each target's fuzz corpus from one night to the next", (
 test("the justfile reaches the cpu environment's Python only through cpu_python", () => {
   const justfileText = readLines(JUSTFILE).join("\n");
   expect(justfileText).not.toContain(CPU_PYTHON_BY_HAND);
+});
+
+test("install-dev-tools never pipes into grep -q, which pipefail turns into a false miss", () => {
+  const pipes = readLines(INSTALL_SCRIPT).filter((line) => EARLY_EXIT_GREP_PIPE.test(line));
+  expect(pipes).toEqual([]);
 });
 
 test("install-dev-tools installs the versions the repo pins elsewhere", () => {

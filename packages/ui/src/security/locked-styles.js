@@ -7,6 +7,7 @@ import { LOCKED_PREFIX, LOCKED_TOKENS } from "../tokens/locked.js";
 
 // Fixed on purpose: these never follow the theme's typography or density tokens.
 const SECURITY_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const SECURITY_CODE_FONT = "ui-monospace, monospace";
 const BODY_FONT_SIZE = "14px";
 const SMALL_FONT_SIZE = "12px";
 const HEADING_FONT_SIZE = "18px";
@@ -14,6 +15,9 @@ const LINE_HEIGHT = 1.5;
 const BOLD = 700;
 // WCAG 2.2's minimum target size (layout 2.9).
 const MIN_TARGET_SIZE = "24px";
+// The largest z-index a browser accepts, so the signed-out screen covers everything else in the page; nothing
+// first-party may stack above it (plugin UIs are iframes clipped to their panels, so they can't reach it at all).
+const TOP_LAYER_Z_INDEX = 2147483647;
 
 /**
  * `var(--rr-locked-<key>, <light value>)`: the light set is the fallback before applyThemeTokens has run.
@@ -125,13 +129,13 @@ export const SCREEN_STYLE = {
   justifyContent: "center",
   background: lockedColor("security-surface"),
   color: lockedColor("security-text"),
-  zIndex: 2147483647,
+  zIndex: TOP_LAYER_Z_INDEX,
 };
 
 /** @type {CSSProperties} */
 export const CODE_STYLE = {
   ...FIXED_TEXT,
-  fontFamily: "ui-monospace, monospace",
+  fontFamily: SECURITY_CODE_FONT,
   fontSize: SMALL_FONT_SIZE,
   color: lockedColor("security-text"),
 };

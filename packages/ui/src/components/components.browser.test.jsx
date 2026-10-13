@@ -51,12 +51,14 @@ afterEach(() => {
  * The form with its values kept in state, and every onChange call recorded.
  * @param {object} props
  * @param {Array<Object<string, any>>} props.changes
+ * @param {FieldSpec[]} [props.fields]
+ * @param {Object<string, any>} [props.initialValues]
  */
-function FormHarness({ changes }) {
-  const [values, setValues] = useState(/** @type {Object<string, any>} */ ({ device: "cpu" }));
+function FormHarness({ changes, fields = FIELDS, initialValues = { device: "cpu" } }) {
+  const [values, setValues] = useState(initialValues);
   return (
     <FieldForm
-      fields={FIELDS}
+      fields={fields}
       values={values}
       onChange={(next) => {
         changes.push(next);
@@ -116,6 +118,28 @@ describe("FieldForm", () => {
     await userEvent.click(/** @type {HTMLElement} */ (mounted.container.querySelector("input[type=checkbox]")));
     await userEvent.selectOptions(/** @type {HTMLElement} */ (mounted.container.querySelector("select")), "cuda:0");
     expect(changes.at(-1)).toEqual({ device: "cuda:0", model: "tiny", steps: 12, resume: true });
+    await mounted.unmount();
+  });
+
+  test("a choice with no value shows Choose…, not the first choice, and a required one is invalid", async () => {
+    /** @type {Array<Object<string, any>>} */
+    const changes = [];
+    /** @type {FieldSpec[]} */
+    const fields = [
+      { name: "device", label: "Device", kind: "choice", required: true, help: "", choices: ["cpu", "cuda:0"] },
+    ];
+    const mounted = await mount(<FormHarness fields={fields} initialValues={{}} changes={changes} />);
+    const select = /** @type {HTMLSelectElement} */ (mounted.container.querySelector("select"));
+    expect(select.value).toBe("");
+    expect(select.selectedOptions[0].textContent).toBe("Choose…");
+    expect(select.validity.valueMissing).toBe(true);
+
+    await userEvent.selectOptions(select, "cpu");
+    expect(changes).toEqual([{ device: "cpu" }]);
+    expect(select.value).toBe("cpu");
+    expect(select.validity.valueMissing).toBe(false);
+    const labels = [...select.options].map((option) => option.textContent);
+    expect(labels).toEqual(["cpu", "cuda:0"]);
     await mounted.unmount();
   });
 });

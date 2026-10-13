@@ -15,10 +15,11 @@ import { LOCKED_PREFIX, lockedTokensFor } from "./locked.js";
 
 /** One CSS variable: [name, value]. @typedef {[string, string]} CssVariable */
 
-const FONT_SIZE_KEYS = ["xs", "sm", "md", "lg", "xl"];
-const FONT_WEIGHT_KEYS = ["regular", "medium", "bold"];
-const LINE_HEIGHT_KEYS = ["body", "heading", "code"];
-const RADIUS_KEYS = ["small", "medium", "large"];
+// Each list is `const` so the checker knows every key is a field of its token group.
+const FONT_SIZE_KEYS = /** @type {const} */ (["xs", "sm", "md", "lg", "xl"]);
+const FONT_WEIGHT_KEYS = /** @type {const} */ (["regular", "medium", "bold"]);
+const LINE_HEIGHT_KEYS = /** @type {const} */ (["body", "heading", "code"]);
+const RADIUS_KEYS = /** @type {const} */ (["small", "medium", "large"]);
 // Lets the browser draw its own parts (scrollbars, native form controls) for the same light or dark base.
 const COLOR_SCHEME_PROPERTY = "color-scheme";
 
@@ -48,7 +49,7 @@ export function themeVariables(tokens) {
     ...colorVariables(tokens),
     ...typographyVariables(tokens),
     ...spacingVariables(tokens),
-    ...RADIUS_KEYS.map((key) => cssVariable(`--rr-radius-${key}`, pixels(readNumber(tokens.radiusPx, key)))),
+    ...RADIUS_KEYS.map((key) => cssVariable(`--rr-radius-${key}`, pixels(tokens.radiusPx[key]))),
     cssVariable("--rr-motion-fast", `${tokens.motion.fastMs}ms`),
     cssVariable("--rr-motion-slow", `${tokens.motion.slowMs}ms`),
     cssVariable("--rr-motion-easing", tokens.motion.easing),
@@ -96,15 +97,9 @@ function typographyVariables(tokens) {
   return [
     cssVariable("--rr-font-ui", typography.fontFamilyUi),
     cssVariable("--rr-font-mono", typography.fontFamilyMono),
-    ...FONT_WEIGHT_KEYS.map((key) =>
-      cssVariable(`--rr-font-weight-${key}`, String(readNumber(typography.fontWeights, key))),
-    ),
-    ...FONT_SIZE_KEYS.map((key) =>
-      cssVariable(`--rr-font-size-${key}`, pixels(readNumber(typography.fontSizesPx, key))),
-    ),
-    ...LINE_HEIGHT_KEYS.map((key) =>
-      cssVariable(`--rr-line-height-${key}`, String(readNumber(typography.lineHeights, key))),
-    ),
+    ...FONT_WEIGHT_KEYS.map((key) => cssVariable(`--rr-font-weight-${key}`, String(typography.fontWeights[key]))),
+    ...FONT_SIZE_KEYS.map((key) => cssVariable(`--rr-font-size-${key}`, pixels(typography.fontSizesPx[key]))),
+    ...LINE_HEIGHT_KEYS.map((key) => cssVariable(`--rr-line-height-${key}`, String(typography.lineHeights[key]))),
   ];
 }
 
@@ -126,16 +121,6 @@ function lockedBase(tokens) {
 }
 
 /**
- * Reads a numeric field by name from one of the small token groups.
- * @param {Object<string, number>} group
- * @param {string} key
- * @returns {number}
- */
-function readNumber(group, key) {
-  return group[key];
-}
-
-/**
  * @param {number} size
  * @returns {string}
  */
@@ -144,6 +129,8 @@ function pixels(size) {
 }
 
 /**
+ * One name and value pair. A function rather than a bare `[name, value]` literal because the checker reads a bare
+ * array literal inside .map() as string[], not as the two-item CssVariable these lists are typed as.
  * @param {string} name
  * @param {string} value
  * @returns {CssVariable}
