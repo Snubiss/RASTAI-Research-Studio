@@ -88,29 +88,6 @@ pub(crate) fn open_database_for_writing(
     migrations: &[Migration],
 ) -> Result<SqliteConnection, StoreError> {
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-    open_writer(path, flags, settings, migrations)
-}
-
-/// Opens (or creates) the new index the rebuild writes at `rastai.db.rebuilding`. SQLite refuses a path that is a
-/// symbolic link, so a link planted there is never written through (the rebuild's file, contracts 8.1).
-pub(crate) fn open_database_for_rebuilding(
-    path: &Path,
-    settings: &DatabaseSettings,
-    migrations: &[Migration],
-) -> Result<SqliteConnection, StoreError> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
-        | OpenFlags::SQLITE_OPEN_CREATE
-        | OpenFlags::SQLITE_OPEN_NO_MUTEX
-        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-    open_writer(path, flags, settings, migrations)
-}
-
-fn open_writer(
-    path: &Path,
-    flags: OpenFlags,
-    settings: &DatabaseSettings,
-    migrations: &[Migration],
-) -> Result<SqliteConnection, StoreError> {
     let connection = open_connection(path, flags, false)?;
     check_schema_version(&connection, migrations)?;
     check_integrity(&connection)?;
@@ -124,9 +101,10 @@ fn open_writer(
 /// `quick_check` can still give up its readable rows. The open writes to the file (an older one is migrated, as
 /// every open by its writer would, so its rows read in this build's columns), which is why it is never the old file
 /// itself. A file migrated by a newer app is refused with `RRS-S0002`. A missing file is an error, not a new
-/// database.
+/// database. The rebuild makes the file itself first, with `create_new` (rebuild.rs), so a link planted at its path
+/// is refused there; SQLite's own no-follow flag is not used, since it refuses a link in any folder above the file too.
 pub(crate) fn open_database_for_salvage(path: &Path, migrations: &[Migration]) -> Result<SqliteConnection, StoreError> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let connection = open_connection(path, flags, false)?;
     check_schema_version(&connection, migrations)?;
     apply_pending_migrations(&connection, migrations)?;

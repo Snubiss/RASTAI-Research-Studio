@@ -76,7 +76,7 @@ use crate::index::runs::{JobRow, RunRow, read_job_run_id, upsert_job, upsert_run
 use crate::indexer::{apply_daemon_events, apply_run_events};
 use crate::sqlite::{
     SqliteConnection, SqliteTransaction, begin_transaction, commit_transaction, finish_database_file,
-    open_database_for_rebuilding, open_database_for_salvage, run_in_savepoint,
+    open_database_for_salvage, open_database_for_writing, run_in_savepoint,
 };
 use crate::store::{INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS};
 
@@ -209,7 +209,8 @@ fn write_rebuilt_index(
     options: &RebuildOptions,
     report: &mut RebuildReport,
 ) -> Result<(), StoreError> {
-    let fresh = open_database_for_rebuilding(rebuilding_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS)?;
+    create_scratch_file(rebuilding_path)?;
+    let fresh = open_database_for_writing(rebuilding_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS)?;
     let kept = read_kept_tables(paths, report)?;
     let home_node_id = embedded_node_id(&kept.nodes);
     write_kept_tables(&fresh, &kept, report)?;
@@ -768,6 +769,20 @@ fn keep_old_file(path: &Path, kept_path: &Path) -> Result<(), StoreError> {
     sync_file(kept_path)
 }
 
+/// Makes the empty file a scratch index is opened on, with `create_new`: a link or file planted at the path between
+/// the removal and the creation makes this fail, so the open never writes through it. Only the folders above the
+/// file are followed, as the daemon's own open follows them, so a data folder reached through a symbolic link works.
+fn create_scratch_file(path: &Path) -> Result<(), StoreError> {
+    remove_file_if_present(path)?;
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| write_error(path, &error))?;
+    drop(file);
+    Ok(())
+}
+
 /// Gives the new index the old index's mode, so a 0600 index stays 0600. The kept copy has the old mode already.
 fn match_old_index_mode(index_path: &Path, rebuilding_path: &Path) -> Result<(), StoreError> {
     if !index_path.exists() {
@@ -973,8 +988,7 @@ mod tests {
 
     use super::*;
     use crate::sqlite::{
-        Migration, SqlValue, execute, integer_value, open_database_for_reading, open_database_for_salvage,
-        open_database_for_writing, text_value,
+        Migration, SqlValue, execute, integer_value, open_database_for_reading, open_database_for_writing, text_value,
     };
 
     // The migration a newer app would have added; this build doesn't know it.
@@ -1295,29 +1309,59 @@ mod tests {
         std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
     }
 
-    // SQLite would create or migrate the empty file a link points at, so the open itself must refuse the link.
+    // A link planted at a scratch path is replaced by the rebuild's own file; the file it points at is never written.
     #[cfg(unix)]
     #[test]
-    fn the_new_and_scratch_indexes_are_never_opened_through_a_planted_link() {
+    fn a_link_planted_at_a_scratch_path_is_replaced_and_its_target_is_left_alone() {
         use std::os::unix::fs::symlink;
-        let paths = test_paths("index-link-planted");
+        let paths = test_paths("scratch-link-planted");
         std::fs::create_dir_all(&paths.data).unwrap();
-        let victim_path = paths.data.join("victim.db");
-        std::fs::write(&victim_path, b"").unwrap();
-        let rebuilding_path = rastai_db_rebuilding_path(&paths);
-        let salvage_path = rastai_db_salvage_path(&paths);
-        symlink(&victim_path, &rebuilding_path).unwrap();
-        symlink(&victim_path, &salvage_path).unwrap();
+        let index_path = rastai_db_path(&paths);
+        drop(open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap());
+        let victim_path = paths.data.join("victim.txt");
+        std::fs::write(&victim_path, b"not the index").unwrap();
+        symlink(&victim_path, rastai_db_rebuilding_path(&paths)).unwrap();
+        symlink(&victim_path, rastai_db_salvage_path(&paths)).unwrap();
 
-        assert!(open_database_for_rebuilding(&rebuilding_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).is_err());
-        assert!(open_database_for_salvage(&salvage_path, INDEX_MIGRATIONS).is_err());
+        rebuild_index(&paths, &RebuildOptions::default()).unwrap();
 
-        assert_eq!(
-            std::fs::metadata(&victim_path).unwrap().len(),
-            0,
-            "the link's target was written"
-        );
+        assert_eq!(std::fs::read(&victim_path).unwrap(), b"not the index");
+        assert!(!std::fs::symlink_metadata(&index_path).unwrap().file_type().is_symlink());
         std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+    }
+
+    // The data folder reached through a symbolic link (a symlinked $HOME or temp dir, the default on macOS) is
+    // rebuilt like any other: only the file the rebuild creates is checked, not the folders above it.
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_whose_parent_is_a_symbolic_link_is_rebuilt() {
+        use std::os::unix::fs::symlink;
+        let real_root = std::env::temp_dir().join(format!("rastai-store-rebuild-{}-parent-real", std::process::id()));
+        let link_root = std::env::temp_dir().join(format!("rastai-store-rebuild-{}-parent-link", std::process::id()));
+        let _ = std::fs::remove_dir_all(&real_root);
+        let _ = std::fs::remove_file(&link_root);
+        std::fs::create_dir_all(real_root.join("data")).unwrap();
+        symlink(&real_root, &link_root).unwrap();
+        let paths = DataPaths {
+            config: link_root.join("config"),
+            data: link_root.join("data"),
+            cache: link_root.join("cache"),
+            state: link_root.join("state"),
+            runtime: link_root.join("runtime"),
+        };
+        drop(open_database_for_writing(&rastai_db_path(&paths), &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap());
+
+        let report = rebuild_index(&paths, &RebuildOptions::default()).unwrap();
+
+        assert!(report.old_index_path.is_some());
+        assert!(
+            !std::fs::symlink_metadata(real_root.join("data").join("rastai.db"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        std::fs::remove_file(&link_root).unwrap();
+        std::fs::remove_dir_all(&real_root).unwrap();
     }
 
     // The mode a user set on the index (0600 here) is the mode of the rebuilt index and of its kept copy.
