@@ -23,7 +23,7 @@ use crate::command_cache::save_command_cache;
 use crate::daemon_client::{DaemonClient, execute, list_commands};
 use crate::error::CliError;
 use crate::exit_codes::{EXIT_OK, exit_code_for_failure, exit_code_for_job};
-use crate::follow::{EventStream, follow_job, open_job_events};
+use crate::follow::{CHUNK_TIMEOUT_MS, EventStream, follow_job, open_job_events};
 use crate::output::{OutputSettings, output_settings, print_line, print_result};
 use crate::verb_arguments::build_arguments_json;
 
@@ -75,7 +75,7 @@ pub async fn run_verb(
     let request = execute_request(command, arguments)?;
     // Subscribed before Execute, so no event of the job can fall between its start and the subscription.
     let events = if follows_job(command, arguments) {
-        Some(open_job_events(client).await?)
+        Some(open_job_events(client, CHUNK_TIMEOUT_MS).await?)
     } else {
         None
     };

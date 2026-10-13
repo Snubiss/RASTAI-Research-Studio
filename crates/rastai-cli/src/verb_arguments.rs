@@ -39,6 +39,9 @@ const EXPECTED_NO_FLAGS: &str = "no flags: this command takes none";
 const EXPECTED_JSON_ONLY: &str = "this field only through --arguments-json or --arguments-file";
 const EXPECTED_MAP_ENTRY: &str = "key=value";
 const EXPECTED_NO_VALUE: &str = "no value after an off flag";
+/// How much of a refused `--arguments-json` text a refusal shows: enough to recognise it, never a whole file's worth.
+const SHOWN_TEXT_CHARACTERS: usize = 200;
+const CUT_MARK: &str = "...";
 
 /// What a field takes on the command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,21 +157,34 @@ fn verb_word_count(command: &CommandDescriptor, arguments: &ParsedArguments) -> 
     1
 }
 
-/// `--arguments-json` or `--arguments-file`, which must hold a JSON object; none is the empty object.
+/// `--arguments-json` or `--arguments-file`, which must hold a JSON object; none is the empty object. A refusal
+/// names the file, or shows the start of the text: never a whole file's worth.
 // A refusal is a `Diagnostic`, the contract type every caller renders; refusals are rare, so it isn't boxed.
 #[allow(clippy::result_large_err)]
 fn base_arguments(arguments: &ParsedArguments) -> Result<Map<String, Value>, Diagnostic> {
     let global = &arguments.global;
-    let text = match (&global.arguments_json, &global.arguments_file) {
+    let (text, shown) = match (&global.arguments_json, &global.arguments_file) {
         (Some(_), Some(_)) => return Err(invalid("--arguments-json and --arguments-file", EXPECTED_ONE_SOURCE)),
-        (Some(text), None) => text.clone(),
-        (None, Some(path)) => std::fs::read_to_string(path).map_err(|_| invalid(path, EXPECTED_OBJECT))?,
+        (Some(text), None) => (text.clone(), shortened(text)),
+        (None, Some(path)) => {
+            let text = std::fs::read_to_string(path).map_err(|_| invalid(path, EXPECTED_OBJECT))?;
+            (text, path.clone())
+        }
         (None, None) => return Ok(Map::new()),
     };
     match serde_json::from_str::<Value>(&text) {
         Ok(Value::Object(object)) => Ok(object),
-        _ => Err(invalid(&text, EXPECTED_OBJECT)),
+        _ => Err(invalid(&shown, EXPECTED_OBJECT)),
     }
+}
+
+/// The first `SHOWN_TEXT_CHARACTERS` characters of a text, marked when cut.
+fn shortened(text: &str) -> String {
+    if text.chars().count() <= SHOWN_TEXT_CHARACTERS {
+        return text.to_string();
+    }
+    let start: String = text.chars().take(SHOWN_TEXT_CHARACTERS).collect();
+    format!("{start}{CUT_MARK}")
 }
 
 /// What the words after the verb set, collected before any of it is applied, so a repeated list flag gathers all
@@ -247,17 +263,33 @@ impl CommandLineReader {
 
     fn read_value(&mut self, field: &ArgumentField, text: &str, shown: &str) {
         let parsed = match &field.kind {
-            FlagKind::List(element) => parse_plain(element, text).map(|value| {
-                self.list_values.entry(field.name.clone()).or_default().push(value);
-            }),
+            FlagKind::List(element) => self.read_list_element(field, element, text),
             FlagKind::Map(member) => self.read_map_entry(field, member, text),
             FlagKind::JsonOnly => Err(EXPECTED_JSON_ONLY.to_string()),
-            plain => parse_plain(plain, text).map(|value| {
-                self.set_values.insert(field.name.clone(), value);
-            }),
+            plain => self.read_plain_value(field, plain, text),
         };
         if let Err(expected) = parsed {
             self.problems.push(invalid(&format!("{shown} {text}"), &expected));
+        }
+    }
+
+    fn read_list_element(&mut self, field: &ArgumentField, element: &FlagKind, text: &str) -> Result<(), String> {
+        match parse_plain(element, text) {
+            Ok(value) => {
+                self.list_values.entry(field.name.clone()).or_default().push(value);
+                Ok(())
+            }
+            Err(expected) => Err(expected),
+        }
+    }
+
+    fn read_plain_value(&mut self, field: &ArgumentField, kind: &FlagKind, text: &str) -> Result<(), String> {
+        match parse_plain(kind, text) {
+            Ok(value) => {
+                self.set_values.insert(field.name.clone(), value);
+                Ok(())
+            }
+            Err(expected) => Err(expected),
         }
     }
 
@@ -447,6 +479,31 @@ mod tests {
     #[test]
     fn a_command_with_no_fields_takes_no_flags() {
         assert_eq!(flag_list(&[]), "no flags: this command takes none");
+    }
+
+    fn with_arguments(arguments_json: Option<String>, arguments_file: Option<String>) -> ParsedArguments {
+        let mut parsed = ParsedArguments::default();
+        parsed.global.arguments_json = arguments_json;
+        parsed.global.arguments_file = arguments_file;
+        parsed
+    }
+
+    #[test]
+    fn arguments_that_are_not_an_object_are_shown_short() {
+        let long_list = format!("[{}0]", "0,".repeat(5_000));
+        let refusal = base_arguments(&with_arguments(Some(long_list.clone()), None)).unwrap_err();
+        assert_eq!(refusal.code, "RRS-C0002");
+        assert!(refusal.message.contains("[0,0,0,"), "{}", refusal.message);
+        assert!(refusal.message.contains("..."), "{}", refusal.message);
+        assert!(refusal.message.len() < long_list.len() / 10, "{}", refusal.message);
+
+        let file = std::env::temp_dir().join(format!("rastai-cli-arguments-{}.json", std::process::id()));
+        std::fs::write(&file, &long_list).unwrap();
+        let path = file.display().to_string();
+        let refusal = base_arguments(&with_arguments(None, Some(path.clone()))).unwrap_err();
+        let _ = std::fs::remove_file(&file);
+        assert!(refusal.message.contains(&path), "{}", refusal.message);
+        assert!(!refusal.message.contains("[0,0,0,"), "{}", refusal.message);
     }
 
     #[test]

@@ -232,6 +232,61 @@ fn a_line_that_cannot_be_a_verb_is_refused_before_a_daemon_starts() {
     assert!(refusal.diagnostics()[0].message.contains("--frob"));
 }
 
+/// A mode refuses what it would ignore: a global flag only a verb reads (`--set` outside `serve`), and words after
+/// `--` outside `validate` and a verb. Nothing opens the UI or serves on a line it doesn't understand.
+#[test]
+fn a_mode_refuses_the_flags_and_words_it_would_ignore() {
+    for line in [
+        "-- stray",
+        "--json -- stray words",
+        "open -- x",
+        "serve -- x",
+        "mcp -- x",
+        "help -- x",
+        "version -- x",
+        "--set ui.theme=dark",
+        "open --set ui.theme=dark",
+        "mcp --set ui.theme=dark",
+        "validate a.json --set ui.theme=dark",
+        "--project p",
+        "open --dry-run",
+        "open --detach",
+        "open --idempotency-key k",
+        "mcp --node gpu-box",
+        "mcp --project p",
+        "help --dry-run",
+        "system status --help --detach",
+        "validate a.json --project p",
+        "validate a.json --arguments-json {}",
+        "version --arguments-file a.json",
+        "serve --dry-run",
+        "serve --project p",
+        "storage rebuild-index --detach",
+    ] {
+        let refusal = choose_mode(&parse(line)).unwrap_err();
+        assert_eq!(refusal.exit_code(), 2, "{line:?}");
+        assert_eq!(refusal.diagnostics()[0].code, "RRS-C0002", "{line:?}");
+    }
+    let refusal = choose_mode(&parse("-- stray")).unwrap_err();
+    assert!(refusal.diagnostics()[0].message.contains("-- stray"));
+    // What each mode does read still passes.
+    assert_eq!(
+        mode_of("serve --set ui.theme=dark --json --verbose"),
+        Mode::Serve(ServeFlags::default())
+    );
+    assert_eq!(mode_of("--"), Mode::OpenUi(OpenFlags::default()));
+    assert_eq!(mode_of("open --no-start --json"), Mode::OpenUi(OpenFlags::default()));
+    assert_eq!(mode_of("mcp --no-start"), Mode::McpBridge);
+    assert_eq!(
+        mode_of("validate -- a.json"),
+        Mode::Local(LocalCommand::Validate(owned(&["a.json"])))
+    );
+    assert_eq!(
+        mode_of("system status --project p --dry-run -- x"),
+        Mode::Verb(owned(&["system", "status"]))
+    );
+}
+
 #[test]
 fn every_mode_names_its_own_words() {
     for fixed_words in CLI_MODE_WORDS {

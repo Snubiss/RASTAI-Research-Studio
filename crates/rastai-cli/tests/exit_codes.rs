@@ -11,6 +11,9 @@
 //! | no daemon and `--no-start`; a daemon without an API package the CLI calls | 3 `EXIT_DAEMON_UNAVAILABLE` |
 //! | a scope refusal in the answer; a credential refusal by the gate | 4 `EXIT_NOT_PERMITTED` |
 //! | a job that failed before it started | 5 `EXIT_ERRORED` |
+//!
+//! A job that ended while its subscription was being reopened is followed through the library with a short chunk
+//! timeout: the follower reads the job with `job.get` after the reopen and reports it at once.
 
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -19,8 +22,13 @@ mod common;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use prost::Message;
+use rastai_cli::daemon_client::DaemonClient;
+use rastai_cli::follow::{follow_job, open_job_events};
+use rastai_cli::output::OutputSettings;
+use rastai_cli::verbs::VerbOutcome;
 use rastai_core::versions::{API_PACKAGES, APP_VERSION};
 use rastai_core::wire::diagnostic_to_proto;
 use rastai_diag::diagnostic::diagnostic;
@@ -29,7 +37,7 @@ use rastai_proto::commands::v1::{
 };
 use rastai_proto::common::v1::JobState;
 use rastai_proto::events::v1::event_payload::Payload;
-use rastai_proto::events::v1::{BusEvent, EventPayload, JobLogLine, JobProgress, JobStateChanged};
+use rastai_proto::events::v1::{BusEvent, EventPayload, JobLogLine, JobProgress, JobStateChanged, SubscribeRequest};
 use rastai_server::http::connect::{connect_error_json, end_of_stream_envelope};
 use rastai_transport::local_socket::{LocalStream, accept_local, bind_local_socket};
 use serde_json::{Value, json};
@@ -49,6 +57,15 @@ const SUBSCRIBE_PATH: &str = "/rastai.events.v1.EventService/Subscribe";
 const JOB_ID_PREFIX: &str = "job_";
 /// Another job's events reach the stream too; a follower must ignore them.
 const OTHER_JOB_ID: &str = "job_other";
+/// A job no stream ever sends an event for; `job.get` reads it as `succeeded`.
+const QUIET_JOB_ID: &str = "job_quiet";
+/// The follower's chunk timeout in the reopen test: short, so it reopens soon, and long enough for the head of a
+/// stream on a loaded machine.
+const SHORT_CHUNK_TIMEOUT_MS: u64 = 1_000;
+/// The follower must end well within this; one that waits for an event already gone never ends.
+const FOLLOW_LIMIT_SECONDS: u64 = 30;
+/// The binary Connect envelope before a request message: a flags byte and a big-endian u32 length.
+const ENVELOPE_HEADER_BYTES: usize = 5;
 
 /// What the fake daemon says about itself.
 struct FakeHealth {
@@ -262,6 +279,49 @@ fn a_detached_job_exits_0_with_its_id_and_is_not_followed() {
 }
 
 #[test]
+fn a_job_that_ended_while_the_subscription_was_reopened_is_reported_at_once() {
+    let home = test_home("job-quiet");
+    let daemon = start_fake_daemon(&home, healthy());
+    let client = DaemonClient {
+        socket_path: common::daemon_socket(&home),
+        daemon_version: APP_VERSION.to_string(),
+        warnings: Vec::new(),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // The fake's stream sends no event at all, as for a job that ended while the subscription was being reopened.
+    let followed = runtime.block_on(async {
+        let events = open_job_events(&client, SHORT_CHUNK_TIMEOUT_MS).await.unwrap();
+        let following = follow_job(events, QUIET_JOB_ID, OutputSettings::default());
+        tokio::time::timeout(Duration::from_secs(FOLLOW_LIMIT_SECONDS), following).await
+    });
+    let outcome = followed
+        .expect("the follower waited for an event that had already been sent")
+        .unwrap();
+    assert_eq!(
+        outcome,
+        VerbOutcome::JobEnded {
+            job_id: QUIET_JOB_ID.to_string(),
+            final_state: JobState::Succeeded,
+            from_state: JobState::Queued,
+            diagnostics: Vec::new(),
+        }
+    );
+    let requests = requests_of(&daemon);
+    let subscribes: Vec<&String> = requests
+        .iter()
+        .filter(|line| line.starts_with(SUBSCRIBE_PATH))
+        .collect();
+    assert!(subscribes.len() >= 2, "{requests:?}");
+    // With no event seen, the reopened stream is a new one.
+    assert!(subscribes.iter().all(|line| line.ends_with(" after 0")), "{requests:?}");
+    let job_reads = requests.iter().filter(|line| line.contains(" job.get ")).count();
+    assert!(job_reads >= 1, "{requests:?}");
+}
+
+#[test]
 fn the_request_carries_the_arguments_and_a_fresh_idempotency_key() {
     let home = test_home("request");
     let daemon = start_fake_daemon(&home, healthy());
@@ -358,7 +418,9 @@ async fn answer_connection(
             answer_execute(&mut stream, &request, &jobs).await;
         }
         SUBSCRIBE_PATH => {
-            log.lock().unwrap().push(SUBSCRIBE_PATH.to_string());
+            let request = SubscribeRequest::decode(&body[ENVELOPE_HEADER_BYTES..]).unwrap();
+            let line = format!("{SUBSCRIBE_PATH} after {}", request.after_bus_sequence);
+            log.lock().unwrap().push(line);
             stream_job_events(&mut stream, jobs.subscribe()).await;
         }
         _ => write_answer(&mut stream, 404, "text/plain", b"").await,
@@ -404,6 +466,15 @@ async fn answer_execute(stream: &mut UnixStream, request: &ExecuteRequest, jobs:
             ..ExecuteResponse::default()
         },
         "plugin.list" => refused("RRS-C0010", &[("command_id", "plugin.list")]),
+        "job.get" => {
+            let arguments: Value = serde_json::from_str(&request.arguments_json).unwrap();
+            let job = json!({"job_id": arguments["job_id"], "node_id": "local", "kind": "train", "state": "succeeded"});
+            ExecuteResponse {
+                ok: true,
+                result_json: json!({ "job": job }).to_string(),
+                ..ExecuteResponse::default()
+            }
+        }
         "token.list" => refused(
             "RRS-C1005",
             &[

@@ -5,7 +5,10 @@
 
 use rastai_core::commands::naming::CLI_MODE_WORDS;
 
-use crate::arguments::{CommandLineItem, NODE_FLAG, ParsedArguments, SET_FLAG, leading_words, shown_flag};
+use crate::arguments::{
+    ARGUMENTS_FILE_FLAG, ARGUMENTS_JSON_FLAG, CommandLineItem, DETACH_FLAG, DRY_RUN_FLAG, GlobalFlags,
+    IDEMPOTENCY_KEY_FLAG, NODE_FLAG, PROJECT_FLAG, ParsedArguments, SET_FLAG, leading_words, shown_flag,
+};
 use crate::error::{CliError, not_available_yet, usage_error};
 
 // The fixed words of CLI_MODE_WORDS, each matched once below.
@@ -32,6 +35,8 @@ const VERIFY_BLOBS_FLAG: &str = "--verify-blobs";
 
 const EXPECTED_NO_WORDS: &str = "no further words";
 const EXPECTED_COMMAND_FIRST: &str = "a command or mode word before its flags";
+const EXPECTED_COMMAND_BEFORE_END_OF_FLAGS: &str = "a command or mode word before --";
+const END_OF_FLAGS: &str = "--";
 const SET_ONLY_WITH_SERVE: &str = "--set only with rastai serve, or settings set for a running daemon";
 const EXPECTED_FILES: &str = "one or more document files";
 const EXPECTED_PORT: &str = "a port number from 0 to 65535";
@@ -84,21 +89,82 @@ pub enum Mode {
     Verb(Vec<String>),
 }
 
-/// The mode the command line asks for, its own flags read. A flag the mode doesn't take is `RRS-C0002`.
+/// The mode the command line asks for, its own flags read. A flag the mode doesn't take is `RRS-C0002`, a global
+/// one only a verb reads included: a mode that would ignore it refuses it instead.
 pub fn choose_mode(arguments: &ParsedArguments) -> Result<Mode, CliError> {
     let words = leading_words(arguments);
-    if arguments.global.help {
-        return Ok(Mode::Help(words));
-    }
-    if arguments.items.is_empty() {
-        return Ok(Mode::OpenUi(OpenFlags::default()));
-    }
-    let Some(mode_words) = fixed_words_of(&words) else {
-        return verb_mode(words, arguments);
+    let mode = if arguments.global.help {
+        Mode::Help(words)
+    } else if arguments.items.is_empty() {
+        Mode::OpenUi(OpenFlags::default())
+    } else {
+        let Some(mode_words) = fixed_words_of(&words) else {
+            return verb_mode(words, arguments);
+        };
+        let word_count = mode_words.split(' ').count();
+        let rest = &arguments.items[word_count..];
+        mode_from_words(mode_words, rest, arguments)?
     };
-    let word_count = mode_words.split(' ').count();
-    let rest = &arguments.items[word_count..];
-    mode_from_words(mode_words, rest, arguments)
+    refuse_what_the_mode_ignores(&mode, arguments)?;
+    Ok(mode)
+}
+
+/// Words after `--` and the global flags only a verb reads, refused in a mode that would ignore them: a line of
+/// only `--` and stray words doesn't open the UI, and `rastai open --dry-run` doesn't pretend to be a dry run.
+/// `--set` is `serve`'s too, and `validate` reads the words after `--` as files. The modes not built yet (M9, L2)
+/// are refused whole with `RRS-C0010`, so their flags aren't looked at.
+fn refuse_what_the_mode_ignores(mode: &Mode, arguments: &ParsedArguments) -> Result<(), CliError> {
+    match mode {
+        Mode::NodeServe | Mode::NodeInit | Mode::NodeCheckUpdate | Mode::Tunnel | Mode::Verb(_) => return Ok(()),
+        _ => {}
+    }
+    let takes_words_after_flags = matches!(mode, Mode::Local(LocalCommand::Validate(_)));
+    if !arguments.words_after_flags.is_empty() && !takes_words_after_flags {
+        let found = format!("{END_OF_FLAGS} {}", arguments.words_after_flags.join(" "));
+        let expected = match mode {
+            Mode::OpenUi(_) if arguments.items.is_empty() => EXPECTED_COMMAND_BEFORE_END_OF_FLAGS,
+            _ => EXPECTED_NO_WORDS,
+        };
+        return Err(usage_error(&found, expected));
+    }
+    let global = &arguments.global;
+    if !matches!(mode, Mode::Serve(_))
+        && let Some(set_flag) = global.set.first()
+    {
+        return Err(usage_error(&format!("{SET_FLAG} {set_flag}"), SET_ONLY_WITH_SERVE));
+    }
+    if let Some(flag) = verb_only_flags_given(global).first() {
+        let expected = format!("a command's flag, which rastai {} doesn't read", mode_words(mode));
+        return Err(usage_error(flag, &expected));
+    }
+    Ok(())
+}
+
+/// The global flags given that only a verb reads, as typed (layout 9.4).
+fn verb_only_flags_given(global: &GlobalFlags) -> Vec<String> {
+    let mut given = Vec::new();
+    if let Some(node) = &global.node {
+        given.push(format!("{NODE_FLAG} {node}"));
+    }
+    if let Some(project) = &global.project {
+        given.push(format!("{PROJECT_FLAG} {project}"));
+    }
+    if global.dry_run {
+        given.push(DRY_RUN_FLAG.to_string());
+    }
+    if global.detach {
+        given.push(DETACH_FLAG.to_string());
+    }
+    if let Some(key) = &global.idempotency_key {
+        given.push(format!("{IDEMPOTENCY_KEY_FLAG} {key}"));
+    }
+    if global.arguments_json.is_some() {
+        given.push(ARGUMENTS_JSON_FLAG.to_string());
+    }
+    if let Some(file) = &global.arguments_file {
+        given.push(format!("{ARGUMENTS_FILE_FLAG} {file}"));
+    }
+    given
 }
 
 /// A verb's words, refused here when the line can't be a verb, so no daemon is started only to refuse it: flags
