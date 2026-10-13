@@ -79,6 +79,10 @@ const UPSERT_PLUGIN: &str = "INSERT INTO plugins (plugin_id, version, state, con
     ON CONFLICT (plugin_id) DO UPDATE SET version = excluded.version, state = excluded.state,
         content_hash = excluded.content_hash, granted_permissions = excluded.granted_permissions,
         source = excluded.source";
+// Every row of the two tables, for the rebuild's copy (13.2); the order only keeps the copy's writes repeatable.
+const SELECT_ALL_PLUGINS: &str = "SELECT plugin_id, version, state, content_hash, granted_permissions, source
+    FROM plugins ORDER BY plugin_id";
+const SELECT_ALL_PROJECTS: &str = "SELECT project_id, path, name, opened_unix_ms FROM projects ORDER BY project_id";
 const SELECT_PLUGIN_BY_ID: &str = "SELECT plugin_id, version, state, content_hash, granted_permissions, source
     FROM plugins WHERE plugin_id = ?1";
 
@@ -244,15 +248,30 @@ pub(crate) fn set_node_state(
 
 pub fn get_project(reader: &IndexReader, project_id: &str) -> Result<Option<ProjectRow>, StoreError> {
     let rows = query_rows(&reader.connection, SELECT_PROJECT_BY_ID, &[text_value(project_id)])?;
-    let Some(row) = rows.first() else {
-        return Ok(None);
-    };
-    Ok(Some(ProjectRow {
+    match rows.first() {
+        Some(row) => Ok(Some(project_from_columns(row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Every project, for the rebuild's copy of the kept tables.
+pub(crate) fn list_projects(reader: &IndexReader) -> Result<Vec<ProjectRow>, StoreError> {
+    let rows = query_rows(&reader.connection, SELECT_ALL_PROJECTS, &[])?;
+    let mut projects = Vec::with_capacity(rows.len());
+    for row in &rows {
+        projects.push(project_from_columns(row)?);
+    }
+    Ok(projects)
+}
+
+/// Columns in the order of `SELECT_PROJECT_BY_ID` and `SELECT_ALL_PROJECTS`.
+fn project_from_columns(row: &[SqlValue]) -> Result<ProjectRow, StoreError> {
+    Ok(ProjectRow {
         project_id: read_text(row, 0)?,
         path: read_text(row, 1)?,
         name: read_text(row, 2)?,
         opened_unix_ms: read_integer(row, 3)?,
-    }))
+    })
 }
 
 /// The token with this hash, revoked or not: the caller decides what a revoked token means.
@@ -321,17 +340,32 @@ fn node_from_columns(row: &[SqlValue]) -> Result<NodeRow, StoreError> {
 
 pub fn get_plugin(reader: &IndexReader, plugin_id: &str) -> Result<Option<PluginRow>, StoreError> {
     let rows = query_rows(&reader.connection, SELECT_PLUGIN_BY_ID, &[text_value(plugin_id)])?;
-    let Some(row) = rows.first() else {
-        return Ok(None);
-    };
-    Ok(Some(PluginRow {
+    match rows.first() {
+        Some(row) => Ok(Some(plugin_from_columns(row)?)),
+        None => Ok(None),
+    }
+}
+
+/// Every plugin row, for the rebuild's copy of the kept tables.
+pub(crate) fn list_plugins(reader: &IndexReader) -> Result<Vec<PluginRow>, StoreError> {
+    let rows = query_rows(&reader.connection, SELECT_ALL_PLUGINS, &[])?;
+    let mut plugins = Vec::with_capacity(rows.len());
+    for row in &rows {
+        plugins.push(plugin_from_columns(row)?);
+    }
+    Ok(plugins)
+}
+
+/// Columns in the order of `SELECT_PLUGIN_BY_ID` and `SELECT_ALL_PLUGINS`.
+fn plugin_from_columns(row: &[SqlValue]) -> Result<PluginRow, StoreError> {
+    Ok(PluginRow {
         plugin_id: read_text(row, 0)?,
         version: read_text(row, 1)?,
         state: read_text(row, 2)?,
         content_hash: read_text(row, 3)?,
         granted_permissions: read_word_list(row, 4)?,
         source: read_text(row, 5)?,
-    }))
+    })
 }
 
 fn word_list_value(words: &[String]) -> Result<SqlValue, StoreError> {

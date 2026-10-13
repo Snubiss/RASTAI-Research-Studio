@@ -1,7 +1,8 @@
 //! The commands that need no daemon (layout: rust-control-plane.md 9.7), run as the real binary: `rastai validate`
 //! gives exactly the codes and paths of the document corpus (fixtures/documents, contracts 12.5), `version` prints
-//! this build's version, and `storage rebuild-index` says it isn't built yet (M1-33 builds it). None of them starts
-//! a daemon.
+//! this build's version, and `storage rebuild-index` rebuilds `rastai.db` with the daemon stopped and refuses while
+//! one holds the lock (its row-by-row check against a live index is tests/rebuild_index.rs). None of them starts a
+//! daemon.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -13,6 +14,8 @@ use std::path::{Path, PathBuf};
 use rastai_core::versions::APP_VERSION;
 use serde_json::{Value, json};
 
+#[cfg(target_os = "linux")]
+use common::DaemonGuard;
 use common::{daemon_processes, final_codes, final_line, run_rastai, run_rastai_in, test_home};
 
 const EXPECTED_SUFFIX: &str = ".expected.json";
@@ -172,11 +175,44 @@ fn version_prints_this_build() {
 }
 
 #[test]
-fn rebuild_index_is_not_built_yet() {
+fn rebuild_index_makes_an_index_without_starting_a_daemon() {
     let home = test_home("rebuild");
     let result = run_rastai(&home, &["storage", "rebuild-index", "--json"]);
-    assert_eq!(result.exit_code, 1, "{result:?}");
-    assert_eq!(final_codes(&result), ["RRS-C0010"]);
+    assert_eq!(result.exit_code, 0, "{result:?}");
+    assert_eq!(final_codes(&result), Vec::<String>::new());
+    let report: Value = serde_json::from_str(result.stdout.lines().next().unwrap()).unwrap();
+    assert_eq!(report["runs"], 0);
+    assert_eq!(report["old_index_path"], Value::Null);
+    assert!(home.join("data").join("rastai.db").exists());
     assert!(daemon_processes(&home).is_empty(), "rebuild-index started a daemon");
     let _ = fs::remove_dir_all(home);
+}
+
+/// A daemon holds `daemon.lock` while it runs, so the rebuild refuses (`RRS-S0001`) and changes nothing.
+#[cfg(target_os = "linux")]
+#[test]
+fn rebuild_index_refuses_while_a_daemon_holds_the_lock() {
+    let home = test_home("rebuild-locked");
+    let _guard = DaemonGuard { home: home.clone() };
+    let started = run_rastai(&home, &["system", "status", "--json"]);
+    assert_eq!(started.exit_code, 0, "{started:?}");
+    let data_files_before = data_file_names(&home);
+
+    let result = run_rastai(&home, &["storage", "rebuild-index", "--json"]);
+
+    assert_eq!(result.exit_code, 1, "{result:?}");
+    assert_eq!(final_codes(&result), ["RRS-S0001"]);
+    assert_eq!(data_file_names(&home), data_files_before);
+    assert!(!daemon_processes(&home).is_empty(), "the daemon should still run");
+}
+
+/// The names in `<home>/data`, sorted: a refused rebuild adds none (no `rastai.db.rebuilding`, no
+/// `rastai.db.broken-*`).
+fn data_file_names(home: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(home.join("data"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
 }

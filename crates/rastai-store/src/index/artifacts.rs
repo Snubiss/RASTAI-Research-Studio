@@ -26,6 +26,13 @@ const INSERT_LINEAGE: &str = "INSERT INTO lineage (from_id, to_id, relation) VAL
     ON CONFLICT (from_id, to_id, relation) DO NOTHING";
 const SELECT_LINEAGE: &str = "SELECT 1 FROM lineage WHERE from_id = ?1 AND to_id = ?2 AND relation = ?3";
 
+// The rebuild checks every artifact's blob (13.2); deleting an artifact deletes its copies too (foreign key), and the
+// lineage rows its own artifact.created made, the ones whose child it is.
+const SELECT_ARTIFACT_BLOBS: &str =
+    "SELECT artifact_id, content_hash, home_node_id FROM artifacts ORDER BY artifact_id";
+const DELETE_ARTIFACT: &str = "DELETE FROM artifacts WHERE artifact_id = ?1";
+const DELETE_LINEAGE_TO: &str = "DELETE FROM lineage WHERE to_id = ?1";
+
 // The home copy's bytes are in its node's blob store, found by the content hash, so it needs no path of its own.
 // Copies elsewhere (transfer.finished, M9) record where they landed.
 const HOME_COPY_PATH: &str = "";
@@ -61,6 +68,36 @@ pub(crate) fn upsert_artifact(
         text_value(HOME_COPY_PATH),
     ];
     execute(transaction, INSERT_ARTIFACT_COPY, &copy)?;
+    Ok(())
+}
+
+/// An artifact's blob and where its home copy is, as the rebuild checks it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArtifactBlob {
+    pub(crate) artifact_id: String,
+    pub(crate) content_hash: String,
+    pub(crate) home_node_id: String,
+}
+
+/// Every artifact with its blob's hash and home node, in id order.
+pub(crate) fn list_artifact_blobs(transaction: &SqliteTransaction<'_>) -> Result<Vec<ArtifactBlob>, StoreError> {
+    let rows = query_rows_in_transaction(transaction, SELECT_ARTIFACT_BLOBS, &[])?;
+    let mut artifacts = Vec::with_capacity(rows.len());
+    for row in &rows {
+        artifacts.push(ArtifactBlob {
+            artifact_id: read_text(row, 0)?,
+            content_hash: read_text(row, 1)?,
+            home_node_id: read_text(row, 2)?,
+        });
+    }
+    Ok(artifacts)
+}
+
+/// Deletes an artifact whose bytes are gone: its row, its copies, and the lineage rows that name it as the child.
+/// Rows that name it as a parent stay, since what was made from it still exists.
+pub(crate) fn delete_artifact(transaction: &SqliteTransaction<'_>, artifact_id: &str) -> Result<(), StoreError> {
+    execute(transaction, DELETE_LINEAGE_TO, &[text_value(artifact_id)])?;
+    execute(transaction, DELETE_ARTIFACT, &[text_value(artifact_id)])?;
     Ok(())
 }
 

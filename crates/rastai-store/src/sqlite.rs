@@ -22,6 +22,9 @@ const WAL_JOURNAL_MODE: &str = "wal";
 
 const QUICK_CHECK: &str = "PRAGMA quick_check";
 const SET_WAL_JOURNAL_MODE: &str = "PRAGMA journal_mode = WAL";
+// A finished rebuild leaves WAL, so the whole database is in its one file before that file is renamed (rebuild.rs).
+const SET_DELETE_JOURNAL_MODE: &str = "PRAGMA journal_mode = DELETE";
+const DELETE_JOURNAL_MODE: &str = "delete";
 const SET_FOREIGN_KEYS_ON: &str = "PRAGMA foreign_keys = ON";
 const COUNT_SCHEMA_MIGRATIONS_TABLES: &str =
     "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'";
@@ -91,6 +94,38 @@ pub(crate) fn open_database_for_writing(
     apply_settings(&connection, settings)?;
     apply_pending_migrations(&connection, migrations)?;
     Ok(connection)
+}
+
+/// Opens an existing database whose health is in doubt, to read what it still holds. Only the offline rebuild does
+/// this, on the old `rastai.db` it is about to set aside (rebuild.rs), so a file that fails `quick_check` can still
+/// give up its readable rows. A file migrated by a newer app is refused with `RRS-S0002` and left as it was; an older
+/// one is migrated first, as every open by its writer would, so its rows read in this build's columns. A missing
+/// file is an error, not a new database.
+pub(crate) fn open_database_for_salvage(path: &Path, migrations: &[Migration]) -> Result<SqliteConnection, StoreError> {
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let connection = open_connection(path, flags, false)?;
+    check_schema_version(&connection, migrations)?;
+    apply_pending_migrations(&connection, migrations)?;
+    Ok(connection)
+}
+
+/// Checks a database the rebuild has just written with `quick_check`, then leaves WAL for a rollback journal, which
+/// moves every page into the main file and removes the `-wal` file, and closes it. Afterwards the file alone is the
+/// whole database, so it can be renamed into place; the daemon's next open turns WAL on again.
+pub(crate) fn finish_database_file(connection: SqliteConnection) -> Result<(), StoreError> {
+    check_integrity(&connection)?;
+    let journal_mode = query_rows(&connection, SET_DELETE_JOURNAL_MODE, &[])?;
+    let mode = match journal_mode.first() {
+        Some(row) => read_text(row, 0)?,
+        None => String::new(),
+    };
+    if !mode.eq_ignore_ascii_case(DELETE_JOURNAL_MODE) {
+        return Err(StoreError::DatabaseWriteFailed {
+            reason: format!("SQLite kept journal mode {mode} instead of leaving WAL"),
+        });
+    }
+    drop(connection);
+    Ok(())
 }
 
 /// Opens a read-only connection to a database its writer has already opened (and so created and migrated).

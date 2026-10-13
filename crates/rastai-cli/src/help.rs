@@ -50,7 +50,7 @@ const MODE_USAGE: &[(&str, &str)] = &[
     ("version", "rastai version   print this CLI's version"),
     (
         "storage rebuild-index",
-        "rastai storage rebuild-index [--verify-blobs]   rebuild rastai.db offline (M1-33)",
+        "rastai storage rebuild-index [--verify-blobs]   rebuild rastai.db offline, with the daemon stopped",
     ),
     ("help", "rastai help [words]   this help"),
 ];

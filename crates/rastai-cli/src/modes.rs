@@ -65,7 +65,7 @@ pub enum LocalCommand {
     Validate(Vec<String>),
     /// `rastai version`
     Version,
-    /// `rastai storage rebuild-index [--verify-blobs]` (M1-33 builds the rebuild itself).
+    /// `rastai storage rebuild-index [--verify-blobs]`: rastai-store rebuilds `rastai.db` while this holds the lock.
     RebuildIndex { verify_blobs: bool },
 }
 

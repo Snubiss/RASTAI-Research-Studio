@@ -15,6 +15,7 @@ pub mod event_log;
 pub mod index;
 pub mod indexer;
 pub mod reader_pool;
+pub mod rebuild;
 pub mod sqlite;
 pub mod store;
 pub mod writer_thread;

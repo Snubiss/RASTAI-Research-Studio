@@ -71,9 +71,11 @@ const ENCRYPTED_SECRETS_FILE: &str = "secrets.enc";
 // <data>
 const RASTAI_DB_FILE: &str = "rastai.db";
 const VAULT_DB_FILE: &str = "vault.db";
-// Database copies sit beside the database: `rastai.db.pre-<version>`, `rastai.db.broken-<unix_ms>`.
+// Database copies sit beside the database: `rastai.db.pre-<version>`, `rastai.db.broken-<unix_ms>`, and the index a
+// rebuild is still writing, `rastai.db.rebuilding`.
 const PRE_UPDATE_MARK: &str = "pre";
 const BROKEN_MARK: &str = "broken";
+const REBUILDING_MARK: &str = "rebuilding";
 const BLOBS_FOLDER: &str = "blobs";
 const RUNS_FOLDER: &str = "runs";
 const DAEMON_FOLDER: &str = "daemon";
@@ -267,13 +269,25 @@ pub fn rastai_db_broken_path(paths: &DataPaths, unix_ms: i64) -> PathBuf {
     paths.data.join(broken_file)
 }
 
+/// `<data>/rastai.db.rebuilding`: the index `storage rebuild-index` writes before it takes the place of `rastai.db`.
+/// A crash leaves it behind with the old index untouched; the next rebuild starts it again.
+pub fn rastai_db_rebuilding_path(paths: &DataPaths) -> PathBuf {
+    let rebuilding_file = format!("{RASTAI_DB_FILE}.{REBUILDING_MARK}");
+    paths.data.join(rebuilding_file)
+}
+
 pub fn blobs_dir(paths: &DataPaths) -> PathBuf {
     paths.data.join(BLOBS_FOLDER)
 }
 
+/// `<data>/runs/`, the folder that holds every run's folder: the rebuild of `rastai.db` lists it.
+pub fn runs_dir(paths: &DataPaths) -> PathBuf {
+    paths.data.join(RUNS_FOLDER)
+}
+
 /// `<data>/runs/<run_id>/` (contracts 8.4).
 pub fn run_dir(paths: &DataPaths, run_id: &str) -> PathBuf {
-    paths.data.join(RUNS_FOLDER).join(run_id)
+    runs_dir(paths).join(run_id)
 }
 
 pub fn run_events_log_path(paths: &DataPaths, run_id: &str) -> PathBuf {
@@ -760,6 +774,8 @@ mod tests {
                 rastai_db_broken_path(&paths, 1_791_633_600_000),
                 "/r/data/rastai.db.broken-1791633600000",
             ),
+            (rastai_db_rebuilding_path(&paths), "/r/data/rastai.db.rebuilding"),
+            (runs_dir(&paths), "/r/data/runs"),
             (run_events_log_path(&paths, "run_01"), "/r/data/runs/run_01/events.log"),
             (daemon_events_log_path(&paths), "/r/data/daemon/events.log"),
             (daemon_events_segment_path(&paths, 3), "/r/data/daemon/events-3.log"),

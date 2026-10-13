@@ -11,6 +11,7 @@
 
 use rastai_diag::logger::log_warn;
 use rastai_proto::events::v1::EventRecord;
+use rastai_store::event_log::daemon_log::{DaemonLogSegment, daemon_log_segments};
 use rastai_store::event_log::reader::{EventLogReader, FrameRead, open_event_log, read_next_frame};
 use rastai_store::index::log_cursors::get_log_cursor;
 use rastai_store::index::reads::open_index_reader;
@@ -18,7 +19,6 @@ use rastai_store::index::writes::IndexWrite;
 use rastai_store::writer_thread::write_index;
 
 use crate::error::ServerError;
-use crate::events::daemon_events::{DaemonLogSegment, daemon_log_segments};
 use crate::server_state::Server;
 
 /// Records per index transaction (contracts 15.10, the same as a run tail's batches).

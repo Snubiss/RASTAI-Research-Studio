@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rastai_core::ids::{IdPrefix, new_id};
-use rastai_core::states::job_state_name;
+use rastai_core::states::{job_kind_name, job_state_name};
 use rastai_core::time::now_unix_ms;
 use rastai_diag::diagnostic::Diagnostic;
 use rastai_diag::logger::log_warn;
@@ -32,7 +32,7 @@ use rastai_store::writer_thread::write_index;
 use tokio::sync::Notify;
 
 use crate::commands::context::{core_failure, store_failure};
-use crate::scheduler::launch::{RunStart, job_kind_name, launch_job, write_run_record};
+use crate::scheduler::launch::{RunStart, launch_job, write_run_record};
 use crate::scheduler::placement::node_is_ready;
 use crate::server_state::Server;
 use crate::shutdown::wait_until_stopping;
@@ -77,8 +77,12 @@ pub async fn submit_job(
     spec.job_id = new_id(IdPrefix::Job).map_err(|error| core_failure(&error))?;
     let mut writes = Vec::new();
     if let Some(run) = run {
-        let record_hash = write_run_record(&server.paths, &spec, &run).map_err(|problem| vec![problem])?;
-        writes.push(IndexWrite::UpsertRun(new_run_row(&spec, node_id, &run, record_hash)));
+        // One reading of the clock for run.json and the row, so a rebuild gives the row this same time.
+        let created_unix_ms = now_unix_ms();
+        let record_hash =
+            write_run_record(&server.paths, &spec, &run, created_unix_ms).map_err(|problem| vec![problem])?;
+        let row = new_run_row(&spec, node_id, &run, record_hash, created_unix_ms);
+        writes.push(IndexWrite::UpsertRun(row));
     }
     writes.push(IndexWrite::UpsertJob(queued_job_row(&spec, node_id)));
     write_index(&server.store.index, IndexWrite::Batch(writes))
@@ -137,7 +141,7 @@ fn first(mut diagnostics: Vec<Diagnostic>) -> Diagnostic {
     diagnostics.remove(0)
 }
 
-fn new_run_row(spec: &JobSpec, node_id: &str, run: &RunStart, record_hash: String) -> RunRow {
+fn new_run_row(spec: &JobSpec, node_id: &str, run: &RunStart, record_hash: String, created_unix_ms: i64) -> RunRow {
     RunRow {
         run_id: spec.run_id.clone(),
         kind: run.kind_name(),
@@ -147,7 +151,7 @@ fn new_run_row(spec: &JobSpec, node_id: &str, run: &RunStart, record_hash: Strin
         parent_run_id: String::new(),
         record_hash,
         acked_sequence: 0,
-        created_unix_ms: now_unix_ms(),
+        created_unix_ms,
         finished_unix_ms: None,
         pinned: false,
         // UpsertRun never writes it: a new run takes the column's default (store layout 6.4).
