@@ -26,6 +26,9 @@ import { inAct, mount } from "./render.js";
 /** @typedef {import("../host-api.js").ExecuteOutcome} ExecuteOutcome */
 /** @typedef {import("./render.js").Mounted} Mounted */
 
+// The fake daemon answers over fetch, a few promise turns per call; this many timer turns is ample even on a busy
+// machine, and costs a few milliseconds.
+const SETTLE_ROUNDS = 20;
 // The sample job's state; job.cancel changes it, as the daemon would.
 let jobState = "running";
 // What both hosts answer: command id -> the command's result.
@@ -166,7 +169,7 @@ async function showSection(host) {
 
 /** Lets every answer arrive (the fake daemon's over fetch, the mock's at once) and React render them. */
 async function settle() {
-  for (let round = 0; round < 5; round += 1) {
+  for (let round = 0; round < SETTLE_ROUNDS; round += 1) {
     await inAct(() => new Promise((resolve) => setTimeout(resolve, 0)));
   }
 }
@@ -183,6 +186,8 @@ async function pagesThrough(host, emit) {
   await settle();
   const pages = [page.container.innerHTML];
   await inAct(() => page.container.querySelector("button")?.click());
+  await settle();
+  // The daemon announces the cancelled job's new state, as it would after job.cancel.
   await inAct(() => emit(sampleBusEvent("job.state_changed", "job_01")));
   await settle();
   pages.push(page.container.innerHTML);
