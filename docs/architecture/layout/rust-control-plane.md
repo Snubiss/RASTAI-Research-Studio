@@ -2299,16 +2299,23 @@ crates/rastai-server/
       run_tail.rs             one task per open run: WatchRunEvents after the ack, mirror for remote runs, index, publish
       daemon_log_replay.rs    at startup: index daemon-log records after log_cursors.acked_sequence
     scheduler/
-      queue.rs                pending jobs per node; interactive work before training
-      placement.rs            pick the node and GPUs from compute settings and the latest telemetry
-      launch.rs               write run.json, build the JobSpec, NodeService.StartJob
+      queue.rs                submit_job (run.json, the runs and jobs rows, queued); run_scheduler: first in, first out
+                              per node, woken on a submit, a connect and a job's end; Scheduler.job_state_lock
+      placement.rs            pick the node and GPUs from compute settings and the latest telemetry (M1: the node
+                              compute.default_node names, `local` = the embedded node; the CPU)
+      launch.rs               write run.json with the JobSpec at submit; launch: read it back, NodeService.StartJob,
+                              start the run's tail at sequence 0
       chains.rs               Teach it, RLHF and sweep chains: next_chain_action(), start the next step, record_chain_event();
                               the only writer of a chain run's events.log
       daemon_tasks.rs         job kind daemon_task (flows/platform.md): plugin.install, storage.gc, project.export, ...
     nodes/
-      node_links.rs           NodeLink per node: transport, handshake, state (contracts §9.2), reconnect with backoff
-      node_hub.rs             NodeHubService server: Heartbeat, ExecuteCommand, GatewayGenerate, GetSecret
-      reconcile.rs            after a connect: ListJobs against the jobs table, then resume the run tails
+      node_links.rs           NodeLink per node: transport, handshake, state (contracts §9.2), every NodeService call
+                              with the session token, missed heartbeats → unreachable, reconnect with backoff;
+                              NodeConnection, the node's RunEventSource
+      node_hub.rs             NodeHubService server: Heartbeat, ExecuteCommand (M1: RRS-P1004), GatewayGenerate,
+                              GetSecret; refuses a call without the session token (RRS-N0009)
+      reconcile.rs            after a connect: the open runs' tails, then ListJobs against the jobs table; heartbeats'
+                              job states as job.state_changed; the run end the daemon writes (contracts 9.5)
       pairing.rs              node.pair and node.unpair over SSH (rastai-transport)
     plugin_host/
       discovery.rs            find preinstalled, installed and dev plugins; read their manifests
@@ -2430,7 +2437,9 @@ pub async fn start_daemon(paths: DataPaths, options: &DaemonOptions) -> Result<R
 }
 ```
 
-M1-26 part 1 builds the lock, the owner token, the store, `build_server` (with `auth`) and `listen_http`; `start_embedded_node` is a stub until M1-47, the identity key arrives with `rastai_node::identity` (M1-42) and M1-47 loads it in `start_daemon` (with the `identity` field of `Server` and the cookie prefix taken from the daemon id), and every other step with the task that builds it. Until the daemon key exists, the cookie's daemon id prefix (`rastai_session_<prefix>`) is the first 8 hex digits of a hash of the owner token's hash: stable for the installation, different on another machine, and it says nothing about the token.
+M1-26 part 1 builds the lock, the owner token, the store, `build_server` (with `auth`) and `listen_http`. M1-47 loads `daemon.key` in `start_daemon` (the `identity` field of `Server`; the cookie's prefix, `rastai_session_<prefix>`, is the first 8 characters of the daemon id's base32 in lower case), starts the embedded node and connects to it; every other step lands with the task that builds it.
+
+**The embedded node as built (M1-47).** `start_embedded_node` loads `<data>/identity/node.key` for the node's id, pins the daemon's key in `paired_daemons.json`, and runs `rastai_node::node::run_node` on a thread of its own with its own tokio runtime (`EmbeddedNode`; `RunningDaemon.embedded_node`). Its environments are the folders of `<data>/envs/`, one per `<environment_id>-<lock_hash12>` name, until uv environments (M2-16); a developer links `.dev/envs/cpu` there. `serve_node_hub` binds `node-hub.sock` before the handshake names it; `connect_to_node` waits up to 20 s for `node.sock` while the node detects hardware and reattaches, handshakes, then reconciles; a failure is logged and left to `watch_node_links`, so the daemon starts without a node rather than not at all. `start_background_tasks` runs the scheduler and the link watch; both end on the shutdown flag. `wait_for_shutdown` stops the embedded node after the listeners (its jobs run on in their own process groups) and waits up to the grace period for the last task to let the server go before closing the store.
 
 This is the function `flows/platform.md` 2.1 sketches as `run_serve`; `rastai-cli` calls it for `rastai serve`. The `owner.token` check runs before the databases open, so a refused start leaves nothing half started. Ports: `--port`, else `daemon.port`, is tried first, then 47820–47829 in order (`candidate_ports`); only a port in use moves on to the next, and none free is `RRS-C1001`. Any other bind error (a `daemon.listen` address this machine doesn't have, a port this user may not open) would fail on every port alike, so it stops the search and is `RRS-C0002`, naming the address and the operating system's reason. `daemon.listen` that isn't an IP address falls back to loopback, and a non-loopback one logs a warning at every start.
 
@@ -2506,9 +2515,15 @@ pub async fn tail_run(server: Arc<Server>, node: Arc<dyn RunEventSource>, run_id
 pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> Vec<JoinHandle<()>>   // after (re)connect,
                                     // for every open run on that node without a live tail (Server.tailed_run_ids)
 
-// scheduler/queue.rs: the job is the generated JobSpec (contracts §2.4 rule 3); no second job struct
-pub async fn submit_job(server: &Server, spec: JobSpec, node_id: &str) -> Result<String, Vec<Diagnostic>>   // fills spec.job_id and returns it
-pub async fn run_scheduler(server: Arc<Server>)                                  // wakes on submit, heartbeat and job end
+// scheduler/queue.rs: the job is the generated JobSpec (contracts §2.4 rule 3); no second job struct. With `run`, the
+// job starts a new run: its run.json (with the JobSpec) and runs row (created) are written before the jobs row (queued).
+pub async fn submit_job(server: &Server, spec: JobSpec, node_id: &str, run: Option<RunStart>) -> Result<String, Vec<Diagnostic>>
+                                                                                 // fills spec.job_id and returns it
+pub async fn run_scheduler(server: Arc<Server>)                                  // wakes on submit, connect and job end
+// scheduler/launch.rs: the job lock is held from the queue check to the recorded answer, so job.cancel of a queued
+// job comes first (never started) or finds it started (signals the node)
+pub struct RunStart { pub project_id: String, pub kind: RunKind, pub recipe: String, pub seed: Option<u64> }
+pub async fn launch_job(server: &Arc<Server>, job: &JobRow)                      // read run.json, StartJob, tail the run
 
 // scheduler/chains.rs (training-evaluation flow 6)
 pub struct ChainStep {
@@ -2528,13 +2543,25 @@ pub async fn start_next_chain_step(server: &Server, finished_run_id: &str)      
 pub async fn record_chain_event(server: &Server, chain_run_id: &str, record: EventRecord) -> Result<(), StoreError>
 pub async fn resume_chains(server: &Server)          // startup: index records after each open chain's ack, then act
 
-// nodes/
-pub enum NodeTransport { Embedded { socket_path: PathBuf }, Ssh { host: String, user: String } }
+// nodes/ (M1-47 as built; only node_links.rs and node_hub.rs import tonic, so the calls are functions here, never a
+// client handed out)
+pub enum NodeTransport { Embedded { socket_path: PathBuf } }                     // Ssh { host, user } joins in M9
 pub struct NodeLink { pub node_id: String, pub state: NodeState, pub transport: NodeTransport,
-                      pub protocol_version: u32, pub capabilities: Vec<String>, pub session_token: String }
-pub async fn connect_node(server: &Server, node_id: &str) -> Result<(), Diagnostic>
-pub async fn node_client(server: &Server, node_id: &str) -> Result<NodeServiceClient<Channel>, Diagnostic>
-pub async fn serve_node_hub(server: Arc<Server>) -> Result<(), ServerError>      // tonic server on node-hub.sock
+                      pub protocol_version: u32, pub capabilities: Vec<String>, pub session_token: String,
+                      pub last_heartbeat_unix_ms: i64, pub telemetry: Option<NodeTelemetry>,
+                      pub retry_at_unix_ms: i64, pub retry_backoff_seconds: u64, pub connection: Arc<NodeConnection> }
+pub async fn connect_node(server: &Arc<Server>, node_id: &str) -> Result<(), Diagnostic>   // dial, handshake, reconcile
+pub async fn start_job_on_node(server: &Server, node_id: &str, spec: JobSpec) -> Result<JobInfo, Diagnostic>
+pub async fn signal_job_on_node(server: &Server, node_id: &str, job_id: &str, signal: JobSignal) -> Result<(), Diagnostic>
+pub async fn list_jobs_on_node(server: &Server, node_id: &str) -> Result<Vec<JobInfo>, Diagnostic>
+pub async fn watch_node_links(server: Arc<Server>)        // missed heartbeats → unreachable, jobs lost; due reconnects
+pub fn serve_node_hub(server: &Arc<Server>) -> Result<JoinHandle<()>, ServerError>   // tonic server on node-hub.sock,
+                                                                                 // holding the server weakly
+// nodes/reconcile.rs
+pub async fn reconcile_node(server: &Arc<Server>, node_id: &str)                 // tails first, then ListJobs
+pub async fn apply_job_snapshot(server: &Arc<Server>, node_id: &str, jobs: &[JobInfo], scope: SnapshotScope)
+pub async fn settle_run(server: &Server, run_id: &str)   // the daemon-written end, once the run's tail is over
+pub fn daemon_written_run_end(current: RunState, job_state: JobState, error_code: &str) -> Option<RunState>   // pure
 
 // gateway_glue/vault_log_sink.rs: the gateway's LogSink is sync; it queues and hands the commit back (node layout §6.2)
 pub struct VaultLogSink { pub vault: VaultWriter }
@@ -2755,6 +2782,8 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 | Undo | `tests/undo_property.rs` | seeded random edit sequences, then undo all: the original bytes; outside edit gives `RRS-C2002` |
 | Bus | `tests/bus_resume.rs` | gap replayed from the buffer; too old gives `RRS-C0401`; first sequence after start is start ms × 1,000 |
 | Indexing | `tests/run_tail.rs` | a fake node streams records; mirror is written before the index; restart re-indexes from the mirror once |
+| Node link | `tests/node_link.rs` | the daemon starts its node and reaches it over node.sock; `node.list`, `node.status` and heartbeat telemetry; the hub refuses a heartbeat without the session token (`RRS-N0009`); `RRS-J0005` and `RRS-N0008`; a `read` token can't cancel a train job (`RRS-C1005`) and the job keeps running; a queued job is cancelled with its run; a job the node refuses fails and the daemon ends its run `failed` |
+| Train jobs | `tests/train_jobs.rs` (`#[ignore]`d; `just test-daemon-jobs`, cpu environment) | `train.start` answers a job id at once and the TextCNN job succeeds with every metric indexed exactly once; a `read` token's `job.cancel` is refused (`RRS-C1005`) while the job trains on, and the owner's ends job and run `cancelled`; a daemon restart mid-run reconciles through `ListJobs` and the tail goes on from the ack |
 | Plugins | `tests/plugin_host.rs`, `fixtures/plugins/` | the tests listed in flows/platform.md 7.1–7.3 |
 | Event handlers | `tests/plugin_event_handlers.rs`, `tests/crash/` | a fixture plugin's module is down when `checkpoint.saved` is indexed: the call stays pending, and on `plugin.state_changed → enabled` it runs exactly once; a re-sent record queues no second call; a call whose command already finished is not run again (idempotency key); kill -9 the daemon between the index commit and the delivery: after restart the handler runs once (a new row for the flows/platform.md 6.5 matrix) |
 | Analysis and policy | `tests/layer_placement.rs`, `tests/data_policy.rs`, `tests/chains.rs` | placement tables on fake GPUs; every cell of the 8.3 policy table; `next_chain_action` over child outcomes, gates and optional steps |
@@ -2775,17 +2804,17 @@ pub fn blob_response_headers(stored_media_type: &str, content_hash: &str) -> Vec
 
 | Part | First needed (§31) |
 |---|---|
-| `daemon.rs`, `server_state.rs`, `shutdown.rs`, `auth_files.rs`, `http/` (minus blobs and mcp), `commands/` (execute, dispatch, journal) with the skeleton handlers, `events/`, `indexing/`, `scheduler/` (queue, launch), `nodes/` (embedded link, hub, reconcile), `plugin_host/` (discovery, capabilities, load, contributions, lifecycle) | 1 (weeks 3–4; plugins load through the host from day one) |
+| `daemon.rs`, `server_state.rs`, `shutdown.rs`, `auth_files.rs`, `http/` (minus blobs and mcp), `commands/` (execute, dispatch, journal) with the skeleton handlers (`handlers/job.rs`; `handlers/train.rs` with `train.start`; `handlers/node.rs` with `node.list` and `node.status`), `events/`, `indexing/`, `scheduler/` (queue, placement, launch), `nodes/` (embedded link, hub, reconcile), `plugin_host/` (discovery, capabilities, load, contributions, lifecycle) | 1 (weeks 3–4; plugins load through the host from day one) |
 | `http/mcp_endpoint.rs` | 1 (skeleton exit) |
 | `secrets.rs`, `handlers/system.rs` HF login and license checks | 2 (gated model downloads) |
 | `gateway_glue/`, `handlers/chat.rs`, `handlers/model.rs`, `handlers/adapter.rs`, `import_export/conversations.rs`, `http/blob_endpoints.rs`, `policy.rs` | 3 (Inference; API adapters are the first data leaving the machine) |
 | `plugin_host/forward.rs` | 4 (Psychology is the first plugin module) |
 | `commands/undo.rs` | 4 (`psychology.branch.prefer` is the first undoable command), used heavily at 6 |
-| `scheduler/chains.rs`, `handlers/train.rs`, `handlers/run.rs`, `storage_tasks.rs` GC, `modelspec_analysis/memory.rs` training estimate, `plugin_host/event_handlers.rs`, `handlers/gym.rs` with only its `sandbox.*` arms (`sandbox.list`, `sandbox.kill`, `sandbox.cleanup`; M5-E10, calling the node's `sandbox_service.rs`) | 5 (Teach it, RLHF, checkpoints, Evaluation auto-run, Pass@k sandboxes) |
+| `scheduler/chains.rs`, the rest of `handlers/train.rs`, `handlers/run.rs`, `storage_tasks.rs` GC, `modelspec_analysis/memory.rs` training estimate, `plugin_host/event_handlers.rs`, `handlers/gym.rs` with only its `sandbox.*` arms (`sandbox.list`, `sandbox.kill`, `sandbox.cleanup`; M5-E10, calling the node's `sandbox_service.rs`) | 5 (Teach it, RLHF, checkpoints, Evaluation auto-run, Pass@k sandboxes) |
 | `modelspec_analysis/` (stats, fits, time, `layer_placement.rs`), `handlers/design.rs` | 6 (Designer; placement across the 5080 and the 3090) |
 | `handlers/gym.rs` `harness.*` and `gym.*` arms | 7 |
 | `plugin_host/install.rs` for third-party archives, `handlers/plugin.rs` dev and test, the M8 capability rows (themes, icon sets, macros, chat templates) | 8 |
-| `nodes/pairing.rs`, SSH `NodeTransport`, `handlers/node.rs` | 9 |
+| `nodes/pairing.rs`, SSH `NodeTransport`, the rest of `handlers/node.rs` (pair, unpair, update, caches) | 9 |
 | `archive_task.rs`, `handlers/archive.rs`, `PolicyTarget::ArchiveDatabase` | M11 (section 14) |
 | (L2) the snapshot timer in `storage_tasks.rs`, the crash-report rate limit, the plugin-data downgrade guard, handler-delivery tools beyond Evaluation auto-run | after the core loop reaches L2 |
 

@@ -19,7 +19,7 @@ use rastai_core::settings::{default_settings, node_settings, resolve_settings};
 use rastai_core::time::now_unix_ms;
 use rastai_core::versions::{APP_VERSION, NODE_PROTOCOL_VERSION};
 use rastai_node::error::NodeError;
-use rastai_node::handshake::{daemon_challenge_bytes, pin_daemon_key};
+use rastai_node::handshake::{daemon_challenge_bytes, pin_daemon_key, session_token_from_metadata};
 use rastai_node::hardware::HardwareSources;
 use rastai_node::identity::{daemon_id_from_public_key, load_or_create_identity, public_key_bytes, sign_challenge};
 use rastai_node::jobs::supervisor::default_job_options;
@@ -298,6 +298,8 @@ pub fn paired_daemon_handshake(folder: &Path, hub_socket_path: &Path) -> Handsha
 /// when it is dropped.
 pub struct FakeHub {
     heartbeats: Arc<Mutex<Vec<(Instant, HeartbeatRequest)>>>,
+    /// The `rastai-session-token` each heartbeat carried, in the same order.
+    session_tokens: Arc<Mutex<Vec<Option<String>>>>,
     handle: tokio::task::JoinHandle<()>,
 }
 
@@ -309,16 +311,23 @@ impl Drop for FakeHub {
 
 struct FakeHubService {
     heartbeats: Arc<Mutex<Vec<(Instant, HeartbeatRequest)>>>,
+    session_tokens: Arc<Mutex<Vec<Option<String>>>>,
 }
 
 #[tonic::async_trait]
 impl NodeHubService for FakeHubService {
     async fn heartbeat(&self, request: Request<HeartbeatRequest>) -> Result<Response<HeartbeatResponse>, Status> {
+        let session_token = session_token_from_metadata(request.metadata());
         let mut heartbeats = self
             .heartbeats
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut session_tokens = self
+            .session_tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         heartbeats.push((Instant::now(), request.into_inner()));
+        session_tokens.push(session_token);
         Ok(Response::new(HeartbeatResponse {}))
     }
 
@@ -331,21 +340,35 @@ impl NodeHubService for FakeHubService {
 #[allow(clippy::unwrap_used)]
 pub fn start_fake_hub(socket_path: &Path) -> FakeHub {
     let heartbeats = Arc::new(Mutex::new(Vec::new()));
+    let session_tokens = Arc::new(Mutex::new(Vec::new()));
     let service = FakeHubService {
         heartbeats: Arc::clone(&heartbeats),
+        session_tokens: Arc::clone(&session_tokens),
     };
     let listener = bind_local_socket(socket_path).unwrap();
     let router = Server::builder().add_service(NodeHubServiceServer::new(service));
     let handle = tokio::spawn(async move {
         let _ = serve_grpc_on_socket(listener, router).await;
     });
-    FakeHub { heartbeats, handle }
+    FakeHub {
+        heartbeats,
+        session_tokens,
+        handle,
+    }
 }
 
 impl FakeHub {
     /// Every heartbeat so far, oldest first, with when it arrived.
     pub fn heartbeats(&self) -> Vec<(Instant, HeartbeatRequest)> {
         self.heartbeats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The session token each heartbeat so far carried, oldest first.
+    pub fn session_tokens(&self) -> Vec<Option<String>> {
+        self.session_tokens
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()

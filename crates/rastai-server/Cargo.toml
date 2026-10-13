@@ -10,7 +10,8 @@ publish.workspace = true
 # The composition root (layout: rust-control-plane.md section 8). M1-26 lands the startup sequence, the listeners,
 # the request gate, login codes and origin-bound sessions, /api/health and the Connect JSON of the CommandService
 # messages; M1-27 the Connect envelopes and the Execute path, with prost; M1-30 `/mcp`, with rastai-mcp; M1-28 the bus,
-# Subscribe and the run tails, with http-body. The node links (M1-47) bring tonic, and secrets (M2) keyring.
+# Subscribe and the run tails, with http-body; M1-47 the embedded node, the node links, NodeHubService and the
+# scheduler, with rastai-node and tonic. Secrets (M2) bring keyring.
 [dependencies]
 rastai-diag = { path = "../rastai-diag" }
 # Paths, settings resolution, principals, versions, random bytes and the clock.
@@ -18,9 +19,16 @@ rastai-core = { path = "../rastai-core" }
 # hash_bytes, the one BLAKE3 wrapper: login codes, session ids, session keys and the owner token are kept as hashes.
 # The strict JSON reader, which the Connect JSON decoder reads every body with.
 rastai-formats = { path = "../rastai-formats" }
-# The CommandService and Diagnostic messages the Connect JSON codec reads and writes (http/connect_json.rs), and the
-# command arguments and results (commands/).
-rastai-proto = { path = "../rastai-proto" }
+# The CommandService and Diagnostic messages the Connect JSON codec reads and writes (http/connect_json.rs), the
+# command arguments and results (commands/), and, with "grpc", the NodeService client and the NodeHubService server
+# of the node links (nodes/).
+rastai-proto = { path = "../rastai-proto", features = ["grpc"] }
+# The embedded node (run_node on its own runtime), the daemon key through the one Ed25519 wrapper
+# (rastai_node::identity), and the handshake's signed bytes and session-token metadata (rastai_node::handshake).
+rastai-node = { path = "../rastai-node" }
+# The NodeHubService server and the NodeService client's requests and statuses. Only nodes/node_hub.rs and
+# nodes/node_links.rs use it (contracts 2.5).
+tonic = { workspace = true, features = ["server", "router", "codegen", "channel"] }
 # The binary Connect bodies of CommandService (application/proto) and the error details. Only http/connect.rs uses it
 # (layout 8.4).
 prost = { workspace = true }
@@ -36,7 +44,8 @@ http-body = { workspace = true }
 # HTTP/1.1 serving on loopback TCP and daemon.sock. Only files under src/http/ use it (contracts 2.5).
 axum = { workspace = true, features = ["tokio", "http1"] }
 # "signal" for SIGTERM and SIGINT (shutdown.rs), "sync" for the shutdown channel, "rt" for the serve tasks.
-tokio = { workspace = true, features = ["net", "rt", "sync", "signal", "time", "macros"] }
+# "rt-multi-thread" for the embedded node's own runtime (daemon.rs).
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "sync", "signal", "time", "macros"] }
 # The login body, the login answer, /api/health, the Connect JSON, and command arguments and results.
 serde_json = { workspace = true }
 # DeserializeOwned, the bound of dispatch.rs's one helper that reads a handler's arguments into its type.

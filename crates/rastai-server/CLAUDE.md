@@ -43,10 +43,21 @@ The daemon, and the composition root: the only crate that wires the others toget
   mirror is written before the index, and the node is reached through `RunEventSource`, never directly. One tail per
   run (`Server.tailed_run_ids`): the tail re-watches a broken stream itself, and `start_run_tails` skips live tails.
   A `RunEventSource` is one long-lived object per node that survives reconnects, never one per connection.
+- **Nodes are reached through `nodes/` only.** `nodes/node_links.rs` and `nodes/node_hub.rs` are the only files that
+  import tonic (contracts 2.5): every `NodeService` call is a function there (`start_job_on_node`, ...), each carrying
+  the session token, and the hub refuses a call without it (`RRS-N0009`). The embedded node is reached over node.sock
+  with the same handshake a remote node gets; it runs on its own thread and runtime (`daemon.rs`).
+- **Job states come from the node; one move is recorded once.** Heartbeats and `ListJobs` become `job.state_changed`
+  records under `Scheduler.job_state_lock` (`nodes/reconcile.rs`), and the launch holds the same lock from its queue
+  check to the recorded answer. A run's end is written by the daemon only for a job that ended without one, only
+  after the run's tail is over, and only along a contracts 9.5 move (`settle_run`, `daemon_written_run_end`).
+- **Queued jobs are rows.** `submit_job` writes `run.json` (with the `JobSpec`), the `runs` row and the `jobs` row
+  before it answers; the launch reads the spec back from `run.json`, so a restart loses no queued job.
 - **Streams end on the shutdown flag.** `Subscribe` streams and run tails select on `wait_until_stopping`, and a
   stream lets the server go before its last envelope, so a stopping daemon can close its store.
 - **One error enum**, `ServerError` in `src/error.rs`; errors of the crates it calls keep their own code.
 - **`src/lib.rs` and `src/http/mod.rs` are lists of `pub mod` lines** (contracts §12.2). Unit tests sit at the bottom
   of the file they test; the gate table and the end-to-end requests are in `tests/gate.rs`, startup and shutdown in
   `tests/startup.rs`, the bus and `Subscribe` in `tests/bus_resume.rs`, run tails and the daemon log's replay in
-  `tests/run_tail.rs`, sharing `tests/common/mod.rs`. Every test removes its temporary folder at its end.
+  `tests/run_tail.rs`, the node link in `tests/node_link.rs` and the real train job (`#[ignore]`d, `just
+  test-daemon-jobs`) in `tests/train_jobs.rs`, sharing `tests/common/mod.rs`. Every test removes its temporary folder at its end.

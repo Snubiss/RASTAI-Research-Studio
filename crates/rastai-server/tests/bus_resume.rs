@@ -1,7 +1,8 @@
 //! The bus and `EventService.Subscribe` through a running daemon (contracts 7.2, flows/platform.md 6.3, layout 8.6):
 //! a gap inside the buffer is replayed and live events follow; a gap outside it, or a sequence from before a restart,
 //! gets `RRS-C0401`; the first sequence after a start is the start time in ms × 1,000; a journaled command publishes
-//! `command.finished`; a token needs `read`, and a revoked token's open stream ends with `RRS-C1006`.
+//! `command.finished`; a token needs `read`, and a revoked token's open stream ends with `RRS-C1006`. Each daemon's
+//! embedded node beats only on a change (`start_quiet_test_daemon`), so the events a test counts are its own.
 //!
 //! The stream is read envelope by envelope over a plain TCP socket, the way a Connect client reads it: HTTP/1.1
 //! chunks carrying 5-byte envelopes, the last one the end-of-stream envelope.
@@ -18,7 +19,7 @@ use rastai_core::principal::owner_principal;
 use rastai_core::time::now_unix_ms;
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::{BusEvent, SubscribeRequest};
-use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
+use rastai_server::daemon::RunningDaemon;
 use rastai_server::events::bus::{publish, subscribe};
 use rastai_server::http::connect::stream_message_envelope;
 use rastai_server::shutdown::request_shutdown;
@@ -27,8 +28,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use common::{
-    ANY_FREE_PORT, execute_request, header_value, ok_result, owner_bearer, remove_test_folder, run_command,
-    send_to_port, start_test_daemon, stop_test_daemon, test_paths,
+    execute_request, header_value, ok_result, owner_bearer, remove_test_folder, run_command, send_to_port,
+    start_quiet_test_daemon, stop_test_daemon, test_paths,
 };
 
 const SUBSCRIBE_PATH: &str = "/rastai.events.v1.EventService/Subscribe";
@@ -195,12 +196,7 @@ fn after(sequence: u64) -> SubscribeRequest {
 }
 
 async fn start_with_small_buffer(paths: &rastai_core::paths::DataPaths) -> RunningDaemon {
-    let options = DaemonOptions {
-        port: Some(ANY_FREE_PORT),
-        set_flags: vec![SMALL_BUFFER_FLAG.to_string()],
-        ..DaemonOptions::default()
-    };
-    start_daemon(paths.clone(), &options).await.unwrap()
+    start_quiet_test_daemon(paths, &[SMALL_BUFFER_FLAG]).await
 }
 
 /// Publishes `count` heartbeats and returns their sequences.
@@ -238,7 +234,7 @@ async fn a_gap_inside_the_buffer_is_replayed_then_live_events_follow() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_filtered_stream_gets_only_its_types_and_subjects() {
     let paths = test_paths("bus-filter");
-    let running = start_test_daemon(&paths).await;
+    let running = start_quiet_test_daemon(&paths, &[]).await;
     let request = SubscribeRequest {
         after_bus_sequence: 0,
         event_types: vec!["node.heartbeat".to_string()],
@@ -289,7 +285,7 @@ async fn a_gap_outside_the_buffer_or_from_before_a_restart_is_rrs_c0401() {
 async fn the_first_sequence_is_the_start_time_times_1000_and_commands_publish_command_finished() {
     let paths = test_paths("bus-first");
     let before_start_ms = u64::try_from(now_unix_ms()).unwrap();
-    let running = start_test_daemon(&paths).await;
+    let running = start_quiet_test_daemon(&paths, &[]).await;
     let after_start_ms = u64::try_from(now_unix_ms()).unwrap();
     let mut live = subscribe(&running.server.bus);
 
@@ -319,7 +315,7 @@ async fn the_first_sequence_is_the_start_time_times_1000_and_commands_publish_co
 #[tokio::test(flavor = "multi_thread")]
 async fn a_token_needs_read_and_a_revoked_token_s_stream_ends_with_rrs_c1006() {
     let paths = test_paths("bus-tokens");
-    let running = start_test_daemon(&paths).await;
+    let running = start_quiet_test_daemon(&paths, &[]).await;
     let owner = owner_principal();
     let create = |arguments: &str| execute_request("token.create", arguments);
     let chat_only = ok_result(
@@ -352,7 +348,7 @@ async fn a_token_needs_read_and_a_revoked_token_s_stream_ends_with_rrs_c1006() {
 #[tokio::test(flavor = "multi_thread")]
 async fn subscribe_takes_only_connect_proto() {
     let paths = test_paths("bus-content-type");
-    let running = start_test_daemon(&paths).await;
+    let running = start_quiet_test_daemon(&paths, &[]).await;
     let headers = [
         ("authorization", owner_bearer(&paths)),
         ("content-type", "application/json".to_string()),

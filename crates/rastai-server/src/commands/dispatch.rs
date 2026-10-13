@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 
 use crate::commands::arguments::invalid_arguments;
 use crate::commands::context::CommandContext;
-use crate::commands::handlers::{command, plugin, settings, system, token};
+use crate::commands::handlers::{command, job, node, plugin, settings, system, token, train};
 
 const CODE_UNKNOWN_COMMAND: &str = "RRS-C0001";
 const CODE_PLUGIN_COMMAND_NOT_AVAILABLE: &str = "RRS-P1004";
@@ -63,10 +63,6 @@ pub async fn dispatch(context: &CommandContext<'_>, arguments_json: &str) -> Res
         "system.status" => system::status(context, typed_arguments(command_id, arguments_json)?).await,
         "system.shutdown" => system::shutdown(context, typed_arguments(command_id, arguments_json)?).await,
         "command.list" => command::list(context, typed_arguments(command_id, arguments_json)?).await,
-        "job.list" => not_available_yet(command_id),
-        "job.get" => not_available_yet(command_id),
-        "job.cancel" => not_available_yet(command_id),
-        "train.start" => not_available_yet(command_id),
         "settings.get" => settings::get(context, typed_arguments(command_id, arguments_json)?).await,
         "settings.set" => settings::set(context, typed_arguments(command_id, arguments_json)?).await,
         "token.login_code.create" => {
@@ -76,13 +72,33 @@ pub async fn dispatch(context: &CommandContext<'_>, arguments_json: &str) -> Res
         "token.list" => token::list(context, typed_arguments(command_id, arguments_json)?).await,
         "token.revoke" => token::revoke(context, typed_arguments(command_id, arguments_json)?).await,
         "plugin.list" => plugin::list(context, typed_arguments(command_id, arguments_json)?).await,
-        "node.list" => not_available_yet(command_id),
-        "node.status" => not_available_yet(command_id),
+        "job.list" | "job.get" | "job.cancel" | "train.start" | "node.list" | "node.status" => {
+            dispatch_jobs_and_nodes(context, arguments_json).await
+        }
         _ => forward_to_plugin_host(context),
     }
 }
 
-/// The honest L0 stub: the area's "not available yet" code.
+/// The job, training and node commands: their own match, so each match stays short enough to read.
+async fn dispatch_jobs_and_nodes(
+    context: &CommandContext<'_>,
+    arguments_json: &str,
+) -> Result<CommandOutput, Vec<Diagnostic>> {
+    let command_id = context.command.command_id.as_str();
+    match command_id {
+        "job.list" => job::list(context, typed_arguments(command_id, arguments_json)?).await,
+        "job.get" => job::get(context, typed_arguments(command_id, arguments_json)?).await,
+        "job.cancel" => job::cancel(context, typed_arguments(command_id, arguments_json)?).await,
+        "train.start" => train::start(context, typed_arguments(command_id, arguments_json)?).await,
+        "node.list" => node::list(context, typed_arguments(command_id, arguments_json)?).await,
+        "node.status" => node::status(context, typed_arguments(command_id, arguments_json)?).await,
+        _ => forward_to_plugin_host(context),
+    }
+}
+
+/// The honest L0 stub: the area's "not available yet" code. Every M1 command has its handler now; the next
+/// milestone's contract task registers its commands as stubs that answer through this again (plan 3.2).
+#[allow(dead_code)]
 pub(crate) fn not_available_yet(command_id: &str) -> Result<CommandOutput, Vec<Diagnostic>> {
     let code = not_available_code(command_id);
     Err(vec![diagnostic(code, &[("command_id", command_id)])])

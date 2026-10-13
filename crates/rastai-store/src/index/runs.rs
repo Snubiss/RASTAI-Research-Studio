@@ -78,6 +78,13 @@ const UPSERT_JOB: &str = "INSERT INTO jobs (job_id, run_id, node_id, kind, state
         exit_code = excluded.exit_code, error_code = excluded.error_code";
 const SELECT_JOB_BY_ID: &str = "SELECT job_id, run_id, node_id, kind, state, pid, process_group_id, exit_code,
     error_code FROM jobs WHERE job_id = ?1";
+// An empty filter field matches every job. Job ids start with the time they were made (contracts 8.6), so their order
+// is the order the jobs were submitted in: newest first here, and the scheduler reverses it for first in, first out.
+const SELECT_JOBS_BY_FILTER: &str = "SELECT job_id, run_id, node_id, kind, state, pid, process_group_id, exit_code,
+        error_code
+    FROM jobs
+    WHERE (?1 = '' OR run_id = ?1) AND (?2 = '' OR state = ?2) AND (?3 = '' OR node_id = ?3)
+    ORDER BY job_id DESC";
 
 /// One row of `runs`. Ids a run may lack (`project_id`, `parent_run_id`) are "".
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,6 +148,14 @@ pub(crate) struct SavedCheckpoint<'a> {
     pub(crate) step: u64,
     pub(crate) folder: &'a str,
     pub(crate) is_best: bool,
+}
+
+/// Which jobs `list_jobs` returns. An empty field matches every job.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobFilter {
+    pub run_id: String,
+    pub state: String,
+    pub node_id: String,
 }
 
 /// Which runs `list_runs` returns. An empty field matches every run; `limit` `None` returns them all.
@@ -361,6 +376,21 @@ pub fn get_job(reader: &IndexReader, job_id: &str) -> Result<Option<JobRow>, Sto
     }
 }
 
+/// Jobs that match the filter, newest first.
+pub fn list_jobs(reader: &IndexReader, filter: &JobFilter) -> Result<Vec<JobRow>, StoreError> {
+    let parameters = [
+        text_value(&filter.run_id),
+        text_value(&filter.state),
+        text_value(&filter.node_id),
+    ];
+    let rows = query_rows(&reader.connection, SELECT_JOBS_BY_FILTER, &parameters)?;
+    let mut jobs = Vec::with_capacity(rows.len());
+    for row in &rows {
+        jobs.push(job_from_columns(row)?);
+    }
+    Ok(jobs)
+}
+
 /// Columns in the order of `SELECT_RUN_BY_ID`.
 fn run_from_columns(row: &[SqlValue]) -> Result<RunRow, StoreError> {
     Ok(RunRow {
@@ -379,7 +409,7 @@ fn run_from_columns(row: &[SqlValue]) -> Result<RunRow, StoreError> {
     })
 }
 
-/// Columns in the order of `SELECT_JOB_BY_ID`.
+/// Columns in the order of `SELECT_JOB_BY_ID` and `SELECT_JOBS_BY_FILTER`.
 fn job_from_columns(row: &[SqlValue]) -> Result<JobRow, StoreError> {
     Ok(JobRow {
         job_id: read_text(row, 0)?,

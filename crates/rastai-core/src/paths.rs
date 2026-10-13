@@ -318,10 +318,15 @@ pub fn hardware_profile_path(paths: &DataPaths) -> PathBuf {
     paths.data.join(NODE_FOLDER).join(HARDWARE_PROFILE_FILE)
 }
 
+/// `<data>/envs/`: every uv environment of this machine, one folder each.
+pub fn environments_dir(paths: &DataPaths) -> PathBuf {
+    paths.data.join(ENVIRONMENTS_FOLDER)
+}
+
 /// `<data>/envs/<environment_id>-<lock_hash12>/`: one uv environment.
 pub fn environment_dir(paths: &DataPaths, environment_id: &str, lock_hash12: &str) -> PathBuf {
     let environment_folder = format!("{environment_id}-{lock_hash12}");
-    paths.data.join(ENVIRONMENTS_FOLDER).join(environment_folder)
+    environments_dir(paths).join(environment_folder)
 }
 
 /// `<data>/python/`: the uv-managed CPython 3.12.
@@ -760,6 +765,7 @@ mod tests {
             (daemon_events_segment_path(&paths, 3), "/r/data/daemon/events-3.log"),
             (daemon_key_path(&paths), "/r/data/identity/daemon.key"),
             (paired_daemons_path(&paths), "/r/data/node/paired_daemons.json"),
+            (environments_dir(&paths), "/r/data/envs"),
             (
                 environment_dir(&paths, "cpu", "0123456789ab"),
                 "/r/data/envs/cpu-0123456789ab",

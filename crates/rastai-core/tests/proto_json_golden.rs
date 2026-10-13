@@ -10,13 +10,16 @@
 use std::fs;
 use std::path::Path;
 
-use rastai_core::proto_json::{hardware_profile_to_json, job_spec_from_json, job_spec_to_json};
-use rastai_proto::common::v1::{GpuInfo, HardwareProfile, LeaseClass, ResourceRequest};
+use rastai_core::proto_json::{hardware_profile_to_json, job_spec_from_json, job_spec_to_json, node_telemetry_to_json};
+use rastai_proto::common::v1::{
+    GpuInfo, GpuTelemetry, HardwareProfile, LeaseClass, NodeTelemetry, ProcessVram, ResourceRequest,
+};
 use rastai_proto::node::v1::{JobKind, JobSpec};
 use serde_json::{Value, json};
 
 const JOB_SPEC_GOLDEN: &str = "fixtures/proto-golden/node/JobSpec.json";
 const HARDWARE_PROFILE_GOLDEN: &str = "fixtures/proto-golden/common/HardwareProfile.json";
+const NODE_TELEMETRY_GOLDEN: &str = "fixtures/proto-golden/common/NodeTelemetry.json";
 const DRIVER: &str = "580.82.09";
 
 fn golden_json(golden: &str) -> Value {
@@ -127,10 +130,57 @@ fn the_hardware_profile_golden_writes_its_json_golden() {
     );
 }
 
+/// The message of fixtures/proto-golden/common/NodeTelemetry.json.
+fn golden_node_telemetry() -> NodeTelemetry {
+    NodeTelemetry {
+        sampled_unix_ms: 1_791_700_000_123,
+        gpus: vec![GpuTelemetry {
+            gpu_index: 1,
+            utilization_percent: 87,
+            vram_used_bytes: 12_884_901_888,
+            vram_total_bytes: 17_094_934_528,
+            temperature_celsius: 61.5,
+            power_watts: 212.25,
+            processes: vec![ProcessVram {
+                pid: 48213,
+                vram_bytes: 7_516_192_768,
+            }],
+        }],
+        ram_used_bytes: 21_474_836_480,
+        ram_total_bytes: 68_719_476_736,
+        disk_free_bytes: 1_099_511_627_776,
+    }
+}
+
+#[test]
+fn the_node_telemetry_golden_writes_its_json_golden() {
+    assert_eq!(
+        node_telemetry_to_json(&golden_node_telemetry()),
+        golden_json(NODE_TELEMETRY_GOLDEN)
+    );
+}
+
+// A float is written as its shortest decimal, the way protobuf-es and Python write a float field.
+#[test]
+fn a_float_is_written_as_its_shortest_decimal() {
+    let telemetry = NodeTelemetry {
+        gpus: vec![GpuTelemetry {
+            temperature_celsius: 0.1,
+            ..GpuTelemetry::default()
+        }],
+        ..NodeTelemetry::default()
+    };
+    assert_eq!(
+        node_telemetry_to_json(&telemetry),
+        json!({"gpus": [{"temperature_celsius": 0.1}]})
+    );
+}
+
 #[test]
 fn defaults_are_left_out() {
     assert_eq!(job_spec_to_json(&JobSpec::default()), json!({}));
     assert_eq!(hardware_profile_to_json(&HardwareProfile::default()), json!({}));
+    assert_eq!(node_telemetry_to_json(&NodeTelemetry::default()), json!({}));
 }
 
 // `optional bool may_reclaim_evictable` set to true is still written, and unset is left out (unset reads as true).

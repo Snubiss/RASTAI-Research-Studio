@@ -1,25 +1,28 @@
 //! A clean stop (flows/platform.md 2.1): SIGTERM, SIGINT or `system.shutdown` set the server's shutdown flag; the
 //! listeners stop taking requests and finish the open ones, daemon.port and daemon.sock are removed, the store's
 //! writer commits what is queued, and the daemon lock is released last, so a new daemon can't start while this one
-//! still writes. Stopping the daemon never stops jobs; `job.cancel` does. Open `Subscribe` streams and run tails end
-//! on the shutdown flag (http/event_endpoint.rs, indexing/run_tail.rs). (Detaching from workers joins with the node
-//! links, M1-47.)
+//! still writes. Stopping the daemon never stops jobs; `job.cancel` does. Open `Subscribe` streams, run tails, the
+//! scheduler, the node links' watch and the node hub end on the shutdown flag. The embedded node is stopped next, so
+//! nothing calls the hub any more; its workers run on in their own process groups and register again with the next
+//! node (flows/platform.md 2.3).
 //!
-//! Aborting a listener after the grace period doesn't end the connection tasks axum spawned for it, and those still
-//! hold the server, so its store can't be closed. Then the lock is kept until the process exits (`run_daemon`
-//! returns straight after), never released while a handler may still write. Streams end on the flag and let the
-//! server go before their last envelope, so this path stays rare.
+//! The store is closed once nothing else holds the server: a run tail or a settle that was mid-write when the flag
+//! went up gets `SHUTDOWN_GRACE_SECONDS` to let it go. Aborting a listener after the grace period doesn't end the
+//! connection tasks axum spawned for it, and those still hold the server, so its store can't be closed. Then the lock
+//! is kept until the process exits (`run_daemon` returns straight after), never released while a handler may still
+//! write. Streams end on the flag and let the server go before their last envelope, so this path stays rare.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use rastai_core::paths::node_hub_socket_path;
 use rastai_diag::logger::{log_info, log_warn};
 use rastai_store::data_dir_lock::DaemonLock;
 use rastai_store::store::close_store;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::daemon::RunningDaemon;
+use crate::daemon::{RunningDaemon, stop_embedded_node};
 use crate::error::ServerError;
 use crate::http::listeners::remove_runtime_files;
 use crate::server_state::Server;
@@ -27,6 +30,8 @@ use crate::server_state::Server;
 /// How long open requests get to finish once a stop is asked for; after that their tasks are dropped, so a client
 /// that never hangs up can't keep the daemon (and its lock) alive.
 const SHUTDOWN_GRACE_SECONDS: u64 = 10;
+/// How often the stop looks whether the last task let the server go.
+const SERVER_RELEASE_POLL_MS: u64 = 20;
 
 /// Asks the daemon to stop. Safe to call any number of times, from anywhere.
 pub fn request_shutdown(server: &Server) {
@@ -52,10 +57,13 @@ pub async fn wait_for_shutdown(running: RunningDaemon) -> Result<(), ServerError
         http_port: _,
         serve_tasks,
         daemon_lock,
+        embedded_node,
     } = running;
     wait_for_flag(server.shutdown.subscribe()).await;
     finish_serving(serve_tasks).await;
+    stop_embedded_node(embedded_node).await;
     remove_runtime_files(&server.paths);
+    let _ = std::fs::remove_file(node_hub_socket_path(&server.paths));
     let store_closed = close_server(server).await;
     if store_closed {
         drop(daemon_lock);
@@ -91,20 +99,29 @@ async fn finish_serving(serve_tasks: Vec<JoinHandle<()>>) {
     }
 }
 
-/// Closes the store once nothing else holds the server, and says whether it did. A handler task still holding the
-/// server keeps the writer alive; then the writer finishes its queue on its own when that task ends.
+/// Closes the store once nothing else holds the server, waiting up to the grace period for the tasks that still do,
+/// and says whether it did. A handler task still holding the server after that keeps the writer alive; then the
+/// writer finishes its queue on its own when that task ends.
 async fn close_server(server: Arc<Server>) -> bool {
-    match Arc::try_unwrap(server) {
-        Ok(server) => {
-            close_store(server.store).await;
-            true
-        }
-        Err(_still_shared) => {
-            log_warn(
-                "the server was still in use at shutdown; the store stays open and the daemon lock is kept until exit",
-                &[],
-            );
-            false
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(SHUTDOWN_GRACE_SECONDS);
+    let mut server = server;
+    loop {
+        match Arc::try_unwrap(server) {
+            Ok(server) => {
+                close_store(server.store).await;
+                return true;
+            }
+            Err(still_shared) if tokio::time::Instant::now() < deadline => {
+                server = still_shared;
+                tokio::time::sleep(Duration::from_millis(SERVER_RELEASE_POLL_MS)).await;
+            }
+            Err(_still_shared) => {
+                log_warn(
+                    "the server was still in use at shutdown; the store stays open and the daemon lock is kept until exit",
+                    &[],
+                );
+                return false;
+            }
         }
     }
 }

@@ -5,7 +5,9 @@
 //!
 //! `job_spec_to_json` and `hardware_profile_to_json` (M1-43) are what the node writes into `job.json`, whose
 //! `job_spec` and `hardware_profile` the worker decodes with protobuf's own `json_format` (python layout 7.3).
-//! `job_spec_from_json` (M1-45) reads the `job_spec` back when a restarted node reattaches the job.
+//! `job_spec_from_json` (M1-45) reads the `job_spec` back when a restarted node reattaches the job, and the daemon
+//! reads it back from `run.json` when it launches a queued job (M1-47). `node_telemetry_to_json` (M1-47) is the
+//! `telemetry` field of `node.status`'s result (contracts 6.5).
 //! `tests/proto_json_golden.rs` checks them against the golden messages in `fixtures/proto-golden/`. The
 //! `HardwareFingerprint` and `SamplingSettings` pairs join with the first code that reads them.
 //!
@@ -17,7 +19,9 @@
 //! Each function takes its message apart with a full pattern (no `..`), so a field added to the .proto fails to
 //! compile here until it is written.
 
-use rastai_proto::common::v1::{GpuInfo, HardwareProfile, LeaseClass, ResourceRequest};
+use rastai_proto::common::v1::{
+    GpuInfo, GpuTelemetry, HardwareProfile, LeaseClass, NodeTelemetry, ProcessVram, ResourceRequest,
+};
 use rastai_proto::node::v1::{JobKind, JobSpec};
 use serde_json::{Map, Value};
 
@@ -102,6 +106,59 @@ pub fn hardware_profile_to_json(profile: &HardwareProfile) -> Value {
     }
     put_text(&mut object, "driver_version", driver_version);
     put_text(&mut object, "backend", backend);
+    Value::Object(object)
+}
+
+/// A node's `NodeTelemetry` as protobuf JSON.
+pub fn node_telemetry_to_json(telemetry: &NodeTelemetry) -> Value {
+    let NodeTelemetry {
+        sampled_unix_ms,
+        gpus,
+        ram_used_bytes,
+        ram_total_bytes,
+        disk_free_bytes,
+    } = telemetry;
+    let mut object = Map::new();
+    put_i64(&mut object, "sampled_unix_ms", *sampled_unix_ms);
+    if !gpus.is_empty() {
+        let gpus = gpus.iter().map(gpu_telemetry_to_json).collect();
+        object.insert("gpus".to_string(), Value::Array(gpus));
+    }
+    put_u64(&mut object, "ram_used_bytes", *ram_used_bytes);
+    put_u64(&mut object, "ram_total_bytes", *ram_total_bytes);
+    put_u64(&mut object, "disk_free_bytes", *disk_free_bytes);
+    Value::Object(object)
+}
+
+fn gpu_telemetry_to_json(gpu: &GpuTelemetry) -> Value {
+    let GpuTelemetry {
+        gpu_index,
+        utilization_percent,
+        vram_used_bytes,
+        vram_total_bytes,
+        temperature_celsius,
+        power_watts,
+        processes,
+    } = gpu;
+    let mut object = Map::new();
+    put_u32(&mut object, "gpu_index", *gpu_index);
+    put_u32(&mut object, "utilization_percent", *utilization_percent);
+    put_u64(&mut object, "vram_used_bytes", *vram_used_bytes);
+    put_u64(&mut object, "vram_total_bytes", *vram_total_bytes);
+    put_f32(&mut object, "temperature_celsius", *temperature_celsius);
+    put_f32(&mut object, "power_watts", *power_watts);
+    if !processes.is_empty() {
+        let processes = processes.iter().map(process_vram_to_json).collect();
+        object.insert("processes".to_string(), Value::Array(processes));
+    }
+    Value::Object(object)
+}
+
+fn process_vram_to_json(process: &ProcessVram) -> Value {
+    let ProcessVram { pid, vram_bytes } = process;
+    let mut object = Map::new();
+    put_u32(&mut object, "pid", *pid);
+    put_u64(&mut object, "vram_bytes", *vram_bytes);
     Value::Object(object)
 }
 
@@ -271,6 +328,24 @@ fn put_u32(object: &mut Map<String, Value>, key: &str, value: u32) {
 fn put_u64(object: &mut Map<String, Value>, key: &str, value: u64) {
     if value != 0 {
         object.insert(key.to_string(), Value::from(value.to_string()));
+    }
+}
+
+fn put_i64(object: &mut Map<String, Value>, key: &str, value: i64) {
+    if value != 0 {
+        object.insert(key.to_string(), Value::from(value.to_string()));
+    }
+}
+
+/// A float is a JSON number. The value goes through its shortest decimal text first, as protobuf-es and Python
+/// write it, so 61.5 stays 61.5 and 0.1 doesn't become 0.10000000149011612.
+fn put_f32(object: &mut Map<String, Value>, key: &str, value: f32) {
+    if value == 0.0 {
+        return;
+    }
+    let shortest: f64 = value.to_string().parse().unwrap_or(f64::from(value));
+    if let Some(number) = serde_json::Number::from_f64(shortest) {
+        object.insert(key.to_string(), Value::Number(number));
     }
 }
 

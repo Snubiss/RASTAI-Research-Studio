@@ -22,7 +22,8 @@
 //!   `start_run_tails`, called again after the node link reconnects, skips the runs whose tail is still watching:
 //!   two tails of one run would index and publish its records twice and write one mirror from two writers.
 //!
-//! The node is a `RunEventSource`. The daemon's node links (M1-47) are one; the tests use a fake node.
+//! The node is a `RunEventSource`. The daemon's node links are one (nodes/node_links.rs, `NodeConnection`); the tests
+//! use a fake node.
 
 use std::collections::HashSet;
 use std::sync::{Arc, MutexGuard, PoisonError};
@@ -77,7 +78,7 @@ const CODE_DISK_FULL: &str = "RRS-S3002";
 const CODE_EVENT_LOG_CORRUPT: &str = "RRS-S2002";
 const CODE_RUN_LOG_RECORD_REFUSED: &str = "RRS-S2004";
 
-/// The node a run's records come from. M1-47's node links implement it over `NodeService.WatchRunEvents`.
+/// The node a run's records come from. The node links implement it over `NodeService.WatchRunEvents`.
 /// A source is one long-lived object per node that survives reconnects, never one per connection: a tail keeps its
 /// claim and re-watches through the source it started with, so a source made per connection would leave the run
 /// skipped by `start_run_tails` and the old tail retrying a dead link.
@@ -163,12 +164,19 @@ pub fn start_run_tails(server: &Arc<Server>, node: &Arc<dyn RunEventSource>) -> 
     };
     let mut tasks = Vec::new();
     for run_id in run_ids {
-        // Claimed before the task starts, so a second call right after this one already sees the run as tailed.
-        if let Some(claim) = claim_run(server, &run_id) {
-            tasks.push(tokio::spawn(tail_claimed_run(claim, node.clone())));
+        if let Some(task) = spawn_run_tail(server, node, &run_id) {
+            tasks.push(task);
         }
     }
     tasks
+}
+
+/// Starts one run's tail on a task of its own and returns the task, or None when the run already has a tail. The
+/// run is claimed before this returns, so a call right after it already sees the run as tailed (the node links
+/// settle a run's end only once its tail is over, nodes/reconcile.rs).
+pub fn spawn_run_tail(server: &Arc<Server>, node: &Arc<dyn RunEventSource>, run_id: &str) -> Option<JoinHandle<()>> {
+    let claim = claim_run(server, run_id)?;
+    Some(tokio::spawn(tail_claimed_run(claim, node.clone())))
 }
 
 /// Tails one run until the node ends its stream, its log is found damaged, or the daemon stops. A broken stream is
@@ -624,7 +632,7 @@ fn read_acked_sequence(server: &Server, run_id: &str) -> Result<Option<u64>, Sto
 }
 
 /// The runs on `node_id` whose state doesn't end the run: their logs may still grow.
-fn open_run_ids(server: &Server, node_id: &str) -> Result<Vec<String>, StoreError> {
+pub fn open_run_ids(server: &Server, node_id: &str) -> Result<Vec<String>, StoreError> {
     let reader = open_index_reader(&server.store.index_readers)?;
     let mut run_ids = Vec::new();
     for run in list_runs(&reader, &RunFilter::default())? {

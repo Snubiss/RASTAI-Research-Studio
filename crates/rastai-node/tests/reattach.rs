@@ -761,6 +761,8 @@ exec sleep 600
         assert!(arrived - asked < IMMEDIATE_BEAT);
         assert_eq!(first.node_id, answer.node_id);
         assert!(first.telemetry.is_some());
+        // Each beat carries the session's token, which the daemon's hub checks (contracts 4.4).
+        assert_eq!(hub.session_tokens()[0], Some(answer.session_token.clone()));
 
         let spec = job_spec(&new_run_id());
         let job_id = spec.job_id.clone();

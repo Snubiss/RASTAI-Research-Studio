@@ -23,7 +23,7 @@ use rastai_proto::commands::v1::ExecuteRequest;
 use rastai_proto::common::v1::PluginState;
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::{BusEvent, PluginStateChanged};
-use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
+use rastai_server::daemon::{DaemonOptions, RunningDaemon};
 use rastai_server::events::bus::subscribe;
 use rastai_server::http::connect_json::list_commands_response_from_json;
 use rastai_server::plugin_host::capabilities::{
@@ -40,7 +40,7 @@ use serde_json::{Value, json};
 
 use common::{
     ANY_FREE_PORT, execute_request, ok_result, options_on_any_port, owner_bearer, remove_test_folder, response_codes,
-    run_command, send_to_port, stop_test_daemon, test_paths, token_principal,
+    run_command, send_to_port, start_daemon_in_test, stop_test_daemon, test_paths, token_principal,
 };
 
 const LIST_COMMANDS_PATH: &str = "/rastai.commands.v1.CommandService/ListCommands";
@@ -418,9 +418,7 @@ async fn listed_command_ids(
 async fn each_fixture_ends_in_its_state_and_the_daemon_keeps_running() {
     let paths = test_paths("plugin-fixtures");
     let names: Vec<&str> = FIXTURES.iter().map(|(folder, _, _, _)| *folder).collect();
-    let running = start_daemon(paths.clone(), &options_with_dev_plugins(&names))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_plugins(&names)).await;
     let health = send_to_port(running.http_port, "GET", HEALTH_PATH, &[], b"").await;
     assert_eq!(health.status, 200);
     let plugins = plugin_list(&running).await;
@@ -476,9 +474,7 @@ async fn each_fixture_ends_in_its_state_and_the_daemon_keeps_running() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dev_plugins_commands_come_and_go_with_its_state() {
     let paths = test_paths("plugin-dev");
-    let running = start_daemon(paths.clone(), &options_with_dev_plugins(&["valid"]))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_plugins(&["valid"])).await;
     let mut live = subscribe(&running.server.bus);
     let mut listed = listed_command_ids(&running, &paths, "fixture_tools").await;
     listed.sort();
@@ -541,9 +537,7 @@ async fn a_dev_plugins_commands_come_and_go_with_its_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plugin_acts_only_within_its_grant_and_only_while_enabled() {
     let paths = test_paths("plugin-grant");
-    let running = start_daemon(paths.clone(), &options_with_dev_plugins(&["valid"]))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_plugins(&["valid"])).await;
     let as_plugin = |command_id: &str, arguments: &str| ExecuteRequest {
         acting_plugin_id: "fixture_tools".to_string(),
         ..execute_request(command_id, arguments)
@@ -575,15 +569,14 @@ async fn a_plugin_acts_only_within_its_grant_and_only_while_enabled() {
 async fn an_installed_plugin_loads_from_its_row_and_its_state_is_saved() {
     let paths = test_paths("plugin-installed");
     // A first start makes rastai.db; the row and the folder an install would leave are written while it runs.
-    let first = start_daemon(
-        paths.clone(),
+    let first = start_daemon_in_test(
+        &paths,
         &DaemonOptions {
             port: Some(ANY_FREE_PORT),
             ..DaemonOptions::default()
         },
     )
-    .await
-    .unwrap();
+    .await;
     let row = PluginRow {
         plugin_id: "fixture_tools".to_string(),
         version: "1.0.0".to_string(),
@@ -604,15 +597,14 @@ async fn an_installed_plugin_loads_from_its_row_and_its_state_is_saved() {
     )
     .unwrap();
 
-    let second = start_daemon(
-        paths.clone(),
+    let second = start_daemon_in_test(
+        &paths,
         &DaemonOptions {
             port: Some(ANY_FREE_PORT),
             ..DaemonOptions::default()
         },
     )
-    .await
-    .unwrap();
+    .await;
     let plugins = plugin_list(&second).await;
     let listed = find_listed(&plugins, "fixture_tools");
     assert_eq!(listed["state"], "enabled");
@@ -635,7 +627,7 @@ async fn an_installed_plugin_loads_from_its_row_and_its_state_is_saved() {
 /// A restart starts `fixture_tools` from its saved `enabled`: the load changes nothing, so the daemon log still has
 /// only the move of its first load.
 async fn assert_a_restart_logs_no_second_move(paths: &DataPaths) {
-    let restarted = start_daemon(paths.clone(), &options_on_any_port()).await.unwrap();
+    let restarted = start_daemon_in_test(paths, &options_on_any_port()).await;
     assert_eq!(listed_state(&restarted, "fixture_tools").await.0, "enabled");
     let moves: Vec<(i32, i32)> = logged_plugin_state_changes(paths)
         .iter()
@@ -662,8 +654,9 @@ fn logged_plugin_state_changes(paths: &DataPaths) -> Vec<PluginStateChanged> {
 fn published_plugin_state_changes(live: &mut tokio::sync::broadcast::Receiver<BusEvent>) -> Vec<PluginStateChanged> {
     let mut changes = Vec::new();
     while let Ok(event) = live.try_recv() {
-        assert_eq!(event.source, "daemon");
+        let source = event.source.clone();
         if let Some(change) = plugin_state_change_of(event.payload.and_then(|payload| payload.payload)) {
+            assert_eq!(source, "daemon");
             changes.push(change);
         }
     }
@@ -743,9 +736,7 @@ async fn disabling_the_end_of_a_dependency_chain_disables_the_whole_chain() {
         ),
         write_dev_plugin(&paths, &small_manifest("acme_c", json!({}))),
     ];
-    let running = start_daemon(paths.clone(), &options_with_dev_folders(&folders))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_folders(&folders)).await;
     for plugin_id in ["acme_a", "acme_b", "acme_c"] {
         assert_eq!(listed_state(&running, plugin_id).await.0, "enabled", "{plugin_id}");
     }
@@ -780,9 +771,7 @@ async fn a_dependency_cycle_names_the_dependency_held_back() {
             &small_manifest("acme_b", json!({"dependencies": {"acme_a": "*"}})),
         ),
     ];
-    let running = start_daemon(paths.clone(), &options_with_dev_folders(&folders))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_folders(&folders)).await;
     let plugins = plugin_list(&running).await;
     let refusal = find_listed(&plugins, "acme_a")["diagnostics"][0].clone();
     assert_eq!(refusal["code"], "RRS-P3001");
@@ -824,9 +813,7 @@ async fn disabling_psychology_disables_a_lens_plugin_until_it_is_back() {
         write_dev_plugin(&paths, &lens),
         write_dev_plugin(&paths, &small_manifest("psychology", json!({}))),
     ];
-    let running = start_daemon(paths.clone(), &options_with_dev_folders(&folders))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_folders(&folders)).await;
     assert_eq!(listed_state(&running, "acme_lens").await.0, "enabled");
     assert_eq!(
         listed_command_ids(&running, &paths, "acme_lens").await,
@@ -858,7 +845,7 @@ fn saved_plugin_state(running: &RunningDaemon, plugin_id: &str) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plugin_the_host_disabled_loads_after_its_fix_and_a_restart() {
     let paths = test_paths("plugin-host-decided");
-    let first = start_daemon(paths.clone(), &options_on_any_port()).await.unwrap();
+    let first = start_daemon_in_test(&paths, &options_on_any_port()).await;
     let row = PluginRow {
         plugin_id: "acme_stream".to_string(),
         version: "1.0.0".to_string(),
@@ -878,7 +865,7 @@ async fn a_plugin_the_host_disabled_loads_after_its_fix_and_a_restart() {
     write_manifest(&paths.data.join("plugins/acme_stream/1.0.0"), &experimental);
 
     // With experimental APIs off, the host disables it; that is its decision, so the row isn't changed.
-    let second = start_daemon(paths.clone(), &options_on_any_port()).await.unwrap();
+    let second = start_daemon_in_test(&paths, &options_on_any_port()).await;
     let (state, codes) = listed_state(&second, "acme_stream").await;
     assert_eq!((state.as_str(), codes), ("disabled", vec!["RRS-P1003".to_string()]));
     assert_eq!(saved_plugin_state(&second, "acme_stream"), "installed");
@@ -889,7 +876,7 @@ async fn a_plugin_the_host_disabled_loads_after_its_fix_and_a_restart() {
         set_flags: vec!["plugins.experimental_apis=true".to_string()],
         ..options_on_any_port()
     };
-    let third = start_daemon(paths.clone(), &with_flag).await.unwrap();
+    let third = start_daemon_in_test(&paths, &with_flag).await;
     assert_eq!(listed_state(&third, "acme_stream").await.0, "enabled");
     assert_eq!(saved_plugin_state(&third, "acme_stream"), "enabled");
     stop_test_daemon(third).await;
@@ -901,9 +888,7 @@ async fn a_plugin_the_host_disabled_loads_after_its_fix_and_a_restart() {
 #[tokio::test(flavor = "multi_thread")]
 async fn owner_only_settings_keys_refuse_a_system_admin_token_and_a_plugin() {
     let paths = test_paths("plugin-owner-keys");
-    let running = start_daemon(paths.clone(), &options_with_dev_plugins(&["valid"]))
-        .await
-        .unwrap();
+    let running = start_daemon_in_test(&paths, &options_with_dev_plugins(&["valid"])).await;
     let admin = token_principal(vec![Scope::SystemAdmin]);
     let dev_paths = r#"{"key": "plugins.dev_paths", "value": ["/tmp/elsewhere"]}"#;
     let ssh_binary = r#"{"key": "nodes.ssh_binary", "value": "/tmp/not-ssh"}"#;

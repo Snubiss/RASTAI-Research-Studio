@@ -6,8 +6,8 @@
 //! In M1 the client makes one call, `Heartbeat` (heartbeat.rs decides when). `ExecuteCommand` joins with plugin
 //! modules (M4), `GatewayGenerate` and `GetSecret` with the milestones that use them.
 //!
-//! The session token isn't sent yet: the gRPC metadata key it travels under is a wire name, which lands in a contract
-//! PR with the daemon's node link (layout 7.9, "Not checked yet"). Until then the hub socket is the daemon's own,
+//! Every call carries the session's token in the `rastai-session-token` metadata key (contracts 4.4), and the
+//! daemon's hub refuses a call without its current token (`RRS-N0009`). The hub socket is also the daemon's own,
 //! reached only by the same user.
 
 use std::path::Path;
@@ -19,7 +19,7 @@ use rastai_proto::node::v1::node_hub_service_client::NodeHubServiceClient;
 use rastai_transport::grpc_channel::connect_grpc_channel;
 use tonic::transport::Channel;
 
-use crate::handshake::current_session;
+use crate::handshake::{current_session, request_with_session_token};
 use crate::node::NodeState;
 
 /// How long one hub call may take. A daemon that doesn't answer in this time has missed the beat; the next tick
@@ -40,6 +40,7 @@ pub async fn send_heartbeat(state: &NodeState, request: HeartbeatRequest) -> Res
     let Some(session) = current_session(state) else {
         return Ok(());
     };
+    let request = request_with_session_token(request, &session.session_token)?;
     let channel = hub_channel(state, &session.hub_socket_path).await?;
     let mut client = NodeHubServiceClient::new(channel);
     let answered = tokio::time::timeout(hub_call_timeout(), client.heartbeat(request)).await;

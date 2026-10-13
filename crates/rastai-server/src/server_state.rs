@@ -3,8 +3,8 @@
 //!
 //! M1-26 brought the fields startup and sign-in need; M1-27 the command registry, the settings layers that sit above
 //! the files, the idempotency locks and the port; M1-32 the plugin host; M1-30 the MCP sessions; M1-28 the bus, the
-//! daemon's own event log and the tailed runs; SEC-01 the plugin-host lock. The node links and identity (M1-42,
-//! M1-47), the gateway and the rest join with the tasks that build them.
+//! daemon's own event log and the tailed runs; SEC-01 the plugin-host lock; M1-47 the daemon's identity, the node
+//! links and the scheduler. The gateway and the rest join with the tasks that build them.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock, RwLock};
@@ -18,6 +18,7 @@ use rastai_formats::describe::json_schema::json_schema_for;
 use rastai_formats::describe::registry::describe_all_types;
 use rastai_formats::describe::types::TypeDescription;
 use rastai_mcp::server::session::McpSession;
+use rastai_node::identity::NodeIdentity;
 use rastai_proto::commands::v1::CommandDescriptor;
 use rastai_store::store::Store;
 use tokio::sync::{oneshot, watch};
@@ -26,7 +27,9 @@ use crate::commands::journal::IdempotencyKeyLock;
 use crate::events::bus::{BUS_BUFFER_EVENTS, Bus, new_bus};
 use crate::events::daemon_events::{DaemonLog, new_daemon_log};
 use crate::http::sessions::AuthState;
+use crate::nodes::node_links::NodeLinks;
 use crate::plugin_host::load::PluginHost;
+use crate::scheduler::queue::{Scheduler, new_scheduler};
 
 /// How many events the bus keeps for clients that reconnect (contracts 7.2 and 11.2).
 const BUS_BUFFER_SETTING: &str = "daemon.bus_buffer_events";
@@ -69,6 +72,13 @@ pub struct Server {
     pub mcp_sessions: Mutex<Vec<McpSession>>,
     /// The loopback port, set once the listener is bound; `token.login_code.create` reports it.
     pub http_port: OnceLock<u16>,
+    /// `daemon.key`, through rastai_node::identity (the one Ed25519 wrapper): it signs the node handshakes, and its
+    /// public key is the daemon id (contracts 8.6).
+    pub identity: NodeIdentity,
+    /// Every node the daemon knows and how its connection stands (nodes/node_links.rs).
+    pub nodes: NodeLinks,
+    /// The job queue's wake-up and the job lock (scheduler/queue.rs).
+    pub scheduler: Scheduler,
     /// Set to true to stop the daemon (`request_shutdown`): the signal handler and `system.shutdown` do. The
     /// listeners watch it.
     pub shutdown: watch::Sender<bool>,
@@ -81,13 +91,27 @@ pub struct TokenCreatePause {
     pub resume: oneshot::Receiver<()>,
 }
 
-pub fn build_server(
-    paths: DataPaths,
-    settings: ResolvedSettings,
-    settings_overrides: Vec<SettingsLayer>,
-    store: Store,
-    auth: AuthState,
-) -> Server {
+/// What `build_server` puts together; each part is made by its own startup step (daemon.rs).
+pub struct ServerParts {
+    pub paths: DataPaths,
+    pub settings: ResolvedSettings,
+    pub settings_overrides: Vec<SettingsLayer>,
+    pub store: Store,
+    pub auth: AuthState,
+    pub identity: NodeIdentity,
+    pub nodes: NodeLinks,
+}
+
+pub fn build_server(parts: ServerParts) -> Server {
+    let ServerParts {
+        paths,
+        settings,
+        settings_overrides,
+        store,
+        auth,
+        identity,
+        nodes,
+    } = parts;
     let (shutdown, _first_receiver) = watch::channel(false);
     let bus_buffer_events = usize::try_from(setting_u64(&settings, BUS_BUFFER_SETTING)).unwrap_or(BUS_BUFFER_EVENTS);
     Server {
@@ -106,6 +130,9 @@ pub fn build_server(
         idempotency_locks: Mutex::new(Vec::new()),
         mcp_sessions: Mutex::new(Vec::new()),
         http_port: OnceLock::new(),
+        identity,
+        nodes,
+        scheduler: new_scheduler(),
         shutdown,
     }
 }

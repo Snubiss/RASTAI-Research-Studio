@@ -13,13 +13,25 @@ use rastai_core::scopes::{Scope, scope_name};
 use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
 use rastai_server::commands::execute::execute_command;
 use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
+use rastai_server::error::ServerError;
+use rastai_server::nodes::node_links::link_telemetry;
 use rastai_server::server_state::Server;
 use rastai_server::shutdown::{request_shutdown, wait_for_shutdown};
+use rastai_store::error::StoreError;
 use rastai_transport::http_client::{HttpRequest, HttpResponse, HttpTarget, send_request};
 
 /// Port 0: the operating system picks a free port, so tests running at once never fight over 47820–47829.
 pub const ANY_FREE_PORT: u16 = 0;
 const REQUEST_TIMEOUT_MS: u64 = 5000;
+/// Keeps the embedded node's heartbeats to the ones a change asks for, the first of which comes with the handshake:
+/// a test that counts bus events then sees only its own once that first beat is in (`start_quiet_test_daemon`).
+pub const QUIET_NODE_FLAG: &str = "nodes.heartbeat_seconds=3600";
+/// How long `start_quiet_test_daemon` waits for the handshake's heartbeat.
+const FIRST_HEARTBEAT_WAIT_MS: u64 = 10_000;
+const FIRST_HEARTBEAT_POLL_MS: u64 = 20;
+/// How long a test's start waits for a lock its own process released a moment ago (start_daemon_in_test).
+const LOCK_RELEASE_WAIT_MS: u64 = 2000;
+const LOCK_RELEASE_POLL_MS: u64 = 10;
 
 /// Empty data folders for one test, under one short parent: the socket path must stay within 107 bytes.
 pub fn test_paths(test_name: &str) -> DataPaths {
@@ -53,9 +65,53 @@ pub fn options_on_any_port() -> DaemonOptions {
     }
 }
 
-#[allow(clippy::unwrap_used)]
 pub async fn start_test_daemon(paths: &DataPaths) -> RunningDaemon {
-    start_daemon(paths.clone(), &options_on_any_port()).await.unwrap()
+    start_daemon_in_test(paths, &options_on_any_port()).await
+}
+
+/// `start_daemon` for a test, which may start a daemon again on the same folders in the same process. The lock a
+/// stopped daemon released can stay held for an instant by a child process another test's embedded node was just
+/// starting (between its fork and its exec it holds every open file of this process), so a lock held by this very
+/// process is tried again for up to `LOCK_RELEASE_WAIT_MS`. Any other failure fails the test.
+pub async fn start_daemon_in_test(paths: &DataPaths, options: &DaemonOptions) -> RunningDaemon {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(LOCK_RELEASE_WAIT_MS);
+    loop {
+        let error = match start_daemon(paths.clone(), options).await {
+            Ok(running) => return running,
+            Err(error) => error,
+        };
+        let held_here = matches!(
+            &error,
+            ServerError::Store(StoreError::DaemonLockHeld { holder_pid: Some(pid), .. }) if *pid == std::process::id()
+        );
+        if !held_here || std::time::Instant::now() > deadline {
+            panic!("the test daemon didn't start: {} {error:?}", error.code());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(LOCK_RELEASE_POLL_MS)).await;
+    }
+}
+
+/// A daemon whose embedded node beats only on a change, started with `extra_flags` too, returned once the
+/// handshake's heartbeat has arrived: from then on nothing publishes on the bus but the test itself.
+#[allow(clippy::unwrap_used)]
+pub async fn start_quiet_test_daemon(paths: &DataPaths, extra_flags: &[&str]) -> RunningDaemon {
+    let mut set_flags = vec![QUIET_NODE_FLAG.to_string()];
+    set_flags.extend(extra_flags.iter().map(|flag| flag.to_string()));
+    let options = DaemonOptions {
+        set_flags,
+        ..options_on_any_port()
+    };
+    let running = start_daemon_in_test(paths, &options).await;
+    let node_id = running.embedded_node.node_id.clone();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(FIRST_HEARTBEAT_WAIT_MS);
+    while link_telemetry(&running.server, &node_id).is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the handshake's heartbeat never came"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(FIRST_HEARTBEAT_POLL_MS)).await;
+    }
+    running
 }
 
 #[allow(clippy::unwrap_used)]

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use rastai_core::error::CoreError;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
+use rastai_node::error::NodeError;
 use rastai_store::error::StoreError;
 use rastai_transport::error::TransportError;
 
@@ -54,8 +55,10 @@ pub enum ServerError {
     Core(CoreError),
     /// The daemon lock, the runtime folder or rastai.db (rastai-store).
     Store(StoreError),
-    /// daemon.sock couldn't be bound (rastai-transport).
+    /// daemon.sock or node-hub.sock couldn't be bound (rastai-transport).
     Transport(TransportError),
+    /// `daemon.key`, the embedded node's key or its pinned daemon keys can't be used (rastai-node, `RRS-N0006`).
+    Node(NodeError),
 }
 
 impl ServerError {
@@ -71,6 +74,7 @@ impl ServerError {
             ServerError::Core(error) => error.code(),
             ServerError::Store(error) => error.code(),
             ServerError::Transport(error) => error.code(),
+            ServerError::Node(error) => error.code(),
         }
     }
 }
@@ -184,6 +188,12 @@ impl From<CoreError> for ServerError {
 impl From<StoreError> for ServerError {
     fn from(error: StoreError) -> ServerError {
         ServerError::Store(error)
+    }
+}
+
+impl From<NodeError> for ServerError {
+    fn from(error: NodeError) -> ServerError {
+        ServerError::Node(error)
     }
 }
 
