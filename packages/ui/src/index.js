@@ -34,6 +34,7 @@ export { DiagnosticView } from "./diagnostics/DiagnosticView.jsx";
 /** @typedef {import("./tokens/token-types.js").ThemeTokens} ThemeTokens */
 /** @typedef {import("./tokens/token-types.js").TypographyTokens} TypographyTokens */
 /** @typedef {import("./tokens/token-types.js").ThemeOptions} ThemeOptions */
+/** @typedef {import("./tokens/token-types.js").BuiltInThemeName} BuiltInThemeName */
 /** @typedef {import("./mode/mode-types.js").UiMode} UiMode */
 /** @typedef {import("./components/FieldForm.jsx").FieldSpec} FieldSpec */
 /** @typedef {import("./components/CommandPaletteView.jsx").PaletteEntry} PaletteEntry */

@@ -22,6 +22,11 @@ import { vizColors } from "./viz-colors.js";
 
 // The generated JSON Schema of rastai.theme/1, which rastai-formats writes from its own types (`just codegen`).
 const THEME_SCHEMA_FILE = new URL("../../../../schemas/rastai.theme/1.json", import.meta.url);
+// The Rust formats' fixture that sets every color role; it is the one file the Rust tests read as a full theme.
+const EVERY_ROLE_FIXTURE = new URL(
+  "../../../../fixtures/documents/rastai.theme/valid/every_role.theme.json",
+  import.meta.url,
+);
 const HEX_COLOR = /^#[0-9a-f]{6}$/;
 const BASES = /** @type {const} */ (["light", "dark"]);
 // Every built-in theme by its ui.theme name, with the base its locked set comes from.
@@ -140,6 +145,14 @@ function hostileTokens(base) {
     [DOCUMENTED_LOCKED_VARIABLES[0]]: HOSTILE_COLOR,
   });
 }
+
+describe("the every_role fixture", () => {
+  test("sets every color role of the schema and the xxl size, so it keeps up when a role is added", () => {
+    const fixture = JSON.parse(readFileSync(EVERY_ROLE_FIXTURE, "utf8"));
+    expect(Object.keys(fixture.colors).sort()).toEqual(schemaColorRoles());
+    expect(fixture.typography.font_sizes_px.xxl).toBeDefined();
+  });
+});
 
 describe("built-in themes", () => {
   test("the role keys are the generated schema's, and every built-in sets every one", () => {

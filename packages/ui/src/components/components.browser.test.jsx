@@ -349,4 +349,74 @@ describe("PanelChrome", () => {
     expect(document.activeElement).toBe(menuButton);
     await mounted.unmount();
   });
+
+  test("Tab closes the menu and moves on from its button, so the items are not three Tab stops", async () => {
+    const mounted = await mount(
+      <div>
+        <PanelChrome
+          title="Live"
+          modeOverride=""
+          onModeOverrideChange={() => {}}
+          menuItems={[
+            { id: "reload", label: "Reload panel" },
+            { id: "move", label: "Move to right" },
+          ]}
+          onMenuSelect={() => {}}
+        />
+        <button type="button">After</button>
+      </div>,
+    );
+    const menuButton = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("[aria-haspopup=menu]"));
+    menuButton.focus();
+    await userEvent.keyboard("{Enter}");
+    const items = /** @type {HTMLElement[]} */ ([...mounted.container.querySelectorAll("[role=menuitem]")]);
+    expect(items.map((item) => item.tabIndex)).toEqual([-1, -1]);
+
+    await userEvent.keyboard("{Tab}");
+    expect(mounted.container.querySelector("[role=menu]")).toBeNull();
+    expect(document.activeElement?.textContent).toBe("After");
+    await mounted.unmount();
+  });
+
+  test("Home and End move to the first and the last item", async () => {
+    const mounted = await mount(
+      <PanelChrome
+        title="Live"
+        modeOverride=""
+        onModeOverrideChange={() => {}}
+        menuItems={[
+          { id: "reload", label: "Reload panel" },
+          { id: "move", label: "Move to right" },
+          { id: "close", label: "Close panel" },
+        ]}
+        onMenuSelect={() => {}}
+      />,
+    );
+    const menuButton = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("[aria-haspopup=menu]"));
+    menuButton.focus();
+    await userEvent.keyboard("{Enter}");
+    const items = [...mounted.container.querySelectorAll("[role=menuitem]")];
+    await userEvent.keyboard("{End}");
+    expect(document.activeElement).toBe(items[2]);
+    await userEvent.keyboard("{Home}");
+    expect(document.activeElement).toBe(items[0]);
+    await mounted.unmount();
+  });
+
+  test("Escape does nothing while the menu is closed, so an enclosing dialog still receives it", async () => {
+    const mounted = await mount(
+      <PanelChrome
+        title="Live"
+        modeOverride=""
+        onModeOverrideChange={() => {}}
+        menuItems={[{ id: "reload", label: "Reload panel" }]}
+        onMenuSelect={() => {}}
+      />,
+    );
+    const menuButton = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("[aria-haspopup=menu]"));
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    menuButton.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+    await mounted.unmount();
+  });
 });

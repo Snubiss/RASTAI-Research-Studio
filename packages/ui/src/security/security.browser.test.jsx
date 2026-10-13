@@ -3,6 +3,7 @@
 // security surface's own color and blows up the type and spacing scales. The test compares two screenshots taken in
 // the same run, so no stored picture can drift, and also the computed colors against LOCKED_TOKENS.
 
+import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
@@ -13,6 +14,7 @@ import { applyThemeTokens } from "../tokens/apply-theme.js";
 import { COLOR_ROLES } from "../tokens/built-in-themes.js";
 import { LOCKED_TOKENS } from "../tokens/locked.js";
 import { builtInTheme } from "../tokens/resolve-tokens.js";
+import { DISABLED_BUTTON_STYLE, PRIMARY_BUTTON_STYLE } from "./locked-styles.js";
 import { EgressBadge, PermissionList, SignedOutScreen, TokenConfirm, TrustPrompt } from "./index.js";
 
 /** @typedef {import("../tokens/token-types.js").ThemeTokens} ThemeTokens */
@@ -29,6 +31,7 @@ const ACTIVE_EGRESS = [
 const PERMISSIONS = ["commands:[read, chat]", "network:[huggingface.co]", "gpu", "weights.read"];
 const TOKEN_CAN = ["Read models and runs", "Start training jobs"];
 const TOKEN_CANNOT = ["Change settings", "Create other tokens"];
+const TOKEN_VALUE = "rst_0123456789abcdef";
 const noop = () => {};
 // The test's own frame around each component. It sets no font size on purpose: the component inherits whatever
 // the hostile theme's type scale puts on the page, so a security element that forgets its own fixed size changes
@@ -57,6 +60,20 @@ const COMPONENTS = [
     name: "TokenConfirm",
     element: () => (
       <TokenConfirm tokenName="laptop" canDo={TOKEN_CAN} cannotDo={TOKEN_CANNOT} onApprove={noop} onCancel={noop} />
+    ),
+    selector: "dialog",
+  },
+  {
+    name: "TokenConfirm after approval",
+    element: () => (
+      <TokenConfirm
+        tokenName="laptop"
+        tokenValue={TOKEN_VALUE}
+        canDo={TOKEN_CAN}
+        cannotDo={TOKEN_CANNOT}
+        onApprove={noop}
+        onCancel={noop}
+      />
     ),
     selector: "dialog",
   },
@@ -160,37 +177,75 @@ describe("the security UI ignores the theme", () => {
   }
 });
 
+/**
+ * The token prompt as the settings page drives it: approval creates the token and hands its value back once.
+ * @param {object} props
+ * @param {string[]} props.decisions
+ */
+function TokenHarness({ decisions }) {
+  const [tokenValue, setTokenValue] = useState(/** @type {string | null} */ (null));
+  return (
+    <TokenConfirm
+      tokenName="laptop"
+      tokenValue={tokenValue}
+      canDo={TOKEN_CAN}
+      cannotDo={TOKEN_CANNOT}
+      onApprove={() => {
+        decisions.push("approve");
+        setTokenValue(TOKEN_VALUE);
+      }}
+      onCancel={() => decisions.push("cancel")}
+    />
+  );
+}
+
+/**
+ * @param {ParentNode} root
+ * @param {string} text
+ * @returns {HTMLButtonElement | undefined}
+ */
+function buttonNamed(root, text) {
+  return [...root.querySelectorAll("button")].find((button) => button.textContent === text);
+}
+
 describe("the token confirmation", () => {
-  test("Approve is disabled until the show-once box is ticked, and Cancel has the focus first", async () => {
+  test("the locked header, the title and both lists show, Cancel has the focus, and Create token is enabled at once", async () => {
     /** @type {string[]} */
     const decisions = [];
-    const mounted = await mount(
-      <TokenConfirm
-        tokenName="laptop"
-        canDo={TOKEN_CAN}
-        cannotDo={TOKEN_CANNOT}
-        onApprove={() => decisions.push("approve")}
-        onCancel={() => decisions.push("cancel")}
-      />,
-    );
+    const mounted = await mount(<TokenHarness decisions={decisions} />);
     const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
     expect(dialog.open).toBe(true);
-    expect(dialog.textContent).toContain("Create token laptop?");
-    expect(dialog.textContent).toContain("Read models and runs");
-    expect(dialog.textContent).toContain("Create other tokens");
+    const text = dialog.textContent ?? "";
+    expect(text).toContain("Rastai security check");
+    expect(text).toContain('Create the token "laptop"?');
+    expect(text).toContain("It can");
+    expect(text).toContain("Read models and runs");
+    expect(text).toContain("It cannot");
+    expect(text).toContain("Create other tokens");
+    expect(text).not.toContain(TOKEN_VALUE);
+    expect(dialog.querySelector("input[type=checkbox]")).toBeNull();
     expect(document.activeElement?.textContent).toBe("Cancel");
 
-    const create = /** @type {HTMLButtonElement} */ (
-      [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Create token")
-    );
-    expect(create.disabled).toBe(true);
-    create.click();
-    expect(decisions).toEqual([]);
-
-    await userEvent.click(/** @type {HTMLElement} */ (dialog.querySelector("input[type=checkbox]")));
-    expect(create.disabled).toBe(false);
-    await userEvent.click(create);
+    const create = buttonNamed(dialog, "Create token");
+    expect(create?.disabled).toBe(false);
+    await userEvent.click(/** @type {HTMLElement} */ (create));
     expect(decisions).toEqual(["approve"]);
+    await mounted.unmount();
+  });
+
+  test("after approval the show-once box shows the new token, and Copy takes the focus", async () => {
+    /** @type {string[]} */
+    const decisions = [];
+    const mounted = await mount(<TokenHarness decisions={decisions} />);
+    const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
+    await userEvent.click(/** @type {HTMLElement} */ (buttonNamed(dialog, "Create token")));
+
+    expect(dialog.querySelector("code")?.textContent).toBe(TOKEN_VALUE);
+    expect(dialog.textContent).toContain("shown once");
+    expect(buttonNamed(dialog, "Create token")).toBeUndefined();
+    const copy = buttonNamed(dialog, "Copy");
+    expect(copy).toBeDefined();
+    expect(document.activeElement).toBe(copy);
     await mounted.unmount();
   });
 
@@ -211,6 +266,31 @@ describe("the token confirmation", () => {
     const dialogStyle = document.querySelector("dialog style");
     expect(dialogStyle?.textContent).toContain(".rr-locked:focus-visible");
     expect(dialogStyle?.textContent).toContain("var(--rr-locked-security-text");
+    await mounted.unmount();
+  });
+});
+
+describe("the locked buttons", () => {
+  test("a disabled button is an outlined dashed button, not a copy of the filled enabled one", async () => {
+    applyThemeTokens(document.documentElement, builtInTheme("light", OPTIONS));
+    const mounted = await mount(
+      <div>
+        <button type="button" className="rr-locked" style={PRIMARY_BUTTON_STYLE}>
+          Approve
+        </button>
+        <button type="button" className="rr-locked" style={DISABLED_BUTTON_STYLE} disabled>
+          Approve
+        </button>
+      </div>,
+    );
+    const [enabled, disabled] = /** @type {HTMLElement[]} */ ([...mounted.container.querySelectorAll("button")]);
+    const enabledStyle = getComputedStyle(enabled);
+    const disabledStyle = getComputedStyle(disabled);
+    expect(disabledStyle.backgroundColor).not.toBe(enabledStyle.backgroundColor);
+    expect(disabledStyle.backgroundColor).toBe(cssRgb(LOCKED_TOKENS.light["security-surface"]));
+    expect(disabledStyle.color).toBe(cssRgb(LOCKED_TOKENS.light["security-text"]));
+    expect(disabledStyle.borderTopStyle).toBe("dashed");
+    expect(enabledStyle.borderTopStyle).toBe("solid");
     await mounted.unmount();
   });
 });
@@ -246,6 +326,7 @@ describe("what the security components say", () => {
     const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
     expect(dialog.open).toBe(true);
     const text = dialog.textContent ?? "";
+    expect(text).toContain("Rastai security check");
     expect(text).toContain("Install Example?");
     expect(text).toContain("Run commands that need these permissions: read, chat");
     expect(text).toContain("Connect to these internet hosts from its Python code: huggingface.co");
