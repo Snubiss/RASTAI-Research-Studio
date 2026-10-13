@@ -691,7 +691,8 @@ export const LOGIN_CODE_PARAMETER = "login";   // a key in the URL fragment's qu
  * @typedef {object} ExecuteOptions
  * @property {string} [projectId]
  * @property {boolean} [dryRun]
- * @property {string} [actingPluginId]   set only by plugin hosts; the daemon narrows the call to the plugin's grant
+ * @property {string} [actingPluginId]   the owner's only, sent by a plugin UI's bridge: narrows the call to the
+ *                                       plugin's grant; any other caller is refused (RRS-C1005)
  */
 
 /**
