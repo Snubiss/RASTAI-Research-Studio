@@ -23,7 +23,8 @@ export function hexToRgba(hex) {
 
 /**
  * "#336699" -> "rgb(51, 102, 153)", the form getComputedStyle reports, so browser tests can compare a computed
- * style with a token. Kept here because color formats belong in tokens/ (check-colors).
+ * style with a token. Only tests call it, but it lives here and ships with the package (a few bytes; index.js doesn't
+ * export it) because check-colors allows color formats only under tokens/.
  * @param {string} hex
  * @returns {string}
  */

@@ -28,9 +28,10 @@ const ACTIVE_EGRESS = [
 ];
 const PERMISSIONS = ["commands:[read, chat]", "network:[huggingface.co]", "gpu", "weights.read"];
 const noop = () => {};
-// The test's own frame around each component, with a fixed font, so the component's place on the page doesn't
-// move with the theme's type scale. Only the component inside is compared.
-const FRAME_STYLE = { display: "block", padding: "8px", fontSize: "14px", lineHeight: "20px" };
+// The test's own frame around each component. It sets no font size on purpose: the component inherits whatever
+// the hostile theme's type scale puts on the page, so a security element that forgets its own fixed size changes
+// the screenshot. flow-root keeps a child's margins inside the frame, so only the component inside is compared.
+const FRAME_STYLE = { display: "flow-root", padding: "8px", lineHeight: "20px" };
 
 /** @type {Array<{ name: string, element: () => ReactElement, selector: string }>} */
 const COMPONENTS = [

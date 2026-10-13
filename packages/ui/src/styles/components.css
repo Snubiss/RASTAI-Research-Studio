@@ -385,6 +385,18 @@
   overflow-wrap: anywhere;
 }
 
+.rr-diagnostic__fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rr-space-2);
+}
+
+.rr-diagnostic__fix-text {
+  color: var(--rr-color-text-muted);
+  font-size: var(--rr-font-size-sm);
+}
+
 /* ---- The security UI's focus ring: locked, like the rest of its colors ---- */
 
 .rr-locked :focus-visible,

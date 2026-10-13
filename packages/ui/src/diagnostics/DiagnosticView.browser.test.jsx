@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("DiagnosticView", () => {
-  test("Basic shows the catalog's basic text and the fix button, and nothing from Advanced", async () => {
+  test("Basic shows the basic text, a short fix button with the fix sentence, and nothing from Advanced", async () => {
     /** @type {string[][]} */
     const fixes = [];
     const mounted = await mount(
@@ -70,7 +70,9 @@ describe("DiagnosticView", () => {
     expect(text).not.toContain(POLICY_CODE);
     expect(text).not.toContain(POLICY_MESSAGE);
     const button = /** @type {HTMLButtonElement} */ (mounted.container.querySelector("button"));
-    expect(button.textContent).toBe(POLICY_ENTRY.fix_text);
+    // A short label on the button, and the catalog's whole fix sentence beside it.
+    expect(button.textContent).toBe("Fix it");
+    expect(button.nextElementSibling?.textContent).toBe(POLICY_ENTRY.fix_text);
     await inAct(() => button.click());
     expect(fixes).toEqual([["settings.set", FIX_ARGUMENTS]]);
     await mounted.unmount();
@@ -109,9 +111,10 @@ describe("DiagnosticView", () => {
     await basic.unmount();
   });
 
-  test("no fix command means no fix button", async () => {
+  test("no fix command means no fix button, but the fix sentence still shows", async () => {
     const mounted = await mount(<DiagnosticView diagnostic={diagnostic({ fixCommandId: "" })} onFix={() => {}} />);
     expect(mounted.container.querySelector("button")).toBeNull();
+    expect(mounted.container.textContent).toContain(POLICY_ENTRY.fix_text);
     await mounted.unmount();
   });
 
