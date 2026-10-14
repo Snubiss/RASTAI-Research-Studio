@@ -226,10 +226,15 @@ A PR is done when all of these hold. Reviewers check the PR template's boxes (8.
 - **What the decisions of 2026-10-11 added to M1 (2 size-days):** M1-57 (`check-names`, 1) and M1-58 (`check-schema-diff`, 1), ADR-0038. They are placed as early as their inputs allow (lane-days 16.25–19), so the server, node, worker and UI tasks are checked from their first PR. That moves everything after them by one lane-day. Placed last, they would cost nothing on the schedule but leave most of M1 unchecked. The reviewer agent per PR (3.5) and the verification comment (3.6) add review time per PR, not size-days; M2-23 measures it.
 - **The theming "do now" work is 3.5 size-days:** the 3 in M1 above, plus 0.5 in the first renderer PRs (`setColors` on the viz classes in M4-E04 and on `GraphRenderer` in M6-E03, 0.25 each).
 - **JSDoc costs about 8 size-days** (ADR-0036): 1.5 in M1, 0.5 in M2-21, and 6 in the UI epics (M3-E09 1, M4-E04 0.75, M4-E06 0.5, M4-E10 1, M5-E06 0.5, M5-E12 1, M6-E03 0.75, M8-E04 0.5).
-- Simulating the two lanes with every dependency, at one size-day per lane per working day, with M2 tasks waiting for M1's exit gate: M1-01 merges at lane-day 2.5; M1's exit gate (M1-48, M1-49) lands at lane-day 39.25, all of M1 at 44.25 (M1-56 runs on lane B beside the first M2 tasks), M2's NVIDIA parity gate (M2-10) at 55.25 and all of M2 at 56.25.
-- §32 gives M1 and M2 four weeks (20 working days). Meeting that needs about 2.7 size-days merged per lane per working day: agents write and self-test the PRs, and the owner reviews about five PRs a day.
+- The plan's estimate, from the 2026-10-10 simulation: at one size-day per lane per working day, with M2 tasks waiting for M1's exit gate, M1-01 merges at lane-day 2.5, M1's exit gate (M1-48, M1-49) lands at lane-day 39.25, all of M1 at 44.25 (M1-56 runs on lane B beside the first M2 tasks), M2's NVIDIA parity gate (M2-10) at 55.25 and all of M2 at 56.25. M2-23 compares that with what M1 measured.
+- **What M1 measured (M2-23, from the merged-PR record, 3.7).** The first M1 landing was 2026-10-11 04:30 UTC (M1-02, a direct commit on main). The last M1 merge was 2026-10-14 02:09 UTC (M1-54). That is 69.6 hours, or 2.9 calendar days, for 79.5 size-days on two lanes, so one lane's size-day took **about 1.75 wall-clock hours** (69.6 × 2 ÷ 79.5). Both ends of the span are a choice. It starts at the two M1-02 direct commits on main (ea1fb18 at 04:30 UTC, 9c7c86a at 05:33), which the M1-02 issue (#2) closed as content already on main with no PR, so it counts commits that aren't task PRs. It leaves out M1-01's build time before its merge (plan positions 0 to 2.5). The two biases are small and point in opposite directions. M6-E06 uses the same start and end. In practice a working day in M1 was a calendar day of agent work: builder agents and reviewer agents ran in both lanes, and every merge went through the owner's account, so any owner review time is not in the record. Merged per calendar day (UTC): 2026-10-11, 23 tasks (28.5 size-days); 10-12, 24 tasks (30.5); 10-13, 9 tasks (16.0); 10-14, 2 tasks (4.5, to 02:09). Per lane, A merged 41.75 size-days over 2.8 calendar days (about 15 a day) and B 37.75 over 2.7 (about 14 a day).
+- **Review time, on the record.** Open to merged, the 57 M1 task PRs took a median of 1.6 hours (mean 2.7, maximum 16.9 for M1-33). No PR has a formal GitHub review: all 91 merged PRs were merged from the owner's account, and branch protection isn't available on the private repository (§12 rows 10 and 16). The review evidence is the agent verification comments on each PR. Build time can't be measured from the record: rebases rewrote the commit dates, so the record doesn't say when a branch was started.
+- **What slowed M1, from the record.** (1) *Review rounds, by commit count (a proxy, 3.7):* eight task PRs had 5 to 8 commits (M1-28 with 8, M1-33 and M1-06 with 7, M1-25 with 6, and M1-12, M1-40, M1-51 and M1-56 with 5). The slowest six open-to-merged times were 7 to 17 hours (M1-33, M1-32, M1-38, DESIGN-01, FU-250 and the M1-49 gate). (2) *Flakes and load:* issues #209, #238, #242, #244, #250, #262, #263 and #282 record flaky, load-sensitive or leaking tests, and their fixes came in follow-up PRs (#239, #264 "catch a hang, not a slow machine", #271, #287). (3) *Unplanned work:* 23 merged PRs are not in the 58-task plan (process, SEC, DESIGN, DOCS and FU). Fourteen of them merged after the M1-49 gate, between 14:28 UTC on 10-13 and 12:35 UTC on 10-14. None has a size label, so the record holds no size for them. (4) *The lane B tail:* M1-33 (the offline index rebuild, plan lane B) merged at 22:15 UTC on 10-13, nine hours after the gate, and was lane B's last M1 merge. The M1-49 gate was not the constraint for lane B.
+- **The estimate with the measured pace (5.5 and 5.7).** The gate M1-49 lands at lane-day 32.4 (2026-10-13 13:12 UTC). Lane B is free for M2 at lane-day 37.5 (after M1-33) and lane A at 39.75 (after M1-54, 2026-10-14 02:09 UTC). M2 then finishes at lane-day 54.25 (M2-21), two lane-days inside the plan's 56.25, with M2's NVIDIA gate (M2-10) at 51.5. If the lanes took M2 straight after the M1 record, M2-21 would merge around 2026-10-15 03:33 UTC. That is not a date. The fourteen follow-up PRs come first, and the simulation leaves out owner review (not in the record), the GPU runner (M2-10), the owner's Hugging Face license acceptance (5.2) and any work not yet filed as an issue.
+- **Decision (M2-23).** The 2.3 windows, the order of the M3 epics and the M2 sizes don't change. The measured pace is ahead of the plan, but one milestone measured with no recorded owner review is too thin a basis to pull dates in, and the windows keep room for the work the record can't see. Scope and the bar don't move (§0.8). M6-E06 measures again at week 13 with the same method and the same table (3.7).
+- §32 gives M1 and M2 four weeks (20 working days). Meeting that needs about 2.7 size-days merged per lane per working day: agents write and self-test the PRs, and the owner reviews about five PRs a day. The record (above) shows the agent pace, not the owner's review pace.
 - The whole 90-day plan (M1, M2 and the `gate:90-day` epics of M3, M4, M5, M6 and M9) is 247.5 size-days. §32 gives it weeks 3–13: 55 working days on two lanes, 110 lane-days. That is about 2.25 size-days per lane per working day. All epics of M3 to M10 are 314 epic-days, plus M1-55 as one size-day (M6, the same way M2-11 is counted in M10); M11 adds 21.
-- If review can't keep that pace, the dates move, not the scope or the bar (§0.8). M2-23 replaces these estimates with M1's measured velocity, and M6-E06 does it again at week 13.
+- If review can't keep the planned pace, the dates move, not the scope or the bar (§0.8). M2-23 measured M1 (3.7) and kept the windows; M6-E06 measures again at week 13.
 
 ### 3.5 Agent build protocol
 
@@ -246,6 +251,7 @@ Agents write most of the code. They invent plausible names when the registry isn
 - **Before M1-57 and M1-58 land,** the reviewer's naming lens does their job by hand against contracts.md.
 - **One agent never reviews its own work.** A reviewer may be the same model, but it runs as a separate agent with its own prompt (the diff, the issue, contracts.md and the layout section), not with the author's context.
 - **What is persisted:** nothing new. The brief is built from files that already exist (the issue body, contracts.md, `schemas/`, the layout doc). Review findings live on the PR and the verification evidence on the issue.
+- **Follow-up issues get a size label when they are filed** (M2-23's process rule, for the owner to confirm). A FU, DESIGN, DOCS, PROC or SEC issue that the work adds to the plan carries its size (4.5 units) from the day it is filed, so the next measurement (3.7, M6-E06) counts it. The 23 unplanned PRs in 3.7 have no size label today.
 
 ### 3.6 Closing an issue: independent verification
 
@@ -275,6 +281,121 @@ Acceptance:
 - [x] <criterion 1>: <test or command> -> <result line>, <file:line>
 - [x] <criterion 2>: <test or command> -> <result line>, <file:line>
 ```
+
+### 3.7 M1's measured velocity (M2-23)
+
+Source: `gh pr list --state merged` (91 merged PRs), `gh api` for each PR's commits and comments, and the plan's tables 4.5 and 5.5 for the sizes and the planned lanes. Branch names don't record the lane, so the lane column is the planned lane. Times are UTC. "Open to merged" is the PR's creation to its merge. Commits per PR are a weak proxy for review rounds, because builders commit more than once before review. The verification comments say "round N", and M6-E06 counts those instead; no PR has a formal GitHub review.
+
+| Measure | M1 on the record |
+|---|---|
+| Task PRs | 57 main PRs (M1-02 landed as two direct commits on main, no PR) and 11 support PRs (contract and code PRs that came before a task's main PR, size 0 in the task) |
+| Unplanned PRs | 23 (process, SEC, DESIGN, DOCS and FU; no size labels) |
+| Size-days | 79.5 on 58 tasks (lane A 41.75, lane B 37.75) |
+| Span | 69.6 hours, from 2026-10-11 04:30 to 2026-10-14 02:09 UTC (2.9 calendar days); its two ends are discussed in 3.4 |
+| Wall-clock hours per lane size-day | 1.75 (69.6 × 2 ÷ 79.5) |
+| Open to merged, task PRs | median 1.6 h, mean 2.7 h, maximum 16.9 h (M1-33) |
+| Commits per task PR (a weak round proxy, 3.7) | median 3, maximum 8 (M1-28) |
+| Formal GitHub reviews | 0 of 91 PRs; all 91 merged from the owner's account |
+
+<details>
+<summary>All 91 merged PRs, in merge order</summary>
+
+| PR | Task | Plan lane | Plan size | Merged (UTC, 2026) | Open to merged (h) | Commits | PR comments | Note |
+|---|---|---|---|---|---|---|---|---|
+| direct commits ea1fb18, 9c7c86a | M1-02 | B | M | 10-11 04:30 | n/a | 2 | n/a | no PR; landed on main |
+| #164 | M1-01 | A | L + 0.5 | 10-11 06:36 | 0.5 | 3 | 5 |  |
+| #165 | M1-01a | B | M | 10-11 07:03 | 0.3 | 2 | 3 |  |
+| #166 | M1-03 | A | M | 10-11 07:06 | 0.3 | 3 | 5 |  |
+| #167 | M1-11 | A | M | 10-11 07:27 | 0.1 | 1 | 1 |  |
+| #169 | M1-14 | A | L | 10-11 08:34 | 0.7 | 4 | 5 |  |
+| #168 | M1-04 | B | M | 10-11 08:46 | 1.4 | 4 | 8 |  |
+| #171 | M1-15 | A | L | 10-11 09:09 | 0.2 | 2 | 3 |  |
+| #172 | M1-05 | B | M + 0.25 | 10-11 09:30 | 0.3 | 2 | 3 |  |
+| #173 | M1-07 | B | S | 10-11 09:32 | 0.1 | 1 | 1 |  |
+| #176 | M1-08 | A | L | 10-11 10:19 | 0.3 | 3 | 5 |  |
+| #177 | M1-36 | B | M | 10-11 10:51 | 0.3 | 2 | 3 |  |
+| #179 | M1-09 | A | M + 0.25 | 10-11 11:51 | 0.7 | 1 | 1 |  |
+| #174 | M1-06 | B | M | 10-11 13:26 | 3.7 | 7 | 8 |  |
+| #178 | M1-12 | B | M | 10-11 13:36 | 2.9 | 5 | 8 |  |
+| #182 | M1-20 | A | 0 (in task) | 10-11 13:42 | 0.8 | 2 | 2 | support PR for the task |
+| #181 | M1-20 | A | M | 10-11 13:51 | 1.3 | 3 | 4 |  |
+| #180 | M1-10 | B | M | 10-11 14:00 | 1.7 | 3 | 5 |  |
+| #183 | M1-16 | A | M | 10-11 14:28 | 0.5 | 2 | 3 |  |
+| #185 | M1-21 | A | M | 10-11 15:56 | 1.7 | 3 | 5 |  |
+| #187 | M1-23 | B | 0 (in task) | 10-11 16:09 | 1.3 | 3 | 2 | support PR for the task |
+| #186 | M1-23 | B | L | 10-11 20:30 | 5.9 | 3 | 5 |  |
+| #190 | M1-41 | B | 0 (in task) | 10-11 20:41 | 5.2 | 3 | 2 | support PR for the task |
+| #184 | M1-13 | A | M | 10-11 20:48 | 6.8 | 3 | 4 |  |
+| #191 | M1-41 | B | M | 10-11 20:55 | 5.5 | 4 | 4 |  |
+| #189 | M1-24 | B | M | 10-11 21:17 | 6.3 | 4 | 7 |  |
+| #193 | PROC-01 |  | unsized | 10-11 21:25 | 0.5 | 3 | 5 | process |
+| #194 | M1-26 | A | 0 (in task) | 10-12 01:51 | 4.2 | 2 | 2 | support PR for the task |
+| #201 | M1-42 | B | 0 (in task) | 10-12 01:58 | 2.7 | 1 | 1 | support PR for the task |
+| #203 | M1-17 | A | M + 0.25 | 10-12 01:59 | 2.3 | 2 | 4 |  |
+| #195 | M1-22 | A | M | 10-12 02:11 | 4.4 | 4 | 6 |  |
+| #199 | M1-39 | A | 0 (in task) | 10-12 02:11 | 3.4 | 3 | 3 | support PR for the task |
+| #198 | M1-29 | B | M | 10-12 02:12 | 3.4 | 2 | 4 |  |
+| #204 | M1-57 | B | M | 10-12 02:13 | 1.8 | 2 | 2 |  |
+| #196 | M1-26 | A | 0 (in task) | 10-12 02:24 | 4.4 | 4 | 5 | part 1 of M1-26 |
+| #200 | M1-39 | A | M | 10-12 02:34 | 3.6 | 3 | 5 |  |
+| #197 | M1-25 | B | M | 10-12 02:41 | 4.3 | 6 | 8 |  |
+| #202 | M1-42 | B | M | 10-12 02:49 | 3.2 | 4 | 5 |  |
+| #206 | PROC-02 |  | unsized | 10-12 03:11 | 0.3 | 2 | 4 | process |
+| #208 | M1-26 | A | L + 0.25 | 10-12 04:41 | 1.6 | 2 | 3 | part 2 of M1-26 |
+| #210 | M1-18 | B | M | 10-12 04:41 | 1.0 | 2 | 3 |  |
+| #211 | M1-19 | B | M | 10-12 04:50 | 1.1 | 2 | 2 |  |
+| #207 | M1-58 | A | M | 10-12 05:00 | 2.1 | 3 | 5 |  |
+| #212 | M1-56 | B | M | 10-12 05:05 | 1.0 | 5 | 6 |  |
+| #215 | M1-43 | B | 0 (in task) | 10-12 07:33 | 1.2 | 1 | 0 | support PR for the task |
+| #214 | M1-34 | B | M + 0.5 | 10-12 07:33 | 2.3 | 4 | 8 |  |
+| #217 | M1-37 | B | M | 10-12 07:46 | 1.0 | 3 | 4 |  |
+| #216 | M1-43 | B | L | 10-12 07:58 | 1.6 | 4 | 7 |  |
+| #219 | M1-40 | A | 0 (in task) | 10-12 09:22 | 1.1 | 1 | 0 | support PR for the task |
+| #218 | M1-35 | B | L | 10-12 09:22 | 1.4 | 1 | 1 |  |
+| #221 | M1-40 | A | L | 10-12 09:31 | 0.9 | 5 | 7 |  |
+| #220 | M1-27 | A | L | 10-12 09:39 | 1.3 | 3 | 4 |  |
+| #222 | M1-44 | B | M | 10-12 09:59 | 0.4 | 3 | 3 |  |
+| #223 | M1-38 | B | L | 10-12 18:58 | 8.9 | 3 | 6 |  |
+| #224 | M1-32 | A | M | 10-12 20:35 | 10.2 | 2 | 3 |  |
+| #229 | M1-30 | B | S | 10-12 20:49 | 0.5 | 1 | 2 |  |
+| #225 | M1-45 | B | M | 10-12 21:03 | 1.6 | 2 | 3 |  |
+| #227 | M1-46 | B | 0 (in task) | 10-12 21:05 | 1.0 | 1 | 0 | support PR for the task |
+| #228 | M1-46 | B | M | 10-12 21:06 | 0.8 | 3 | 3 |  |
+| #226 | M1-28 | A | L | 10-13 00:34 | 5.0 | 8 | 8 |  |
+| #241 | FU |  | unsized | 10-13 00:53 | 2.0 | 4 | 2 | unplanned follow-up |
+| #237 | FU |  | unsized | 10-13 00:54 | 3.2 | 3 | 5 | unplanned follow-up |
+| #243 | FU |  | unsized | 10-13 00:56 | 0.4 | 4 | 1 | unplanned follow-up |
+| #239 | FU |  | unsized | 10-13 00:57 | 2.4 | 2 | 4 | unplanned follow-up |
+| #240 | SEC-01 |  | unsized | 10-13 01:33 | 2.6 | 4 | 5 | unplanned follow-up |
+| #246 | SEC-01 |  | unsized | 10-13 01:35 | 0.5 | 6 | 1 | unplanned follow-up |
+| #247 | M1-50 | A | M + 0.5 | 10-13 03:07 | 1.8 | 2 | 4 |  |
+| #245 | M1-47 | B | 0 (in task) | 10-13 03:28 | 2.6 | 1 | 0 | support PR for the task |
+| #251 | M1-47 | B | L | 10-13 03:30 | 1.8 | 2 | 1 |  |
+| #248 | M1-31 | A | L | 10-13 03:59 | 2.5 | 4 | 5 |  |
+| #255 | FU-252 |  | unsized | 10-13 08:06 | 4.5 | 2 | 4 | unplanned follow-up |
+| #256 | M1-51 | A | L + 1 | 10-13 10:27 | 6.7 | 5 | 6 |  |
+| #258 | M1-48 | B | L | 10-13 10:44 | 5.9 | 4 | 3 |  |
+| #260 | M1-49 | B | M | 10-13 13:12 | 7.2 | 3 | 7 |  |
+| #264 | FU-262 |  | unsized | 10-13 14:28 | 3.6 | 1 | 1 | unplanned follow-up |
+| #270 | M1-52 | A | M + 0.5 | 10-13 16:07 | 4.1 | 3 | 3 |  |
+| #274 | FU-273 |  | unsized | 10-13 18:20 | 1.8 | 2 | 1 | unplanned follow-up |
+| #271 | FU-250 |  | unsized | 10-13 20:32 | 8.4 | 2 | 4 | unplanned follow-up |
+| #275 | DESIGN-02 |  | unsized | 10-13 20:49 | 3.9 | 2 | 3 | unplanned follow-up |
+| #272 | DESIGN-01 |  | unsized | 10-13 21:45 | 8.5 | 8 | 2 | unplanned follow-up |
+| #259 | M1-33 | B | M | 10-13 22:15 | 16.9 | 7 | 8 |  |
+| #278 | DESIGN-03 |  | unsized | 10-13 22:27 | 0.0 | 3 | 0 | unplanned follow-up |
+| #279 | M1-53 | A | L + 0.25 | 10-14 00:19 | 0.0 | 4 | 0 |  |
+| #280 | M1-54 | A | L + 0.25 | 10-14 02:09 | 0.9 | 3 | 3 |  |
+| #284 | DOCS-02 |  | unsized | 10-14 08:04 | 1.8 | 1 | 2 | unplanned follow-up |
+| #287 | FU-244 |  | unsized | 10-14 11:35 | 0.0 | 1 | 1 | unplanned follow-up |
+| #288 | FU-281A |  | unsized | 10-14 11:43 | 0.1 | 2 | 1 | unplanned follow-up |
+| #289 | FU-257 |  | unsized | 10-14 11:50 | 0.3 | 1 | 1 | unplanned follow-up |
+| #290 | FU-254a |  | unsized | 10-14 11:55 | 0.3 | 1 | 1 | unplanned follow-up |
+| #291 | FU-254 |  | unsized | 10-14 12:01 | 0.4 | 2 | 1 | unplanned follow-up |
+| #292 | FU-276 |  | unsized | 10-14 12:08 | 0.3 | 3 | 1 | unplanned follow-up |
+| #293 | FU-281B |  | unsized | 10-14 12:35 | 0.7 | 3 | 2 | unplanned follow-up |
+
+</details>
 
 ---
 
@@ -1178,28 +1299,30 @@ The ModelSpec compiler becomes the Inspectable runtime for real models (§17, §
 
 | ID | Task | Lane | Size | Depends on | Start–end (lane days) |
 |---|---|---|---|---|---|
-| M2-01 | ModelSpec ops for decoder families (contract) | B | M | M1-18 | 41.25–42.25 |
-| M2-02 | rastai_models: observation points, forward context, kernels and traits | B | M | M2-01, M1-35 | 44.25–45.25 |
-| M2-03 | rastai_models: decoder blocks (spike port) | B | L | M2-02 | 45.25–47.25 |
-| M2-04 | rastai_models: KV caches, including the sliding ring buffer | B | M | M2-03 | 47.25–48.25 |
-| M2-05 | rastai_models: decoder graphs, strict loading and sharded weights | B | L | M2-03 | 48.25–50.25 |
-| M2-06 | Family base class and the Gemma 3 family | B | M | M2-05, M2-04 | 50.25–51.25 |
-| M2-07 | The Llama family | B | M | M2-06 | 51.25–52.25 |
-| M2-08 | The parity harness | B | M | M2-06 | 52.25–53.25 |
-| M2-09 | Gemma 3 and Llama parity in CI (fp32 and bf16) | B | M | M2-08, M2-07 | 53.25–54.25 |
-| M2-10 | Nightly GPU runner and real-weight parity on the 5080 and 3090 | B | M | M2-09, M2-15 | 54.25–55.25 |
-| M2-12 | Step-2 contracts: environments, hardware, secrets and model commands (contract) | A | M | M1-22, M1-10 | 41.75–42.75 |
-| M2-13 | rastai-formats: the safetensors reader and planner, and the model hash | B | M | M1-14, M1-34 | 39.75–40.75 |
-| M2-14 | rastai-transport: the HTTPS client | A | M | M1-41, M1-02 | 42.75–43.75 |
-| M2-15 | Locked environments for every backend | A | M | M1-04 | 43.75–44.75 |
-| M2-16 | rastai-node: uv environments | A | L | M2-12, M2-15 | 45.75–47.75 |
-| M2-17 | rastai-node: Hugging Face downloads | A | L | M2-14, M2-12 | 47.75–49.75 |
-| M2-18 | rastai-server: secrets, HF sign-in and the license check | A | M | M2-12 | 44.75–45.75 |
-| M2-19 | rastai-server: system and model handlers | A | L | M2-16, M2-17, M2-13, M2-18 | 49.75–51.75 |
-| M2-20 | `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint | A | L | M2-16, M2-05, M2-12, M2-22 | 51.75–53.75 |
-| M2-21 | Home: the First Run checklist | A | L + 0.5 | M2-19, M2-20, M2-18, M1-54 | 53.75–56.25 |
-| M2-22 | rastai-formats: the zip reader, with DEFLATE through miniz_oxide | B | S | M1-14 | 40.75–41.25 |
-| M2-23 | Re-plan with M1's measured velocity | B | S | M1-48, M1-49 | 39.25–39.75 |
+| M2-01 | ModelSpec ops for decoder families (contract) | B | M | M1-18 | 39.52–40.52 |
+| M2-02 | rastai_models: observation points, forward context, kernels and traits | B | M | M2-01, M1-35 | 40.52–41.52 |
+| M2-03 | rastai_models: decoder blocks (spike port) | B | L | M2-02 | 41.52–43.52 |
+| M2-04 | rastai_models: KV caches, including the sliding ring buffer | B | M | M2-03 | 43.52–44.52 |
+| M2-05 | rastai_models: decoder graphs, strict loading and sharded weights | B | L | M2-03 | 44.52–46.52 |
+| M2-06 | Family base class and the Gemma 3 family | B | M | M2-05, M2-04 | 46.52–47.52 |
+| M2-07 | The Llama family | B | M | M2-06 | 47.52–48.52 |
+| M2-08 | The parity harness | B | M | M2-06 | 48.52–49.52 |
+| M2-09 | Gemma 3 and Llama parity in CI (fp32 and bf16) | B | M | M2-08, M2-07 | 49.52–50.52 |
+| M2-10 | Nightly GPU runner and real-weight parity on the 5080 and 3090 | B | M | M2-09, M2-15 | 50.52–51.52 |
+| M2-12 | Step-2 contracts: environments, hardware, secrets and model commands (contract) | A | M | M1-22, M1-10 | 39.75–40.75 |
+| M2-13 | rastai-formats: the safetensors reader and planner, and the model hash | B | M | M1-14, M1-34 | 38.02–39.02 |
+| M2-14 | rastai-transport: the HTTPS client | A | M | M1-41, M1-02 | 40.75–41.75 |
+| M2-15 | Locked environments for every backend | A | M | M1-04 | 41.75–42.75 |
+| M2-16 | rastai-node: uv environments | A | L | M2-12, M2-15 | 43.75–45.75 |
+| M2-17 | rastai-node: Hugging Face downloads | A | L | M2-14, M2-12 | 45.75–47.75 |
+| M2-18 | rastai-server: secrets, HF sign-in and the license check | A | M | M2-12 | 42.75–43.75 |
+| M2-19 | rastai-server: system and model handlers | A | L | M2-16, M2-17, M2-13, M2-18 | 47.75–49.75 |
+| M2-20 | `rastai doctor`: numerical self-test, VRAM fraction and hardware fingerprint | A | L | M2-16, M2-05, M2-12, M2-22 | 49.75–51.75 |
+| M2-21 | Home: the First Run checklist | A | L + 0.5 | M2-19, M2-20, M2-18, M1-54 | 51.75–54.25 |
+| M2-22 | rastai-formats: the zip reader, with DEFLATE through miniz_oxide | B | S | M1-14 | 39.02–39.52 |
+| M2-23 | Re-plan with M1's measured velocity | B | S | M1-48, M1-49 | 37.52–38.02 |
+
+M2-23 re-simulated these positions from M1's measured record (3.4, 3.7). Lane-day 0 is the first M1 landing (2026-10-11 04:30 UTC), and one lane-day is 1.75 measured hours. The gate M1-49 merged at lane-day 32.36 (2026-10-13 13:12 UTC). Lane B is free at 37.52 (after M1-33, 22:15 UTC) and lane A at 39.75 (after M1-54, 2026-10-14 02:09 UTC). M2-21 ends at 54.25. The plan's 5.5 positions had M2-02 wait for the M1-56 slot (43.25–44.25) while lane B sat idle from 42.25; the rerun uses that day. Calendar times check the pace; they are not dates, and 14 follow-up PRs took the lanes first (3.4).
 
 M2-11 (AMD parity on a discrete RDNA3+ card) moved to M10 with its id kept; its row is in 6.8 and its details stay in 5.8. M2 tasks also wait for M1's exit gate (5.2), which the simulation applies.
 
@@ -1294,15 +1417,15 @@ flowchart TD
 
 ### 5.7 Lanes week by week: what runs in parallel in the two worktrees
 
-Lane-days continue from M1's count, so M2 starts where each lane finishes its M1 work.
+Lane-days continue from M1's measured finish, so M2 starts where each lane finishes its M1 work (the M2-23 rerun, 3.4). A lane week here is five lane-days of 1.75 measured hours each (3.4), not a calendar week: the lane-day of this table is the measured unit, and the working day of 4.5 and 2.3 is the plan's unit, so the two don't convert one-to-one.
 
 | Lane week | Lane A | Lane B |
 |---|---|---|
-| 8 (days 35–40) | M1 tasks (4.7) | M1-48 and M1-49, then M2-23, M2-13 |
-| 9 (days 40–45) | M2-12, M2-14, M2-15, M2-18 | M2-22, M2-01, M1-56, M2-02 |
-| 10 (days 45–50) | M2-16, M2-17, M2-19 | M2-03, M2-04, M2-05 |
-| 11 (days 50–55) | M2-20, M2-21 | M2-06, M2-07, M2-08, M2-09, M2-10 |
-| 12 (days 55–60) | M2-21 ends at 56.25; free for M3 | M2-10 ends at 55.25; free for M3 |
+| 8 (days 35–40) | M1-53 and M1-54 (M1 tail: M1-53 at 38.76, M1-54 at 39.75); M2-12 at 39.75 | M1-33 (last M1 merge on lane B at 37.52); M2-23, M2-13, M2-22, M2-01 |
+| 9 (days 40–45) | M2-14, M2-15, M2-18, M2-16 | M2-02, M2-03, M2-04, M2-05 |
+| 10 (days 45–50) | M2-17, M2-19, M2-20 | M2-06, M2-07, M2-08, M2-09 |
+| 11 (days 50–55) | M2-21 | M2-10 |
+| 12 (days 55–60) | M2-21 ends at 54.25; free for M3 | M2-10 ends at 51.52; free for M3 |
 
 ### 5.8 Task details
 
@@ -1974,7 +2097,7 @@ The owner's box (5080, 3090, later the AMD card) runs the GPU jobs (§29). Owner
 
 | Risk | Effect on the plan | Mitigation |
 |---|---|---|
-| Review throughput (§28 risk 1) | at one size-day per lane-day, the 90-day content needs about 2.25× §32's calendar (3.4) | two lanes only (owner decision 10); small PRs; agents self-test; dates move, scope and bar don't; re-plan after M1 (M2-23) and at week 13 (M6-E06) |
+| Review throughput (§28 risk 1) | the plan assumed one size-day per lane per working day (about 2.25× §32's calendar for the 90 days). M1 measured about 1.75 wall-clock hours per lane size-day with agent review, and no owner approval is in the record (3.4, 3.7) | two lanes only (owner decision 10); small PRs; agents self-test; the windows stay until M6-E06 re-measures at week 13; scope and bar don't move; the owner's approval record is open (§12 rows 10 and 16) |
 | M1-01 blocks every task | lane B idles for 2.5 lane-days at the start | lane B drafts M1-02 and M1-01a in its worktree while M1-01 is in review; both merge right after it |
 | JSDoc instead of TypeScript | about 8 more size-days of UI code, and type errors a stricter checker would catch | short JSDoc, `check-js` in `just check`, the shared contract tables (executor, host) as tests; the cost is in the sizes (3.4) |
 | The AMD card doesn't arrive | M2-11 and M10-E01 stay open; the prototype can't exit (§5) | the owner buys a discrete RDNA3+ card before M10 (owner decision 11); the design stays AMD-ready (same `torch.cuda` API, ROCm llama.cpp builds); the iGPU is never forced (spike 05) |
