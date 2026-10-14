@@ -29,9 +29,15 @@ change to this folder:
   the installed GPU and environment variables, so uv cannot lock it reproducibly. Pinning its device packages by hand
   (a `[tool.uv] override-dependencies` entry plus direct pins) is the likely route, and it is a decision too.
 
+- **numpy's 0BSD.** torchvision brings numpy, whose wheel declares `BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0`.
+  Only 0BSD is missing from the allowlist's `licenses`, so `check-deps` fails the cpu lock until the owner approves a named
+  entry for numpy that names 0BSD (as pillow's and torch's were). Nothing records that approval yet.
+
 ## The cpu environment
 
 - `cpu/pyproject.toml` pins torch (CPU build, from the PyTorch index), tokenizers, grpcio and protobuf exactly, with pytest, ruff, grpcio-tools (the generators `just codegen` runs) and maturin (which builds rastai-formats' PyO3 module) in the `dev` group. rastai-formats is built without build isolation (`no-build-isolation-package`), so it uses that locked maturin, and `just env-cpu` rebuilds it on every sync (`--reinstall-package rastai-formats`), so the module always matches the Rust sources. Workspace packages are installed editable from their folder through `[tool.uv.sources]`, with no version pin: `rastai-proto`, `rastai-data` and `rastai-plugin` so far. The packages later tasks need (pyarrow, torchvision, PyMySQL, onnx, onnxscript and the other workspace packages) join with those tasks.
+- Platforms: the cpu lock has a `win_arm64` wheel for torch but none for torchvision 0.29.1, so a cpu sync on Windows on
+  ARM fails. That platform is not one of ADR-0014's tiers, so it isn't supported until torchvision ships an arm64 wheel.
 - `just env-cpu` syncs it into `.dev/envs/cpu` (git-ignored). Until M2-16 the embedded node uses that folder, and every `just check` runs pytest and ruff from it. After one online run it works offline from the uv cache.
 - `tests/test_cpu_environment.py` is the smoke test: Python 3.12, the CPU build of torch, the direct runtime packages (torch, tokenizers, grpcio and protobuf) importable, the installed versions equal to the pins, and the workspace packages installed.
 
@@ -51,6 +57,8 @@ uv itself is pinned: `required-version` in each `pyproject.toml` refuses any uv 
 - `python/envs/tests/test_env_locks.py` (in `just test-python`, offline) checks that each lock folder is listed in
   `environments.json`, and that each lock's torchvision carries the same build tag as its torch and is the release
   `TORCHVISION_FOR_TORCH` names for it.
-- From M2, the `env-locks` job runs `just env-locks`: `uv lock --locked --refresh` in every folder under `python/envs/`.
-  It resolves each lock against its indexes and fails on a new package, a new version or a hash it didn't expect (§28
-  risk 11). A folder with a `pyproject.toml` and no `uv.lock` fails too.
+- From M2, the `env-locks` job runs `just env-locks`: `uv lock --locked --refresh --directory <folder>` in every folder
+  under `python/envs/`. It resolves each lock against its indexes and fails on a new package, a new version or a hash it
+  didn't expect (§28 risk 11). A folder with a `pyproject.toml` and no `uv.lock` fails too. `--directory` is the form
+  that passes on a clean lock with uv 0.13.0; `--project` from the repository root reports a stale lock that a fresh
+  `uv lock` leaves unchanged. The job runs on every PR, since it is a required check (plan 8.4).

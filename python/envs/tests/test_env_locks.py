@@ -13,8 +13,12 @@ ENVIRONMENTS_FILE = "python/envs/environments.json"
 ENVIRONMENTS_FOLDER = "python/envs"
 LOCK_FILE_NAME = "uv.lock"
 PROJECT_FILE_NAME = "pyproject.toml"
+JUSTFILE = "justfile"
+# The env-locks recipe's first line: the for loop over every project folder (justfile, `env-locks`).
+ENV_LOCKS_LOOP_START = "    for project in python/envs/*/pyproject.toml;"
 TORCH = "torch"
 TORCHVISION = "torchvision"
+ROCM = "rocm"
 # The torchvision release published with each torch release (torchvision 0.29.1 came out with torch 2.14.1, on
 # 2026-09-30). A new torch needs its row here in the same PR as its lock.
 TORCHVISION_FOR_TORCH = {"2.14.1": "0.29.1"}
@@ -70,9 +74,13 @@ def test_each_lock_torchvision_matches_its_torch(repo_root: Path) -> None:
         for torch_version in versions_of(lock, TORCH):
             torch_base, torch_tag = split_local_tag(torch_version)
             matching = [split_local_tag(version) for version in torchvision_versions]
-            assert (TORCHVISION_FOR_TORCH[torch_base], torch_tag) in matching, (
-                f"{environment_id}: torch {torch_version} needs torchvision {TORCHVISION_FOR_TORCH[torch_base]}"
-                f"{torch_tag} in the lock, which holds {torchvision_versions}"
+            torchvision_release = TORCHVISION_FOR_TORCH.get(torch_base)
+            assert torchvision_release is not None, (
+                f"{environment_id}: no torchvision release is listed for {torch_base}"
+            )
+            assert (torchvision_release, torch_tag) in matching, (
+                f"{environment_id}: torch {torch_version} needs torchvision {torchvision_release}{torch_tag} "
+                f"in the lock, which holds {torchvision_versions}"
             )
 
 
@@ -87,8 +95,17 @@ def test_each_listed_environment_names_its_pytorch_build(repo_root: Path) -> Non
 def test_supported_amd_gfx_targets_are_listed_only_for_rocm_and_are_well_formed(repo_root: Path) -> None:
     for environment_id, entry in read_environments(repo_root).items():
         targets = entry["supported_amd_gfx_targets"]
-        if environment_id != "rocm":
+        if environment_id != ROCM:
             assert targets == [], environment_id
         assert len(set(targets)) == len(targets), environment_id
         for target in targets:
             assert re.fullmatch(GFX_TARGET_PATTERN, target), target
+
+
+def test_env_locks_recipe_resolves_each_folder_with_directory_and_refresh(repo_root: Path) -> None:
+    """`--directory`, not `--project`: from the repo root `--project` reports a stale lock on a clean tree (uv 0.13.0).
+    `--refresh` stays, so `--locked` also sees a tampered hash. Fails on a recipe that drops either."""
+    recipe_lines = (repo_root / JUSTFILE).read_text(encoding="utf-8").splitlines()
+    loop_lines = [line for line in recipe_lines if line.startswith(ENV_LOCKS_LOOP_START)]
+    assert len(loop_lines) == 1, "the env-locks recipe holds one loop over python/envs/*/pyproject.toml"
+    assert "uv lock --locked --refresh --directory" in loop_lines[0], loop_lines[0]
