@@ -18,6 +18,10 @@ const CODE_REFERENCE_UNRESOLVED: &str = "RRS-E2001";
 const CODE_FILE_TOO_LARGE: &str = "RRS-E5003";
 const CODE_TOO_DEEP: &str = "RRS-E5004";
 const CODE_TOO_MANY_VALUES: &str = "RRS-E5006";
+const CODE_ZIP_ENTRY_ESCAPES: &str = "RRS-E5001";
+const CODE_ZIP_LIMIT: &str = "RRS-E5002";
+const CODE_ZIP_MALFORMED: &str = "RRS-E5007";
+const CODE_ZIP_UNSUPPORTED: &str = "RRS-E5008";
 const CODE_SOURCE_NOT_READABLE: &str = "RRS-D3001";
 const CODE_DISK_FULL_DURING_WRITE: &str = "RRS-S3002";
 const CODE_WRITE_FAILED: &str = "RRS-S3005";
@@ -60,6 +64,19 @@ pub enum FormatsError {
     DiskFull { reason: String },
     /// A `ByteSink` write failed for any other reason (permissions, a closed handle, an I/O error).
     WriteFailed { reason: String },
+    /// A zip entry's name would land outside its folder: `..`, a leading `/`, a backslash or a drive letter. Refused
+    /// when the archive is opened, before any entry is read (zip slip).
+    ZipEntryEscapes { name: String },
+    /// A zip is bigger than an `ImportLimits` cap, or an entry's deflate stream holds more output than the entry
+    /// declares. `what` names the cap ("entry count", "total uncompressed size", "compression ratio", "declared size");
+    /// `size` is what the archive asks for and `limit` what the cap allows.
+    ZipLimit { what: &'static str, size: u64, limit: u64 },
+    /// A zip record is cut short or disagrees with another (offsets, sizes, a checksum, two entries sharing bytes, or
+    /// the deflate stream itself).
+    ZipMalformed { reason: &'static str },
+    /// A zip uses something Rastai doesn't read: encryption, a compression method other than stored or deflate, or
+    /// several disks. Refused rather than guessed at.
+    ZipUnsupported { reason: &'static str },
 }
 
 impl FormatsError {
@@ -79,6 +96,10 @@ impl FormatsError {
             FormatsError::ReadFailed { .. } => CODE_SOURCE_NOT_READABLE,
             FormatsError::DiskFull { .. } => CODE_DISK_FULL_DURING_WRITE,
             FormatsError::WriteFailed { .. } => CODE_WRITE_FAILED,
+            FormatsError::ZipEntryEscapes { .. } => CODE_ZIP_ENTRY_ESCAPES,
+            FormatsError::ZipLimit { .. } => CODE_ZIP_LIMIT,
+            FormatsError::ZipMalformed { .. } => CODE_ZIP_MALFORMED,
+            FormatsError::ZipUnsupported { .. } => CODE_ZIP_UNSUPPORTED,
         }
     }
 }
@@ -132,6 +153,24 @@ mod tests {
             (FormatsError::NotSerializable { reason: reason() }, "RRS-E1006"),
             (FormatsError::DiskFull { reason: reason() }, "RRS-S3002"),
             (FormatsError::WriteFailed { reason: reason() }, "RRS-S3005"),
+        ]);
+    }
+
+    #[test]
+    fn zip_errors_have_their_catalog_codes() {
+        let escape = FormatsError::ZipEntryEscapes {
+            name: "../x".to_string(),
+        };
+        let limit = FormatsError::ZipLimit {
+            what: "entry count",
+            size: 2,
+            limit: 1,
+        };
+        assert_codes(vec![
+            (escape, "RRS-E5001"),
+            (limit, "RRS-E5002"),
+            (FormatsError::ZipMalformed { reason: "r" }, "RRS-E5007"),
+            (FormatsError::ZipUnsupported { reason: "r" }, "RRS-E5008"),
         ]);
     }
 

@@ -22,7 +22,7 @@ and §15.1.
 - **Content hashes are computed only here** (canonical JSON, then BLAKE3). JavaScript and Python call this code
   through WASM and the wheel and never hash documents themselves.
 - **One wrapper file per external crate:** `blake3` only in `src/hashing.rs`; `miniz_oxide` only in
-  `src/zip/inflate.rs` (M2).
+  `src/zip/inflate.rs`.
 - **One error enum**, `FormatsError` in `src/error.rs`, each variant with a catalog code from contracts §10.3.
 - **A document type is written in four places, all in its own contract PR:** the struct (with
   `#[serde(flatten)] pub header: SharedHeader`) and its `describe_<file>_types()` (the document's fields start with

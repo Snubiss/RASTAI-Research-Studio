@@ -657,6 +657,7 @@ crates/rastai-formats/
       mod.rs                  the chain runner: read schema_version, apply each step, mark newer files read-only (RRS-E4001)
       chain_table.rs          one row per (type, from_version) naming its step function; empty until a v2 exists
     zip/
+      mod.rs                  a list of pub mod lines
       reader.rs               central directory (ZIP64 too), stored and deflate entries, limits, zip-slip check, before any
                               entry is read; copy_zip_entry streams one entry into a ByteSink
       inflate.rs              the only miniz_oxide import: streaming inflate in fixed-size chunks, stopped at the declared
@@ -991,16 +992,16 @@ pub fn gguf_tensor_bytes(tensor: &GgufTensorInfo) -> Result<u64, Diagnostic>    
 pub struct ZipEntry { pub path: String, pub compressed_bytes: u64, pub uncompressed_bytes: u64, pub method: ZipMethod,
                       pub data_offset: u64, pub crc32: u32 }
 pub struct ZipSource { pub path: String, pub reader: Box<dyn ByteSource>, pub size_bytes: u64 }
-pub fn list_zip_entries(source: &dyn ByteSource, limits: &ImportLimits) -> Result<Vec<ZipEntry>, Diagnostic>   // all caps checked here
-pub fn copy_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, sink: &mut dyn ByteSink, limits: &ImportLimits) -> Result<(), Diagnostic>
-pub fn read_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, limits: &ImportLimits) -> Result<Vec<u8>, Diagnostic>  // documents only
+pub fn list_zip_entries(source: &dyn ByteSource, limits: &ImportLimits) -> Result<Vec<ZipEntry>, FormatsError>   // all caps checked here
+pub fn copy_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, sink: &mut dyn ByteSink, limits: &ImportLimits) -> Result<(), FormatsError>
+pub fn read_zip_entry(source: &dyn ByteSource, entry: &ZipEntry, limits: &ImportLimits) -> Result<Vec<u8>, FormatsError>  // documents only
 pub fn write_zip_stored(destination: &mut dyn ByteSink, entries: &mut dyn Iterator<Item = ZipSource>) -> Result<(), FormatsError>
 pub fn write_small_zip(entries: &[(String, Vec<u8>)]) -> Result<Vec<u8>, FormatsError>   // in memory, for a few small documents
 
 // zip/inflate.rs: the miniz_oxide wrapper; the reader calls it, nothing else does
 pub struct InflateStream { /* miniz_oxide state, bytes written, declared size */ }
 pub fn new_inflate_stream(declared_uncompressed_bytes: u64) -> InflateStream
-pub fn inflate_chunk(stream: &mut InflateStream, input: &[u8], sink: &mut dyn ByteSink) -> Result<InflateProgress, Diagnostic>
+pub fn inflate_chunk(stream: &mut InflateStream, input: &[u8], sink: &mut dyn ByteSink) -> Result<InflateProgress, FormatsError>
 // RRS-E5002 if the output would pass the declared size; the CRC is checked by reader.rs at the end
 ```
 
@@ -1014,7 +1015,7 @@ pub fn inflate_chunk(stream: &mut InflateStream, input: &[u8], sink: &mut dyn By
   - **ZIP64:** when any size or offset passes `u32::MAX`, or there are more than 65,535 entries, the writer adds the ZIP64 extra fields, the ZIP64 end-of-central-directory record and its locator. The reader accepts the same.
   - `copy_zip_entry` unpacks one entry into a sink in fixed-size chunks (`project.import` writes `weights/` straight into the `.importing` folder). Inflate stops at the declared size, and the CRC is checked at the end.
   - `read_zip_entry` and `write_small_zip` stay for documents and small archives (`system.bundle`, tests); `read_zip_entry` refuses an entry over the `ImportLimits` file-size cap with `RRS-E5003`.
-- **Zip limits** are checked from the central directory before any entry is inflated: entry count, total uncompressed size, per-entry ratio (zip bomb, `RRS-E5002`), and `..`, absolute paths or backslashes in names (zip slip, `RRS-E5001`). `inflate.rs` also stops at the declared uncompressed size, so a lying header can't exceed it; the CRC-32 (`crc32.rs`) is checked when the entry ends.
+- **Zip limits** are checked from the central directory before any entry is inflated: entry count, total uncompressed size, per-entry ratio (zip bomb, `RRS-E5002`), and `..`, absolute paths or backslashes in names (zip slip, `RRS-E5001`). A local header must agree with its central record on the compression method and the encryption bit, or the archive is refused as `RRS-E5007`. A per-entry ratio can't see a bomb built from many records that point at one compressed stream, so `list_zip_entries` also checks that no two entries' bytes (local header through compressed data) share archive bytes, and that no entry's data runs into the central directory (`RRS-E5007`). `inflate.rs` also stops at the declared uncompressed size, so a lying header can't exceed it; the CRC-32 (`crc32.rs`) is checked when the entry ends.
 
 ### 4.6 WASM build: `rastai-formats-wasm`
 
