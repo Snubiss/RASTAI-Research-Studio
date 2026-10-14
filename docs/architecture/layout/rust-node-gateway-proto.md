@@ -271,7 +271,10 @@ crates/rastai-transport/
     transfer_resume.rs      interrupt a transfer mid-file, resume from offset, hash matches
     ssh_loopback.rs         real OpenSSH against a test sshd (ignored unless RASTAI_TEST_SSH is set)
     http_client.rs          plain HTTP over a Unix socket and loopback against a raw HTTP/1.1 test server: round trip,
-                            chunked streaming, timeouts (M1-41); TLS refusal of bad certs (M2-14)
+                            chunked streaming, timeouts (M1-41). HTTPS (M2-14) is tested in src/http_client.rs,
+                            not here: rustls may only be imported in that one file (contracts 2.5), and this crate's
+                            tests are separate crates. The test CA and server certificate are PEM fixtures in
+                            tests/fixtures/tls (chunked HTTPS body, timeout, refused certificates, the egress tag)
   fuzz/
     fuzz_targets/sse_reader.rs   arbitrary bytes in arbitrary chunk sizes never panic; the events equal a one-chunk parse (nightly, 10 minutes)
 ```

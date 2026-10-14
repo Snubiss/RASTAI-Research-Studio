@@ -46,6 +46,7 @@ pub fn execute(
         headers: vec![("content-type".to_string(), JSON_CONTENT_TYPE.to_string())],
         body: body.to_string().into_bytes(),
         timeout_ms: REQUEST_TIMEOUT_MS,
+        egress: None,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

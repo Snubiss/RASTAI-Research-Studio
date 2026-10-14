@@ -1,8 +1,9 @@
 //! `TransportError`, the one error type of this crate (contracts 12.2). Library functions return it; the edge (a
 //! tonic service, an HTTP handler, the CLI) turns it into a `Diagnostic` through `code()`.
 //!
-//! Every variant maps to a code that contracts 10.3 lists, all in the `RRS-N` heartbeat and reachability range
-//! (2000–2999). The `reason` fields keep the operating system's or the library's own words for the log.
+//! Every variant maps to a code that contracts 10.3 lists: the `RRS-N` heartbeat and reachability range (2000–2999),
+//! and RRS-N3008 for an HTTPS request that came without its egress tag. The `reason` fields keep the operating
+//! system's or the library's own words for the log.
 
 use std::path::PathBuf;
 
@@ -12,6 +13,7 @@ const CODE_PEER_IS_ANOTHER_USER: &str = "RRS-N2006";
 const CODE_SOCKET_NOT_CREATED: &str = "RRS-N2007";
 const CODE_CONNECTION_FAILED: &str = "RRS-N2008";
 const CODE_NOT_SUPPORTED_ON_THIS_PLATFORM: &str = "RRS-N2009";
+const CODE_EGRESS_TAG_MISSING: &str = "RRS-N3008";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransportError {
@@ -33,6 +35,9 @@ pub enum TransportError {
     /// Local sockets aren't built for this platform yet: Windows named pipes come with tier 2. `what` names the
     /// function that was called.
     NotSupportedOnThisPlatform { what: &'static str },
+    /// An HTTPS request came without its egress tag, so it was refused before any connection. A bug in the caller
+    /// (section 4.6): every outbound HTTPS request reports itself.
+    EgressTagMissing { host: String },
 }
 
 impl TransportError {
@@ -46,6 +51,7 @@ impl TransportError {
             TransportError::ConnectionFailed { .. } => CODE_CONNECTION_FAILED,
             TransportError::TimedOut { .. } => CODE_CONNECTION_FAILED,
             TransportError::NotSupportedOnThisPlatform { .. } => CODE_NOT_SUPPORTED_ON_THIS_PLATFORM,
+            TransportError::EgressTagMissing { .. } => CODE_EGRESS_TAG_MISSING,
         }
     }
 }
@@ -91,5 +97,9 @@ mod tests {
             what: "bind_local_socket",
         };
         assert_eq!(unsupported.code(), "RRS-N2009");
+        let untagged = TransportError::EgressTagMissing {
+            host: "huggingface.co".to_string(),
+        };
+        assert_eq!(untagged.code(), "RRS-N3008");
     }
 }
