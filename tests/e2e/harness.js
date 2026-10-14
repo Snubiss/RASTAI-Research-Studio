@@ -273,3 +273,35 @@ export async function interactiveElements(page) {
       });
   });
 }
+
+// How many times Ctrl K is pressed before the palette is taken to be stuck. The window's key listener is attached after its
+// first render, so under load a key pressed as soon as the frame shows can come too early; a press that finds the palette
+// already open does nothing but clear its query.
+const PALETTE_OPEN_ATTEMPTS = 5;
+const PALETTE_OPEN_WAIT_MS = 2000;
+
+/**
+ * Opens the command palette with Ctrl K, and waits until its search box shows.
+ * @param {import("playwright").Page} page
+ */
+export async function openPalette(page) {
+  for (let attempt = 0; attempt < PALETTE_OPEN_ATTEMPTS; attempt += 1) {
+    await page.keyboard.press("Control+K");
+    try {
+      await page.getByRole("combobox", { name: "Search or run a command" }).waitFor({ timeout: PALETTE_OPEN_WAIT_MS });
+      return;
+    } catch {
+      // Not open yet: press again.
+    }
+  }
+  throw new Error(`the command palette did not open after ${PALETTE_OPEN_ATTEMPTS} presses of Ctrl K`);
+}
+
+/**
+ * Waits until the palette's highlighted row is the entry with this text, so an Enter that follows runs that entry.
+ * @param {import("playwright").Page} page
+ * @param {string} title
+ */
+export async function highlightEntry(page, title) {
+  await page.locator(".rr-palette__entry--active", { hasText: title }).waitFor();
+}
