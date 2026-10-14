@@ -1,0 +1,16 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_attributes.rrsmodel:80:13#/blocks/decoder_layer/nodes/1/attributes/variant"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_attributes.rrsmodel:79:11#/blocks/decoder_layer/nodes/1/attributes/hidden_size"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_attributes.rrsmodel:79:11#/blocks/decoder_layer/nodes/1/attributes/head_dim"
+    }
+  ]
+}

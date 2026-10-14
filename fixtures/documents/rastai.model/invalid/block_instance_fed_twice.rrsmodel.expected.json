@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2007",
+      "path": "block_instance_fed_twice.rrsmodel:63:7#/graph/edges/3"
+    }
+  ]
+}
