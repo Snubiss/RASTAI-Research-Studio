@@ -14,6 +14,9 @@ const CODE_DUPLICATE_KEY: &str = "RRS-E0003";
 const CODE_NOT_A_NUMBER: &str = "RRS-E0004";
 const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
 const CODE_NOT_SERIALIZABLE: &str = "RRS-E1006";
+/// The planner's and model hash's caller-misuse refusals (contracts 10.3). `hashing.rs` builds its refusal with it too,
+/// so the code string has one owner.
+pub const CODE_UNPLANNABLE_LAYOUT: &str = "RRS-E1007";
 const CODE_REFERENCE_UNRESOLVED: &str = "RRS-E2001";
 const CODE_FILE_TOO_LARGE: &str = "RRS-E5003";
 const CODE_TOO_DEEP: &str = "RRS-E5004";
@@ -58,6 +61,9 @@ pub enum FormatsError {
     },
     /// serde refused to write a value (a map with non-string keys). A bug in the caller, not in a user's file.
     NotSerializable { reason: String },
+    /// The safetensors planner was asked for a layout it can't write (a repeated name, a size past 64 bits, a header past
+    /// the cap). Nothing is written; the caller's arguments are wrong.
+    UnplannableLayout { reason: String },
     /// A `ByteSource` couldn't give the bytes asked for: past the end, an I/O error, or a length it couldn't read.
     ReadFailed { offset: u64, length: u64, reason: String },
     /// A `ByteSink` write failed because the disk is full. `reason` keeps the operating system's own words.
@@ -93,6 +99,7 @@ impl FormatsError {
             FormatsError::InvalidVersion { .. } => CODE_VALUE_NOT_ALLOWED,
             FormatsError::PatchFailed { .. } => CODE_REFERENCE_UNRESOLVED,
             FormatsError::NotSerializable { .. } => CODE_NOT_SERIALIZABLE,
+            FormatsError::UnplannableLayout { .. } => CODE_UNPLANNABLE_LAYOUT,
             FormatsError::ReadFailed { .. } => CODE_SOURCE_NOT_READABLE,
             FormatsError::DiskFull { .. } => CODE_DISK_FULL_DURING_WRITE,
             FormatsError::WriteFailed { .. } => CODE_WRITE_FAILED,
@@ -151,6 +158,7 @@ mod tests {
             (too_deep, "RRS-E5004"),
             (too_many, "RRS-E5006"),
             (FormatsError::NotSerializable { reason: reason() }, "RRS-E1006"),
+            (FormatsError::UnplannableLayout { reason: reason() }, "RRS-E1007"),
             (FormatsError::DiskFull { reason: reason() }, "RRS-S3002"),
             (FormatsError::WriteFailed { reason: reason() }, "RRS-S3005"),
         ]);

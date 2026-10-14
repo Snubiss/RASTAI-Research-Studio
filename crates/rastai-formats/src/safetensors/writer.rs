@@ -7,7 +7,7 @@
 //! same, and a planned layout reads back through `read_safetensors_header` with the same offsets. The tests read the file
 //! the Python writer wrote (fixtures/safetensors-writer/) and check it against the plan.
 //!
-//! A refusal is `FormatsError::NotSerializable` (RRS-E1006): the caller asked for a layout that can't be written, so
+//! A refusal is `FormatsError::UnplannableLayout` (RRS-E1007): the caller asked for a layout that can't be written, so
 //! nothing is written. The reader's RRS-E60xx codes are for files already on disk.
 
 use crate::error::FormatsError;
@@ -165,7 +165,7 @@ fn overflow(tensor_name: &str) -> FormatsError {
 }
 
 fn refused(reason: String) -> FormatsError {
-    FormatsError::NotSerializable { reason }
+    FormatsError::UnplannableLayout { reason }
 }
 
 #[cfg(test)]
@@ -287,19 +287,19 @@ mod tests {
             tensor("a", SafetensorsDtype::U8, &[1]),
             tensor("a", SafetensorsDtype::U8, &[2]),
         ];
-        assert_eq!(refusal_code(&tensors, &[]), "RRS-E1006");
+        assert_eq!(refusal_code(&tensors, &[]), "RRS-E1007");
     }
 
     #[test]
     fn a_tensor_named_like_the_metadata_key_is_refused() {
         let tensors = [tensor(METADATA_KEY, SafetensorsDtype::U8, &[1])];
-        assert_eq!(refusal_code(&tensors, &[]), "RRS-E1006");
+        assert_eq!(refusal_code(&tensors, &[]), "RRS-E1007");
     }
 
     #[test]
     fn a_metadata_key_given_twice_is_refused() {
         let metadata = [("k".to_string(), "1".to_string()), ("k".to_string(), "2".to_string())];
-        assert_eq!(refusal_code(&[], &metadata), "RRS-E1006");
+        assert_eq!(refusal_code(&[], &metadata), "RRS-E1007");
     }
 
     #[test]
@@ -307,7 +307,7 @@ mod tests {
         let tensors = [tensor("big", SafetensorsDtype::U8, &[4_294_967_296, 4_294_967_296])];
         let error = plan_safetensors(&tensors, &[]).err().unwrap();
         match error {
-            FormatsError::NotSerializable { reason } => assert!(reason.contains("big"), "{reason}"),
+            FormatsError::UnplannableLayout { reason } => assert!(reason.contains("big"), "{reason}"),
             other => panic!("{other:?}"),
         }
     }
@@ -316,9 +316,9 @@ mod tests {
     fn a_header_past_the_cap_is_refused_and_one_at_the_cap_is_not() {
         assert!(check_header_length(MAX_HEADER_BYTES).is_ok());
         let refused = check_header_length(MAX_HEADER_BYTES + 1).unwrap_err();
-        assert_eq!(refused.code(), "RRS-E1006");
-        let FormatsError::NotSerializable { reason } = refused else {
-            panic!("a header past the cap is not serializable");
+        assert_eq!(refused.code(), "RRS-E1007");
+        let FormatsError::UnplannableLayout { reason } = refused else {
+            panic!("a header past the cap is not a layout that can be planned");
         };
         assert!(reason.contains("104857600 byte limit"), "{reason}");
     }
@@ -349,6 +349,6 @@ mod tests {
             tensor("a", SafetensorsDtype::U8, &[half]),
             tensor("b", SafetensorsDtype::U8, &[half]),
         ];
-        assert_eq!(refusal_code(&tensors, &[]), "RRS-E1006");
+        assert_eq!(refusal_code(&tensors, &[]), "RRS-E1007");
     }
 }
