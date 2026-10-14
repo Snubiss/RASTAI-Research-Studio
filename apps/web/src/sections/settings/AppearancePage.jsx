@@ -62,7 +62,7 @@ export function AppearancePage() {
         </AdvancedOnly>
         <div className="rr-theme-cards">
           {THEME_CHOICES.map((choice) => (
-            <ThemeCard
+            <ThemeChoice
               key={choice.value}
               choice={choice}
               selected={themeSetting === choice.value}
@@ -162,7 +162,7 @@ export function AppearancePage() {
  * @param {() => void} props.onChoose
  * @param {Object<string, string>} props.colors   the theme's color roles, as hex
  */
-function ThemeCard({ choice, selected, onChoose, colors }) {
+function ThemeChoice({ choice, selected, onChoose, colors }) {
   return (
     <label className={selected ? "rr-theme-card rr-theme-card--selected" : "rr-theme-card"}>
       <input type="radio" name="theme" value={choice.value} checked={selected} onChange={onChoose} />

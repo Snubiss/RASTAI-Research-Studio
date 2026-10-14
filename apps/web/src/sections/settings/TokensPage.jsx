@@ -6,7 +6,7 @@
 import { AdvancedOnly, Button, Select, TextField } from "@rastai/ui";
 import { usePluginHost, tokenCreate, tokenList, tokenRevoke } from "@rastai/plugin";
 import { TokenConfirm } from "@rastai/ui/security";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useShell } from "../../app/shell-context.js";
 import { PRESET_LABELS, presetWords } from "./scope-words.js";
@@ -30,6 +30,9 @@ export function TokensPage() {
   const [preset, setPreset] = useState(/** @type {string} */ (DEFAULT_PRESET));
   const [prompt, setPrompt] = useState(/** @type {TokenPrompt | null} */ (null));
   const [message, setMessage] = useState("");
+  // Set for the life of the tokenCreate call. Cancel and Escape do nothing while it is set: closing the prompt then would
+  // hide a token that is still being made. A ref, not state, so the close handler sees it at once.
+  const creatingRef = useRef(false);
 
   async function loadTokens() {
     const outcome = await tokenList(host, { include_revoked: false });
@@ -54,17 +57,39 @@ export function TokensPage() {
   }
 
   async function approve() {
-    if (prompt === null) {
+    if (prompt === null || creatingRef.current) {
       return;
     }
-    const outcome = await tokenCreate(host, { name: prompt.name, preset: /** @type {any} */ (prompt.preset) });
+    // The result is written only into the prompt this call was started for, so a late answer can't reopen a closed prompt.
+    // While creatingRef blocks every close, no close can reach this point; the check is defense in depth for any later
+    // close path that the ref does not cover.
+    const started = prompt;
+    creatingRef.current = true;
+    let outcome;
+    try {
+      outcome = await tokenCreate(host, { name: started.name, preset: /** @type {any} */ (started.preset) });
+    } finally {
+      creatingRef.current = false;
+    }
     if (outcome.ok) {
-      setPrompt({ ...prompt, tokenValue: outcome.result.token });
+      setPrompt((current) => (current === started ? { ...started, tokenValue: outcome.result.token } : current));
       setName("");
       await loadTokens();
     } else {
-      setPrompt(null);
+      setPrompt((current) => (current === started ? null : current));
       outcome.diagnostics.forEach((diagnostic) => shell.notify(diagnostic));
+    }
+  }
+
+  /** Closes the prompt, unless a token is still being made (the prompt then stays open with its Creating state). */
+  function closePrompt() {
+    if (prompt === null || creatingRef.current) {
+      return;
+    }
+    const created = prompt.tokenValue !== null;
+    setPrompt(null);
+    if (created) {
+      loadTokens();
     }
   }
 
@@ -141,13 +166,7 @@ export function TokensPage() {
           canDo={words.canDo}
           cannotDo={words.cannotDo}
           onApprove={approve}
-          onCancel={() => {
-            const created = prompt.tokenValue !== null;
-            setPrompt(null);
-            if (created) {
-              loadTokens();
-            }
-          }}
+          onCancel={closePrompt}
         />
       ) : null}
     </section>

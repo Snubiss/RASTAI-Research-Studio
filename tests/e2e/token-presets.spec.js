@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { PRESET_LABELS, PRESET_SCOPES } from "../../apps/web/src/sections/settings/scope-words.js";
-import { goToSection, jsonLines, openApp, startDaemon } from "./harness.js";
+import { ENGINES, goToSection, jsonLines, openApp, startDaemon } from "./harness.js";
 
 // `token list --json` answers with one line that has a `tokens` list; the lines after it are the exit record.
 const LIST_KEY = "tokens";
@@ -78,3 +78,77 @@ describe("the Access choices", () => {
     }
   });
 });
+
+// The Tokens page end to end (ui-design 6.9; plan M1-54): the locked prompt makes the token only when it is approved, the
+// value shows once, and the list holds the token while the value is gone from the page.
+const E2E_TOKEN_NAME = "e2e token";
+// A preset the daemon doesn't take: the page sends it as chosen, and the daemon refuses it with a catalog code.
+const REFUSED_PRESET = "no-such-preset";
+// The code the daemon gives an unknown preset (crates/rastai-formats/src/commands/mod.rs). A diagnostic's toast ends
+// with its catalog code in parentheses (apps/web/src/app/shell.js notify).
+const REFUSED_PRESET_TOAST_CODE = "(RRS-E1004)";
+
+for (const engine of ENGINES) {
+  describe(`the Tokens page in ${engine}`, () => {
+    test("create, approve, show once, Done, list, then revoke", async () => {
+      const daemon = await startDaemon();
+      const app = await openApp(engine, daemon);
+      try {
+        await goToSection(app.page, "Settings");
+        await app.page.getByLabel("Token name", { exact: true }).fill(E2E_TOKEN_NAME);
+        await app.page.getByRole("button", { name: "Create token", exact: true }).click();
+        const prompt = app.page.getByRole("dialog");
+        await prompt.waitFor();
+        await prompt.getByRole("button", { name: "Create token", exact: true }).click();
+        const shown = await prompt.locator("code").innerText();
+        assert.ok(shown.length > 0, "the prompt shows the new token's value");
+        await prompt.getByRole("button", { name: "Done", exact: true }).click();
+        await prompt.waitFor({ state: "detached" });
+        const row = app.page.locator(".rr-token-list__item", { hasText: E2E_TOKEN_NAME });
+        await row.waitFor();
+        assert.ok(
+          !(await app.page.content()).includes(shown),
+          "the token's value is not on the page once Done is pressed",
+        );
+        await app.page.getByRole("button", { name: `Revoke ${E2E_TOKEN_NAME}`, exact: true }).click();
+        await row.waitFor({ state: "detached" });
+      } finally {
+        await app.close();
+        await daemon.stop();
+      }
+    });
+
+    test("a refused create closes the prompt and shows the daemon's diagnostic with its code", async () => {
+      const daemon = await startDaemon();
+      const app = await openApp(engine, daemon);
+      try {
+        await goToSection(app.page, "Settings");
+        await app.page.getByLabel("Token name", { exact: true }).fill(E2E_TOKEN_NAME);
+        // The page's Access list takes only the presets it offers, so the refused one is added to it as a chosen option.
+        await app.page.getByLabel("Access", { exact: true }).evaluate((select, preset) => {
+          const option = document.createElement("option");
+          option.value = preset;
+          option.textContent = preset;
+          select.append(option);
+          select.value = preset;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+        }, REFUSED_PRESET);
+        await app.page.getByRole("button", { name: "Create token", exact: true }).click();
+        const prompt = app.page.getByRole("dialog");
+        await prompt.waitFor();
+        await prompt.getByRole("button", { name: "Create token", exact: true }).click();
+        await prompt.waitFor({ state: "detached" });
+        await app.page.locator(".rr-toast").first().waitFor();
+        const toasts = await app.page.locator(".rr-toast").allInnerTexts();
+        assert.ok(
+          toasts.some((text) => text.includes(REFUSED_PRESET_TOAST_CODE)),
+          `a toast names the catalog code ${REFUSED_PRESET_TOAST_CODE}: ${toasts.join(" | ")}`,
+        );
+        assert.equal(await app.page.locator(".rr-token-list__item", { hasText: E2E_TOKEN_NAME }).count(), 0);
+      } finally {
+        await app.close();
+        await daemon.stop();
+      }
+    });
+  });
+}

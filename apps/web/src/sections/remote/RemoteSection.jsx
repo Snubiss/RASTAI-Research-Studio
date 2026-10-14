@@ -4,16 +4,24 @@
 
 import { AdvancedOnly, DiagnosticView, StatePill } from "@rastai/ui";
 import { pluginDiagnostic, useStore } from "@rastai/plugin";
+import { useEffect, useState } from "react";
 
 import { useShell } from "../../app/shell-context.js";
-import { heartbeatWord, nodeTone, nodeWhere } from "./node-view.js";
+import { heartbeatWord, isUnreachable, nodeTone, nodeWhere } from "./node-view.js";
 
 // The catalog code for a node the daemon can't reach (RRS-N2001); its text comes from the catalog.
 const UNREACHABLE_CODE = "RRS-N2001";
+// The heartbeat's age is a clock reading, so the section re-renders each tick while it is on screen.
+const HEARTBEAT_AGE_TICK_MS = 1000;
 
 export function RemoteSection() {
   const shell = useShell();
   const nodes = /** @type {any[]} */ (useStore(shell.stores.nodes));
+  const [nowUnixMs, setNowUnixMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowUnixMs(Date.now()), HEARTBEAT_AGE_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
   return (
     <div className="rr-remote">
       <h2 className="rr-section-title">Remote</h2>
@@ -26,10 +34,10 @@ export function RemoteSection() {
               <h3 className="rr-card__title">{node.name}</h3>
               <p className="rr-settings-note">{nodeWhere(node)}</p>
               <StatePill label={node.state} tone={nodeTone(node.state)} />
-              {node.state === "unreachable" ? (
+              {isUnreachable(node.state) ? (
                 <DiagnosticView diagnostic={pluginDiagnostic(UNREACHABLE_CODE, {})} />
               ) : null}
-              <p className="rr-settings-note">{heartbeatWord(node.last_heartbeat_unix_ms, Date.now())}</p>
+              <p className="rr-settings-note">{heartbeatWord(node.last_heartbeat_unix_ms, nowUnixMs)}</p>
               <AdvancedOnly>
                 <p className="rr-setting-key">{`node id ${node.node_id}`}</p>
                 <p className="rr-settings-note">{`Protocol ${node.protocol_version}`}</p>
