@@ -8,6 +8,7 @@ Decisions already made for Rastai Research Studio. Build from them; don't re-lit
 - **0033–0037** record the owner decisions of 2026-10-10 (spec v5.4, contracts v1.1): the one `unsafe` exception, sign-in, the long-term archive, the frontend language and the borrowed decoders.
 - **0038** records the owner decisions of 2026-10-11: CI-enforced names and command schemas, and independent verification before work is closed.
 - **0039** records the owner approval of 2026-10-13: a second window signs in only after the owner approves a locked prompt.
+- **0040** records the owner decision of 2026-10-14: the browser is the client for now, and the desktop shell is deferred to M6 with its choice reopened.
 
 Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the shared contracts (v1.2)](../architecture/contracts.md), then the layout and flow docs, these ADRs and the plan. [The spike results](../../spike/README.md) are the source for measured numbers. The ADRs use the contracts' names exactly; contracts.md is the only list of names.
 
@@ -54,6 +55,7 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 | [0037](0037-borrowed-decoders-and-parser-fuzzing.md) | Borrowed decoders for DEFLATE and images; one implementation and a fuzz target for every in-house parser | Accepted, 2026-10-10. Supersedes 0029 decision 1 in part |
 | [0038](0038-naming-and-schema-enforcement.md) | Names and command schemas are enforced by CI (`check-names`, `check-schema-diff` in M1); work is closed only after independent verification | Accepted, 2026-10-11. Amends 0017 decision 5 (closing needs independent verification); moves the schema-diff check of 0005's note into M1. Decision 4 amended 2026-10-11 (PROC-01) |
 | [0039](0039-second-window-sign-in-approval.md) | A second window signs in only after the owner approves a locked prompt | Accepted, 2026-10-13. Settles contracts open question 24 |
+| [0040](0040-browser-first-desktop-shell-deferred.md) | The browser is the client for now; the desktop shell is deferred to M6 and its choice reopened | Accepted, 2026-10-14. Reopens the shell choice of spec §27 and plan M1-55; keeps 0006 and 0034 |
 
 ## By topic
 
@@ -61,7 +63,7 @@ Sources of truth, in order: [the spec (v5.4)](../spec/rastai_spec_v5.md), [the s
 |---|---|
 | Processes, durability, storage | 0001, 0002, 0003, 0024, 0033, 0035 |
 | Contracts, formats and schemas | 0004, 0005, 0029, 0030, 0032, 0037, 0038 |
-| UI and security | 0006, 0007, 0019, 0034, 0036, 0039 |
+| UI and security | 0006, 0007, 0019, 0034, 0036, 0039, 0040 |
 | Inference and runtimes | 0008, 0010, 0013, 0025, 0026, 0027 |
 | Training and evaluation | 0020, 0021, 0022, 0028 |
 | Platforms, environments, remote | 0009, 0011, 0014, 0031 |
@@ -79,6 +81,7 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
 | [0004](0004-schema-ownership.md) | The code example uses the control-plane layout's names. "TS" reads "JavaScript"; generated frontend types are `.d.ts` or JSDoc `@typedef` modules; protobuf-es target `js+dts`; the `schemars` rule (about 20 document types) | illustration; language |
 | [0005](0005-command-layer.md) | The dispatch example returns `Vec<Diagnostic>` and calls `parse_arguments(command_id, arguments_json)`. `COMMANDS: &[CommandRow]` with the generated `CommandDescriptor`; `stability` on commands and events; typed JavaScript wrappers over `CommandExecutor`; `acting_plugin_id`; no domain logic in `apps/web`. `check-schema-diff` runs from M1, not Phase 2, over `schemas/commands/` and `schemas/events/` | illustration; contracts v1.1; 0038 |
 | [0006](0006-ui-transport-http-only.md) | Decision 4: the shell only runs `rastai open --print-url`; file associations arrive as a `#/open?path=` fragment. "TS package" reads "JavaScript package"; cross-origin browser clients refused in v1; `EventService` binary only | superseded in part by 0034; language |
+| [0006](0006-ui-transport-http-only.md) | Decision 4: the desktop shell is deferred to M6 and its choice reopened; the shell rules stay | amended in part by 0040, 2026-10-14; note since acceptance |
 | [0007](0007-local-api-security.md) | Decisions 3 and 4: sign-in through `token.login_code.create`; sessions bound to the redeeming origin; the `Sec-Fetch-Site` rule; any loopback Host on any port; a too-open `owner.token` refuses the start with `RRS-C1008` | superseded in part by 0034 |
 | [0012](0012-build-in-house-policy.md) | Decision 9 settled: the §27 additions are approved, each behind one wrapper file; `typescript` is a dev-only checker. Managed vLLM comes after the prototype | owner decisions 1 and 8; vLLM |
 | [0013](0013-unified-model-runtime.md) | M2 closes on NVIDIA, AMD parity at M10; the self-hosted GPU runner; one golden fixture per op; placement planned only in Rust | owner decisions 11 and 12 |
@@ -96,8 +99,10 @@ Changes to accepted ADRs. Each is marked in the ADR itself: a status line and a 
 | [0030](0030-diagnostics-catalog.md) | Decision 8 decided: the in-house JSON-lines logger. Collisions settled; ranges `RRS-S5xxx` and `RRS-D4xxx`; "TS" reads "JavaScript" | owner decision 2; language |
 | [0031](0031-sandbox-manager.md) | `hyper` on §27, wrapper `engine_http.rs`; the `rastai.job_id` label; the egress proxy | contracts v1.1 |
 | [0032](0032-document-files-and-validation.md) | The daemon-free validator is `rastai validate <file>`; `rastai file validate` is the daemon-backed verb. DEFLATE through `miniz_oxide`; fuzz targets for every in-house parser | path; 0037 |
+| [0034](0034-login-codes-loopback-host-owner-token.md) | The desktop shell's plan task is M1-55, moved from M1 to M6 | path; ADR-0040 |
 | [0036](0036-frontend-plain-javascript.md) | Decision 4: the generated folder of `@rastai/proto` is `packages/proto/src/generated/`, not the whole package | path |
 | [0038](0038-naming-and-schema-enforcement.md) | Decision 4: closing needs `just check` passing locally (the pre-push hook) and on the verifier's fresh clone of the PR head, not green CI; GitHub CI is manual-only while the repository is private | amended (owner decision, PROC-01) |
+| [0039](0039-second-window-sign-in-approval.md) | The desktop work is M1-55, moved from M1 to M6 | path; ADR-0040 |
 
 ## Writing a new ADR
 

@@ -3,7 +3,7 @@
 **Status:** version 1.0, 2026-10-13. The owner's decisions of 2026-10-13 are recorded in §8 (row 8 is an orchestrator
 proposal, not an owner decision), and §9 is the build plan. The visual reference is the owner's canvas (nine screen boards plus "Type options" and "Keyboard
 shortcuts"), https://claude.ai/artifact/G5H4BFoT9F64VcpVgr8GaB. That canvas is private to the owner; this document copies
-nothing from it. The second-window sign-in approval is recorded in ADR-0039.
+nothing from it. The second-window sign-in approval is recorded in ADR-0039. The desktop window moved from M1 to M6 (task M1-55) on 2026-10-14 (ADR-0040).
 
 ## 0. How to read this document
 
@@ -65,7 +65,7 @@ Left section rail (`SidebarNav`), 200 px, icon plus label, in three groups:
 
 Left to right: logo (links Home) · project switcher (`project.open`, M3) · breadcrumb of the current route ·
 **palette entry** (a search-field-shaped button, "Search or run a command  Ctrl K") · **global Basic/Advanced switch**
-(segmented control, `settings.set ui.mode`). On the desktop shell the native title bar stays native (M1-55).
+(segmented control, `settings.set ui.mode`). On the desktop shell (task M1-55, in M6, deferred; ADR-0040) the native title bar stays native.
 
 ### 3.3 Workspace model
 
@@ -110,7 +110,7 @@ Settings › Keybindings (`workspace.keybindings.set`), and a binding's `when` u
 | Shift ? | Show the shortcut list | outside text fields | proposed | none |
 | G then H / C / T / D / P / S | Go to Home, Chat, Training, Designer, Psychology, Settings | outside text fields | proposed | none (inactive while typing) |
 | F6 | Move focus between regions: rail, panels, status bar | anywhere | proposed | Browser tab: Chrome and Firefox may send F6 to the address bar. Desktop shell: none. |
-| Ctrl + / − / 0 | Zoom the interface | anywhere | existing (browser) | Desktop shell must implement it (M1-55). |
+| Ctrl + / − / 0 | Zoom the interface | anywhere | existing (browser) | The desktop shell must implement it (M1-55, deferred; ADR-0040). |
 | ↑ ↓ | Move through results | palette | existing (layout 4.1) | none |
 | Enter | Run the highlighted command, or open its arguments form | palette | existing (layout 2.5) | none |
 | Tab | Move into the arguments form | palette, command needs input | proposed | none |
@@ -573,7 +573,7 @@ This is DESIGN-03 (#267), a follow-up PR on main after M1-51 (PR #256, merged 20
   - `packages/ui/src/security/security.browser.test.jsx`: screenshots of TokenConfirm under the hostile theme;
   - a test that the font files and `OFL.txt` are present and that base.css names them.
 
-### (d) M1-53, M1-54 and M1-55 on top
+### (d) M1-53 and M1-54 on top (the desktop window is deferred to M6, task M1-55)
 
 **M1-53 (web shell)**
 - The frame per §3.1 to §3.5:
@@ -583,6 +583,8 @@ This is DESIGN-03 (#267), a follow-up PR on main after M1-51 (PR #256, merged 20
   - workspace;
   - status bar: connection, node summary, jobs, the locked egress badge on the right.
 - Phone-width rules from §6, and a `min-height: 100vh` frame.
+- Not in M1-53: the collapse of the rail to icons below 1024 px. §3.1 places the icon rail in Phase 2, and the plan's
+  Phase 2 list (plan §6.10) owns it. The phone-width rule of §6 stays.
 - `ui.theme` `high_contrast` resolves in `state/theme.js`.
 - The global shortcuts of §3.7: Ctrl K, Esc, Shift ? overlay, G-letter jumps, F6 regions.
 - The status bar subscribes to `job.state_changed`, `job.progress`, `node.heartbeat` and `egress.active`.
@@ -601,11 +603,11 @@ This is DESIGN-03 (#267), a follow-up PR on main after M1-51 (PR #256, merged 20
   - `basic-advanced.spec.js`: Settings, Plugins, Remote, and the Chat/Inference label;
   - `theme.spec.js`: light, dark, high contrast, `system`, compact; no `--rr-locked-*` change.
 
-**M1-55 (desktop window)**
-- Minimum window 960 × 600; below 1024 px the rail collapses to icons. Native title bar; window title
-  "Rastai · <project> · <section>".
+**M1-55 (desktop window; in M6, deferred, ADR-0040)**
+- Minimum window 960 × 600. Native title bar; window title "Rastai · <project> · <section>". The shell's choice is
+  made when M6 starts; these items hold for either engine.
 - Ctrl +/- zoom and the OS reduced-motion setting are respected. Ctrl K, Ctrl . and F6 reach the page.
-- Manual check in WebKitGTK on the owner's box: Geist renders and the focus ring matches Chromium.
+- Manual check in the chosen shell's engine on the owner's box: Geist renders and the focus ring matches Chromium.
 - Second windows are built only through ADR-0039's mechanism (Accepted 2026-10-13). Before this work, a contract PR
   registers `SessionApproval` and adds its threat-model row (ADR-0039 decision 7). `SessionApproval` lands with the
   work that builds second windows (frontend layout 8.9 step 5).
@@ -642,7 +644,7 @@ are not listed here.
 | Command requests R1–R14 (other than those above) | commands and fields | §7 | each joins the milestone of the area it extends |
 | `IconButton`, `Slider`, `Toggle`, `Tabs`, `SidebarNav`, `StatusBarView`, `EmptyState`, `KeyHint`, `ProgressBar` and the other planned components of §5.2 | layout names (frontend layout 4.1) | §3, §5.2 | not in contracts; a component joins contracts when it is built |
 | `contextStore`, `state/theme.js` | module names (frontend layout 2) | §3.6, §6.3 | not in contracts; the frontend layout doc owns them |
-| `basic-advanced.spec.js`, `theme.spec.js`, `palette.spec.js` | test and spec file names | §9 (c), §9 (d) | DESIGN-03 (#267) and M1-53 to M1-55 PRs |
+| `basic-advanced.spec.js`, `theme.spec.js`, `palette.spec.js` | test and spec file names | §9 (c), §9 (d) | DESIGN-03 (#267) and M1-53 and M1-54 PRs, and M1-55 |
 
 The existing files `tokens/built-in-themes.js`, `tokens/palettes.test.js`, `tokens/tokens.test.js`, `security/locked-styles.js`
 and `security/permission-text.js` are on main; §9 (c) extends them, so they need no registration.

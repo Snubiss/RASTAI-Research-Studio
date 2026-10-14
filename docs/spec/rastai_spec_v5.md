@@ -842,7 +842,7 @@ SQLite stays the live store. A MySQL or MariaDB server is an optional long-term 
 - **Logs:** structured JSON-lines logs from an in-house logger in `rastai-diag` (no `tracing`), with run IDs carried into Python jobs through `RASTAI_RUN_ID`.
 - `rastai doctor --bundle` packs logs, the hardware profile and versions into one file for bug reports.
 - **Self-update:**
-  - Linux packages: AppImage and `.deb` in the prototype, through the Tauri updater.
+  - Linux packages: AppImage and `.deb` in the prototype, through the Tauri updater (deferred with the shell, ADR-0040).
   - Remote nodes get the matching binary pushed by the daemon.
 - **Model downloads:** gated HF models (token, license acceptance), resumable downloads, and disk checks.
 - **Disk:** quotas, garbage collection, pinned items, and a storage view in settings (Settings > Storage, with an Archive page for §19 in M11).
@@ -907,8 +907,8 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Foundation | `torchvision.io.decode_image` | PNG and JPEG decoding of untrusted images, only in `rastai_data/image_decode.py`. A hand-written decoder is weeks of parser risk | An in-house decoder behind the same function |
 | Foundation | uv | Python environments and lockfiles; packaging is a swamp | — |
 | Foundation | React | UI framework, used from plain JavaScript and JSX (§16) | — |
-| Foundation | Tauri 2 (with `tauri-build`) | Desktop shell | The browser is already a full client |
-| Foundation | the Tauri updater plugin (`tauri-plugin-updater`) | Signed updates for the desktop shell; ships with the desktop shell (approved 2026-10-11) | The browser is already a full client |
+| Foundation | Tauri 2 (with `tauri-build`) | Desktop shell. **Deferred:** shell choice reopened (ADR-0040, owner 2026-10-14); not built in M1 | The browser is already a full client |
+| Foundation | the Tauri updater plugin (`tauri-plugin-updater`) | Signed updates for the desktop shell; ships with the desktop shell (approved 2026-10-11). **Deferred** with the shell (ADR-0040, owner 2026-10-14) | The browser is already a full client |
 | Foundation | SQLite (rusqlite) | Embedded database, the live store on every machine | — |
 | Foundation | Docker / Podman engine, OpenSSH | Containers and remote access | — |
 | Security | blake3, ed25519-dalek, rustls, keyring (OS keychain bindings) | Crypto, identity, TLS, secrets | — |
@@ -929,7 +929,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Dev tooling | pytest, vitest, vite, pnpm | Python and JavaScript tests, the frontend build, JavaScript workspaces | — |
 | Dev tooling | `@vitest/browser` | Runs the renderer tests (canvas, viz) in a real browser engine. Dev and test only, never shipped | Playwright component tests |
 | Dev tooling | axe-core | Automated accessibility checks in the Playwright and `@vitest/browser` tests (§7). Dev and test only, never shipped | A hand-written checklist test |
-| Dev tooling | the Tauri CLI | Builds and packages the desktop shell. Dev tooling only, never shipped | — |
+| Dev tooling | the Tauri CLI | Builds and packages the desktop shell. Dev tooling only, never shipped. **Deferred** with the shell (ADR-0040, owner 2026-10-14) | — |
 | Dev tooling | ruff, prettier | Python and JavaScript formatting and linting (M1) | — |
 | Dev tooling (checker only) | the `typescript` package | Runs `tsc --noEmit` in `checkJs` mode over `jsconfig.json` in `just check`, checking the JSDoc types in plain JavaScript. Never ships; nobody writes TypeScript (§0.22) | Drop the check; the code is plain JavaScript either way |
 | Dev tooling (checker only) | `@types/react`, `@types/react-dom` | React's type declarations, read only by that checker: React ships none, and without them every JSX element fails `checkJs` (TS7026). Never imported by code, never shipped. Added by M1-51 (owner approval of 2026-10-13) | Drop them with the checker |
@@ -1001,7 +1001,7 @@ python/
   envs/<backend>/uv.lock
 apps/                 # plain JavaScript + React (.js, .jsx)
   web                 # React app
-  desktop             # Tauri shell
+  desktop             # desktop shell, deferred to M6 (ADR-0040; the engine is chosen then)
   viewer              # static replay and design viewer
 packages/             # JS packages (@rastai/*), plain JavaScript + JSDoc
   ui                  # design system, theme tokens
@@ -1080,7 +1080,7 @@ tests/{parity,e2e,gpu,crash,loop}
 14. **Platform tiers:** Linux NVIDIA + AMD + CPU at tier 1; macOS and Windows at tier 2 with portability rules.
 15. **Plugins and licensing:** WASM tier deferred; Apache-2.0 + DCO (decided, §0.12); dependency license allowlist.
 
-ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five, v5.4.1 adds one more (ADR-0038), and v5.4.5 adds one more (ADR-0039):
+ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds five, v5.4.1 adds one more (ADR-0038), v5.4.5 adds one more (ADR-0039), and v5.4.6 adds one more (ADR-0040):
 - **ADR-0033:** `unsafe` allowed for one `statvfs` call in `rastai-store/src/disk_space.rs` only.
 - **ADR-0034:** sign-in with one-time login codes and an HttpOnly session cookie bound to its origin, the loopback Host rule, refusing a too-open `owner.token`, the reattach order; cross-origin browser clients refused in v1. Supersedes parts of ADR-0001, ADR-0006 and ADR-0007.
 - **ADR-0035:** the optional MySQL/MariaDB long-term archive. Supersedes ADR-0003 decision 6 in part (still no server for the live store, but an optional archive) and amends ADR-0002 decision 7 (a rebuild may read pruned runs from the archive).
@@ -1088,6 +1088,7 @@ ADR-0016 to ADR-0032 record later decisions (`docs/adr/README.md`). v5.4 adds fi
 - **ADR-0037:** borrowed decoders: `miniz_oxide` for DEFLATE and `torchvision.io.decode_image` for images, each behind one wrapper file; one implementation per in-house parser (Python calls the `rastai_formats` wheel for safetensors headers); a fuzz target for every remaining in-house parser of untrusted input. Supersedes ADR-0029 decision 1 in part.
 - **ADR-0038 (v5.4.1):** names and command schemas are enforced by CI. `check-schema-diff` and `check-names` run in M1 as part of `just check`; build agents get contracts.md, the generated schemas and the owning layout section; every PR has a separate reviewer agent with a naming and schema lens; a task is closed only after independent verification with evidence. Related to ADR-0004, ADR-0005 and ADR-0017; it moves the schema-diff check from Phase 2 into M1.
 - **ADR-0039 (v5.4.5):** a second window signs in only after the owner approves a locked prompt. The opener hands its session key over by `postMessage` to its own origin only, never in a URL; the new window accepts it only from its own origin. Built before any second window ships (UI design §6.9, ADR-0039).
+- **ADR-0040 (v5.4.6):** the browser is the client for now; the desktop shell is deferred to M6 and its choice is reopened (Electron, or Tauri once GTK4 ships). The shell rules of ADR-0006 and ADR-0034 hold for any shell.
 
 ---
 
@@ -1344,6 +1345,12 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4.6 (owner decision of 2026-10-14, DOCS-02; the status line stays v5.4)**
+- The browser is the client for now: "browser only for now. desktop shell later is acceptable" (ADR-0040). The daemon serves the web app, and `rastai open` opens the user's browser, already signed in. The desktop shell is deferred to M6, beside packaging (M1-55, which M6-E05 depends on). M1-55 moved out of M1.
+- §27: the Tauri 2, `tauri-build`, `tauri-plugin-updater` and Tauri CLI rows are marked deferred: the shell choice is reopened, decided when M6 starts (Electron, or Tauri once a release ships the GTK4 port). The reason is the archived GTK3 bindings Tauri 2 uses on Linux (RUSTSEC-2024-0411 and related, RUSTSEC-2024-0429 for glib; tauri #14684 and wry #1767 track the GTK4 port). Replacement path: the shell rules of ADR-0034 and ADR-0006 hold for any shell; nothing else changes.
+- §0, §16 and §29: wherever the spec names Tauri as the shell, read the desktop shell as deferred (ADR-0040). The §16 rule that the shell only runs `rastai open --print-url` stands for any shell.
+- Contracts: `rastai-desktop` and `@rastai/desktop` are marked (M6) (contracts v1.2 §2.1, §2.3, §15.1; `contracts-changes/DOCS-02.md`).
+
 **v5.4.5 (owner approval of 2026-10-13, DESIGN-01; the status line stays v5.4)**
 - §27: Geist and Geist Mono (SIL OFL 1.1, github.com/vercel/geist-font) are bundled UI typefaces, recorded as an "Asset (not code)" row beside the license entries. Their files and `OFL.txt` go in `packages/ui/src/fonts/`. Replacement path: swap the files and the two `font_family` tokens.
 - The UI design is `docs/design/ui-design.md` (version 1.0, owner approval of 2026-10-13). ADR-0039 records the second-window sign-in approval (Accepted, 2026-10-13); its contract shapes come in a later contract PR.
