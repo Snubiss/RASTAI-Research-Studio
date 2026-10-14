@@ -42,6 +42,8 @@ describe("the egress badge under the daemon's policy", () => {
     }
   });
 
+  // This test relies on the one above it in this file: vitest runs a file's tests in order, and the policy meta that
+  // test adds must still be removed when this one runs. Run on its own, this test passes trivially.
   test("the policy meta is gone once its test ends", () => {
     expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')).toBeNull();
   });

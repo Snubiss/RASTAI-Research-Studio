@@ -21,6 +21,8 @@ import { activeEgress } from "./egress-state.js";
 const BYTES_PER_GIB = 1024 * 1024 * 1024;
 // The running jobs the bar lists by name; the rest are counted ("2 more running"), so a busy node can't fill the bar.
 const STATUS_BAR_JOB_LIMIT = 3;
+// The route segment that opens a run's page (layout frontend-and-plugins.md 2.6): #/<section>/run/<run_id>.
+const RUN_ROUTE_SEGMENT = "run";
 // The egress list is re-checked this often while it has entries, so a held entry drops off after its hold time.
 const EGRESS_RECHECK_MS = 1000;
 /** @type {Object<string, string>} */
@@ -100,7 +102,7 @@ export function jobRouteOf(job) {
   if (sectionId === undefined) {
     return sectionRoute(HOME_SECTION_ID);
   }
-  return { sectionId, path: job.run_id ? [job.run_id] : [], query: {} };
+  return { sectionId, path: job.run_id ? [RUN_ROUTE_SEGMENT, job.run_id] : [], query: {} };
 }
 
 /**

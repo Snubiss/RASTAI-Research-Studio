@@ -24,6 +24,20 @@ beforeAll(async () => {
   await loadAppStyles();
 });
 
+/**
+ * The fake daemon's running train jobs, one per count, each with its run.
+ * @param {number} count
+ */
+function runningTrainJobs(count) {
+  return Array.from({ length: count }, (_, index) => ({
+    job_id: `job_0${index + 1}`,
+    node_id: "node_local",
+    kind: "train",
+    run_id: `run_0${index + 1}`,
+    state: "running",
+  }));
+}
+
 /** The mounted trees of this test, unmounted before the next test so no dialog outlives its page. */
 /** @type {{ unmount: () => Promise<void> }[]} */
 let mounted = [];
@@ -367,16 +381,6 @@ describe("the running jobs on the status bar", () => {
    * @param {number} count
    * @returns {any[]} that many running train jobs, each in its own run
    */
-  function runningTrainJobs(count) {
-    return Array.from({ length: count }, (_, index) => ({
-      job_id: `job_0${index + 1}`,
-      node_id: "node_local",
-      kind: "train",
-      run_id: `run_0${index + 1}`,
-      state: "running",
-    }));
-  }
-
   test("a progress event is keyed by the job in its source, so a run-id subject still reaches its job's bar", async () => {
     const { stream } = await renderApp({
       answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) },
@@ -407,7 +411,7 @@ describe("the running jobs on the status bar", () => {
     await renderApp({ answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) } });
     await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
     await inAct(async () => /** @type {HTMLButtonElement} */ (document.querySelector(".rr-status-bar__job")).click());
-    expect(window.location.hash).toBe("#/training/run_01");
+    expect(window.location.hash).toBe("#/training/run/run_01");
   });
 
   test("a running job with no run opens its section's page", async () => {
@@ -448,11 +452,17 @@ describe("the panel menu", () => {
 });
 
 describe("touch targets and phone width", () => {
-  test("every control is at least 24 px tall", async () => {
-    await renderApp();
+  // One running job puts a status bar job button on the page, so its height is checked with the rest.
+  test.each(["comfortable", "compact"])("every control is at least 24 px tall in %s density", async (density) => {
+    await renderApp({
+      extraSettings: { ui: { mode: "advanced", density } },
+      answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
     const controls = [
       sectionLink("Home"),
       document.querySelector(".rr-top-bar__palette"),
+      document.querySelector(".rr-status-bar__job"),
       ...document.querySelectorAll(".rr-segmented__option"),
     ];
     for (const control of controls) {

@@ -3,7 +3,7 @@
 import { JobState } from "@rastai/proto";
 import { describe, expect, test } from "vitest";
 
-import { jobIdOfEvent, withJobProgress, withoutEndedJob } from "./job-progress.js";
+import { jobIdOfEvent, withJobProgress, withOnlyListedJobs, withoutEndedJob } from "./job-progress.js";
 
 const RUN_ID = "run_01";
 const JOB_ID = "job_01";
@@ -85,5 +85,19 @@ describe("the progress map", () => {
   test("an ended job with no progress leaves the map as it was", () => {
     const running = { other: halfDone()[JOB_ID] };
     expect(withoutEndedJob(running, stateEvent(JOB_ID, JobState.SUCCEEDED))).toBe(running);
+  });
+});
+
+describe("the progress map after the job list is refreshed", () => {
+  test("a job the list no longer holds loses its progress", () => {
+    /** @type {any} */
+    const progress = { [JOB_ID]: { fraction: 0.5, message: "" }, job_02: { fraction: 0.1, message: "" } };
+    const kept = withOnlyListedJobs(progress, [{ job_id: "job_02" }]);
+    expect(Object.keys(kept)).toEqual(["job_02"]);
+  });
+
+  test("a job the list still holds keeps its progress", () => {
+    const progress = halfDone();
+    expect(withOnlyListedJobs(progress, [{ job_id: JOB_ID }])).toEqual(progress);
   });
 });
