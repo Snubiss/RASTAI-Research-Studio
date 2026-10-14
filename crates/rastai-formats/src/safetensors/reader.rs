@@ -45,6 +45,26 @@ pub fn read_tensor_bytes(
     entry: &TensorEntry,
     buffer: &mut Vec<u8>,
 ) -> Result<(), Diagnostic> {
+    let span = tensor_span(source, header, entry)?;
+    let length = tensor_buffer_length(&entry.name, span.length, LARGEST_BUFFER)?;
+    buffer.clear();
+    buffer.resize(length, 0);
+    read_tensor_range(source, span.offset, buffer)
+}
+
+/// Where one tensor's bytes sit in the source: its offset and its length, both checked against the source.
+pub(crate) struct TensorSpan {
+    pub(crate) offset: u64,
+    pub(crate) length: u64,
+}
+
+/// The span of a tensor's data, refused with `RRS-E6011` when it doesn't fit the source (checked again here, after
+/// the header was accepted, because the source is the one that matters for reading).
+pub(crate) fn tensor_span(
+    source: &dyn ByteSource,
+    header: &SafetensorsHeader,
+    entry: &TensorEntry,
+) -> Result<TensorSpan, Diagnostic> {
     let outside = || offsets_outside_diagnostic(&entry.name);
     let offset = header.data_start.checked_add(entry.start).ok_or_else(outside)?;
     let length = entry.end.checked_sub(entry.start).ok_or_else(outside)?;
@@ -52,9 +72,11 @@ pub fn read_tensor_bytes(
     if end > source.length() {
         return Err(outside());
     }
-    let length = tensor_buffer_length(&entry.name, length, LARGEST_BUFFER)?;
-    buffer.clear();
-    buffer.resize(length, 0);
+    Ok(TensorSpan { offset, length })
+}
+
+/// Fills `buffer` from `offset` in the source. A failed read is `RRS-D3001`.
+pub(crate) fn read_tensor_range(source: &dyn ByteSource, offset: u64, buffer: &mut [u8]) -> Result<(), Diagnostic> {
     source.read_at(offset, buffer).map_err(read_diagnostic)
 }
 

@@ -883,7 +883,7 @@ pub fn new_stream_hasher() -> StreamHasher
 pub fn update_stream_hasher(hasher: &mut StreamHasher, bytes: &[u8])
 pub fn finish_stream_hasher(hasher: StreamHasher) -> String
 pub fn content_hash_of_value(document: &serde_json::Value) -> String   // canonical JSON without the content_hash key
-pub fn model_hash(weight_files: &[&dyn ByteSource]) -> Result<String, Diagnostic> // contracts §8.6: one line per tensor, sorted by name
+pub fn model_hash(weight_files: &[&dyn ByteSource]) -> Result<String, Diagnostic> // contracts §8.6: one line per tensor, sorted by name; tensor bytes read in 1 MiB chunks
 
 // crc32.rs: one table for zip entries and event-log frames (contracts §7.1)
 pub fn crc32(bytes: &[u8]) -> u32
