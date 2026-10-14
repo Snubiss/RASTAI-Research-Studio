@@ -117,6 +117,9 @@ APP_PANELS = """const panels = import.meta.glob(["./panels/*.jsx"], { eager: tru
 # A declaration file is type-only: a shared package's types may come from @rastai/proto, as in the ui package.
 UI_DECLARATIONS = """import type { Diagnostic } from "@rastai/proto";
 """
+# A glob pattern may name a folder called base: only the options object's `base` key moves the patterns.
+BASE_FOLDER_PANELS = """const panels = import.meta.glob("./base/*.jsx", { eager: true });
+"""
 PASSING_JAVASCRIPT = (
     js_package("packages/ui", "@rastai/ui")
     | js_package("packages/client", "@rastai/client")
@@ -141,6 +144,7 @@ PASSING_JAVASCRIPT = (
         "apps/web/vite.config.js": 'import { defineConfig } from "vite";\n',
         "apps/web/src/app/panels.js": APP_PANELS,
         "packages/ui/src/generated/diagnostic.d.ts": UI_DECLARATIONS,
+        "apps/web/src/app/base-panels.js": BASE_FOLDER_PANELS,
     }
 )
 FAILING_JAVASCRIPT = [
@@ -315,6 +319,48 @@ FAILING_JAVASCRIPT = [
         "packages/ui/src/diagnostics/View.jsx",
         'import { Diagnostic } from "@rastai/proto";\n',
         "only in a JSDoc type import",
+    ),
+    # An import.meta.glob option named base moves the patterns to another folder, so the call is refused whatever
+    # its patterns are: as an identifier or as a quoted key (FU-276 review: base plus a `..` pattern escapes src/).
+    (
+        "plugins/evaluation/ui/src/a.js",
+        'const panels = import.meta.glob("./security/*.jsx", { base: "../../../../packages/ui/src", eager: true });\n',
+        "its options name `base`",
+    ),
+    (
+        "plugins/evaluation/ui/src/a.js",
+        'const panels = import.meta.glob("./security/*.jsx", { "base": "/packages/ui/src", eager: true });\n',
+        "its options name `base`",
+    ),
+    # An escaped base spells the same option name, so Vite resolves it (FU-276 review: a real Vite build bundled the
+    # locked file for each shape). The escape itself is refused, since this check reads the key as plain text only.
+    (
+        "plugins/evaluation/ui/src/a.js",
+        'const panels = import.meta.glob("./security/*.jsx", { b\\u0061se: "/packages/ui/src", eager: true });\n',
+        "its options have a backslash",
+    ),
+    (
+        "plugins/evaluation/ui/src/a.js",
+        'const panels = import.meta.glob("./security/*.jsx", { "b\\x61se": "/packages/ui/src", eager: true });\n',
+        "its options have a backslash",
+    ),
+    # A .ts or .mts file in src/generated/ can write the call's type argument (import.meta.glob<M>(...)), which Vite
+    # reads too, so its patterns are checked like any other (FU-276 review, items 5 and 8).
+    (
+        "plugins/evaluation/ui/src/generated/patterns.ts",
+        'export const locked = import.meta.glob<Module>("@rastai/ui/security");\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/evaluation/ui/src/generated/patterns.mts",
+        'export const locked = import.meta.glob<Module>("../../../../../packages/ui/src/security/*.jsx");\n',
+        "reaches outside its package's src/",
+    ),
+    # A backslash escape in a code import, not only in a JSDoc type (FU-276 item 3, review nit).
+    (
+        "packages/plugin/src/index.js",
+        'import "..\\\\..\\\\ui\\\\src\\\\security\\\\index.js";\n',
+        "a backslash",
     ),
     ("packages/ui/src/hooks/use-daemon.js", 'import { DaemonClient } from "@rastai/client";\n', "here may import only"),
     (

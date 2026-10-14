@@ -12,10 +12,15 @@
 - JavaScript specifiers are read from the code, not from the text around it: static imports and re-exports, import(),
   import.meta.glob patterns (a string or an array of strings in its first argument), and JSDoc import types in
   comments. A relative specifier from a package's src/ must stay inside that src/, and every symlink under a scanned
-  src/ is a problem: Vite follows symlinks and this check's walk does not.
+  src/ is a problem: Vite follows symlinks and this check's walk does not. An import.meta.glob call whose options name
+  `base` is refused outright: Vite resolves the patterns against base, so it can move them outside src/. Its options
+  may not hold a backslash either, since an escape can spell `base` where this check reads plain text.
+- .js, .jsx, .mjs, .ts and .mts files are all read the same way, so a TypeScript file in src/generated/ is covered.
+  Vite detects import.meta.glob calls with a type argument too (import.meta.glob<M>(...)), and so does this check.
 Out of scope (a static check can't see these, and they are not a working import in the shipped ESM bundle): a
-specifier held in a variable, a ternary or comma expression inside import(), CommonJS require and .cjs files, and
-new URL(..., import.meta.url). The real boundary for third-party plugins is the M8 sandboxed iframe.
+specifier held in a variable, a ternary or comma expression inside import(), an options object held in a variable,
+CommonJS require and .cjs files, and new URL(..., import.meta.url). The real boundary for third-party plugins is the M8
+sandboxed iframe.
 The tables below restate contracts 2.2, 2.3 and 2.5; tools/checks/tests checks that every package those tables
 name has a row here.
 """
@@ -30,6 +35,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from repo_files import (
+    javascript_code_only,
     line_number_at,
     list_files,
     parse_root_argument,
@@ -242,15 +248,27 @@ OUR_SCOPE = "@rastai/"
 SPECIFIER_BEFORE = re.compile(r"(?:\bfrom|\bimport(?:\s*\()*)\s*$")
 # A JSDoc type import inside a comment: {import("@rastai/proto").Diagnostic}.
 TYPE_IMPORT = re.compile(r"\bimport\(\s*[\"']([^\"']+)[\"']\s*\)")
-# The code right before the parenthesis of a call whose first argument holds the glob patterns:
-# import.meta.glob("...") or import.meta.glob(["...", "..."]). Vite reads those patterns as module paths, so they
-# are specifiers; the options after them are not.
-GLOB_CALL_BEFORE = re.compile(r"\bimport\.meta\.glob\s*$")
-# How much code before a position is enough to recognize GLOB_CALL_BEFORE.
-GLOB_CALL_CONTEXT_LENGTH = 32
+# The start of an import.meta.glob call, matched as Vite matches it: the word, an optional type argument (a .ts file's
+# import.meta.glob<M>(...)) and the parenthesis. It is matched in code only, so a comment or string can't start a call.
+GLOB_CALL_START = re.compile(r"\bimport\.meta\.glob(?:<\w+>)?\s*\(")
+# The brackets that open and close a call's arguments, its array and its object, counted together.
+OPENING_BRACKETS = "([{"
+CLOSING_BRACKETS = ")]}"
+# An option named base, as a key, a shorthand or a value: Vite resolves the glob patterns against base, so the call
+# can reach outside src/ whatever its patterns are. A quoted key is matched in the call's own text, because the
+# code-only text has its quotes blanked. A quoted "base" that is only a value is refused too: writing it another way
+# costs nothing, so the check fails safe rather than parse the object.
+GLOB_BASE_IDENTIFIER = re.compile(r"\bbase\b")
+GLOB_BASE_QUOTED_KEY = re.compile(r"([\"'`])base\1")
 # Specifiers with a backslash (a unicode escape reads as a path inside the package) or a node_modules segment (a
 # relative path through pnpm's per-package link into another package) are refused before anything else is read.
 BACKSLASH_REASON = "a backslash (an escape reads as a path); write the specifier as plain text"
+GLOB_BASE_REASON = (
+    "its options name `base`, which moves the patterns outside this src/; write each pattern as a path inside src/"
+)
+# An escape in the options can spell `base` (b\u0061se, "b\x61se"), which Vite resolves to the same option while this
+# check reads the key as plain text. No option the repository needs has a backslash, so any backslash is refused.
+GLOB_ESCAPE_REASON = "its options have a backslash, which can spell `base` unreadably; write option names as plain text"
 NODE_MODULES_REASON = "a node_modules path; import the other package by its name, not through its installed copy"
 ROOT_ABSOLUTE_REASON = "a root-absolute path ('/...') is not a path inside this package; import by name or go relative"
 
@@ -452,6 +470,8 @@ def check_js_file(root: Path, path: str, package: str, package_folder: str) -> l
         reason = js_import_problem(specifier, is_type_only or declares_types, path, package, package_folder)
         if reason:
             problems.append(f"{path}:{line_number_at(text, offset)}: imports `{specifier}`: {reason}")
+    for offset, reason in glob_option_problems(text):
+        problems.append(f"{path}:{line_number_at(text, offset)}: imports `import.meta.glob`: {reason}")
     return problems
 
 
@@ -460,7 +480,7 @@ def js_imports(text: str) -> list[tuple[int, str, bool]]:
     patterns of import.meta.glob, and JSDoc `import("...")` types in comments."""
     imports = []
     spans = split_javascript(text)
-    glob_patterns = glob_pattern_starts(text, spans)
+    glob_patterns = {start for _, _, _, patterns in glob_calls(text) for start in patterns}
     # The code since the last string. A comment is whitespace in JavaScript, so it becomes one space here: the
     # code on both sides stays apart (`await/**/import(` must still read as `await import(`), and a comment
     # between `import(` and the specifier (`import(/* @vite-ignore */ "x")`) can't hide the `import(` before it.
@@ -478,39 +498,71 @@ def js_imports(text: str) -> list[tuple[int, str, bool]]:
     return imports
 
 
-def glob_pattern_starts(text: str, spans: list[tuple[str, int, int]]) -> set[int]:
-    """The offsets of the string literals that are import.meta.glob patterns: the string itself, or each string
-    of the array, when it is the call's first argument. Strings after that comma are options (query: "?raw"),
-    not paths, so they are not returned. Brackets are counted from the call's own parenthesis, so the commas
-    inside an array don't end the first argument."""
-    starts = set()
-    # 0 outside a glob call's first argument; otherwise the brackets open from the call's parenthesis onwards.
+def glob_calls(text: str) -> list[tuple[int, int, int, list[int]]]:
+    """Each import.meta.glob call as (offset of its parenthesis, offset of the one that closes it, offset of the comma
+    that starts its options, offsets of the string literals that are its patterns). The calls are found in code only.
+    The patterns are the strings of the first argument: the string itself, or each string of an array. Strings after
+    that first comma are options (query: "?raw"), not paths."""
+    code = javascript_code_only(text)
+    string_starts = [start for kind, start, _ in split_javascript(text) if kind == "string"]
+    calls = []
+    for match in GLOB_CALL_START.finditer(code):
+        open_at = match.end() - 1
+        close_at = matching_close(code, open_at)
+        options_start = end_of_first_argument(code, open_at, close_at)
+        patterns = [start for start in string_starts if open_at < start < options_start]
+        calls.append((open_at, close_at, options_start, patterns))
+    return calls
+
+
+def matching_close(code: str, open_at: int) -> int:
+    """The offset of the bracket that closes the one at open_at, or the end of the code when none does."""
     depth = 0
-    code_before = ""
-    for kind, start, end in spans:
-        if kind == "string":
-            if depth > 0:
-                starts.add(start)
-            code_before = ""
-            continue
-        characters = text[start:end] if kind == "code" else " "
-        for character in characters:
-            depth = next_glob_depth(depth, character, code_before)
-            code_before = (code_before + character)[-GLOB_CALL_CONTEXT_LENGTH:]
-    return starts
+    for position in range(open_at, len(code)):
+        if code[position] in OPENING_BRACKETS:
+            depth += 1
+        elif code[position] in CLOSING_BRACKETS:
+            depth -= 1
+            if depth == 0:
+                return position
+    return len(code)
 
 
-def next_glob_depth(depth: int, character: str, code_before: str) -> int:
-    """The bracket depth after one character of code, given the code before it (see glob_pattern_starts)."""
-    if depth == 0:
-        return 1 if character == "(" and GLOB_CALL_BEFORE.search(code_before) else 0
-    if character in "([{":
-        return depth + 1
-    if character in ")]}":
-        return depth - 1
-    if character == "," and depth == 1:
-        return 0  # the first argument ends at a comma of the call itself
-    return depth
+def end_of_first_argument(code: str, open_at: int, close_at: int) -> int:
+    """The offset of the comma that ends the call's first argument, or the closing parenthesis when there is none.
+    Commas inside an array or a nested call are at a deeper depth, so they don't end the argument."""
+    depth = 0
+    for position in range(open_at + 1, close_at):
+        if code[position] in OPENING_BRACKETS:
+            depth += 1
+        elif code[position] in CLOSING_BRACKETS:
+            depth -= 1
+        elif code[position] == "," and depth == 0:
+            return position
+    return close_at
+
+
+def glob_option_problems(text: str) -> list[tuple[int, str]]:
+    """(offset of the call, reason) for each import.meta.glob call whose options can move its patterns outside src/.
+    Only the options are read: a base in a string pattern (./base/*.jsx) or in the first argument is not an option."""
+    code = javascript_code_only(text)
+    problems = []
+    for open_at, close_at, options_start, _ in glob_calls(text):
+        reason = glob_option_problem(text, code, options_start, close_at)
+        if reason:
+            problems.append((open_at, reason))
+    return problems
+
+
+def glob_option_problem(text: str, code: str, options_start: int, close_at: int) -> str | None:
+    """Why one call's options are refused, or None. The backslash is looked for in the raw text, so an escape in a
+    key is seen; `base` is looked for in code for an identifier and in the raw text for a quoted key."""
+    if "\\" in text[options_start:close_at]:
+        return GLOB_ESCAPE_REASON
+    names_base = GLOB_BASE_IDENTIFIER.search(code, options_start, close_at) or GLOB_BASE_QUOTED_KEY.search(
+        text, options_start, close_at
+    )
+    return GLOB_BASE_REASON if names_base else None
 
 
 def type_imports_in_comment(comment: str, comment_start: int) -> list[tuple[int, str, bool]]:
