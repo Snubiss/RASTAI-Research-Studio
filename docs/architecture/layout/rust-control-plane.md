@@ -638,8 +638,9 @@ crates/rastai-formats/
       structure.rs            layer 2: header first, then the body description; RRS-E1xxx with pointer and line
       meaning/
         mod.rs                check_meaning(document): one match arm per document type
-        model_graph.rs        references resolve, block refs exist, repeat counts, acyclic unless an rnn op closes the loop
+        model_graph.rs        references resolve, acyclic unless an rnn op closes the loop, input connections exact
         model_shapes.rs       shape inference per op along the graph; shape errors on the edge that breaks
+        model_blocks.rs       block definitions and block instances: refs resolve, repeat counts, no instances in a block body
         input_map.rs          input ranges don't overlap, every range has an encoder, fusion inputs exist
         harness.rs            tool names unique, reward refers to a known kind, task ids unique
         data.rs               split ratios sum to 1, converter ref present, source hashes well formed

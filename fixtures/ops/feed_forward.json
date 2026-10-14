@@ -1,0 +1,32 @@
+{
+  "op": "feed_forward",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "dense",
+      "attributes": {
+        "variant": "dense",
+        "hidden_size": 16,
+        "intermediate_size": 32,
+        "activation": "gelu"
+      },
+      "input_shapes": [[2, 4, 16]],
+      "output_shapes": [[2, 4, 16]],
+      "parameter_count": 1024,
+      "flops": 16384
+    },
+    {
+      "name": "gated",
+      "attributes": {
+        "variant": "gated",
+        "hidden_size": 16,
+        "intermediate_size": 32,
+        "activation": "silu"
+      },
+      "input_shapes": [[2, 4, 16]],
+      "output_shapes": [[2, 4, 16]],
+      "parameter_count": 1536,
+      "flops": 24576
+    }
+  ]
+}

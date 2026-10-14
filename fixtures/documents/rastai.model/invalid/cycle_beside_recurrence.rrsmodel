@@ -45,7 +45,12 @@
         "node_id": "attention",
         "op": "attention",
         "label": "",
-        "attributes": {},
+        "attributes": {
+          "variant": "mha",
+          "hidden_size": 16,
+          "head_count": 2,
+          "head_dim": 8
+        },
         "train_mode": "train",
         "observe": true
       },

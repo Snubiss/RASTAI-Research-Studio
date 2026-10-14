@@ -16,8 +16,8 @@ use rastai_diag::diagnostic::Diagnostic;
 
 use crate::documents::model::ModelSpec;
 use crate::documents::model_ops::{
-    ClassifierHeadAttributes, ConcatAttributes, Conv1dAttributes, EmbeddingAttributes, LinearAttributes, OpAttributes,
-    PoolAttributes,
+    AttentionAttributes, ClassifierHeadAttributes, ConcatAttributes, Conv1dAttributes, EmbeddingAttributes,
+    FeedForwardAttributes, LinearAttributes, OpAttributes, PoolAttributes, UnembedAttributes,
 };
 use crate::validate::meaning::{MeaningSource, meaning_diagnostic};
 
@@ -171,6 +171,12 @@ pub fn infer_op_output_shapes(
     };
     let output = match attributes {
         OpAttributes::Embedding(embedding) => embedding_shape(embedding, first)?,
+        OpAttributes::RmsNorm(norm) => last_axis_shape(first, norm.size, norm.size)?,
+        OpAttributes::LayerNorm(norm) => last_axis_shape(first, norm.size, norm.size)?,
+        OpAttributes::Attention(attention) => attention_shape(attention, first)?,
+        OpAttributes::FeedForward(feed_forward) => feed_forward_shape(feed_forward, first)?,
+        OpAttributes::ResidualAdd(_) => residual_add_shape(input_shapes)?,
+        OpAttributes::Unembed(unembed) => unembed_shape(unembed, first)?,
         OpAttributes::Conv1d(conv) => conv1d_shape(conv, first)?,
         OpAttributes::Pool(pool) => pool_shape(pool, first)?,
         OpAttributes::Linear(linear) => linear_shape(linear, first)?,
@@ -190,6 +196,37 @@ fn embedding_shape(embedding: &EmbeddingAttributes, input: &[u64]) -> Result<Vec
     let mut output = input.to_vec();
     output.push(embedding.embedding_size);
     Ok(output)
+}
+
+/// Self-attention keeps the sequence shape `[batch, length, hidden_size]`: the sequence must be three axes long.
+fn attention_shape(attention: &AttentionAttributes, input: &[u64]) -> Result<Vec<u64>, ShapeProblem> {
+    let expected = format!("[batch, length, {}]", attention.hidden_size);
+    let [batch, length, hidden] = input else {
+        return Err(problem(0, expected));
+    };
+    if *hidden != attention.hidden_size {
+        return Err(problem(0, expected));
+    }
+    Ok(vec![*batch, *length, *hidden])
+}
+
+/// `[..., hidden_size]` to the same shape.
+fn feed_forward_shape(feed_forward: &FeedForwardAttributes, input: &[u64]) -> Result<Vec<u64>, ShapeProblem> {
+    last_axis_shape(input, feed_forward.hidden_size, feed_forward.hidden_size)
+}
+
+/// `[..., hidden_size]` to `[..., vocab_size]`: the logits.
+fn unembed_shape(unembed: &UnembedAttributes, input: &[u64]) -> Result<Vec<u64>, ShapeProblem> {
+    last_axis_shape(input, unembed.hidden_size, unembed.vocab_size)
+}
+
+/// Two inputs of one shape, which the sum keeps: the second must match the first, and the first is the output.
+fn residual_add_shape(inputs: &[Vec<u64>]) -> Result<Vec<u64>, ShapeProblem> {
+    let first = &inputs[0];
+    match inputs.get(1) {
+        Some(second) if second == first => Ok(first.clone()),
+        _ => Err(problem(1, shape_text(first))),
+    }
 }
 
 /// `[batch, length, in_channels]` to `[batch, out_length, out_channels]`, with PyTorch's length rule:
@@ -353,7 +390,7 @@ fn concat_text(first: &[u64], axis: usize) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::documents::model_ops::{ActivationAttributes, ActivationFunction, PoolMode};
+    use crate::documents::model_ops::{ActivationAttributes, ActivationFunction, AttentionVariant, PoolMode};
 
     fn conv(kernel_size: u64, padding: u64) -> OpAttributes {
         OpAttributes::Conv1d(Conv1dAttributes {
@@ -450,5 +487,38 @@ mod tests {
     fn shapes_read_as_lists() {
         assert_eq!(shape_text(&[64, 128, 128]), "[64, 128, 128]");
         assert_eq!(shape_text(&[]), "[]");
+    }
+
+    #[test]
+    fn a_residual_sum_needs_two_inputs_of_one_shape() {
+        let same = vec![vec![2, 3, 8], vec![2, 3, 8]];
+        assert_eq!(residual_add_shape(&same), Ok(vec![2, 3, 8]));
+        let narrower = vec![vec![2, 3, 8], vec![2, 3, 4]];
+        assert_eq!(residual_add_shape(&narrower), Err(problem(1, "[2, 3, 8]".to_string())));
+        let one_input = vec![vec![2, 3, 8]];
+        assert_eq!(residual_add_shape(&one_input), Err(problem(1, "[2, 3, 8]".to_string())));
+    }
+
+    #[test]
+    fn attention_wants_three_axes_of_its_hidden_size() {
+        let attention = AttentionAttributes {
+            variant: AttentionVariant::Mha,
+            hidden_size: 16,
+            head_count: 2,
+            kv_head_count: None,
+            head_dim: 8,
+            window: None,
+            qk_norm: false,
+            rope: None,
+        };
+        assert_eq!(attention_shape(&attention, &[1, 6, 16]), Ok(vec![1, 6, 16]));
+        assert_eq!(
+            attention_shape(&attention, &[6, 16]),
+            Err(problem(0, "[batch, length, 16]".to_string()))
+        );
+        assert_eq!(
+            attention_shape(&attention, &[1, 6, 12]),
+            Err(problem(0, "[batch, length, 16]".to_string()))
+        );
     }
 }

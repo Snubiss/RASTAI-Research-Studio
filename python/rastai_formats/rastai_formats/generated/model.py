@@ -49,6 +49,8 @@ class ModelSpec:
     objective: Objective | None = None
     # Number format and the sizes shapes are worked out with.
     defaults: ModelDefaults
+    # Reusable graphs by block id, stamped by block instances.
+    blocks: dict[str, ModelGraph] | None = None
     # Pretrained parts it starts from; empty to train from scratch.
     weights: list[WeightsSource] | None = None
     # Graph node id to GPU index, written by the layer placement planner.
@@ -74,6 +76,7 @@ def model_spec_from_json(data: dict[str, Any]) -> ModelSpec:
         outputs=[output_head_from_json(item) for item in data["outputs"]],
         objective=None if "objective" not in data else objective_from_json(data["objective"]),
         defaults=model_defaults_from_json(data["defaults"]),
+        blocks=None if "blocks" not in data else {key: model_graph_from_json(item) for key, item in data["blocks"].items()},
         weights=None if "weights" not in data else [weights_source_from_json(item) for item in data["weights"]],
         placement=None if "placement" not in data else data["placement"],
     )
@@ -106,6 +109,8 @@ def model_spec_to_json(value: ModelSpec) -> dict[str, Any]:
     if value.objective is not None:
         data["objective"] = objective_to_json(value.objective)
     data["defaults"] = model_defaults_to_json(value.defaults)
+    if value.blocks is not None:
+        data["blocks"] = {key: model_graph_to_json(item) for key, item in value.blocks.items()}
     if value.weights is not None:
         data["weights"] = [weights_source_to_json(item) for item in value.weights]
     if value.placement is not None:
@@ -156,6 +161,10 @@ class GraphNode:
     train_mode: Literal["freeze", "lora", "train"] | None = None
     # Whether its outputs are observation points; true by default.
     observe: bool | None = None
+    # The block a block instance (op block) stamps; a key of blocks.
+    block_ref: str | None = None
+    # How many copies of the block to stamp, one after another; 1 when left out.
+    repeat: int | None = None
 
 
 def graph_node_from_json(data: dict[str, Any]) -> GraphNode:
@@ -167,6 +176,8 @@ def graph_node_from_json(data: dict[str, Any]) -> GraphNode:
         attributes=None if "attributes" not in data else data["attributes"],
         train_mode=None if "train_mode" not in data else data["train_mode"],
         observe=None if "observe" not in data else data["observe"],
+        block_ref=None if "block_ref" not in data else data["block_ref"],
+        repeat=None if "repeat" not in data else data["repeat"],
     )
 
 
@@ -183,6 +194,10 @@ def graph_node_to_json(value: GraphNode) -> dict[str, Any]:
         data["train_mode"] = value.train_mode
     if value.observe is not None:
         data["observe"] = value.observe
+    if value.block_ref is not None:
+        data["block_ref"] = value.block_ref
+    if value.repeat is not None:
+        data["repeat"] = value.repeat
     return data
 
 
@@ -304,7 +319,7 @@ class Objective:
     "What the model is trained to do."
 
     # The objective, such as classification.
-    kind: Literal["classification"]
+    kind: Literal["classification", "next_token"]
     # Its settings, checked by the recipe.
     settings: dict[str, Any] | None = None
 
@@ -401,6 +416,8 @@ class EmbeddingAttributes:
     vocab_size: int
     # Length of each vector.
     embedding_size: int
+    # Multiplier of each vector; 1 by default. Gemma 3 uses the square root of embedding_size.
+    scale: float | None = None
 
 
 def embedding_attributes_from_json(data: dict[str, Any]) -> EmbeddingAttributes:
@@ -408,6 +425,7 @@ def embedding_attributes_from_json(data: dict[str, Any]) -> EmbeddingAttributes:
     return EmbeddingAttributes(
         vocab_size=data["vocab_size"],
         embedding_size=data["embedding_size"],
+        scale=None if "scale" not in data else data["scale"],
     )
 
 
@@ -416,6 +434,212 @@ def embedding_attributes_to_json(value: EmbeddingAttributes) -> dict[str, Any]:
     data: dict[str, Any] = {}
     data["vocab_size"] = value.vocab_size
     data["embedding_size"] = value.embedding_size
+    if value.scale is not None:
+        data["scale"] = value.scale
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class RmsNormAttributes:
+    "rms_norm over the last axis: [..., size] to [..., size]."
+
+    # Size of its last axis.
+    size: int
+    # Whether the learned scale is added to one (Gemma 3); false by default.
+    scale_offset: bool | None = None
+    # Added under the square root; 1e-6 by default.
+    epsilon: float | None = None
+
+
+def rms_norm_attributes_from_json(data: dict[str, Any]) -> RmsNormAttributes:
+    """A RmsNormAttributes from its JSON object."""
+    return RmsNormAttributes(
+        size=data["size"],
+        scale_offset=None if "scale_offset" not in data else data["scale_offset"],
+        epsilon=None if "epsilon" not in data else data["epsilon"],
+    )
+
+
+def rms_norm_attributes_to_json(value: RmsNormAttributes) -> dict[str, Any]:
+    """The JSON object of a RmsNormAttributes; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    data["size"] = value.size
+    if value.scale_offset is not None:
+        data["scale_offset"] = value.scale_offset
+    if value.epsilon is not None:
+        data["epsilon"] = value.epsilon
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class LayerNormAttributes:
+    "layer_norm over the last axis: [..., size] to [..., size]."
+
+    # Size of its last axis.
+    size: int
+    # Whether it learns a shift as well as a scale; true by default.
+    bias: bool | None = None
+    # Added under the square root; 1e-5 by default.
+    epsilon: float | None = None
+
+
+def layer_norm_attributes_from_json(data: dict[str, Any]) -> LayerNormAttributes:
+    """A LayerNormAttributes from its JSON object."""
+    return LayerNormAttributes(
+        size=data["size"],
+        bias=None if "bias" not in data else data["bias"],
+        epsilon=None if "epsilon" not in data else data["epsilon"],
+    )
+
+
+def layer_norm_attributes_to_json(value: LayerNormAttributes) -> dict[str, Any]:
+    """The JSON object of a LayerNormAttributes; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    data["size"] = value.size
+    if value.bias is not None:
+        data["bias"] = value.bias
+    if value.epsilon is not None:
+        data["epsilon"] = value.epsilon
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class AttentionAttributes:
+    "attention over one sequence: [batch, length, hidden_size] to the same shape, with its own projections."
+
+    # mha (one key and value head per query head), gqa (grouped key and value heads) or sliding (a window of tokens only).
+    variant: Literal["mha", "gqa", "sliding"]
+    # Size of its input's last axis and of its output.
+    hidden_size: int
+    # Query heads.
+    head_count: int
+    # Key and value heads; head_count when left out. Fewer than head_count for gqa; it must divide head_count.
+    kv_head_count: int | None = None
+    # Size of each head.
+    head_dim: int
+    # Tokens a sliding layer looks back over; required for sliding and left out otherwise.
+    window: int | None = None
+    # Whether queries and keys are RMS-normalized per head before rotation; false by default.
+    qk_norm: bool | None = None
+    # Rotary position embedding of queries and keys; none when left out.
+    rope: RopeSettings | None = None
+
+
+def attention_attributes_from_json(data: dict[str, Any]) -> AttentionAttributes:
+    """A AttentionAttributes from its JSON object."""
+    return AttentionAttributes(
+        variant=data["variant"],
+        hidden_size=data["hidden_size"],
+        head_count=data["head_count"],
+        kv_head_count=None if "kv_head_count" not in data else data["kv_head_count"],
+        head_dim=data["head_dim"],
+        window=None if "window" not in data else data["window"],
+        qk_norm=None if "qk_norm" not in data else data["qk_norm"],
+        rope=None if "rope" not in data else rope_settings_from_json(data["rope"]),
+    )
+
+
+def attention_attributes_to_json(value: AttentionAttributes) -> dict[str, Any]:
+    """The JSON object of a AttentionAttributes; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    data["variant"] = value.variant
+    data["hidden_size"] = value.hidden_size
+    data["head_count"] = value.head_count
+    if value.kv_head_count is not None:
+        data["kv_head_count"] = value.kv_head_count
+    data["head_dim"] = value.head_dim
+    if value.window is not None:
+        data["window"] = value.window
+    if value.qk_norm is not None:
+        data["qk_norm"] = value.qk_norm
+    if value.rope is not None:
+        data["rope"] = rope_settings_to_json(value.rope)
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class FeedForwardAttributes:
+    "feed_forward: [..., hidden_size] to the same shape, through intermediate_size."
+
+    # dense (up, activation, down) or gated (activated gate times up, then down).
+    variant: Literal["dense", "gated"]
+    # Size of its input and output.
+    hidden_size: int
+    # Size of the hidden layer between its projections.
+    intermediate_size: int
+    # The function on the up projection (dense) or the gate (gated).
+    activation: Literal["relu", "gelu", "silu", "tanh", "sigmoid"]
+
+
+def feed_forward_attributes_from_json(data: dict[str, Any]) -> FeedForwardAttributes:
+    """A FeedForwardAttributes from its JSON object."""
+    return FeedForwardAttributes(
+        variant=data["variant"],
+        hidden_size=data["hidden_size"],
+        intermediate_size=data["intermediate_size"],
+        activation=data["activation"],
+    )
+
+
+def feed_forward_attributes_to_json(value: FeedForwardAttributes) -> dict[str, Any]:
+    """The JSON object of a FeedForwardAttributes; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    data["variant"] = value.variant
+    data["hidden_size"] = value.hidden_size
+    data["intermediate_size"] = value.intermediate_size
+    data["activation"] = value.activation
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class ResidualAddAttributes:
+    "residual_add: the sum of its two inputs, which have the same shape."
+
+
+def residual_add_attributes_from_json(data: dict[str, Any]) -> ResidualAddAttributes:
+    """A ResidualAddAttributes from its JSON object."""
+    return ResidualAddAttributes()
+
+
+def residual_add_attributes_to_json(value: ResidualAddAttributes) -> dict[str, Any]:
+    """The JSON object of a ResidualAddAttributes; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class UnembedAttributes:
+    "unembed: [..., hidden_size] to [..., vocab_size], the logits."
+
+    # Size of its input's last axis.
+    hidden_size: int
+    # Size of its output's last axis.
+    vocab_size: int
+    # Whether its weight is the embedding's, so it holds no parameters of its own; false by default.
+    tied: bool | None = None
+    # Caps the logits to within plus or minus this value, by cap * tanh(logit / cap).
+    final_softcap: float | None = None
+
+
+def unembed_attributes_from_json(data: dict[str, Any]) -> UnembedAttributes:
+    """A UnembedAttributes from its JSON object."""
+    return UnembedAttributes(
+        hidden_size=data["hidden_size"],
+        vocab_size=data["vocab_size"],
+        tied=None if "tied" not in data else data["tied"],
+        final_softcap=None if "final_softcap" not in data else data["final_softcap"],
+    )
+
+
+def unembed_attributes_to_json(value: UnembedAttributes) -> dict[str, Any]:
+    """The JSON object of a UnembedAttributes; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    data["hidden_size"] = value.hidden_size
+    data["vocab_size"] = value.vocab_size
+    if value.tied is not None:
+        data["tied"] = value.tied
+    if value.final_softcap is not None:
+        data["final_softcap"] = value.final_softcap
     return data
 
 
@@ -627,4 +851,62 @@ def classifier_head_attributes_to_json(value: ClassifierHeadAttributes) -> dict[
     data["class_count"] = value.class_count
     if value.bias is not None:
         data["bias"] = value.bias
+    return data
+
+
+@dataclass(frozen=True, kw_only=True)
+class RopeSettings:
+    "Rotary position embedding of an attention op's queries and keys."
+
+    # Base frequency; 10000 by default.
+    base: float | None = None
+    # none (the default), linear, llama3 or yarn.
+    scaling: Literal["none", "linear", "llama3", "yarn"] | None = None
+    # How far the context is extended; 1 by default.
+    factor: float | None = None
+    # Context length the model was trained on; required for llama3 and yarn.
+    original_max_position: int | None = None
+    # llama3: the low frequency band's factor; 1 by default.
+    low_freq_factor: float | None = None
+    # llama3: the high frequency band's factor; 4 by default.
+    high_freq_factor: float | None = None
+    # yarn: the fast rotation bound; 32 by default.
+    beta_fast: float | None = None
+    # yarn: the slow rotation bound; 1 by default.
+    beta_slow: float | None = None
+
+
+def rope_settings_from_json(data: dict[str, Any]) -> RopeSettings:
+    """A RopeSettings from its JSON object."""
+    return RopeSettings(
+        base=None if "base" not in data else data["base"],
+        scaling=None if "scaling" not in data else data["scaling"],
+        factor=None if "factor" not in data else data["factor"],
+        original_max_position=None if "original_max_position" not in data else data["original_max_position"],
+        low_freq_factor=None if "low_freq_factor" not in data else data["low_freq_factor"],
+        high_freq_factor=None if "high_freq_factor" not in data else data["high_freq_factor"],
+        beta_fast=None if "beta_fast" not in data else data["beta_fast"],
+        beta_slow=None if "beta_slow" not in data else data["beta_slow"],
+    )
+
+
+def rope_settings_to_json(value: RopeSettings) -> dict[str, Any]:
+    """The JSON object of a RopeSettings; optional fields that are None are left out."""
+    data: dict[str, Any] = {}
+    if value.base is not None:
+        data["base"] = value.base
+    if value.scaling is not None:
+        data["scaling"] = value.scaling
+    if value.factor is not None:
+        data["factor"] = value.factor
+    if value.original_max_position is not None:
+        data["original_max_position"] = value.original_max_position
+    if value.low_freq_factor is not None:
+        data["low_freq_factor"] = value.low_freq_factor
+    if value.high_freq_factor is not None:
+        data["high_freq_factor"] = value.high_freq_factor
+    if value.beta_fast is not None:
+        data["beta_fast"] = value.beta_fast
+    if value.beta_slow is not None:
+        data["beta_slow"] = value.beta_slow
     return data

@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2002",
+      "path": "wrong_width.rrsmodel:101:7#/graph/edges/1"
+    }
+  ]
+}

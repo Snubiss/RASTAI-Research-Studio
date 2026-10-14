@@ -152,7 +152,7 @@
       "schema_id": "rastai.lock/1"
     },
     {
-      "content_hash": "blake3:aa87b67d6dd2310c294fd9da4f7d571c25474a24d15aadab5fc24b641d99d8b7",
+      "content_hash": "blake3:1607966d1100bf738c8513fe651cbc2b7545e4aaa9e843e4170e984cb4f12fb4",
       "file": "rastai.model/1.json",
       "schema_id": "rastai.model/1"
     },

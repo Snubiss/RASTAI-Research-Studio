@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2001",
+      "path": "missing_block.rrsmodel:27:9#/graph/nodes/1/block_ref"
+    }
+  ]
+}

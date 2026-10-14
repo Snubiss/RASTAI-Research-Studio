@@ -4,6 +4,7 @@
 //!
 //! One arm per document type. A type with no meaning rules yet has an empty arm, so a new type can't be forgotten.
 
+pub mod model_blocks;
 pub mod model_graph;
 pub mod model_shapes;
 pub mod plugin_manifest;

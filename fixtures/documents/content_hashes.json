@@ -3,6 +3,9 @@
   "hashes": {
     "rastai.lock/valid/environment_only.lock": "blake3:15bc7177adb0fec30bb729bfcf8f4cfb7dafd2fae8380203f8f0fd549bcc1871",
     "rastai.lock/valid/rastai.lock": "blake3:7a24a4045cc59fd42262778146cdd98565f60f0d11d95ef71ffe9a27b3447ba5",
+    "rastai.model/valid/block_repeat.rrsmodel": "blake3:7b2f54727c732925cb1f6817e5a42bae0ddfb40f0be3d6d9b2e7af6126a025a6",
+    "rastai.model/valid/tiny_gemma3.rrsmodel": "blake3:59bee70006d48fbb6954236d0ffd3445eda1e2e23b5639e6e56243e03d069738",
+    "rastai.model/valid/tiny_llama.rrsmodel": "blake3:f9cd6004276831de02fdbd31fd7cffd9d807ee2df560c299fdff3a1182573879",
     "rastai.model/valid/kim_textcnn.rrsmodel": "blake3:e8869ef66b77170b4bd6b6cbe8a75bdce9e950db31c6e980645edeeb47348c03",
     "rastai.model/valid/recurrent_loop.rrsmodel": "blake3:8e3da1f13440a26be34166d0cd59b30d68809d2c10f5cf28bac5456e724bdffd",
     "rastai.plugin/valid/rastai-plugin.json": "blake3:85918bca7542b23f05eee04c541724c4ea16e1ce7488bbf5d7b8a21ddc91c30d",
