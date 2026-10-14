@@ -34,6 +34,10 @@ One golden file per ModelSpec op, `<op>.json` (contracts §5.3 and §12.5). Each
 
 They were written from PyTorch 2.14 on CPU in eval mode: each case built as a channels-last module (`nn.Embedding`, `nn.Conv1d` and `max_pool1d`/`avg_pool1d` between two transposes, `nn.Linear`, `nn.Dropout`, the activation modules, `torch.cat`), run once under `FlopCounterMode`, with the parameter count summed from `module.parameters()`. The TextCNN cases use the sizes of the template `templates/designs/textcnn.rrsmodel` (batch 64, length 128, embedding 128, 64 filters, 4 classes).
 
+## The decoder ops (M2-01)
+
+`attention`, `feed_forward`, `residual_add`, `rms_norm`, `layer_norm` and `unembed` take their numbers from the formulas in contracts 5.3 and the FLOP convention above, worked out by hand from the attributes of each case, not by running PyTorch. The Python compiler (M2-03) runs each case under `FlopCounterMode` and must match. Attention's `notes` field states how sliding layers and qk_norm count.
+
 ## Adding an op
 
 The contract that adds an op to the vocabulary adds its file here, with its attribute description and shape rule, in the same PR. `tests/op_shapes.rs` fails when an op with shapes (`OPS_WITH_SHAPES`) has no file, or a file names an op without shapes, and `test_op_fixtures.py` fails the same way for the compiler's op table.

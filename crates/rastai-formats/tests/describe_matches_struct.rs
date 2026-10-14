@@ -37,8 +37,10 @@ use rastai_formats::documents::model::{
     ObjectiveKind, OutputHead, TrainMode, WeightsSource,
 };
 use rastai_formats::documents::model_ops::{
-    ActivationAttributes, ActivationFunction, ClassifierHeadAttributes, ConcatAttributes, Conv1dAttributes,
-    DropoutAttributes, EmbeddingAttributes, LinearAttributes, PoolAttributes, PoolMode,
+    ActivationAttributes, ActivationFunction, AttentionAttributes, AttentionVariant, ClassifierHeadAttributes,
+    ConcatAttributes, Conv1dAttributes, DropoutAttributes, EmbeddingAttributes, FeedForwardAttributes,
+    FeedForwardVariant, LayerNormAttributes, LinearAttributes, PoolAttributes, PoolMode, ResidualAddAttributes,
+    RmsNormAttributes, RopeScaling, RopeSettings, UnembedAttributes,
 };
 use rastai_formats::documents::plugin_manifest::{
     CommandContribution, EventHandlerContribution, PanelContribution, PanelPlacement, PluginCommandKind,
@@ -169,11 +171,15 @@ fn a_header_with_only_required_fields_still_writes_every_key() {
     assert_eq!(written["license"], Value::String(String::new()));
 }
 
-// A command that takes nothing (`system.status`) has arguments with no fields; every other type has some.
+// A command that takes nothing (`system.status`) has arguments with no fields, and so does residual_add, which takes
+// no attributes: its empty type makes an attribute on it an unknown field. Every other type has some.
+const OP_TYPES_WITH_NO_FIELDS: &[&str] = &["ResidualAddAttributes"];
+
 #[test]
 fn every_registered_description_has_fields() {
     for description in describe_all_types() {
-        let may_be_empty = is_command_arguments(&description.name);
+        let may_be_empty =
+            is_command_arguments(&description.name) || OP_TYPES_WITH_NO_FIELDS.contains(&description.name.as_str());
         assert!(
             may_be_empty || !description.fields.is_empty(),
             "{} has no fields",
@@ -764,28 +770,68 @@ fn every_color_role_is_set_in_the_filled_theme() {
 
 // ModelSpec: every optional part set, and every op attributes type with its optional attributes set.
 
-fn filled_model() -> ModelSpec {
+fn filled_blocks() -> BTreeMap<String, ModelGraph> {
+    let mut blocks = BTreeMap::new();
+    blocks.insert(
+        text("decoder_layer"),
+        ModelGraph {
+            nodes: vec![GraphNode {
+                node_id: text("norm"),
+                op: text("rms_norm"),
+                label: text(""),
+                attributes: BTreeMap::new(),
+                train_mode: TrainMode::Train,
+                observe: true,
+                block_ref: None,
+                repeat: None,
+            }],
+            edges: Vec::new(),
+        },
+    );
+    blocks
+}
+
+fn filled_graph() -> ModelGraph {
     let mut attributes = BTreeMap::new();
     attributes.insert(text("embedding_size"), json!(128));
-    let mut placement = BTreeMap::new();
-    placement.insert(text("embedding"), 0);
-    ModelSpec {
-        header: header_of_type("rastai.model"),
-        graph: ModelGraph {
-            nodes: vec![GraphNode {
+    ModelGraph {
+        nodes: vec![
+            GraphNode {
                 node_id: text("embedding"),
                 op: text("embedding"),
                 label: text("Embedding"),
                 attributes,
                 train_mode: TrainMode::Freeze,
                 observe: false,
-            }],
-            edges: vec![GraphEdge {
-                from_node: text("embedding"),
-                to_node: text("concat"),
-                to_input: 1,
-            }],
-        },
+                block_ref: None,
+                repeat: None,
+            },
+            GraphNode {
+                node_id: text("layers"),
+                op: text("block"),
+                label: text("Layers"),
+                attributes: BTreeMap::new(),
+                train_mode: TrainMode::Train,
+                observe: true,
+                block_ref: Some(text("decoder_layer")),
+                repeat: Some(2),
+            },
+        ],
+        edges: vec![GraphEdge {
+            from_node: text("embedding"),
+            to_node: text("concat"),
+            to_input: 1,
+        }],
+    }
+}
+
+fn filled_model() -> ModelSpec {
+    let mut placement = BTreeMap::new();
+    placement.insert(text("embedding"), 0);
+    let blocks = filled_blocks();
+    ModelSpec {
+        header: header_of_type("rastai.model"),
+        graph: filled_graph(),
         inputs: vec![InputRange {
             name: text("tokens"),
             range: InputSpan { start: 0, end: 128 },
@@ -804,6 +850,7 @@ fn filled_model() -> ModelSpec {
             sequence_length: 128,
             batch_size: 64,
         },
+        blocks,
         weights: vec![WeightsSource {
             source: text("hf:google/gemma-3-1b-it@main"),
             family: text("gemma3"),
@@ -819,7 +866,9 @@ fn the_model_spec_and_its_parts_match_their_descriptions() {
     let model = filled_model();
     assert_description_matches(&model, "ModelSpec");
     assert_description_matches(&model.graph, "ModelGraph");
-    assert_description_matches(&model.graph.nodes[0], "GraphNode");
+    // The block instance has every field set; the embedding node leaves out the block fields.
+    assert_description_matches(&model.graph.nodes[1], "GraphNode");
+    assert_description_matches(&model.blocks["decoder_layer"], "ModelGraph");
     assert_description_matches(&model.graph.edges[0], "GraphEdge");
     assert_description_matches(&model.inputs[0], "InputRange");
     assert_description_matches(&model.inputs[0].range, "InputSpan");
@@ -834,6 +883,7 @@ fn every_op_attributes_type_matches_its_description() {
     let embedding = EmbeddingAttributes {
         vocab_size: 25000,
         embedding_size: 128,
+        scale: 11.3,
     };
     assert_description_matches(&embedding, "EmbeddingAttributes");
     let conv = Conv1dAttributes {
@@ -870,6 +920,59 @@ fn every_op_attributes_type_matches_its_description() {
         bias: false,
     };
     assert_description_matches(&head, "ClassifierHeadAttributes");
+}
+
+#[test]
+fn every_decoder_op_attributes_type_matches_its_description() {
+    let norm = RmsNormAttributes {
+        size: 2048,
+        scale_offset: true,
+        epsilon: 1e-6,
+    };
+    assert_description_matches(&norm, "RmsNormAttributes");
+    let layer_norm = LayerNormAttributes {
+        size: 64,
+        bias: false,
+        epsilon: 1e-5,
+    };
+    assert_description_matches(&layer_norm, "LayerNormAttributes");
+    let rope = RopeSettings {
+        base: 500000.0,
+        scaling: RopeScaling::Yarn,
+        factor: 4.0,
+        original_max_position: 8192,
+        low_freq_factor: 1.0,
+        high_freq_factor: 4.0,
+        beta_fast: 32.0,
+        beta_slow: 1.0,
+    };
+    assert_description_matches(&rope, "RopeSettings");
+    let attention = AttentionAttributes {
+        variant: AttentionVariant::Sliding,
+        hidden_size: 1152,
+        head_count: 4,
+        kv_head_count: Some(1),
+        head_dim: 256,
+        window: Some(512),
+        qk_norm: true,
+        rope: Some(rope),
+    };
+    assert_description_matches(&attention, "AttentionAttributes");
+    let feed_forward = FeedForwardAttributes {
+        variant: FeedForwardVariant::Gated,
+        hidden_size: 1152,
+        intermediate_size: 6912,
+        activation: ActivationFunction::Gelu,
+    };
+    assert_description_matches(&feed_forward, "FeedForwardAttributes");
+    assert_description_matches(&ResidualAddAttributes {}, "ResidualAddAttributes");
+    let unembed = UnembedAttributes {
+        hidden_size: 1152,
+        vocab_size: 262144,
+        tied: true,
+        final_softcap: Some(30.0),
+    };
+    assert_description_matches(&unembed, "UnembedAttributes");
 }
 
 // Every registered document type is covered above.

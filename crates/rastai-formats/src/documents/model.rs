@@ -2,9 +2,10 @@
 //! map that feeds it, its heads, the objective it trains for, the defaults its shapes are worked out with, the
 //! pretrained weights it starts from and, once planned, which GPU holds each graph node.
 //!
-//! This is the first slice of the type (M1-18): what TextCNN needs. Block definitions and instances, `repeat`, LoRA
-//! settings, opaque nodes and canvas positions join the same schema version with the tasks that build them (M2-01,
-//! M5-E03, M6-E01, M6-E04), each as an optional field, so every file written now still reads then.
+//! M1-18 built the slice TextCNN needs. M2-01 adds block definitions (`blocks`), block instances (`block_ref`) and
+//! `repeat` for the decoder families, as optional fields. LoRA settings, opaque nodes and canvas positions join the
+//! same schema version with the tasks that build them (M5-E03, M6-E01, M6-E04), each as an optional field, so every
+//! file written now still reads then.
 //!
 //! An op's `attributes` are free JSON here and checked by layer 3 against the op's own description
 //! (documents/model_ops.rs), because which attributes a node takes depends on its `op`.
@@ -40,7 +41,7 @@ const WEIGHTS_NAME: &str = "WeightsSource";
 
 // The enum values, as serde writes `TrainMode`, `ObjectiveKind` and `ModelDtype`.
 const TRAIN_MODE_VALUES: &[&str] = &["freeze", "lora", "train"];
-const OBJECTIVE_KIND_VALUES: &[&str] = &["classification"];
+const OBJECTIVE_KIND_VALUES: &[&str] = &["classification", "next_token"];
 const DTYPE_VALUES: &[&str] = &["bf16", "fp16", "fp32"];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +57,10 @@ pub struct ModelSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective: Option<Objective>,
     pub defaults: ModelDefaults,
+    /// Reusable graphs, by block id. A block instance (a graph node with op `block` and a `block_ref`) stamps one
+    /// into this design; its nodes are not shape-checked until the decoder blocks are built (M2-03).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub blocks: BTreeMap<String, ModelGraph>,
     /// Pretrained parts this design starts from; empty for a model trained from scratch. A list, so one design can
     /// compose several (plan section 10 row 11).
     #[serde(default)]
@@ -91,6 +96,13 @@ pub struct GraphNode {
     /// Whether the node's outputs are observation points (contracts 5.3).
     #[serde(default = "observed_by_default")]
     pub observe: bool,
+    /// The block a block instance stamps (a key of `blocks`); only on nodes with op `block`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_ref: Option<String>,
+    /// How many copies of the instance's block the design stamps, one after another; 1 when absent. Only on nodes
+    /// with op `block`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<u64>,
 }
 
 /// How training treats a graph node's weights.
@@ -146,11 +158,13 @@ pub struct Objective {
     pub settings: BTreeMap<String, Value>,
 }
 
-/// The objectives built so far. The decoder families add theirs with their contract (M2-01).
+/// The objectives of contracts 5.2: classification for TextCNN, and next_token, the decoder families' language
+/// modeling objective (M2-01).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectiveKind {
     Classification,
+    NextToken,
 }
 
 /// The sizes the design's shapes are worked out with, and its number format.
@@ -246,6 +260,12 @@ fn model_fields() -> Vec<FieldDescription> {
             "Number format and the sizes shapes are worked out with.",
         ),
         field(
+            "blocks",
+            FieldKind::Map(Box::new(type_kind(GRAPH_NAME))),
+            OPTIONAL,
+            "Reusable graphs by block id, stamped by block instances.",
+        ),
+        field(
             "weights",
             list_of(type_kind(WEIGHTS_NAME)),
             OPTIONAL,
@@ -309,6 +329,18 @@ fn describe_node() -> TypeDescription {
                 FieldKind::Boolean,
                 OPTIONAL,
                 "Whether its outputs are observation points; true by default.",
+            ),
+            field(
+                "block_ref",
+                FieldKind::String,
+                OPTIONAL,
+                "The block a block instance (op block) stamps; a key of blocks.",
+            ),
+            field(
+                "repeat",
+                FieldKind::Integer,
+                OPTIONAL,
+                "How many copies of the block to stamp, one after another; 1 when left out.",
             ),
         ],
     )
@@ -484,7 +516,10 @@ mod tests {
     fn enum_values_are_what_serde_writes() {
         let train_modes = [TrainMode::Freeze, TrainMode::Lora, TrainMode::Train];
         assert_eq!(written(&train_modes), TRAIN_MODE_VALUES);
-        assert_eq!(written(&[ObjectiveKind::Classification]), OBJECTIVE_KIND_VALUES);
+        assert_eq!(
+            written(&[ObjectiveKind::Classification, ObjectiveKind::NextToken]),
+            OBJECTIVE_KIND_VALUES
+        );
         assert_eq!(
             written(&[ModelDtype::Bf16, ModelDtype::Fp16, ModelDtype::Fp32]),
             DTYPE_VALUES

@@ -33,6 +33,10 @@
           "description": "The op's attributes.",
           "type": "object"
         },
+        "block_ref": {
+          "description": "The block a block instance (op block) stamps; a key of blocks.",
+          "type": "string"
+        },
         "label": {
           "description": "Name shown on the canvas; empty means the node id.",
           "type": "string"
@@ -48,6 +52,10 @@
         "op": {
           "description": "An op, such as conv1d (contracts 5.3).",
           "type": "string"
+        },
+        "repeat": {
+          "description": "How many copies of the block to stamp, one after another; 1 when left out.",
+          "type": "integer"
         },
         "train_mode": {
           "description": "freeze, lora or train (the default).",
@@ -173,7 +181,8 @@
         "kind": {
           "description": "The objective, such as classification.",
           "enum": [
-            "classification"
+            "classification",
+            "next_token"
           ],
           "type": "string"
         },
@@ -255,6 +264,13 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "blocks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ModelGraph"
+      },
+      "description": "Reusable graphs by block id, stamped by block instances.",
+      "type": "object"
     },
     "content_hash": {
       "description": "blake3:<64 hex> of the canonical content.",

@@ -20,6 +20,7 @@
  * @property {OutputHead[]} outputs The heads: graph nodes whose outputs are the model's.
  * @property {Objective} [objective] What the model is trained to do.
  * @property {ModelDefaults} defaults Number format and the sizes shapes are worked out with.
+ * @property {Object<string, ModelGraph>} [blocks] Reusable graphs by block id, stamped by block instances.
  * @property {WeightsSource[]} [weights] Pretrained parts it starts from; empty to train from scratch.
  * @property {Object<string, number>} [placement] Graph node id to GPU index, written by the layer placement planner.
  */
@@ -40,6 +41,8 @@
  * @property {Object<string, any>} [attributes] The op's attributes.
  * @property {"freeze" | "lora" | "train"} [train_mode] freeze, lora or train (the default).
  * @property {boolean} [observe] Whether its outputs are observation points; true by default.
+ * @property {string} [block_ref] The block a block instance (op block) stamps; a key of blocks.
+ * @property {number} [repeat] How many copies of the block to stamp, one after another; 1 when left out.
  */
 
 /**
@@ -75,7 +78,7 @@
 /**
  * What the model is trained to do.
  * @typedef {object} Objective
- * @property {"classification"} kind The objective, such as classification.
+ * @property {"classification" | "next_token"} kind The objective, such as classification.
  * @property {Object<string, any>} [settings] Its settings, checked by the recipe.
  */
 
@@ -101,6 +104,59 @@
  * @typedef {object} EmbeddingAttributes
  * @property {number} vocab_size Token ids it knows, from 0.
  * @property {number} embedding_size Length of each vector.
+ * @property {number} [scale] Multiplier of each vector; 1 by default. Gemma 3 uses the square root of embedding_size.
+ */
+
+/**
+ * rms_norm over the last axis: [..., size] to [..., size].
+ * @typedef {object} RmsNormAttributes
+ * @property {number} size Size of its last axis.
+ * @property {boolean} [scale_offset] Whether the learned scale is added to one (Gemma 3); false by default.
+ * @property {number} [epsilon] Added under the square root; 1e-6 by default.
+ */
+
+/**
+ * layer_norm over the last axis: [..., size] to [..., size].
+ * @typedef {object} LayerNormAttributes
+ * @property {number} size Size of its last axis.
+ * @property {boolean} [bias] Whether it learns a shift as well as a scale; true by default.
+ * @property {number} [epsilon] Added under the square root; 1e-5 by default.
+ */
+
+/**
+ * attention over one sequence: [batch, length, hidden_size] to the same shape, with its own projections.
+ * @typedef {object} AttentionAttributes
+ * @property {"mha" | "gqa" | "sliding"} variant mha (one key and value head per query head), gqa (grouped key and value heads) or sliding (a window of tokens only).
+ * @property {number} hidden_size Size of its input's last axis and of its output.
+ * @property {number} head_count Query heads.
+ * @property {number} [kv_head_count] Key and value heads; head_count when left out. Fewer than head_count for gqa; it must divide head_count.
+ * @property {number} head_dim Size of each head.
+ * @property {number} [window] Tokens a sliding layer looks back over; required for sliding and left out otherwise.
+ * @property {boolean} [qk_norm] Whether queries and keys are RMS-normalized per head before rotation; false by default.
+ * @property {RopeSettings} [rope] Rotary position embedding of queries and keys; none when left out.
+ */
+
+/**
+ * feed_forward: [..., hidden_size] to the same shape, through intermediate_size.
+ * @typedef {object} FeedForwardAttributes
+ * @property {"dense" | "gated"} variant dense (up, activation, down) or gated (activated gate times up, then down).
+ * @property {number} hidden_size Size of its input and output.
+ * @property {number} intermediate_size Size of the hidden layer between its projections.
+ * @property {"relu" | "gelu" | "silu" | "tanh" | "sigmoid"} activation The function on the up projection (dense) or the gate (gated).
+ */
+
+/**
+ * residual_add: the sum of its two inputs, which have the same shape.
+ * @typedef {object} ResidualAddAttributes
+ */
+
+/**
+ * unembed: [..., hidden_size] to [..., vocab_size], the logits.
+ * @typedef {object} UnembedAttributes
+ * @property {number} hidden_size Size of its input's last axis.
+ * @property {number} vocab_size Size of its output's last axis.
+ * @property {boolean} [tied] Whether its weight is the embedding's, so it holds no parameters of its own; false by default.
+ * @property {number} [final_softcap] Caps the logits to within plus or minus this value, by cap * tanh(logit / cap).
  */
 
 /**
@@ -155,6 +211,19 @@
  * @property {number} in_features Size of its input's last axis.
  * @property {number} class_count Classes it scores, 2 or more.
  * @property {boolean} [bias] Whether it adds a bias; true by default.
+ */
+
+/**
+ * Rotary position embedding of an attention op's queries and keys.
+ * @typedef {object} RopeSettings
+ * @property {number} [base] Base frequency; 10000 by default.
+ * @property {"none" | "linear" | "llama3" | "yarn"} [scaling] none (the default), linear, llama3 or yarn.
+ * @property {number} [factor] How far the context is extended; 1 by default.
+ * @property {number} [original_max_position] Context length the model was trained on; required for llama3 and yarn.
+ * @property {number} [low_freq_factor] llama3: the low frequency band's factor; 1 by default.
+ * @property {number} [high_freq_factor] llama3: the high frequency band's factor; 4 by default.
+ * @property {number} [beta_fast] yarn: the fast rotation bound; 32 by default.
+ * @property {number} [beta_slow] yarn: the slow rotation bound; 1 by default.
  */
 
 export {};

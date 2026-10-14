@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "wrong_head_count.rrsmodel:38:11#/graph/nodes/2/attributes/kv_head_count"
+    }
+  ]
+}

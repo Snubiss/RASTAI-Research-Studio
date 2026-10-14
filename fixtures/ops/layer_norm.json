@@ -1,0 +1,27 @@
+{
+  "op": "layer_norm",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "with_bias",
+      "attributes": {
+        "size": 16
+      },
+      "input_shapes": [[4, 16]],
+      "output_shapes": [[4, 16]],
+      "parameter_count": 32,
+      "flops": 0
+    },
+    {
+      "name": "without_bias",
+      "attributes": {
+        "size": 12,
+        "bias": false
+      },
+      "input_shapes": [[2, 3, 12]],
+      "output_shapes": [[2, 3, 12]],
+      "parameter_count": 12,
+      "flops": 0
+    }
+  ]
+}

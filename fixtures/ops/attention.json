@@ -1,0 +1,69 @@
+{
+  "op": "attention",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "notes": "Projections: query head_count * head_dim, key and value kv_head_count * head_dim, output back to hidden_size; no biases. Scores and the weighted sum are counted over every query and key position, so a sliding layer counts the same FLOPs as a full one: its window masks positions, it doesn't skip them. qk_norm adds two RMS norms of head_dim (2 * head_dim parameters, 0 FLOPs). rope rotates by elementwise products and counts 0 FLOPs.",
+  "cases": [
+    {
+      "name": "mha",
+      "attributes": {
+        "variant": "mha",
+        "hidden_size": 64,
+        "head_count": 4,
+        "head_dim": 16
+      },
+      "input_shapes": [[1, 6, 64]],
+      "output_shapes": [[1, 6, 64]],
+      "parameter_count": 16384,
+      "flops": 205824
+    },
+    {
+      "name": "mha_qk_norm_rope",
+      "attributes": {
+        "variant": "mha",
+        "hidden_size": 64,
+        "head_count": 4,
+        "head_dim": 16,
+        "qk_norm": true,
+        "rope": {
+          "base": 500000,
+          "scaling": "llama3",
+          "factor": 8,
+          "original_max_position": 8192
+        }
+      },
+      "input_shapes": [[1, 6, 64]],
+      "output_shapes": [[1, 6, 64]],
+      "parameter_count": 16416,
+      "flops": 205824
+    },
+    {
+      "name": "gqa",
+      "attributes": {
+        "variant": "gqa",
+        "hidden_size": 64,
+        "head_count": 4,
+        "kv_head_count": 2,
+        "head_dim": 16
+      },
+      "input_shapes": [[2, 3, 64]],
+      "output_shapes": [[2, 3, 64]],
+      "parameter_count": 12288,
+      "flops": 152064
+    },
+    {
+      "name": "sliding",
+      "attributes": {
+        "variant": "sliding",
+        "hidden_size": 16,
+        "head_count": 2,
+        "kv_head_count": 1,
+        "head_dim": 8,
+        "window": 4
+      },
+      "input_shapes": [[1, 6, 16]],
+      "output_shapes": [[1, 6, 16]],
+      "parameter_count": 768,
+      "flops": 11520
+    }
+  ]
+}

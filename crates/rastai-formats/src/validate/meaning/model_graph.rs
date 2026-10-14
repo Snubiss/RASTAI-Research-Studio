@@ -28,10 +28,11 @@ use crate::describe::structure_check::{MismatchKind, StructureCheck, StructureMi
 use crate::describe::types::TypeDescription;
 use crate::documents::model::ModelSpec;
 use crate::documents::model_ops::{
-    MANY_INPUTS_OP, MODEL_OPS, OpAttributes, RECURRENT_OP, describe_model_op_types, op_attribute_problems,
-    op_attributes_from_value, op_attributes_name,
+    MANY_INPUTS_OP, MODEL_OPS, OpAttributes, RECURRENT_OP, describe_model_op_types, fixed_input_count,
+    op_attribute_problems, op_attributes_from_value, op_attributes_name,
 };
 use crate::json::pointer::join_pointer;
+use crate::validate::meaning::model_blocks::check_blocks;
 use crate::validate::meaning::model_shapes::{InputSource, ShapeWalk, check_model_shapes};
 use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
 
@@ -71,6 +72,7 @@ const FINISHED: u8 = 2;
 pub fn check_model(model: &ModelSpec, source: &MeaningSource) -> Vec<Diagnostic> {
     let node_index = index_nodes(model);
     let mut diagnostics = check_node_ids(model, source);
+    diagnostics.extend(check_blocks(model, source));
     let attributes = check_nodes(model, source, &mut diagnostics);
     let edge_ends = check_edges(model, &node_index, source, &mut diagnostics);
     diagnostics.extend(check_inputs(model, &node_index, source));
@@ -396,7 +398,11 @@ fn input_connections(
         let to_input = edge.to_input as usize;
         // A concat's inputs are numbered from 0 with no gap, so a number past its feed count can't be right; it
         // also keeps a hostile number from sizing the list below.
-        let input_count = if op == MANY_INPUTS_OP { feed_counts[target] } else { 1 };
+        let input_count = if op == MANY_INPUTS_OP {
+            feed_counts[target]
+        } else {
+            fixed_input_count(op)
+        };
         if to_input >= input_count {
             let found = edge.to_input.to_string();
             let expected = inputs_text(op, input_count);
@@ -423,10 +429,14 @@ fn feed_counts(model: &ModelSpec, node_index: &BTreeMap<&str, usize>) -> Vec<usi
     counts
 }
 
-/// What a `to_input` should be: "0: conv1d takes one input", "0 to 2: this concat has 3 inputs connected".
+/// What a `to_input` should be: "0: conv1d takes one input", "0 to 1: residual_add takes 2 inputs", "0 to 2: this
+/// concat has 3 inputs connected".
 fn inputs_text(op: &str, input_count: usize) -> String {
     if op != MANY_INPUTS_OP {
-        return format!("0: {op} takes one input");
+        if input_count == 1 {
+            return format!("0: {op} takes one input");
+        }
+        return format!("0 to {}: {op} takes {input_count} inputs", input_count - 1);
     }
     let last = input_count.saturating_sub(1);
     format!("0 to {last}: this {op} has {input_count} inputs connected")
@@ -452,9 +462,11 @@ fn check_node_connections(
     if op_attributes_name(&node.op).is_none() {
         return Vec::new();
     }
-    // Every op with shapes has an input 0, even when nothing is connected to it.
-    if node_connections.is_empty() {
-        node_connections.push(Vec::new());
+    // Every input of an op with a fixed number of inputs is listed, even when nothing is connected to it; a concat
+    // keeps at least its input 0.
+    let fixed_count = fixed_input_count(&node.op);
+    if node_connections.len() < fixed_count.max(1) {
+        node_connections.resize(fixed_count.max(1), Vec::new());
     }
     let mut ordered = Vec::new();
     for (input, sources) in node_connections.iter().enumerate() {

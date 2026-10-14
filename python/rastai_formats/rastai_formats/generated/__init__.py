@@ -36,7 +36,7 @@ from rastai_formats.generated.command_token_login_code_create import TokenLoginC
 from rastai_formats.generated.command_token_revoke import TokenRevokeArgs, token_revoke_args_from_json, token_revoke_args_to_json, TokenRevokeResult, token_revoke_result_from_json, token_revoke_result_to_json
 from rastai_formats.generated.command_train_start import TrainStartArgs, train_start_args_from_json, train_start_args_to_json, TrainStartResult, train_start_result_from_json, train_start_result_to_json, TrainingPlan, training_plan_from_json, training_plan_to_json, TrainJobArgs, train_job_args_from_json, train_job_args_to_json
 from rastai_formats.generated.lock import LockFile, lock_file_from_json, lock_file_to_json, LockEnvironment, lock_environment_from_json, lock_environment_to_json, LockedPlugin, locked_plugin_from_json, locked_plugin_to_json, LockedModel, locked_model_from_json, locked_model_to_json
-from rastai_formats.generated.model import ModelSpec, model_spec_from_json, model_spec_to_json, ModelGraph, model_graph_from_json, model_graph_to_json, GraphNode, graph_node_from_json, graph_node_to_json, GraphEdge, graph_edge_from_json, graph_edge_to_json, InputRange, input_range_from_json, input_range_to_json, InputSpan, input_span_from_json, input_span_to_json, OutputHead, output_head_from_json, output_head_to_json, Objective, objective_from_json, objective_to_json, ModelDefaults, model_defaults_from_json, model_defaults_to_json, WeightsSource, weights_source_from_json, weights_source_to_json, EmbeddingAttributes, embedding_attributes_from_json, embedding_attributes_to_json, Conv1dAttributes, conv1d_attributes_from_json, conv1d_attributes_to_json, PoolAttributes, pool_attributes_from_json, pool_attributes_to_json, LinearAttributes, linear_attributes_from_json, linear_attributes_to_json, DropoutAttributes, dropout_attributes_from_json, dropout_attributes_to_json, ActivationAttributes, activation_attributes_from_json, activation_attributes_to_json, ConcatAttributes, concat_attributes_from_json, concat_attributes_to_json, ClassifierHeadAttributes, classifier_head_attributes_from_json, classifier_head_attributes_to_json
+from rastai_formats.generated.model import ModelSpec, model_spec_from_json, model_spec_to_json, ModelGraph, model_graph_from_json, model_graph_to_json, GraphNode, graph_node_from_json, graph_node_to_json, GraphEdge, graph_edge_from_json, graph_edge_to_json, InputRange, input_range_from_json, input_range_to_json, InputSpan, input_span_from_json, input_span_to_json, OutputHead, output_head_from_json, output_head_to_json, Objective, objective_from_json, objective_to_json, ModelDefaults, model_defaults_from_json, model_defaults_to_json, WeightsSource, weights_source_from_json, weights_source_to_json, EmbeddingAttributes, embedding_attributes_from_json, embedding_attributes_to_json, RmsNormAttributes, rms_norm_attributes_from_json, rms_norm_attributes_to_json, LayerNormAttributes, layer_norm_attributes_from_json, layer_norm_attributes_to_json, AttentionAttributes, attention_attributes_from_json, attention_attributes_to_json, FeedForwardAttributes, feed_forward_attributes_from_json, feed_forward_attributes_to_json, ResidualAddAttributes, residual_add_attributes_from_json, residual_add_attributes_to_json, UnembedAttributes, unembed_attributes_from_json, unembed_attributes_to_json, Conv1dAttributes, conv1d_attributes_from_json, conv1d_attributes_to_json, PoolAttributes, pool_attributes_from_json, pool_attributes_to_json, LinearAttributes, linear_attributes_from_json, linear_attributes_to_json, DropoutAttributes, dropout_attributes_from_json, dropout_attributes_to_json, ActivationAttributes, activation_attributes_from_json, activation_attributes_to_json, ConcatAttributes, concat_attributes_from_json, concat_attributes_to_json, ClassifierHeadAttributes, classifier_head_attributes_from_json, classifier_head_attributes_to_json, RopeSettings, rope_settings_from_json, rope_settings_to_json
 from rastai_formats.generated.plugin import PluginManifest, plugin_manifest_from_json, plugin_manifest_to_json, PluginEngines, plugin_engines_from_json, plugin_engines_to_json, PluginContributions, plugin_contributions_from_json, plugin_contributions_to_json, CommandContribution, command_contribution_from_json, command_contribution_to_json, SectionContribution, section_contribution_from_json, section_contribution_to_json, PanelContribution, panel_contribution_from_json, panel_contribution_to_json, SettingsPageContribution, settings_page_contribution_from_json, settings_page_contribution_to_json, ThemeContribution, theme_contribution_from_json, theme_contribution_to_json, EventHandlerContribution, event_handler_contribution_from_json, event_handler_contribution_to_json, PluginUi, plugin_ui_from_json, plugin_ui_to_json, PluginPython, plugin_python_from_json, plugin_python_to_json, PluginProvider, plugin_provider_from_json, plugin_provider_to_json
 from rastai_formats.generated.project import Project, project_from_json, project_to_json
 from rastai_formats.generated.resume import ResumeState, resume_state_from_json, resume_state_to_json, ResumeDataloader, resume_dataloader_from_json, resume_dataloader_to_json
@@ -301,6 +301,24 @@ __all__ = [
     "EmbeddingAttributes",
     "embedding_attributes_from_json",
     "embedding_attributes_to_json",
+    "RmsNormAttributes",
+    "rms_norm_attributes_from_json",
+    "rms_norm_attributes_to_json",
+    "LayerNormAttributes",
+    "layer_norm_attributes_from_json",
+    "layer_norm_attributes_to_json",
+    "AttentionAttributes",
+    "attention_attributes_from_json",
+    "attention_attributes_to_json",
+    "FeedForwardAttributes",
+    "feed_forward_attributes_from_json",
+    "feed_forward_attributes_to_json",
+    "ResidualAddAttributes",
+    "residual_add_attributes_from_json",
+    "residual_add_attributes_to_json",
+    "UnembedAttributes",
+    "unembed_attributes_from_json",
+    "unembed_attributes_to_json",
     "Conv1dAttributes",
     "conv1d_attributes_from_json",
     "conv1d_attributes_to_json",
@@ -322,6 +340,9 @@ __all__ = [
     "ClassifierHeadAttributes",
     "classifier_head_attributes_from_json",
     "classifier_head_attributes_to_json",
+    "RopeSettings",
+    "rope_settings_from_json",
+    "rope_settings_to_json",
     "PluginManifest",
     "plugin_manifest_from_json",
     "plugin_manifest_to_json",

@@ -1,0 +1,30 @@
+{
+  "op": "unembed",
+  "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
+  "cases": [
+    {
+      "name": "untied",
+      "attributes": {
+        "hidden_size": 16,
+        "vocab_size": 100
+      },
+      "input_shapes": [[1, 4, 16]],
+      "output_shapes": [[1, 4, 100]],
+      "parameter_count": 1600,
+      "flops": 12800
+    },
+    {
+      "name": "tied_softcap",
+      "attributes": {
+        "hidden_size": 16,
+        "vocab_size": 100,
+        "tied": true,
+        "final_softcap": 30.0
+      },
+      "input_shapes": [[1, 4, 16]],
+      "output_shapes": [[1, 4, 100]],
+      "parameter_count": 0,
+      "flops": 12800
+    }
+  ]
+}

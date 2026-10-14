@@ -1,0 +1,173 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.model/1.json",
+  "type": "rastai.model",
+  "schema_version": 1,
+  "created_with": "rastai 0.1.0",
+  "content_hash": "",
+  "derived_from": [],
+  "authors": [],
+  "license": "",
+  "source_url": "",
+  "requires": {},
+  "id": "doc_01M2LLAMATINY00000000001",
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "embed",
+        "op": "embedding",
+        "attributes": {
+          "vocab_size": 32,
+          "embedding_size": 16
+        }
+      },
+      {
+        "node_id": "norm_1",
+        "op": "rms_norm",
+        "attributes": {
+          "size": 16,
+          "epsilon": 1e-05
+        }
+      },
+      {
+        "node_id": "attn",
+        "op": "attention",
+        "attributes": {
+          "variant": "gqa",
+          "hidden_size": 16,
+          "head_count": 4,
+          "kv_head_count": 2,
+          "head_dim": 4,
+          "rope": {
+            "base": 500000,
+            "scaling": "llama3",
+            "factor": 8,
+            "original_max_position": 8192,
+            "low_freq_factor": 1,
+            "high_freq_factor": 4
+          }
+        }
+      },
+      {
+        "node_id": "add_1",
+        "op": "residual_add",
+        "attributes": {}
+      },
+      {
+        "node_id": "norm_2",
+        "op": "rms_norm",
+        "attributes": {
+          "size": 16,
+          "epsilon": 1e-05
+        }
+      },
+      {
+        "node_id": "ffn",
+        "op": "feed_forward",
+        "attributes": {
+          "variant": "gated",
+          "hidden_size": 16,
+          "intermediate_size": 32,
+          "activation": "silu"
+        }
+      },
+      {
+        "node_id": "add_2",
+        "op": "residual_add",
+        "attributes": {}
+      },
+      {
+        "node_id": "final_norm",
+        "op": "rms_norm",
+        "attributes": {
+          "size": 16,
+          "epsilon": 1e-05
+        }
+      },
+      {
+        "node_id": "head",
+        "op": "unembed",
+        "attributes": {
+          "hidden_size": 16,
+          "vocab_size": 32
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "embed",
+        "to_node": "norm_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "norm_1",
+        "to_node": "attn",
+        "to_input": 0
+      },
+      {
+        "from_node": "embed",
+        "to_node": "add_1",
+        "to_input": 0
+      },
+      {
+        "from_node": "attn",
+        "to_node": "add_1",
+        "to_input": 1
+      },
+      {
+        "from_node": "add_1",
+        "to_node": "norm_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "norm_2",
+        "to_node": "ffn",
+        "to_input": 0
+      },
+      {
+        "from_node": "add_1",
+        "to_node": "add_2",
+        "to_input": 0
+      },
+      {
+        "from_node": "ffn",
+        "to_node": "add_2",
+        "to_input": 1
+      },
+      {
+        "from_node": "add_2",
+        "to_node": "final_norm",
+        "to_input": 0
+      },
+      {
+        "from_node": "final_norm",
+        "to_node": "head",
+        "to_input": 0
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "tokens",
+      "range": {
+        "start": 0,
+        "end": 8
+      },
+      "encoder_node": "embed"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "logits",
+      "graph_node": "head"
+    }
+  ],
+  "objective": {
+    "kind": "next_token",
+    "settings": {}
+  },
+  "defaults": {
+    "dtype": "bf16",
+    "sequence_length": 8,
+    "batch_size": 2
+  }
+}
