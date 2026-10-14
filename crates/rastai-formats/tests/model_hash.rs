@@ -4,9 +4,12 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::cell::Cell;
+
 use rastai_formats::byte_source::{ByteSource, SliceSource};
+use rastai_formats::error::FormatsError;
 use rastai_formats::hashing::{hash_bytes, model_hash};
-use rastai_formats::safetensors::dtypes::SafetensorsDtype;
+use rastai_formats::safetensors::dtypes::{SafetensorsDtype, dtype_element_bytes};
 use rastai_formats::safetensors::writer::{TensorPlan, plan_safetensors};
 
 /// One tensor as a test writes it: its name, dtype, shape and the bytes its data section holds.
@@ -27,10 +30,11 @@ fn model_tensors() -> Vec<Tensor> {
     ]
 }
 
-/// `size` bytes starting at `first`, so each tensor's data differs from the others.
+/// A tensor whose data is its element count times its dtype's size, counting up from `first`, so each tensor's data
+/// differs from the others.
 fn tensor(name: &'static str, dtype: SafetensorsDtype, shape: &'static [u64], first: u8) -> Tensor {
     let element_count: u64 = shape.iter().product();
-    let size = element_count as usize * rastai_formats::safetensors::dtypes::dtype_element_bytes(dtype) as usize;
+    let size = element_count as usize * dtype_element_bytes(dtype) as usize;
     Tensor {
         name,
         dtype,
@@ -158,4 +162,52 @@ fn two_files_holding_one_tensor_name_are_refused_as_unplannable() {
     let first = file_bytes(&tensors[..1], &[]);
     let again = file_bytes(&tensors[..1], &[("copy", "2")]);
     assert_eq!(hash_of_files(&[first, again]).unwrap_err(), "RRS-E1007");
+}
+
+/// A source that remembers the largest read it was asked for, so a test can see whether a tensor was read whole.
+struct LargestReadSource<'a> {
+    bytes: &'a [u8],
+    largest_read: Cell<usize>,
+}
+
+impl ByteSource for LargestReadSource<'_> {
+    fn length(&self) -> u64 {
+        self.bytes.len() as u64
+    }
+
+    fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<(), FormatsError> {
+        self.largest_read.set(self.largest_read.get().max(buffer.len()));
+        SliceSource { bytes: self.bytes }.read_at(offset, buffer)
+    }
+}
+
+#[test]
+fn a_big_tensor_is_hashed_in_bounded_reads() {
+    // Three mebibytes of data: a read of the whole tensor at once would be three times the chunk size.
+    const BIG_LENGTH: usize = 3 * 1024 * 1024;
+    const LARGEST_CHUNK: usize = 1024 * 1024;
+    let data: Vec<u8> = (0..BIG_LENGTH).map(|index| (index % 251) as u8).collect();
+    let expected_data_hash = hash_bytes(&data);
+    let bytes = file_bytes(
+        &[Tensor {
+            name: "embed",
+            dtype: SafetensorsDtype::U8,
+            shape: &[BIG_LENGTH as u64],
+            data,
+        }],
+        &[],
+    );
+    let source = LargestReadSource {
+        bytes: &bytes,
+        largest_read: Cell::new(0),
+    };
+    let files: [&dyn ByteSource; 1] = [&source];
+    let hash = model_hash(&files).unwrap();
+    assert!(
+        source.largest_read.get() <= LARGEST_CHUNK,
+        "read {} bytes at once",
+        source.largest_read.get()
+    );
+    let listing = format!("\"embed\" U8 [{BIG_LENGTH}] {expected_data_hash}\n");
+    assert_eq!(hash, hash_bytes(listing.as_bytes()));
 }

@@ -62,7 +62,8 @@ pub enum FormatsError {
     /// serde refused to write a value (a map with non-string keys). A bug in the caller, not in a user's file.
     NotSerializable { reason: String },
     /// The safetensors planner was asked for a layout it can't write (a repeated name, a size past 64 bits, a header past
-    /// the cap). Nothing is written; the caller's arguments are wrong.
+    /// the cap). Nothing is written; the caller's arguments are wrong. `model_hash` refuses two files holding one tensor
+    /// name with this code too (the model has no single identity), so the code's text is about layouts, not one call.
     UnplannableLayout { reason: String },
     /// A `ByteSource` couldn't give the bytes asked for: past the end, an I/O error, or a length it couldn't read.
     ReadFailed { offset: u64, length: u64, reason: String },

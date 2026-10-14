@@ -15,11 +15,15 @@ use crate::byte_source::ByteSource;
 use crate::error::CODE_UNPLANNABLE_LAYOUT;
 use crate::json::canonical::canonical_json;
 use crate::safetensors::dtypes::{SafetensorsDtype, dtype_name};
-use crate::safetensors::reader::{read_safetensors_header, read_tensor_bytes};
+use crate::safetensors::header_check::{SafetensorsHeader, TensorEntry};
+use crate::safetensors::reader::{read_safetensors_header, read_tensor_range, tensor_span};
 
 const HASH_PREFIX: &str = "blake3:";
 /// The shared-header field that holds the hash, so it is left out of what it hashes (contracts 5.1).
 const CONTENT_HASH_KEY: &str = "content_hash";
+/// The most tensor bytes read at once while hashing a model. A tensor (an embedding can be 1-2 GB) is hashed in pieces
+/// this size, so memory stays bounded by it, not by the largest tensor (contracts 8.6 is the same hash either way).
+const HASH_CHUNK_BYTES: usize = 1024 * 1024;
 
 /// A hash computed over bytes that arrive in pieces (a blob being written, a file read in chunks).
 pub struct StreamHasher {
@@ -78,21 +82,38 @@ struct TensorDigest {
     data_hash: String,
 }
 
-/// Reads a file's header through the reader's checks, then each tensor's bytes one at a time.
+/// Reads a file's header through the reader's checks, then hashes each tensor's data in chunks.
 fn file_tensor_digests(source: &dyn ByteSource) -> Result<Vec<TensorDigest>, Diagnostic> {
     let header = read_safetensors_header(source)?;
-    let mut buffer = Vec::new();
     let mut digests = Vec::with_capacity(header.entries.len());
     for entry in &header.entries {
-        read_tensor_bytes(source, &header, entry, &mut buffer)?;
         digests.push(TensorDigest {
             name: entry.name.clone(),
             dtype: entry.dtype,
             shape: entry.shape.clone(),
-            data_hash: hash_bytes(&buffer),
+            data_hash: tensor_data_hash(source, &header, entry)?,
         });
     }
     Ok(digests)
+}
+
+/// BLAKE3 of one tensor's data bytes, read `HASH_CHUNK_BYTES` at a time. Equal to `hash_bytes` of the whole data.
+fn tensor_data_hash(
+    source: &dyn ByteSource,
+    header: &SafetensorsHeader,
+    entry: &TensorEntry,
+) -> Result<String, Diagnostic> {
+    let span = tensor_span(source, header, entry)?;
+    let mut hasher = new_stream_hasher();
+    let mut chunk = vec![0u8; HASH_CHUNK_BYTES];
+    let mut done: u64 = 0;
+    while done < span.length {
+        let size = (span.length - done).min(HASH_CHUNK_BYTES as u64) as usize;
+        read_tensor_range(source, span.offset + done, &mut chunk[..size])?;
+        update_stream_hasher(&mut hasher, &chunk[..size]);
+        done += size as u64;
+    }
+    Ok(finish_stream_hasher(hasher))
 }
 
 /// Two tensors with one name would give the listing two lines for one tensor, so the model would have no single
