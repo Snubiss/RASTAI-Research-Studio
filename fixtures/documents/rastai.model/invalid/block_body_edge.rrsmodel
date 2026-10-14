@@ -1,0 +1,123 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.model/1.json",
+  "type": "rastai.model",
+  "schema_version": 1,
+  "created_with": "rastai 0.1.0",
+  "content_hash": "",
+  "derived_from": [],
+  "authors": [],
+  "license": "",
+  "source_url": "",
+  "requires": {},
+  "id": "doc_01M2BLOCKBODYEDGE000001",
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "embed",
+        "op": "embedding",
+        "attributes": {
+          "vocab_size": 32,
+          "embedding_size": 16
+        }
+      },
+      {
+        "node_id": "layers",
+        "op": "block",
+        "attributes": {},
+        "block_ref": "decoder_layer",
+        "repeat": 2
+      },
+      {
+        "node_id": "final_norm",
+        "op": "rms_norm",
+        "attributes": {
+          "size": 16,
+          "epsilon": 1e-05
+        }
+      },
+      {
+        "node_id": "head",
+        "op": "unembed",
+        "attributes": {
+          "hidden_size": 16,
+          "vocab_size": 32
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "embed",
+        "to_node": "layers",
+        "to_input": 0
+      },
+      {
+        "from_node": "layers",
+        "to_node": "final_norm",
+        "to_input": 0
+      },
+      {
+        "from_node": "final_norm",
+        "to_node": "head",
+        "to_input": 0
+      }
+    ]
+  },
+  "blocks": {
+    "decoder_layer": {
+      "nodes": [
+        {
+          "node_id": "norm",
+          "op": "rms_norm",
+          "attributes": {
+            "size": 16,
+            "epsilon": 1e-05
+          }
+        },
+        {
+          "node_id": "attn",
+          "op": "rms_norm",
+          "attributes": {
+            "size": 16
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from_node": "norm",
+          "to_node": "attn",
+          "to_input": 0
+        },
+        {
+          "from_node": "attn",
+          "to_node": "ffn",
+          "to_input": 0
+        }
+      ]
+    }
+  },
+  "inputs": [
+    {
+      "name": "tokens",
+      "range": {
+        "start": 0,
+        "end": 8
+      },
+      "encoder_node": "embed"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "logits",
+      "graph_node": "head"
+    }
+  ],
+  "objective": {
+    "kind": "next_token",
+    "settings": {}
+  },
+  "defaults": {
+    "dtype": "bf16",
+    "sequence_length": 8,
+    "batch_size": 2
+  }
+}

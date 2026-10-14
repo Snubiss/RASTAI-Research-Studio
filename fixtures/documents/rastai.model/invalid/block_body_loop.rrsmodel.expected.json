@@ -1,0 +1,12 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2003",
+      "path": "block_body_loop.rrsmodel:66:5#/blocks/decoder_layer"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_loop.rrsmodel:66:5#/blocks/decoder_layer"
+    }
+  ]
+}

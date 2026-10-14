@@ -335,9 +335,10 @@ def test_an_input_map_range_takes_its_positions(repo_root: Path) -> None:
 
 def test_an_op_without_an_implementation_is_rrs_m0001(repo_root: Path) -> None:
     document = template_json(repo_root)
-    node_named(document, "dropout")["op"] = "rms_norm"
+    # rope is in the vocabulary with no shapes or attributes yet (its settings live on attention), so no module runs it.
+    node_named(document, "dropout")["op"] = "rope"
     node_named(document, "dropout")["attributes"] = {}
     with pytest.raises(ModelError) as refusal:
         compile_document(document)
     assert refusal.value.code == RRS_M0001
-    assert refusal.value.message.startswith("The graph node dropout (rms_norm) has no implementation")
+    assert refusal.value.message.startswith("The graph node dropout (rope) has no implementation")
