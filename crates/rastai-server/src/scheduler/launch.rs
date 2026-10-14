@@ -119,7 +119,7 @@ pub async fn launch_job(server: &Arc<Server>, job: &JobRow) {
             return;
         }
     };
-    let info = match start_job_for_launch(server, &job.node_id, spec).await {
+    let info = match start_job_on_node(server, &job.node_id, spec).await {
         Ok(info) => info,
         Err(problem) => {
             log_warn(
@@ -138,30 +138,6 @@ pub async fn launch_job(server: &Arc<Server>, job: &JobRow) {
         record_start(server, job, info).await
     };
     settle_runs_later(server, ended_runs);
-}
-
-/// `StartJob` for a launch. The launch holds `Scheduler.launch_lock` across it, never `job_state_lock`: a heartbeat
-/// from the node is applied while the call is in flight (contracts 9.1, tests/node_link.rs). The test seam
-/// `Server.start_job_pause` sits in front of the call, so a launch that held another lock there would show it.
-async fn start_job_for_launch(server: &Server, node_id: &str, spec: JobSpec) -> Result<JobInfo, Diagnostic> {
-    pause_launch_if_a_test_asked(server).await;
-    start_job_on_node(server, node_id, spec).await
-}
-
-/// The test seam `Server.start_job_pause`: a test stops the next launch here until it lets it go. Nothing happens
-/// unless a test set it.
-async fn pause_launch_if_a_test_asked(server: &Server) {
-    let pause = match server.start_job_pause.lock() {
-        Ok(mut pause) => pause.take(),
-        Err(poisoned) => poisoned.into_inner().take(),
-    };
-    let Some(pause) = pause else {
-        return;
-    };
-    if pause.reached.send(()).is_ok() {
-        // Resumed or dropped by the test, the launch goes on either way.
-        let _ = pause.resume.await;
-    }
 }
 
 /// The tail starts before the job's state is recorded, so a settle the new state asks for waits for the tail to

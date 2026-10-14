@@ -56,9 +56,9 @@ pub struct Server {
     /// its checks and its insert, still holding `plugin_host_lock` for a `plugin:` creator, until the test lets it
     /// go. tests/token_creators.rs puts a disable in that window, so a create that let the lock go early fails it.
     pub token_create_pause: Mutex<Option<TokenCreatePause>>,
-    /// A test seam, always `None` in a running daemon: when a test sets it, the next launch stops just before its
-    /// `StartJob` call, still holding whatever lock the launch holds there, until the test lets it go
-    /// (scheduler/launch.rs). tests/node_link.rs uses it to show a heartbeat is applied while a launch is in flight.
+    /// A test seam, always `None` in a running daemon: when a test sets it, the next `StartJob` stops just before its
+    /// RPC in `start_job_on_node` (nodes/node_links.rs), still holding whatever lock its caller holds there, until the
+    /// test lets it go. tests/node_link.rs uses it to show a heartbeat is applied while a launch is in flight.
     pub start_job_pause: Mutex<Option<StartJobPause>>,
     /// Login codes, sessions, the owner token's hash and the scoped tokens' hashes.
     pub auth: AuthState,
@@ -95,8 +95,8 @@ pub struct TokenCreatePause {
     pub resume: oneshot::Receiver<()>,
 }
 
-/// How a launch held by the `start_job_pause` seam tells the test it has stopped (`reached`), and waits for the test to
-/// let it go on (`resume`, or the test dropping its sender).
+/// How a `StartJob` held by the `start_job_pause` seam tells the test it has stopped (`reached`), and waits for the
+/// test to let it go on (`resume`, or the test dropping its sender).
 pub struct StartJobPause {
     pub reached: oneshot::Sender<()>,
     pub resume: oneshot::Receiver<()>,

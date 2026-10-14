@@ -94,7 +94,8 @@ async fn insert_run_and_job(running: &RunningDaemon, node_id: &str, job_state: &
     insert_run_and_job_of_kind(running, node_id, "train", job_state).await;
 }
 
-/// A run and its job of any kind, written as `submit_job` writes them.
+/// A run and its job of the given kind, written as `submit_job` writes them. The run keeps kind `train`: a job's kind
+/// doesn't have to be its run's.
 async fn insert_run_and_job_of_kind(running: &RunningDaemon, node_id: &str, kind: &str, job_state: &str) {
     let run = RunRow {
         run_id: RUN_ID.to_string(),
@@ -427,9 +428,10 @@ async fn cancelling_a_job_no_command_starts_needs_system_admin() {
 }
 
 // contracts 9.1 and flows/platform.md 5.1: a launch holds its launch lock across StartJob and never the job lock, so
-// a heartbeat from the node is applied while StartJob is in flight. The test holds the launch just before the call
-// (`Server.start_job_pause`) and sends a heartbeat that reports the job running. A launch that held job_state_lock
-// across the call would keep the heartbeat waiting; the bounded wait below then fails the test instead of hanging.
+// a heartbeat from the node is applied while StartJob is in flight. The test holds the call just before the RPC
+// (`Server.start_job_pause`, in `start_job_on_node`) and sends a heartbeat that reports the job running. A caller that
+// held job_state_lock around the call would keep the heartbeat waiting; the bounded wait below then fails the test
+// instead of hanging.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_heartbeat_is_applied_while_a_launch_is_in_start_job() {
     let paths = test_paths("nl-start-held");

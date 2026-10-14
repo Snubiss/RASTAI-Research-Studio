@@ -189,7 +189,7 @@ struct KeptRows {
 /// can't rebuild from the old file (see the top). The caller holds `daemon.lock`. An error leaves the old index in
 /// place and removes the half-written new one.
 pub fn rebuild_index(paths: &DataPaths, options: &RebuildOptions) -> Result<RebuildReport, StoreError> {
-    std::fs::create_dir_all(&paths.data).map_err(|error| write_error(&paths.data, &error))?;
+    std::fs::create_dir_all(&paths.data).map_err(|error| folder_write_error(&paths.data, &error))?;
     let rebuilding_path = rastai_db_rebuilding_path(paths);
     remove_database_files(&rebuilding_path)?;
     remove_database_files(&rastai_db_salvage_path(paths))?;
@@ -899,13 +899,28 @@ fn write_error(path: &Path, error: &std::io::Error) -> StoreError {
         ErrorKind::StorageFull => StoreError::DiskFull {
             reason: format!("{}: {error}", path.display()),
         },
-        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => StoreError::DataDirectoryNotWritable {
-            path: path.parent().unwrap_or(path).to_path_buf(),
-            reason: error.to_string(),
-        },
+        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => {
+            not_writable_folder(path.parent().unwrap_or(path), error)
+        }
         _ => StoreError::DatabaseWriteFailed {
             reason: format!("{}: {error}", path.display()),
         },
+    }
+}
+
+/// `write_error` for a failed write to a folder itself (the data folder, when it can't be created): a refusal names
+/// that folder, not its parent.
+fn folder_write_error(folder: &Path, error: &std::io::Error) -> StoreError {
+    match error.kind() {
+        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => not_writable_folder(folder, error),
+        _ => write_error(folder, error),
+    }
+}
+
+fn not_writable_folder(folder: &Path, error: &std::io::Error) -> StoreError {
+    StoreError::DataDirectoryNotWritable {
+        path: folder.to_path_buf(),
+        reason: error.to_string(),
     }
 }
 
@@ -1020,6 +1035,11 @@ mod tests {
     // The mode of an index only its owner reads, which a rebuild must keep.
     #[cfg(unix)]
     const PRIVATE_MODE: u32 = 0o600;
+    // A data folder no one can write into, and the mode that lets the test remove it again.
+    #[cfg(unix)]
+    const READ_ONLY_FOLDER_MODE: u32 = 0o500;
+    #[cfg(unix)]
+    const OWNER_FOLDER_MODE: u32 = 0o700;
 
     fn test_paths(test_name: &str) -> DataPaths {
         let root = std::env::temp_dir().join(format!("rastai-store-rebuild-{}-{test_name}", std::process::id()));
@@ -1132,14 +1152,22 @@ mod tests {
         );
     }
 
-    // A salvage copy into a read-only data folder: the write is refused, and the error names the folder (RRS-S0004),
-    // not the scratch file the rebuild was writing.
+    // A folder the rebuild can't create is named by that folder, not its parent (RRS-S0004).
+    #[test]
+    fn a_folder_refused_for_a_permission_is_rrs_s0004_naming_that_folder() {
+        let folder = Path::new("/data");
+        let denied = std::io::Error::from(ErrorKind::PermissionDenied);
+
+        let message = store_error_diagnostic(&folder_write_error(folder, &denied)).message;
+        assert_eq!(message, "The data directory /data is not writable.");
+    }
+
+    // A rebuild into a read-only data folder: the first write it makes is its scratch file, which is refused, and the
+    // error names the data folder (RRS-S0004), not the file the rebuild was writing.
     #[cfg(unix)]
     #[test]
-    fn a_salvage_copy_into_a_read_only_folder_is_rrs_s0004_naming_the_folder() {
+    fn a_rebuild_into_a_read_only_data_folder_is_rrs_s0004_naming_the_folder() {
         use std::os::unix::fs::PermissionsExt;
-        const READ_ONLY_FOLDER_MODE: u32 = 0o500;
-        const OWNER_FOLDER_MODE: u32 = 0o700;
         let paths = test_paths("read-only-salvage");
         std::fs::create_dir_all(&paths.data).unwrap();
         let index_path = rastai_db_path(&paths);
