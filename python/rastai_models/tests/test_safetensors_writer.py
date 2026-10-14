@@ -22,9 +22,14 @@ SEED = 34
 
 # The layout the Rust planner is checked against (rastai-formats writer.rs reads this file). The tensors are fixed, so
 # the bytes are fixed: the header holds metadata first, then the tensors in name order; the data section is 30 bytes.
+# The metadata is chosen so the unpadded header is 217 bytes: the writer must pad it with 7 spaces, so this file also
+# pins the padding bytes, not only the layout (a header that is already a multiple of 8 would leave them untested).
 PLANNED_LAYOUT_FILE = (
     Path(__file__).resolve().parents[3] / "fixtures" / "safetensors-writer" / "planned_layout.safetensors"
 )
+
+
+PLANNED_LAYOUT_METADATA = {"step": "30", "format": "pt"}
 
 
 def planned_layout_tensors() -> dict[str, torch.Tensor]:
@@ -37,7 +42,7 @@ def planned_layout_tensors() -> dict[str, torch.Tensor]:
 
 def test_the_writer_still_writes_the_committed_planned_layout(tmp_path: Path) -> None:
     path = tmp_path / "planned_layout.safetensors"
-    write_safetensors(path, planned_layout_tensors(), {"step": "3", "format": "pt"})
+    write_safetensors(path, planned_layout_tensors(), PLANNED_LAYOUT_METADATA)
     assert path.read_bytes() == PLANNED_LAYOUT_FILE.read_bytes()
 
 

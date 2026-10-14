@@ -180,7 +180,8 @@ mod tests {
 
     /// The header the Python writer's `build_header` gives for `sample_tensors` and `sample_metadata`, copied from
     /// its output: metadata first, then the tensors in name order.
-    const PYTHON_HEADER: &[u8] = br#"{"__metadata__":{"format":"pt","step":"3"},"Head":{"dtype":"U8","shape":[0],"data_offsets":[0,0]},"bias":{"dtype":"BF16","shape":[3],"data_offsets":[0,6]},"weight":{"dtype":"F32","shape":[2,3],"data_offsets":[6,30]}}"#;
+    /// The 217-byte JSON is padded with 7 spaces to 224 bytes, so the padding bytes are part of the comparison.
+    const PYTHON_HEADER: &[u8] = br#"{"__metadata__":{"format":"pt","step":"30"},"Head":{"dtype":"U8","shape":[0],"data_offsets":[0,0]},"bias":{"dtype":"BF16","shape":[3],"data_offsets":[0,6]},"weight":{"dtype":"F32","shape":[2,3],"data_offsets":[6,30]}}       "#;
     /// The file `write_safetensors` writes for the same tensors and metadata. The Python test
     /// (python/rastai_models/tests/test_safetensors_writer.py) checks the writer still writes these bytes, so the two
     /// layouts are kept equal by this file, not by a copy.
@@ -209,7 +210,7 @@ mod tests {
 
     fn sample_metadata() -> Vec<(String, String)> {
         vec![
-            ("step".to_string(), "3".to_string()),
+            ("step".to_string(), "30".to_string()),
             ("format".to_string(), "pt".to_string()),
         ]
     }
@@ -256,7 +257,7 @@ mod tests {
             header.metadata,
             [
                 ("format".to_string(), "pt".to_string()),
-                ("step".to_string(), "3".to_string())
+                ("step".to_string(), "30".to_string())
             ]
         );
         assert_eq!(header.data_start, HEADER_LENGTH_BYTES + PYTHON_HEADER.len() as u64);
