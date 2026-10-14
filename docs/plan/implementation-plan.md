@@ -1556,7 +1556,7 @@ Lane A · size L · type task · depends on M2-12, M2-15
 
 - **Goal:** The node is the only process that runs uv: pick the environment from the hardware (never forcing ROCm on an unsupported chip), `uv sync --frozen` into `<data>/envs/<id>-<lock_hash12>` with the variables of the node layout §7.6, write the ready marker last, verify with `python -m rastai_worker check`, and stream progress through EnsureEnvironment. Replaces the `just env-cpu` stopgap.
 - **Files:** `crates/rastai-node/src/environments.rs`; `node_service.rs` (EnsureEnvironment); `python/rastai_worker/rastai_worker/check.py` (the `check` subcommand); `deps/engines/uv.json`; `tests/environments.rs` (fake uv on PATH)
-- **Test:** The pick table (sm_120 → cuda13, sm_61 → cuda126, gfx1036 → cpu with the reason, never HSA_OVERRIDE_GFX_VERSION); a killed sync leaves no ready marker and the next ensure rebuilds (kill -9 row 5); disk below the plan → RRS-S3001 before anything downloads.
+- **Test:** The pick table (sm_120 → cuda13, sm_61 → cuda126, gfx1036 → cpu with the reason, never HSA_OVERRIDE_GFX_VERSION); a killed sync leaves no ready marker and the next ensure rebuilds (kill -9 row 5); disk below the plan → RRS-S3001 before anything downloads. Also re-measures the cold download sizes, with torchvision, numpy, pillow and PyMySQL included (layout python.md 11.2 open point 1) and updates `expected_download_gib` in `python/envs/environments.json` (M2-15 handed it over).
 - **Docs:** [Layout: node, gateway, proto §7.6](../architecture/layout/rust-node-gateway-proto.md), [Flows: platform §1.3](../architecture/flows/platform.md), [Flows: Designer, Gym, Remote C4](../architecture/flows/designer-gym-remote.md)
 
 #### M2-17 rastai-node: Hugging Face downloads
