@@ -28,9 +28,7 @@ export function TopBar({ onOpenPalette }) {
       <a className="rr-top-bar__logo" href={sectionFragment(HOME_SECTION_ID)}>
         Rastai
       </a>
-      <span className="rr-top-bar__project" aria-label="Project">
-        No project
-      </span>
+      <span className="rr-top-bar__project">No project</span>
       <nav aria-label="Breadcrumb" className="rr-top-bar__crumbs">
         <ol>
           <li aria-current="page">{sectionName}</li>

@@ -6,6 +6,7 @@
 import "@rastai/ui/styles/base.css";
 import "@rastai/ui/styles/components.css";
 import "./app/frame.css";
+import "./app/surfaces.css";
 
 import { SignedOutScreen } from "@rastai/ui/security";
 import { createRoot } from "react-dom/client";

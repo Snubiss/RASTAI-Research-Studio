@@ -377,10 +377,6 @@ describe("the status bar from the daemon", () => {
 });
 
 describe("the running jobs on the status bar", () => {
-  /**
-   * @param {number} count
-   * @returns {any[]} that many running train jobs, each in its own run
-   */
   test("a progress event is keyed by the job in its source, so a run-id subject still reaches its job's bar", async () => {
     const { stream } = await renderApp({
       answers: { "job.list": answered({ jobs: runningTrainJobs(1) }) },
@@ -392,6 +388,24 @@ describe("the running jobs on the status bar", () => {
       document.querySelector('progress[aria-label="train · run_01 progress"]')
     );
     expect(bar?.value).toBe(0.5);
+  });
+
+  test("a resync drops the progress of a job the refreshed list no longer holds", async () => {
+    // The daemon may have lost the final job.state_changed while the stream was down, so the refreshed list is the
+    // truth: a job it no longer lists keeps no progress bar.
+    let runningJobs = [{ job_id: "job_01", node_id: "node_local", kind: "train", run_id: "", state: "running" }];
+    const { stream } = await renderApp({
+      answers: { "job.list": () => answered({ jobs: runningJobs }) },
+    });
+    await vi.waitFor(() => expect(document.querySelector(".rr-status-bar__job")).not.toBeNull());
+    const progress = { payload: { case: "jobProgress", value: { fraction: 0.25, message: "" } } };
+    await inAct(() => stream.emit(busEvent("job.progress", "job_01", progress)));
+    expect(document.querySelector('progress[aria-label="train progress"]')).not.toBeNull();
+
+    runningJobs = [];
+    await inAct(() => stream.opened.at(-1)?.handlers.onResync());
+    await vi.waitFor(() => expect(document.querySelector('progress[aria-label="train progress"]')).toBeNull());
+    expect(document.querySelector(".rr-status-bar__jobs")?.textContent).toBe("No jobs running");
   });
 
   test("the bar lists three running jobs and counts the rest", async () => {

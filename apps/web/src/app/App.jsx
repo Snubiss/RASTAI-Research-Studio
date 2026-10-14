@@ -9,6 +9,9 @@ import { useEffect, useRef } from "react";
 
 import { FOCUS_REGIONS, GO_PREFIX_TIMEOUT_MS } from "../constants.js";
 import { CommandPalette } from "../frame/CommandPalette.jsx";
+import { requiredArgumentNames } from "../commands/command-index.js";
+import { commandForKeys } from "../commands/keybindings.js";
+import { runFromPalette } from "../commands/run-command.js";
 import { Overlays } from "../frame/Overlays.jsx";
 import { SectionRail } from "../frame/SectionRail.jsx";
 import { StatusBar } from "../frame/StatusBar.jsx";
@@ -62,6 +65,7 @@ function Frame() {
       );
       armGoPrefix(goPending, goTimer, step.goPending);
       if (step.action === "") {
+        runDefaultShortcut(shell, event);
         return;
       }
       event.preventDefault();
@@ -142,6 +146,25 @@ function Notices() {
  */
 function openPalette(shell) {
   shell.stores.palette.set({ open: true, query: "" });
+}
+
+/**
+ * A command's default shortcut runs the command with no arguments, unless the command needs some: those open the palette
+ * instead, so no argument is guessed. A key press that no command takes does nothing.
+ * @param {Shell} shell
+ * @param {KeyboardEvent} event
+ */
+function runDefaultShortcut(shell, event) {
+  const command = commandForKeys(shell.stores.commands.get(), event);
+  if (command === null) {
+    return;
+  }
+  if (requiredArgumentNames(command.argumentsSchemaJson).length > 0) {
+    openPalette(shell);
+    return;
+  }
+  event.preventDefault();
+  runFromPalette(shell, command, {});
 }
 
 /**

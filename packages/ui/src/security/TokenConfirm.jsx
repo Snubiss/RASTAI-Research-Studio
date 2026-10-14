@@ -70,7 +70,10 @@ export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, on
     onCancel();
   }
 
+  // A disabled button drops the focus, so the focus moves to Cancel first: the keyboard user keeps their place while
+  // the token is made (ui-design.md 5.1, loading: aria-busy and a verb).
   function approve() {
+    cancelRef.current?.focus();
     setApproving(true);
     onApprove();
   }
@@ -85,7 +88,14 @@ export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, on
   }
 
   return (
-    <dialog ref={dialogRef} className="rr-locked" style={PANEL_STYLE} aria-labelledby={titleId} onCancel={handleCancel}>
+    <dialog
+      ref={dialogRef}
+      className="rr-locked"
+      style={PANEL_STYLE}
+      aria-labelledby={titleId}
+      aria-busy={approving}
+      onCancel={handleCancel}
+    >
       <LockedFocusRing />
       <SecurityCheckHeader />
       <h2 id={titleId} style={HEADING_STYLE}>
@@ -136,7 +146,7 @@ export function TokenConfirm({ tokenName, tokenValue = null, canDo, cannotDo, on
               disabled={approving}
               onClick={approve}
             >
-              Create token
+              {approving ? "Creating…" : "Create token"}
             </button>
           </>
         )}

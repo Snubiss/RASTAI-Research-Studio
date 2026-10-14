@@ -162,9 +162,7 @@ describe("SegmentedControl", () => {
 
   test("Tab enters the group at the pressed option, and Shift+Tab after an arrow leaves from the arrowed-to option", async () => {
     const mounted = await mount(<TabOrderHarness initial="all" />);
-    const [before, all, warnings, , after] = /** @type {HTMLElement[]} */ ([
-      ...mounted.container.querySelectorAll("button"),
-    ]);
+    const [before, all, warnings] = /** @type {HTMLElement[]} */ ([...mounted.container.querySelectorAll("button")]);
     before.focus();
     await userEvent.tab();
     expect(document.activeElement).toBe(all);
@@ -207,6 +205,19 @@ describe("SegmentedControl", () => {
     await mounted.unmount();
   });
 
+  test("when the options shrink while focus is inside, the one Tab stop moves to the last option", async () => {
+    const mounted = await mount(<ShrinkHarness count={3} />);
+    const group = /** @type {HTMLElement} */ (mounted.container.querySelector("[role=group]"));
+    const buttons = /** @type {HTMLElement[]} */ ([...group.querySelectorAll("button")]);
+    buttons[2].focus();
+    expect(document.activeElement).toBe(buttons[2]);
+    await mounted.rerender(<ShrinkHarness count={2} />);
+    const shrunk = /** @type {HTMLButtonElement[]} */ ([...group.querySelectorAll("button")]);
+    expect(shrunk).toHaveLength(2);
+    expect(shrunk.map((button) => button.tabIndex)).toEqual([-1, 0]);
+    await mounted.unmount();
+  });
+
   test("a disabled group presses nothing and shows its options in the disabled text color", async () => {
     /** @type {string[]} */
     const changes = [];
@@ -228,6 +239,16 @@ describe("SegmentedControl", () => {
     await mounted.unmount();
   });
 });
+
+/**
+ * A segmented group whose option count the test changes, to see the Tab stop follow the shorter list.
+ * @param {object} props
+ * @param {number} props.count
+ */
+function ShrinkHarness({ count }) {
+  const options = LOG_OPTIONS.slice(0, count);
+  return <SegmentedControl label="Log stream" options={options} value="all" onChange={() => {}} />;
+}
 
 /**
  * A button, the segmented group, and another button, so a test can see where Tab and Shift+Tab land.

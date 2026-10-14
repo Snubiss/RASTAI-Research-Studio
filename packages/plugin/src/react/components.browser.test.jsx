@@ -123,6 +123,26 @@ describe("CommandForm", () => {
     expect(outcomes.map((outcome) => outcome.ok)).toEqual([true]);
   });
 
+  test("starts with the initial values, and reports the arguments they make on every change", async () => {
+    const mock = createMockHost("core", {});
+    /** @type {object[]} */
+    const seen = [];
+    const page = await show(
+      <PluginHostProvider host={mock.host}>
+        <CommandForm
+          commandId="settings.set"
+          argumentsSchemaJson={SETTINGS_SET_SCHEMA}
+          initialValues={{ key: "ui.theme" }}
+          onArgumentsChange={(args) => seen.push(args)}
+        />
+      </PluginHostProvider>,
+    );
+    expect(/** @type {HTMLInputElement} */ (fieldLabelled(page.container, "Key")).value).toBe("ui.theme");
+    await userEvent.fill(fieldLabelled(page.container, "Value"), '"dark"');
+    expect(seen.at(-1)).toEqual({ key: "ui.theme", value: "dark" });
+    expect(mock.calls).toEqual([]);
+  });
+
   test("shows the daemon's diagnostics when the command fails", async () => {
     const mock = createMockHost("core", {
       "settings.set": () => ({

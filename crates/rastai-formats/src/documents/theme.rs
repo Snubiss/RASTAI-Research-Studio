@@ -83,7 +83,10 @@ pub const COLOR_ROLES: &[(&str, &str)] = &[
     ("canvas_edge_active", "Edges carrying data in a live view."),
     ("canvas_label", "Labels on the canvas."),
     ("canvas_port", "Node input and output ports."),
-    ("confidence_tint", "Chat text shading by model confidence."),
+    (
+        "confidence_tint",
+        "Saturated base hue of chat confidence shading: chat mixes it into surface at 16, 30 and 46 percent.",
+    ),
 ];
 
 /// One `rastai.theme/1` file.

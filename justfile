@@ -78,7 +78,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # The repo checks are the ones of layout rust-control-plane.md 2.3. check-dco isn't here: it reads a pull request's
 # commit range, which CI's `dco` job passes when CI runs; locally, `just check-dco` checks the commits not yet on main.
 # The gate every PR passes: format, lint, the JSDoc type check, tests, the browser build, dependencies, repo checks.
-check: fmt-check lint check-js web-embed test-rust test-node-jobs test-daemon-jobs test-crash e2e-surfaces test-python \
+check: fmt-check lint check-js web-embed test-rust test-node-jobs test-daemon-jobs test-crash e2e-surfaces e2e-web test-python \
     test-js wasm deny proto-check check-deps check-unsafe check-no-pickle check-imports check-colors check-no-typescript \
     check-fuzz-locks codegen-check check-names check-schema-diff
 
@@ -137,6 +137,15 @@ test-crash: env-cpu
 e2e-surfaces: env-cpu
     cargo build --locked -p rastai-cli
     cd tests/e2e/three_surfaces && "{{cpu_python}}" -m pytest
+
+# The web app in a real daemon (plan M1-54; layout frontend-and-plugins.md 8.7): tests/e2e/*.spec.js run with Node's test
+# runner and Playwright, in Chromium and WebKit, against a `rastai serve --headless` that serves the built app. web-embed
+# builds the app first, so the binary embeds it. The browsers are the ones `tools/ci/install-dev-tools browsers` installs.
+# CI runs it as its own `e2e-web` job; while CI is manual-only, `check` runs it too (plan 3.6).
+e2e-web: env-js web-embed
+    cargo build --locked -p rastai-cli
+    node --test --test-concurrency=1 tests/e2e/palette.spec.js tests/e2e/basic-advanced.spec.js \
+        tests/e2e/theme.spec.js tests/e2e/accessibility.spec.js
 
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
 # tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml,

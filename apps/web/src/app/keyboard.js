@@ -66,6 +66,7 @@ export const SHORTCUT_LIST = [
   { keys: "Shift ?", action: "Show this list" },
   { keys: "G then H, C, T, D, P or S", action: "Go to Home, Chat, Training, Designer, Psychology or Settings" },
   { keys: "F6", action: "Move focus between the section rail, the panels and the status bar" },
+  { keys: "Ctrl .", action: "In the palette: copy the highlighted command as a CLI line" },
 ];
 
 /**
