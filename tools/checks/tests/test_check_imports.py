@@ -2,6 +2,7 @@
 public API, Rust wrapper files. Also checks that its tables name every package contracts 2.2 and 2.3 list."""
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -110,6 +111,12 @@ import { expect, test } from "vitest";
 PLUGIN_RENDER = """import { act } from "react";
 import { createRoot } from "react-dom/client";
 """
+# import.meta.glob takes its patterns from the first argument; the options after the comma are not paths.
+APP_PANELS = """const panels = import.meta.glob(["./panels/*.jsx"], { eager: true, query: "?raw" });
+"""
+# A declaration file is type-only: a shared package's types may come from @rastai/proto, as in the ui package.
+UI_DECLARATIONS = """import type { Diagnostic } from "@rastai/proto";
+"""
 PASSING_JAVASCRIPT = (
     js_package("packages/ui", "@rastai/ui")
     | js_package("packages/client", "@rastai/client")
@@ -132,6 +139,8 @@ PASSING_JAVASCRIPT = (
         "packages/plugin/src/testing/render.js": PLUGIN_RENDER,
         # beside src/: dev tooling, not package code
         "apps/web/vite.config.js": 'import { defineConfig } from "vite";\n',
+        "apps/web/src/app/panels.js": APP_PANELS,
+        "packages/ui/src/generated/diagnostic.d.ts": UI_DECLARATIONS,
     }
 )
 FAILING_JAVASCRIPT = [
@@ -153,6 +162,84 @@ FAILING_JAVASCRIPT = [
         "plugins/evaluation/ui/src/index.js",
         'export { PermissionList } from "@rastai/ui/security";\n',
         "only apps/web/src/ may import",
+    ),
+    # No space before the quote (minified, or prettier-ignored code): the quote after the whole word from or import
+    # still opens a specifier (FU-276 item 1).
+    (
+        "plugins/evaluation/ui/src/SuitePanel.jsx",
+        'import{EgressBadge}from"@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/psychology/ui/src/Live.jsx",
+        'import"@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/index.js",
+        "export{TrustPrompt}from'@rastai/ui/security';\n",
+        "only apps/web/src/ may import",
+    ),
+    # Redundant parentheses around the specifier (FU-276 item 2).
+    (
+        "plugins/psychology/ui/src/Live.jsx",
+        'const prompt = await import(("@rastai/ui/security"));\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "packages/plugin/src/loader.js",
+        'const prompt = await import( /* @vite-ignore */ (("@rastai/ui/security")));\n',
+        "only apps/web/src/ may import",
+    ),
+    # A backslash in a specifier reads as a path inside the package. The JSDoc import type is type-only, and the
+    # check used to skip type-only specifiers it didn't recognize (FU-276 item 3).
+    (
+        "apps/web/src/app/boot.js",
+        '/** @typedef {import("\\u0040rastai/ui/security").EgressBadge} Badge */\n',
+        "a backslash",
+    ),
+    # A relative path through pnpm's per-package link stays inside the package folder, so only the node_modules
+    # segment shows it (FU-276 item 4).
+    (
+        "apps/web/src/app/boot.js",
+        'import { EgressBadge } from "../node_modules/@rastai/ui/src/security/index.js";\n',
+        "a node_modules path",
+    ),
+    # Vite reads import.meta.glob patterns as module paths: a root-absolute pattern and a pattern in the array form
+    # are refused like a static import (FU-276 item 5).
+    (
+        "apps/web/src/app/boot.js",
+        'const locked = import.meta.glob("/packages/ui/src/security/*.jsx");\n',
+        "a root-absolute path",
+    ),
+    (
+        "plugins/evaluation/ui/src/SuitePanel.jsx",
+        'const parts = import.meta.glob(["./parts/*.jsx", "@rastai/ui/security/*"], { eager: true });\n',
+        "its files aren't public API",
+    ),
+    # A relative import from src/ into code outside src/ (here a plugin's lib folder) is refused, because that code
+    # is not scanned (FU-276 item 6).
+    (
+        "plugins/evaluation/ui/src/index.js",
+        'export * from "../lib/security.js";\n',
+        "reaches outside its package's src/",
+    ),
+    # A file in src/generated/ is checked too, .ts and .mts alike (FU-276 item 8).
+    (
+        "plugins/evaluation/ui/src/generated/ui.ts",
+        'import { EgressBadge } from "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/evaluation/ui/src/generated/ui.mts",
+        'import { EgressBadge } from "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    # A declaration file is type-only, which still doesn't grant a package a dependency it doesn't have.
+    (
+        "packages/canvas/src/generated/graph.d.ts",
+        'import type { Diagnostic } from "@rastai/proto";\n',
+        "here may import only",
     ),
     (
         "packages/plugin/src/index.js",
@@ -313,9 +400,37 @@ def test_each_javascript_rule_fails(write_tree, run_check, path, source, expecte
     root = write_tree(packages | {path: source})
     result = run_check("check-imports", "--root", str(root))
     assert result.returncode == 1
-    # The specifier is the first double-quoted string in each case, so its line is the lines before it, plus one.
-    line = 1 + source.split('"')[0].count("\n")
+    # The specifier is the first quoted string in each case (double or single quotes), so its line is the lines
+    # before it, plus one.
+    line = 1 + source[: first_quote(source)].count("\n")
     assert f"{path}:{line}: imports" in result.stdout and expected in result.stdout, result.stdout
+
+
+def first_quote(source: str) -> int:
+    quotes = [position for position in (source.find('"'), source.find("'")) if position != -1]
+    return min(quotes)
+
+
+def test_a_symlink_under_src_fails(write_tree, run_check):
+    """os.walk doesn't follow a symlinked folder, but Vite does, so every symlink under a scanned src/ is refused:
+    a symlinked folder and a symlinked file alike. Skipped where the platform can't make symlinks."""
+    root = write_tree(
+        js_package("apps/web", "@rastai/web")
+        | {
+            "apps/web/src/app/boot.js": "export const booted = true;\n",
+            "apps/web/src/sections/home/Home.jsx": "export const home = true;\n",
+        }
+    )
+    try:
+        os.symlink(root / "apps/web/src/sections", root / "apps/web/src/app/sections", target_is_directory=True)
+        os.symlink(root / "apps/web/src/sections/home/Home.jsx", root / "apps/web/src/app/home.jsx")
+    except (OSError, NotImplementedError):
+        pytest.skip("this platform can't make symlinks")
+    result = run_check("check-imports", "--root", str(root))
+    assert result.returncode == 1
+    assert "apps/web/src/app/sections: is a symlink" in result.stdout
+    assert "apps/web/src/app/home.jsx: is a symlink" in result.stdout
+    assert "2 problem(s)" in result.stdout
 
 
 def test_an_unknown_javascript_package_fails(write_tree, run_check):

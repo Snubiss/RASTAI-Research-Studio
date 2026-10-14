@@ -40,6 +40,9 @@ RUST_SPAN_START_CHARACTERS = set("/\"'rbc")
 RUST_CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'")
 # The start of a raw string: r"..", r#".."#, r##".."## and so on, and the byte and C forms br".." and cr"..".
 RUST_RAW_STRING_START = re.compile(r"[bc]?r(#*)\"")
+# The keywords a module specifier follows with no space in between (import{X}from"x", import"x").
+IMPORT_KEYWORD = "import"
+IMPORT_KEYWORD_BEFORE_QUOTE = re.compile(r"(?<![\w$])(?:from|import)\Z")
 
 
 def parse_root_argument(description: str) -> Path:
@@ -155,7 +158,7 @@ def next_javascript_span(text: str, position: int) -> tuple[str | None, int]:
         return "comment", len(text) if end == -1 else end + 2
     if text[position] == "`":
         return "string", string_end(text, position)
-    if text[position] in "\"'" and not follows_a_word(text, position):
+    if text[position] in "\"'" and (not follows_a_word(text, position) or follows_an_import_keyword(text, position)):
         return "string", string_end(text, position)
     return None, position
 
@@ -165,6 +168,15 @@ def follows_a_word(text: str, position: int) -> bool:
     (only a backtick does, for a tagged template), so a quote after a word is JSX text, like the apostrophe in
     <p>Don't</p>, and not a string that runs to the end of the line. Rust raw strings follow the same rule."""
     return position > 0 and (text[position - 1].isalnum() or text[position - 1] == "_")
+
+
+def follows_an_import_keyword(text: str, position: int) -> bool:
+    """Whether the whole word `from` or `import` sits right before position, as in import{X}from"x": the minified
+    and prettier-ignored forms write no space before the quote, and that quote is still a module specifier. A
+    longer word that ends in those letters (reimport) is not the keyword, so its quote stays JSX text."""
+    # A window one character longer than the keyword holds the character before it, which must not be a word character.
+    window = text[max(0, position - len(IMPORT_KEYWORD) - 1) : position]
+    return IMPORT_KEYWORD_BEFORE_QUOTE.search(window) is not None
 
 
 def string_end(text: str, start: int) -> int:
