@@ -31,7 +31,7 @@ mod on_linux {
     use serde_json::{Value, json};
 
     use crate::common::{
-        execute_request, ok_result, remove_test_folder, response_codes, run_command, start_test_daemon,
+        JobGroupGuard, execute_request, ok_result, remove_test_folder, response_codes, run_command, start_test_daemon,
         stop_test_daemon, test_paths, token_principal,
     };
 
@@ -204,6 +204,7 @@ mod on_linux {
     #[ignore = "needs the cpu environment (just env-cpu); just test-daemon-jobs runs it"]
     async fn train_start_trains_textcnn_to_success_with_every_metric_indexed() {
         let paths = test_paths("tj-success");
+        let _jobs = JobGroupGuard::for_paths(&paths);
         let running = start_daemon_with_cpu_environment(&paths).await;
         let (_, run_id, job_id) = start_training(&running).await;
         assert!(job_id.starts_with("job_"), "{job_id}");
@@ -235,6 +236,7 @@ mod on_linux {
     #[ignore = "needs the cpu environment (just env-cpu); just test-daemon-jobs runs it"]
     async fn job_cancel_ends_the_train_job_and_its_run_cancelled() {
         let paths = test_paths("tj-cancel");
+        let _jobs = JobGroupGuard::for_paths(&paths);
         let running = start_daemon_with_cpu_environment(&paths).await;
         let (_, run_id, job_id) = start_training(&running).await;
         wait_for_first_metric(&running, &paths, &run_id).await;
@@ -267,6 +269,7 @@ mod on_linux {
     #[ignore = "needs the cpu environment (just env-cpu); just test-daemon-jobs runs it"]
     async fn a_daemon_restart_mid_run_reconciles_and_the_tail_resumes_from_the_ack() {
         let paths = test_paths("tj-restart");
+        let _jobs = JobGroupGuard::for_paths(&paths);
         let running = start_daemon_with_cpu_environment(&paths).await;
         let (_, run_id, job_id) = start_training(&running).await;
         wait_for_first_metric(&running, &paths, &run_id).await;

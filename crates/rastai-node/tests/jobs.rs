@@ -41,7 +41,10 @@ mod on_linux {
     use tokio::task::JoinHandle;
     use tonic::transport::Channel;
 
-    use crate::common::{NvidiaSmi, TestFolder, machine_from_fixture, new_test_folder, start_node, test_node_options};
+    use crate::common::{
+        NvidiaSmi, TestFolder, kill_job_groups_under, machine_from_fixture, new_test_folder, start_node,
+        test_node_options,
+    };
     use crate::common::{test_paths, write_tool};
 
     const TEST_FOLDER_PREFIX: &str = "rnjb";
@@ -55,6 +58,8 @@ mod on_linux {
     const SHORT_GRACE: Duration = Duration::from_millis(1500);
     /// How long a test waits for a job or a file to get where it should.
     const WAIT_LIMIT: Duration = Duration::from_secs(30);
+    /// The group signal is sent at once; a few seconds cover a loaded machine's /proc catching up.
+    const GROUP_GONE_WAIT: Duration = Duration::from_secs(5);
     const POLL: Duration = Duration::from_millis(20);
     /// The worker's notes, in its run folder.
     const READY_FILE: &str = "ready.txt";
@@ -134,6 +139,8 @@ exit "$(cat "$run_folder/exit-code")"
 
     impl Drop for JobNode {
         fn drop(&mut self) {
+            // Before the abort: aborting the node leaves its worker running, and only the node knew its group.
+            kill_job_groups_under(&self.folder.path);
             self.node.abort();
         }
     }
@@ -1177,5 +1184,42 @@ exit "$(cat "$run_folder/exit-code")"
             "RRS-J2003"
         );
         assert_eq!(recorded_events(&record, "signal")[0]["name"], "SIGTERM");
+    }
+
+    /// Whether any process other than a zombie is in the process group.
+    fn group_has_members(process_group_id: u32) -> bool {
+        let entries = fs::read_dir("/proc").unwrap();
+        entries.flatten().any(|entry| {
+            process_state_and_group(&entry.path())
+                .is_some_and(|(state, group)| group == process_group_id && state != "Z")
+        })
+    }
+
+    async fn wait_until_group_is_gone(process_group_id: u32) {
+        let started = Instant::now();
+        while group_has_members(process_group_id) {
+            assert!(
+                started.elapsed() < GROUP_GONE_WAIT,
+                "the group {process_group_id} still has members {GROUP_GONE_WAIT:?} after its node was dropped"
+            );
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
+    // A failed test drops its node while the worker runs. The worker leads its own group, and aborting the node
+    // doesn't stop it, so the node's Drop has to signal the group itself (issue #244).
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the cpu environment (just env-cpu); just test-node-jobs runs it"]
+    async fn dropping_the_node_kills_the_running_worker_group() {
+        let mut node = start_fake_worker_node("{}", LONG_TIMEOUT).await;
+        let (_spec, run_id) = running_fake_job(&mut node).await;
+        let job_file = read_job_file(&job_file_path(&run_folder(&node, &run_id))).unwrap();
+        let process_group_id = job_file.process_group_id;
+        assert!(
+            group_has_members(process_group_id),
+            "the worker isn't running in group {process_group_id}"
+        );
+        drop(node);
+        wait_until_group_is_gone(process_group_id).await;
     }
 }

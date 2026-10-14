@@ -33,7 +33,10 @@ mod on_linux {
     use tokio::task::JoinHandle;
     use tonic::transport::Channel;
 
-    use crate::common::{NvidiaSmi, TestFolder, machine_from_fixture, new_test_folder, start_node, test_node_options};
+    use crate::common::{
+        NvidiaSmi, TestFolder, kill_job_groups_under, machine_from_fixture, new_test_folder, start_node,
+        test_node_options,
+    };
     use crate::common::{test_paths, write_tool};
 
     const TEST_FOLDER_PREFIX: &str = "rntj";
@@ -72,6 +75,8 @@ mod on_linux {
 
     impl Drop for TrainNode {
         fn drop(&mut self) {
+            // Before the abort: aborting the node leaves its worker running, and only the node knew its group.
+            kill_job_groups_under(&self._folder.path);
             self.node.abort();
         }
     }
