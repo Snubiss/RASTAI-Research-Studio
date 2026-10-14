@@ -12,7 +12,10 @@
 //!   aren't checked further, because every one of them would repeat the same problem;
 //! - a malformed command id: `RRS-E2006`; one outside the plugin's namespace: `RRS-P0004`; one listed twice:
 //!   `RRS-E2005` at the second;
-//! - an event handler whose command isn't one of the plugin's own: `RRS-P0004` (layout 12.4).
+//! - an event handler whose command isn't one of the plugin's own: `RRS-P0004` (layout 12.4);
+//! - a non-empty `default_shortcut` that doesn't parse, or has neither Mod nor Alt: `RRS-E2006` at
+//!   `/contributes/commands/<i>/default_shortcut`. The grammar mirrors apps/web/src/commands/keybindings.js
+//!   (`parseShortcut`), which the web app reads the same text with, so a shortcut one side refuses the other refuses too.
 
 use rastai_diag::diagnostic::Diagnostic;
 
@@ -28,12 +31,21 @@ const PLUGIN_ID_POINTER: &str = "/plugin_id";
 const COMMANDS_POINTER: &str = "/contributes/commands";
 const EVENT_HANDLERS_POINTER: &str = "/contributes/event_handlers";
 const COMMAND_ID_KEY: &str = "command_id";
+const DEFAULT_SHORTCUT_KEY: &str = "default_shortcut";
 const EXPECTED_COMMAND_ID: &str = "<plugin_id>.<verb> or <plugin_id>.<noun>.<verb>, in lowercase snake_case";
+const EXPECTED_DEFAULT_SHORTCUT: &str =
+    "a shortcut with Mod or Alt: modifiers Mod, Shift or Alt joined by +, then one key, such as Mod+Shift+P or Alt+F";
 
 const ID_SEPARATOR: char = '.';
 const WORD_SEPARATOR: char = '_';
 const MIN_COMMAND_SEGMENTS: usize = 2;
 const MAX_COMMAND_SEGMENTS: usize = 3;
+
+// The shortcut grammar, mirrored from apps/web/src/commands/keybindings.js.
+const SHORTCUT_PART_SEPARATOR: char = '+';
+const SHORTCUT_MODIFIER_MOD: &str = "mod";
+const SHORTCUT_MODIFIER_SHIFT: &str = "shift";
+const SHORTCUT_MODIFIER_ALT: &str = "alt";
 
 /// What a plugin id should look like, for the manifest check here and the registry's `check_plugin_id`.
 pub const EXPECTED_PLUGIN_ID_FORM: &str =
@@ -126,8 +138,38 @@ fn check_commands(manifest: &PluginManifest, source: &MeaningSource) -> Vec<Diag
             diagnostics.push(meaning_diagnostic(CODE_DUPLICATE_ID, &values, source, &pointer));
         }
         seen.push(command_id);
+        let shortcut = command.default_shortcut.as_str();
+        if !shortcut.is_empty() && !is_usable_shortcut(shortcut) {
+            let values = [
+                ("found", shown_value(shortcut)),
+                ("expected", EXPECTED_DEFAULT_SHORTCUT),
+            ];
+            let pointer = format!("{COMMANDS_POINTER}/{index}/{DEFAULT_SHORTCUT_KEY}");
+            diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &pointer));
+        }
     }
     diagnostics
+}
+
+/// A default shortcut the web app can bind: its parts split on `+`, each trimmed and lowercased, with the empty parts
+/// dropped. Every part but the last is Mod, Shift or Alt, and the last is the key. It needs Mod or Alt, so a bare key
+/// (`Enter`, `x`) or a Shift-only key (`Shift+K`) is refused. `Ctrl` isn't a modifier word here, so `Ctrl+K` is refused.
+pub fn is_usable_shortcut(text: &str) -> bool {
+    let parts: Vec<String> = text
+        .split(SHORTCUT_PART_SEPARATOR)
+        .map(|part| part.trim().to_lowercase())
+        .filter(|part| !part.is_empty())
+        .collect();
+    let Some((_key, modifiers)) = parts.split_last() else {
+        return false;
+    };
+    let all_known = modifiers.iter().all(|modifier| {
+        modifier == SHORTCUT_MODIFIER_MOD || modifier == SHORTCUT_MODIFIER_SHIFT || modifier == SHORTCUT_MODIFIER_ALT
+    });
+    let has_mod_or_alt = modifiers
+        .iter()
+        .any(|modifier| modifier == SHORTCUT_MODIFIER_MOD || modifier == SHORTCUT_MODIFIER_ALT);
+    all_known && has_mod_or_alt
 }
 
 /// A handler runs as the plugin, so it may only name the plugin's own commands.
@@ -216,6 +258,21 @@ mod tests {
         assert!(is_core_area("model") && is_core_area("core") && is_core_area("view"));
         assert!(!is_core_area("psychology") && !is_core_area("eval"));
         assert_eq!(CORE_AREAS.len(), 38);
+    }
+
+    #[test]
+    fn default_shortcuts_need_mod_or_alt_and_the_web_grammar() {
+        for shortcut in ["Mod+Shift+P", "Alt+F", "mod+alt+x", " Mod + . ", "Alt+Shift+Enter"] {
+            assert!(is_usable_shortcut(shortcut), "{shortcut}");
+        }
+        for shortcut in ["Enter", "Mod+", "Ctrl+K", "Shift+K", "Hyper+K", "x"] {
+            assert!(!is_usable_shortcut(shortcut), "{shortcut}");
+        }
+    }
+
+    #[test]
+    fn an_empty_shortcut_is_left_for_the_caller_to_skip() {
+        assert!(!is_usable_shortcut(""));
     }
 
     #[test]

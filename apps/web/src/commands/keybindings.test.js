@@ -15,6 +15,13 @@ describe("parseShortcut", () => {
     expect(parseShortcut("")).toBeNull();
     expect(parseShortcut("Hyper+L")).toBeNull();
   });
+
+  test("a shortcut with neither Mod nor Alt is no shortcut, so a bare key or a Shift key never binds a command", async () => {
+    for (const text of ["Enter", "Escape", "Tab", "Shift+Enter", "x"]) {
+      expect(parseShortcut(text), text).toBeNull();
+    }
+    expect(parseShortcut("Alt+X")).toEqual({ mod: false, shift: false, alt: true, key: "x" });
+  });
 });
 
 describe("shortcutMatches", () => {
@@ -23,6 +30,15 @@ describe("shortcutMatches", () => {
     expect(shortcutMatches("Mod+Shift+L", press({ key: "l", metaKey: true, shiftKey: true }))).toBe(true);
     expect(shortcutMatches("Mod+Shift+L", press({ key: "l", ctrlKey: true }))).toBe(false);
     expect(shortcutMatches("Mod+K", press({ key: "k", ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(shortcutMatches("Alt+X", press({ key: "x", altKey: true }))).toBe(true);
+  });
+
+  test("a bare key matches no press, so Enter, Escape, Tab and a letter never run a command", async () => {
+    expect(shortcutMatches("Enter", press({ key: "Enter" }))).toBe(false);
+    expect(shortcutMatches("Escape", press({ key: "Escape" }))).toBe(false);
+    expect(shortcutMatches("Tab", press({ key: "Tab" }))).toBe(false);
+    expect(shortcutMatches("Shift+Enter", press({ key: "Enter", shiftKey: true }))).toBe(false);
+    expect(shortcutMatches("x", press({ key: "x" }))).toBe(false);
   });
 
   test("the copy-as shortcut is Ctrl period, and not Ctrl Shift C, which opens the browser's element picker", () => {
@@ -37,6 +53,7 @@ describe("shortcutLabel", () => {
     expect(shortcutLabel("Mod+Shift+L")).toBe("Ctrl+Shift+L");
     expect(shortcutLabel("Mod+.")).toBe("Ctrl+.");
     expect(shortcutLabel("")).toBe("");
+    expect(shortcutLabel("Enter")).toBe("");
   });
 });
 
@@ -48,5 +65,10 @@ describe("commandForKeys", () => {
     ];
     expect(commandForKeys(commands, press({ key: "l", ctrlKey: true, shiftKey: true }))?.commandId).toBe("job.cancel");
     expect(commandForKeys(commands, press({ key: "x", ctrlKey: true }))).toBeNull();
+  });
+
+  test("a command whose default shortcut is a bare key is never found, even on that key", async () => {
+    const commands = [{ commandId: "plugin.enter", defaultShortcut: "Enter" }];
+    expect(commandForKeys(commands, press({ key: "Enter" }))).toBeNull();
   });
 });

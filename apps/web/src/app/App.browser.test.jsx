@@ -13,12 +13,15 @@ import { loadAppStyles } from "../testing/styles.js";
 import { answered, busEvent, refused, testShell } from "../testing/fake-shell.js";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { App } from "./App.jsx";
+import { paletteHostOf, runFromPalette } from "../commands/run-command.js";
 
 const DESKTOP_VIEWPORT = { width: 1024, height: 768 };
 const PHONE_VIEWPORT = { width: 390, height: 844 };
 const MIN_TARGET_PX = 24;
 // Tab from the top of the page reaches the rail well inside this many presses (skip link, top bar, then the rail).
 const MAX_TAB_PRESSES = 30;
+// A command with no arguments, as its descriptor's arguments schema says.
+const EMPTY_SCHEMA = '{"type":"object","properties":{}}';
 
 beforeAll(async () => {
   await loadAppStyles();
@@ -59,7 +62,7 @@ async function mountTracked(element) {
 
 /**
  * Mounts the App over a fresh shell. Settings are held in the fake daemon, so settings.set changes what settings.get says.
- * @param {{ mode?: "basic" | "advanced", answers?: Object<string, any>, extraSettings?: Object<string, any>, route?: string }} [options]
+ * @param {{ mode?: "basic" | "advanced", answers?: Object<string, any>, extraSettings?: Object<string, any>, route?: string, commands?: any[] }} [options]
  */
 async function renderApp(options = {}) {
   window.location.hash = options.route ?? "#/home";
@@ -74,7 +77,7 @@ async function renderApp(options = {}) {
     },
     ...(options.answers ?? {}),
   };
-  const built = await testShell({ answers, settings: storedSettings });
+  const built = await testShell({ answers, settings: storedSettings, commands: options.commands ?? [] });
   const tree = await mountTracked(<App shell={built.shell} />);
   await vi.waitFor(() => expect(document.querySelector(".rr-frame")).not.toBeNull());
   return { ...built, tree };
@@ -492,5 +495,99 @@ describe("touch targets and phone width", () => {
     const rail = document.getElementById("section-rail")?.getBoundingClientRect();
     const main = document.getElementById("main")?.getBoundingClientRect();
     expect(rail && main && rail.bottom <= main.top + 1).toBe(true);
+  });
+});
+
+/**
+ * The calls the fake daemon got for one command.
+ * @param {{ calls: { commandId: string }[] }} client
+ * @param {string} commandId
+ */
+function callsTo(client, commandId) {
+  return client.calls.filter((call) => call.commandId === commandId).length;
+}
+
+/**
+ * A native locked dialog with one button, as TokenConfirm has: the button is the Enter target while the dialog is open.
+ * @param {() => void} onKeep
+ */
+function openLockedDialog(onKeep) {
+  const dialog = document.createElement("dialog");
+  const button = document.createElement("button");
+  button.textContent = "Keep";
+  button.addEventListener("click", onKeep);
+  dialog.append(button);
+  document.body.append(dialog);
+  dialog.showModal();
+  button.focus();
+  return dialog;
+}
+
+describe("default shortcuts and locked dialogs", () => {
+  const SHORTCUT_COMMANDS = [
+    { commandId: "fake.enter", title: "Fake enter", defaultShortcut: "Enter", argumentsSchemaJson: EMPTY_SCHEMA },
+    { commandId: "fake.jump", title: "Fake jump", defaultShortcut: "Mod+Shift+J", argumentsSchemaJson: EMPTY_SCHEMA },
+  ];
+
+  test("neither a bare key nor a Mod shortcut runs while a locked dialog is open, and the dialog's button gets Enter", async () => {
+    const { client } = await renderApp({
+      commands: SHORTCUT_COMMANDS,
+      answers: { "fake.enter": answered({}), "fake.jump": answered({}) },
+    });
+    let keeps = 0;
+    const dialog = openLockedDialog(() => {
+      keeps += 1;
+    });
+    try {
+      await userEvent.keyboard("{Enter}");
+      expect(keeps).toBe(1);
+      await userEvent.keyboard("{Control>}{Shift>}j{/Shift}{/Control}");
+      expect(callsTo(client, "fake.enter")).toBe(0);
+      expect(callsTo(client, "fake.jump")).toBe(0);
+    } finally {
+      dialog.close();
+      dialog.remove();
+    }
+  });
+
+  test("once the dialog closes, the Mod shortcut runs, and Enter still never runs a command", async () => {
+    const { client } = await renderApp({
+      commands: SHORTCUT_COMMANDS,
+      answers: { "fake.enter": answered({}), "fake.jump": answered({}) },
+    });
+    const dialog = openLockedDialog(() => {});
+    dialog.close();
+    dialog.remove();
+    await userEvent.keyboard("{Control>}{Shift>}j{/Shift}{/Control}");
+    await vi.waitFor(() => expect(callsTo(client, "fake.jump")).toBe(1));
+    await userEvent.keyboard("{Enter}");
+    expect(callsTo(client, "fake.enter")).toBe(0);
+  });
+});
+
+describe("token.create from the palette", () => {
+  test("the palette sends token.create to Settings and makes no token, and another command still runs", async () => {
+    const { shell, client } = await renderApp({ answers: { "system.status": answered({}) } });
+    const ranToken = await runFromPalette(
+      shell,
+      { commandId: "token.create", title: "Create API token" },
+      { name: "ci" },
+    );
+    expect(ranToken).toBe(false);
+    expect(window.location.hash).toBe("#/settings");
+    expect(callsTo(client, "token.create")).toBe(0);
+    expect(shell.stores.palette.get().open).toBe(false);
+
+    const ranStatus = await runFromPalette(shell, { commandId: "system.status", title: "System status" }, {});
+    expect(ranStatus).toBe(true);
+    expect(callsTo(client, "system.status")).toBe(1);
+  });
+
+  test("the palette form's host sends token.create to Settings too", async () => {
+    const { shell, client } = await renderApp({});
+    const outcome = await paletteHostOf(shell).execute("token.create", { name: "ci" });
+    expect(outcome.ok).toBe(false);
+    expect(window.location.hash).toBe("#/settings");
+    expect(callsTo(client, "token.create")).toBe(0);
   });
 });

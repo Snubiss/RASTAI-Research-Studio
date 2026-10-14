@@ -5,7 +5,7 @@
     "rastai.lock/valid/rastai.lock": "blake3:7a24a4045cc59fd42262778146cdd98565f60f0d11d95ef71ffe9a27b3447ba5",
     "rastai.model/valid/kim_textcnn.rrsmodel": "blake3:e8869ef66b77170b4bd6b6cbe8a75bdce9e950db31c6e980645edeeb47348c03",
     "rastai.model/valid/recurrent_loop.rrsmodel": "blake3:8e3da1f13440a26be34166d0cd59b30d68809d2c10f5cf28bac5456e724bdffd",
-    "rastai.plugin/valid/rastai-plugin.json": "blake3:440550d9f71d53fe632df6d9a6df676da5db0b26524d8d9495ee78c33755f463",
+    "rastai.plugin/valid/rastai-plugin.json": "blake3:85918bca7542b23f05eee04c541724c4ea16e1ce7488bbf5d7b8a21ddc91c30d",
     "rastai.project/valid/project.json": "blake3:597074355304f748520bc2c4e8b4986416e019a439347691efff807c5e817e7f",
     "rastai.project/valid/remote_node.json": "blake3:7d6a8488ded8faf388e2dad0a6bc34bfd5f63341eb82b202f381fae314dea3bc",
     "rastai.resume/valid/resume.json": "blake3:0d027e7c434a342d1ead29784bd8b3297dfd34de0113b0b57f1d7dedde1afaec",

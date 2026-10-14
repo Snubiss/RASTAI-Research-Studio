@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "default_shortcut_without_modifier.json:20:9#/contributes/commands/0/default_shortcut"
+    }
+  ]
+}
