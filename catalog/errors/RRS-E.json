@@ -100,6 +100,16 @@
     "retired": false
   },
   {
+    "code": "RRS-E1007",
+    "severity": "error",
+    "title": "A safetensors layout can't be planned or hashed",
+    "message": "A safetensors layout can't be planned or hashed: {reason}.",
+    "basic_text": "Rastai can't lay out or identify these weights as one model. Nothing was saved.",
+    "fix_text": "If the weights came from a download, delete that copy and download it again. Otherwise report this bug; the log has the details.",
+    "docs_anchor": "rrs-e1007",
+    "retired": false
+  },
+  {
     "code": "RRS-E2001",
     "severity": "error",
     "title": "Reference doesn't resolve",

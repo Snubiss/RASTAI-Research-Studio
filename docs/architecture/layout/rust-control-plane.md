@@ -883,7 +883,7 @@ pub fn new_stream_hasher() -> StreamHasher
 pub fn update_stream_hasher(hasher: &mut StreamHasher, bytes: &[u8])
 pub fn finish_stream_hasher(hasher: StreamHasher) -> String
 pub fn content_hash_of_value(document: &serde_json::Value) -> String   // canonical JSON without the content_hash key
-pub fn model_hash(weight_files: &[(String, String)]) -> String         // contracts §8.6: sorted "<name> <hash>" lines
+pub fn model_hash(weight_files: &[&dyn ByteSource]) -> Result<String, Diagnostic> // contracts §8.6: one line per tensor, sorted by name
 
 // crc32.rs: one table for zip entries and event-log frames (contracts §7.1)
 pub fn crc32(bytes: &[u8]) -> u32
@@ -1067,7 +1067,7 @@ fn content_hash(document_json: &str) -> PyResult<String>
 fn hash_bytes(data: &[u8]) -> String
 
 #[pyfunction]
-fn model_hash(weight_files: Vec<(String, String)>) -> String
+fn model_hash(weight_files: Vec<String>) -> PyResult<String>   // the weight files' paths, each opened as a FileSource and read through the reader (contracts §8.6)
 
 #[pyfunction]
 fn read_safetensors_header_length(length_prefix: &[u8], file_length: u64) -> PyResult<u64>  // before any header byte is read

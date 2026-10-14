@@ -104,7 +104,7 @@ Not obvious:
   - a dropped folder takes the "Open from disk" route too, so a folder of documents is never uploaded file by file;
   - `rastai dataset import <path>` always imports by path.
 - **Which node.** Converters run next to the data (§22). A local path goes to the embedded node. An HF dataset goes to the node that will train, which pulls it directly. A MySQL source goes to the node that will train and reads the server from there (section 2.5). Private local data, and rows read from a database, move to a remote node only under the `trusted-remote` or `any` data policy (§24).
-- **Source hash.** The node hashes files in Rust. A folder's `content_hash` is BLAKE3 over its sorted `<relative path> <file hash>` lines, the same rule as the model hash.
+- **Source hash.** The node hashes files in Rust. A folder's `content_hash` is BLAKE3 over its sorted `<relative path> <file hash>` lines. That is a file-level rule; the model hash (contracts 8.6) covers the tensors instead.
 - **The sample** is the first 1,000 rows plus 1,000 seeded random rows. First rows alone are often unrepresentative (examples, headers, sorted data).
 - **Only the daemon writes project documents.** The job returns the draft as a blob. `documents`, undo steps and `document.changed` stay in one place.
 - **Formats in the prototype (§14):** JSONL, JSON arrays, CSV/TSV, Parquet, HF datasets (including streaming), text and Markdown folders, Alpaca, ShareGPT and OpenAI chat formats, DPO pair files, image folders and Parquet image columns (decoded through torchvision, section 2.5), and a MySQL or MariaDB query (section 2.5). The readers are `rastai_data/readers/` (`layout/python.md` 4.1). Anything else fails with `RRS-D1001` and a fix button that runs `plugin.suggest`.

@@ -622,6 +622,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-E1007",
+        severity: Severity::Error,
+        title: "A safetensors layout can't be planned or hashed",
+        message: "A safetensors layout can't be planned or hashed: {reason}.",
+        basic_text: "Rastai can't lay out or identify these weights as one model. Nothing was saved.",
+        fix_text: "If the weights came from a download, delete that copy and download it again. Otherwise report this bug; the log has the details.",
+        fix_command_id: "",
+        docs_anchor: "rrs-e1007",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-E2001",
         severity: Severity::Error,
         title: "Reference doesn't resolve",

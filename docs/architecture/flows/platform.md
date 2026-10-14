@@ -268,7 +268,7 @@ sequenceDiagram
     ND->>HC: rename to blobs/etag, link snapshots/commit/file
   end
   ND->>HC: write refs/revision last
-  ND->>ND: BLAKE3 per file, then the model hash
+  ND->>ND: BLAKE3 per file, then the model hash over the tensors (contracts 8.6)
   ND->>SRV: Heartbeat now, job succeeded, download.finished
   SRV->>SRV: models row with model_hash, license, gated, size
   SRV-->>WEB: download.finished
