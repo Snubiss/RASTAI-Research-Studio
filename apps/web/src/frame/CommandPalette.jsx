@@ -14,7 +14,7 @@ import { contextChips, flatContext } from "../commands/context-arguments.js";
 import { COPY_AS_CLI_SHORTCUT, shortcutMatches } from "../commands/keybindings.js";
 import { buildPaletteItems } from "../commands/palette-entries.js";
 import { loadRecentIds, saveRecentIds, withRecentId } from "../commands/recent.js";
-import { runFromPalette } from "../commands/run-command.js";
+import { paletteHostOf, runFromPalette } from "../commands/run-command.js";
 import { navigateTo } from "../routing/navigate.js";
 import { sectionRoute } from "../routing/route.js";
 import { readSetting } from "../state/settings.js";
@@ -47,6 +47,7 @@ export function CommandPalette() {
   const [copyFormat, setCopyFormat] = useState("cli");
   const [copyStatus, setCopyStatus] = useState("");
   const detailRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  const paletteHost = useMemo(() => paletteHostOf(shell), [shell]);
 
   const experimentalOn = readSetting(settings.values, EXPERIMENTAL_SETTING, false) === true;
   const { items, hiddenCount } = useMemo(
@@ -191,7 +192,7 @@ export function CommandPalette() {
         <div className="rr-palette-layout__detail" ref={detailRef}>
           <PaletteDetail
             item={selected}
-            host={shell.coreHost}
+            host={paletteHost}
             copyFormat={copyFormat}
             onCopyFormatChange={setCopyFormat}
             copyStatus={copyStatus}

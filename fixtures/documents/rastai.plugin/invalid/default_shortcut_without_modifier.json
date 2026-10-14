@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schemas.rastai.dev/rastai.plugin/1.json",
+  "type": "rastai.plugin",
+  "schema_version": 1,
+  "id": "doc_01JA2B3C4D5E6F7G8H9J0K1M2S",
+  "plugin_id": "acme_tools",
+  "display_name": "Acme tools",
+  "version": "1.2.0",
+  "engines": {
+    "rastai": "^1.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "title": "Run",
+        "kind": "sync",
+        "arguments_type": "A",
+        "result_type": "R",
+        "command_id": "acme_tools.run",
+        "default_shortcut": "Enter"
+      }
+    ]
+  }
+}

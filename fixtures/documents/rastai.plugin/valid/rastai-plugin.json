@@ -33,7 +33,7 @@
         "kind": "sync",
         "arguments_type": "RefreshArgs",
         "result_type": "RefreshResult",
-        "default_shortcut": "Ctrl+Shift+R",
+        "default_shortcut": "Mod+Shift+R",
         "undoable": false
       }
     ],

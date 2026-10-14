@@ -28,7 +28,9 @@ const PART_SEPARATOR = "+";
  */
 
 /**
- * The parts of a shortcut text. Empty or unreadable text is no shortcut.
+ * The parts of a shortcut text. Empty or unreadable text is no shortcut, and so is a key with neither Mod nor Alt: a
+ * bare Enter, Escape, Tab or letter belongs to the window's dialogs and fields, never to a command. The daemon's
+ * manifest check (crates/rastai-formats/src/validate/meaning/plugin_manifest.rs) uses the same grammar and rule.
  * @param {string} text
  * @returns {Shortcut | null}
  */
@@ -45,12 +47,16 @@ export function parseShortcut(text) {
   if (!modifiers.every((modifier) => [MODIFIER_MOD, MODIFIER_SHIFT, MODIFIER_ALT].includes(modifier))) {
     return null;
   }
-  return {
+  const shortcut = {
     mod: modifiers.includes(MODIFIER_MOD),
     shift: modifiers.includes(MODIFIER_SHIFT),
     alt: modifiers.includes(MODIFIER_ALT),
     key,
   };
+  if (!shortcut.mod && !shortcut.alt) {
+    return null;
+  }
+  return shortcut;
 }
 
 /**

@@ -431,7 +431,7 @@ flowchart LR
 
 Steps:
 1. **Descriptors:** at boot and on every `plugin.state_changed`, the app calls `ListCommands`. The daemon merges the core table and enabled plugins' manifests, so the UI never merges them itself.
-2. **Keybindings,** lowest to highest: each descriptor's `default_shortcut`, plugins' `contributes.keybindings`, then the user's `<config>/keybindings.json` read with `workspace.keybindings.get`. A binding's `when` is empty (always) or a single `<key>=<value>` test against the context, e.g. `focus=canvas` or `section=designer`. Context keys are in contracts §15.6.
+2. **Keybindings,** lowest to highest: each descriptor's `default_shortcut`, plugins' `contributes.keybindings`, then the user's `<config>/keybindings.json` read with `workspace.keybindings.get`. A binding's `when` is empty (always) or a single `<key>=<value>` test against the context, e.g. `focus=canvas` or `section=designer`. Context keys are in contracts §15.6. A default shortcut needs Mod or Alt (a bare Enter, Escape, Tab or letter is never a shortcut), and the daemon's manifest check refuses a plugin's `default_shortcut` that doesn't have one (`RRS-E2006`, the grammar of `apps/web/src/commands/keybindings.js`). No shortcut fires while a modal dialog is open: a locked dialog owns its keys.
 3. **View actions** are UI-only entries the app derives from the registry: `view.section.open` per section, `view.panel.open` per panel, `view.window.open` (the current route in a new window, 8.4), `view.palette.repeat_last`. They never reach the daemon and have no "Copy as". `view` is a reserved core area (contracts §6.1), so no plugin command can take a `view.*` id.
 4. **Filter:** hide `experimental` commands unless `plugins.experimental_apis` is on. In Basic mode keep only `basic` ones. Every command is `stability` `preview` until Phase 2 (contracts §6.1), so the palette shows no stability tag in the prototype; a `deprecated` command, once one exists, gets a tag and its replacement.
 5. **Match and rank:** in-house subsequence scoring over the title, command id and section. Recently used entries (localStorage) rank first.
@@ -439,6 +439,7 @@ Steps:
    - If the arguments have required fields that the context can't fill, the palette opens `CommandForm`, generated from the descriptor's `arguments_schema_json` (the same schema the MCP server lists as `inputSchema`).
    - Context prefill: a field named like a context id (`conversation_id`, `document_id`, `run_id`, `checkpoint_id`, `model_ref`) is filled from the current context. Sections set the context with `host.setContext`.
    - Then `execute`. A `job` command shows a `JobProgress` toast with a link; a `stream` command navigates to the view that shows the stream.
+   - `token.create` is never run from here, by the entry, the form or a shortcut: a token is made only behind the locked TokenConfirm prompt, so the palette closes and opens Settings > API tokens (`run-command.js`, `paletteHostOf`).
 7. **Copy as:** the entry's menu writes the same call four ways (`apps/web/src/commands/copy-as.js`):
 
 ```
@@ -2537,7 +2538,7 @@ The manifest (`rastai-plugin.json`, `rastai.plugin/1`, owned by `rastai-formats`
 
 | Contribution | Entry fields | Implemented by |
 |---|---|---|
-| `commands[]` | `command_id`, `title`, `summary`, `scope`, `kind`, `arguments_type`, `result_type`, `basic`, `default_shortcut`, `undoable` | Python `handle_command` in the plugin module |
+| `commands[]` | `command_id`, `title`, `summary`, `scope`, `kind`, `arguments_type`, `result_type`, `basic`, `default_shortcut` (empty, or one with Mod or Alt; no shortcut fires while a modal dialog is open), `undoable` | Python `handle_command` in the plugin module |
 | `sections[]` | `section_id` (= `plugin_id`), `title`, `icon`, `order`, `default_layout` | JS `Section` |
 | `panels[]` | `panel_id`, `title`, `dock_section`, `placement` (right/bottom/tab), `basic` | JS `Panel` (in-process) or the iframe entry |
 | `lenses[]` | `lens_id`, `title`, `source` (live/offline), `points[]` (observation-point patterns), `readout_class` (Python), `view` (lens view id or `table`), `basic` | Python `Lens` (offline) or the runtime (`live`, first-party only); JS `LensView` |

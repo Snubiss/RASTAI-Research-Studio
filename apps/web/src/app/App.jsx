@@ -59,6 +59,11 @@ function Frame() {
   useEffect(() => {
     /** @param {KeyboardEvent} event */
     function onKeyDown(event) {
+      // A locked dialog owns its keys, so no window shortcut runs while one is open (see modalDialogOpen).
+      if (modalDialogOpen()) {
+        armGoPrefix(goPending, goTimer, false);
+        return;
+      }
       const step = keyStep(
         {
           key: event.key,
@@ -151,6 +156,16 @@ function Notices() {
  */
 function openPalette(shell) {
   shell.stores.palette.set({ open: true, query: "" });
+}
+
+/**
+ * Whether a modal dialog is open: TokenConfirm, TrustPrompt, the Overlays dialogs or the palette. Their Enter, Escape and
+ * Tab belong to the dialog's own buttons, and a shortcut that ran a command behind a locked prompt would take them, so
+ * while one is open the window's keys and default shortcuts stay quiet.
+ * @returns {boolean}
+ */
+function modalDialogOpen() {
+  return document.querySelector("dialog:modal") !== null;
 }
 
 /**
