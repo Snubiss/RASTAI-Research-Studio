@@ -2873,7 +2873,7 @@ crates/rastai-cli/
     verb_arguments.rs         flags to arguments JSON from the command's schema (kinds, positionals, lists, maps)
     follow.rs                 follow a job or a stream through EventService.Subscribe until it ends
     command_cache.rs          <cache>/commands-<app version>.json: the last ListCommands, for help when the daemon is down
-    help.rs                   help text from descriptors and schemas
+    help.rs                   help text from descriptors and schemas; control characters dropped from descriptor text
     completion.rs             bash, zsh and fish completion scripts from the cached command list
     local_commands.rs         no daemon needed: validate, version, storage rebuild-index
     output.rs                 the only stdout and stderr writer: results as text or --json, diagnostics via rastai-diag
@@ -2949,6 +2949,10 @@ pub fn build_arguments_json(command: &CommandDescriptor, schema: &serde_json::Va
 | a field with `cli_position` (core) or `x-rastai-cli-position` (plugin `types.json`) | positional, in order, or as a flag | `rastai eval test evals/facts.rrseval --model ckpt:...` |
 
 - Field names map to flags by `flag_name` (`fail_fast` → `--fail-fast`). Flags override `--arguments-json` and `--arguments-file` key by key.
+- `--arguments-file` is read at most one byte past the import limit (the cap `validate` uses), so a FIFO or a huge file is refused with `RRS-E5003` before any JSON parse; a file that isn't UTF-8 is refused as not an object.
+- `--help` on a verb line wins: the verb's global flags (`--dry-run`, `--detach`, `--arguments-json`, ...) are ignored in help mode rather than refused. Words after `--` keep their refusal, and without `--help` the flags are still refused in a mode that doesn't read them.
+- Descriptor text printed by `help.rs` (titles, summaries, descriptions, flag words) drops every control character except the line break, so a plugin's text can't write escape sequences to the terminal.
+- A job that ended while the follower was reopening (`job.get`) reports its row's `error_code`, when it has one, as a diagnostic whose message is the catalog title, since the row carries no placeholder values.
 - **Global flags** are reserved; `tests/command_table.rs` and the plugin host refuse a command field that collides with one: `--json`, `--detach`, `--no-start`, `--node`, `--project`, `--set`, `--verbose`, `--dry-run`, `--idempotency-key`, `--arguments-json`, `--arguments-file`, `--help`.
 - "Copy as CLI" in the UI (frontend doc) always writes flags, never positionals, so a copied line is unambiguous. `tests/verbs.rs` parses every CLI line of `fixtures/command-golden/copy-as.json` back to the same arguments.
 

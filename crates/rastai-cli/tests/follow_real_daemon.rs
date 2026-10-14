@@ -19,6 +19,8 @@ use rastai_cli::follow::{follow_job, open_job_events};
 use rastai_cli::output::OutputSettings;
 use rastai_cli::verbs::VerbOutcome;
 use rastai_core::versions::APP_VERSION;
+use rastai_diag::catalog::find_entry;
+use rastai_diag::diagnostic::{Diagnostic, Severity};
 use rastai_proto::common::v1::JobState;
 use serde_json::Value;
 
@@ -27,6 +29,8 @@ use common::{DaemonGuard, daemon_socket, run_rastai, test_home};
 const DESIGN: &str = "templates/designs/textcnn.rrsmodel";
 const DATASET: &str = "fixtures/datasets/textcnn_tiny.jsonl";
 const FAILED_STATE: &str = "failed";
+/// The code the job fails with on a daemon with no cpu environment (see the module doc).
+const NODE_LACKS_CAPABILITY: &str = "RRS-N0004";
 /// The job fails as soon as the scheduler offers it to the embedded node; a loaded machine is slower.
 const JOB_END_LIMIT: Duration = Duration::from_secs(60);
 const POLL: Duration = Duration::from_millis(200);
@@ -102,13 +106,23 @@ fn a_job_that_ended_before_its_follower_subscribed_is_read_with_the_daemons_job_
         .expect("the follower waited for an event that had already been sent")
         .unwrap();
     // The row doesn't keep the state the job left, so the last state the follower saw (none: queued) stands in.
+    // The row's error code comes with its catalog title, the job's failure as the follower reports it.
+    let failure = Diagnostic {
+        code: NODE_LACKS_CAPABILITY.to_string(),
+        severity: Severity::Error,
+        message: find_entry(NODE_LACKS_CAPABILITY).unwrap().title.to_string(),
+        path: String::new(),
+        fix_text: find_entry(NODE_LACKS_CAPABILITY).unwrap().fix_text.to_string(),
+        fix_command_id: String::new(),
+        fix_arguments_json: String::new(),
+    };
     assert_eq!(
         outcome,
         VerbOutcome::JobEnded {
             job_id,
             final_state: JobState::Failed,
             from_state: JobState::Queued,
-            diagnostics: Vec::new(),
+            diagnostics: vec![failure],
         }
     );
 }

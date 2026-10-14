@@ -112,7 +112,8 @@ pub fn choose_mode(arguments: &ParsedArguments) -> Result<Mode, CliError> {
 /// Words after `--` and the global flags only a verb reads, refused in a mode that would ignore them: a line of
 /// only `--` and stray words doesn't open the UI, and `rastai open --dry-run` doesn't pretend to be a dry run.
 /// `--set` is `serve`'s too, and `validate` reads the words after `--` as files. The modes not built yet (M9, L2)
-/// are refused whole with `RRS-C0010`, so their flags aren't looked at.
+/// are refused whole with `RRS-C0010`, so their flags aren't looked at. A `--help` on a verb line wins: the verb's
+/// flags are only read for their help, so they are ignored rather than refused.
 fn refuse_what_the_mode_ignores(mode: &Mode, arguments: &ParsedArguments) -> Result<(), CliError> {
     match mode {
         Mode::NodeServe | Mode::NodeInit | Mode::NodeCheckUpdate | Mode::Tunnel | Mode::Verb(_) => return Ok(()),
@@ -133,7 +134,10 @@ fn refuse_what_the_mode_ignores(mode: &Mode, arguments: &ParsedArguments) -> Res
     {
         return Err(usage_error(&format!("{SET_FLAG} {set_flag}"), SET_ONLY_WITH_SERVE));
     }
-    if let Some(flag) = verb_only_flags_given(global).first() {
+    let help_wins = matches!(mode, Mode::Help(_)) && global.help;
+    if let Some(flag) = verb_only_flags_given(global).first()
+        && !help_wins
+    {
         let expected = format!("a command's flag, which rastai {} doesn't read", mode_words(mode));
         return Err(usage_error(flag, &expected));
     }
