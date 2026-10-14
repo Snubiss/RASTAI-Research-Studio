@@ -239,11 +239,34 @@ FAILING_JAVASCRIPT = [
         'import { EgressBadge } from "@rastai/ui/security";\n',
         "only apps/web/src/ may import",
     ),
+    # check-no-typescript allows .tsx and .cts in src/generated/ too, so each is read like a .js file (FU-276 item 8,
+    # review round 3). Before the fix a .js file importing ./generated/x resolved to x.tsx and passed unread.
+    (
+        "plugins/evaluation/ui/src/generated/ui.tsx",
+        'import { EgressBadge } from "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
+    (
+        "plugins/evaluation/ui/src/generated/ui.cts",
+        'import { EgressBadge } from "@rastai/ui/security";\n',
+        "only apps/web/src/ may import",
+    ),
     # A declaration file is type-only, which still doesn't grant a package a dependency it doesn't have.
     (
         "packages/canvas/src/generated/graph.d.ts",
         'import type { Diagnostic } from "@rastai/proto";\n',
         "here may import only",
+    ),
+    (
+        "packages/canvas/src/generated/graph.d.cts",
+        'import type { Diagnostic } from "@rastai/proto";\n',
+        "here may import only",
+    ),
+    # A negated pattern is refused with its own reason: it names no file, and Vite's negation is not a §27 library.
+    (
+        "apps/web/src/app/panels.js",
+        'const panels = import.meta.glob(["./panels/*.jsx", "!./panels/legacy.jsx"], { eager: true });\n',
+        "a negated pattern",
     ),
     (
         "packages/plugin/src/index.js",
@@ -542,6 +565,16 @@ def test_every_contracts_package_has_a_row(load_check):
     assert python_packages and javascript_packages
     assert python_packages == set(check.PYTHON_INTERNAL_DEPS)
     assert javascript_packages == set(check.JS_INTERNAL_DEPS)
+
+
+def test_every_typescript_suffix_is_read_as_javascript(load_check):
+    """check-no-typescript allows these suffixes in src/generated/, so this check must read every one of them."""
+    check = load_check("check-imports")
+    typescript = load_check("check-no-typescript")
+    for suffix in typescript.TYPESCRIPT_SUFFIXES:
+        assert suffix in check.JS_SUFFIXES, suffix
+    for declaration in (".d.ts", ".d.mts", ".d.cts"):
+        assert declaration in check.TYPE_DECLARATION_SUFFIXES, declaration
 
 
 def test_the_real_repository_passes(run_check):
