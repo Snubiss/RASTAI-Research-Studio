@@ -41,8 +41,9 @@ RUST_CHAR_LITERAL = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]{1,6}\}|x[0-9a-fA-F]{2}|
 # The start of a raw string: r"..", r#".."#, r##".."## and so on, and the byte and C forms br".." and cr"..".
 RUST_RAW_STRING_START = re.compile(r"[bc]?r(#*)\"")
 # The keywords a module specifier follows with no space in between (import{X}from"x", import"x").
-IMPORT_KEYWORD = "import"
 IMPORT_KEYWORD_BEFORE_QUOTE = re.compile(r"(?<![\w$])(?:from|import)\Z")
+# The longer of the two keywords, which sets how far back follows_an_import_keyword looks.
+LONGEST_IMPORT_KEYWORD_LENGTH = len("import")
 
 
 def parse_root_argument(description: str) -> Path:
@@ -99,6 +100,20 @@ def split_javascript(text: str) -> list[tuple[str, int, int]]:
     check reads a few characters as the wrong kind.
     """
     return split_source(text, next_javascript_span)
+
+
+def javascript_code_only(text: str) -> str:
+    """JavaScript source with every comment and string blanked to spaces, the same length and the same line breaks.
+
+    A check that looks for syntax (`import.meta.glob(`, `base:`) reads this, so a pattern in a string or a
+    commented-out call can neither hide code nor count as code. A check that needs a quoted key reads the text itself,
+    since its string is blanked here.
+    """
+    pieces = []
+    for kind, start, end in split_javascript(text):
+        piece = text[start:end]
+        pieces.append(piece if kind == "code" else blank_out(piece))
+    return "".join(pieces)
 
 
 def split_rust(text: str) -> list[tuple[str, int, int]]:
@@ -173,9 +188,14 @@ def follows_a_word(text: str, position: int) -> bool:
 def follows_an_import_keyword(text: str, position: int) -> bool:
     """Whether the whole word `from` or `import` sits right before position, as in import{X}from"x": the minified
     and prettier-ignored forms write no space before the quote, and that quote is still a module specifier. A
-    longer word that ends in those letters (reimport) is not the keyword, so its quote stays JSX text."""
-    # A window one character longer than the keyword holds the character before it, which must not be a word character.
-    window = text[max(0, position - len(IMPORT_KEYWORD) - 1) : position]
+    longer word that ends in those letters (reimport) is not the keyword, so its quote stays JSX text.
+
+    Known false positive: JSX text that ends in the whole word from or import (<p>Copy from"here"</p>) reads as a
+    specifier. The check fails safe on it (the word is refused as a library), and the repository has no such text.
+    """
+    # The window holds one character more than the longest keyword, so the lookbehind can see the character before a
+    # keyword that starts inside it.
+    window = text[max(0, position - LONGEST_IMPORT_KEYWORD_LENGTH - 1) : position]
     return IMPORT_KEYWORD_BEFORE_QUOTE.search(window) is not None
 
 

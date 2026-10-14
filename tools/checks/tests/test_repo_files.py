@@ -8,7 +8,7 @@ import pytest
 # repo_files.py sits one folder up, beside the check scripts that import it.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from repo_files import rust_code_only, split_javascript  # noqa: E402
+from repo_files import javascript_code_only, rust_code_only, split_javascript  # noqa: E402
 
 
 @pytest.mark.parametrize(
@@ -31,6 +31,21 @@ def test_rust_code_only_blanks_strings_and_comments(source, non_code_part):
 def test_lifetimes_stay_code():
     source = "fn f<'a>(x: &'a str) -> &'a str { x }"
     assert rust_code_only(source) == source
+
+
+@pytest.mark.parametrize(
+    ("source", "non_code_part"),
+    [
+        ('f("import.meta.glob(x)");', '"import.meta.glob(x)"'),
+        ("a(); // base: 1", "// base: 1"),
+        ("b(/* base */ 1);", "/* base */"),
+        ("c(`x${y}`);", "`x${y}`"),
+    ],
+)
+def test_javascript_code_only_blanks_strings_and_comments(source, non_code_part):
+    """A glob call or a base key written in a string or a comment is not code, so the glob check can't see it there."""
+    blanked = "".join("\n" if character == "\n" else " " for character in non_code_part)
+    assert javascript_code_only(source) == source.replace(non_code_part, blanked)
 
 
 def test_rust_code_only_keeps_offsets(source='x = "a\\"b"; /* c */ y'):
