@@ -303,7 +303,7 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 | 7 | The safetensors header check gives the expected code on all 33 corpus files, in Rust and through the wheel from Python | M1-34 |
 | 8 | Plugins load through the host; a bad manifest disables only that plugin | `tests/plugin_host.rs` (M1-32) |
 | 9 | The web shell's palette lists and runs the registered commands; copy-as matches the CLI | `palette.spec.js` (M1-54) |
-| 10 | Rust, the portable Python packages and the JavaScript packages build and pass their tests on CPU runners: Rust and Python on Linux, macOS and Windows, JavaScript on Linux and macOS | `test-rust-*`, `test-python-*`, `test-js`, `test-js-macos` jobs (M1-06) |
+| 10 | Rust, the portable Python packages and the JavaScript packages build and pass their tests on CPU runners: Rust and Python on Linux, macOS and Windows, JavaScript on Linux and macOS | `test-rust-*`, `test-python-*`, `test-js`, `test-js-macos` jobs (M1-06). Until the Windows random source lands (#232, 8.7), `test-rust-windows` is expected red on tests that reach `new_id` or `random_bytes` outside `cfg(unix)` |
 | 11 | A theme switch (light, dark, `system`, compact density) restyles the shell without changing any `--rr-locked-*` variable; a session cookie works only from the origin that redeemed its login code | `theme.spec.js` (M1-54), `tests/gate.rs` (M1-26) |
 | 12 | No hand-written TypeScript and no color literal outside the token files | `check-no-typescript`, `check-colors` in `just check` (M1-05) |
 | 13 | Every name in code is registered in contracts.md, and every registered name is in code or carries its milestone mark; a command or event schema change without a contracts update fails, and so does a breaking change to a `stable` item | `check-names` (M1-57) and `check-schema-diff` (M1-58) in `just check` and the `checks` job, each with its fixture suite |
@@ -1946,6 +1946,10 @@ Each job is one `just` recipe; the workflow files stay thin (contracts §1). Whi
 | `ssh-loopback`, `remote-network-drop` | `ci.yml` | Linux with an sshd container | PR, push | M9-E02, M9-E03 | yes |
 | `node-over-ssh` (§16: the local suites rerun with `RASTAI_TEST_NODE=ssh`, so local and remote never drift) | `nightly.yml` | Linux with an sshd container | schedule, `main` only (contracts §15.9; section 10 row 44) | M9-E02; grows with M9-E03 and M5-E06 | no |
 | `mysql-archive` (`just test-archive` against MySQL 8.4, MySQL 9.7, MariaDB 11.4 and MinIO; a skipped server test fails it) | `ci.yml` and `nightly.yml` | Linux with service containers | PR touching the archive or the MySQL reader; nightly on `main` | M11-E07 | yes, for the PRs it runs on |
+
+**What changes when CI returns (M1 close-out, FU-254):**
+- `test-rust-windows` is expected red on tests that reach `new_id` or `random_bytes` outside `cfg(unix)` until a Windows random source lands (#232, tier 2). Accepted while CI is manual-only; the affected tests stay unix-only or the job stays red, and the choice is recorded here when #232 is worked.
+- A release-build strings check that the shipped `rastai` binary contains no `RASTAI_TEST_PAUSE_AT` hook strings (#263).
 
 ### 8.8 The self-hosted GPU runner
 

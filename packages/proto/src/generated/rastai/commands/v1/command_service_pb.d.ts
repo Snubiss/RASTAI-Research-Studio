@@ -62,8 +62,9 @@ export declare type ExecuteRequest = Message<"rastai.commands.v1.ExecuteRequest"
   dryRun: boolean;
 
   /**
-   * Set only by a UI plugin host. It narrows the caller's rights to that plugin's grant and is journaled as
-   * plugin:<plugin_id>; it can only remove rights, never add them.
+   * Only the owner may set it (a UI plugin host acting for the owner); any other principal is refused with
+   * RRS-C1005. It narrows the caller's rights to that plugin's grant and is journaled as plugin:<plugin_id>; it can
+   * only remove rights, never add them.
    *
    * @generated from field: string acting_plugin_id = 6;
    */

@@ -52,6 +52,7 @@ pub fn dispatch(context: &CommandContext, command_id: &str, arguments_json: &str
 - *Every command and event type carries `stability` (`preview`, `stable`, `deprecated`); all are `preview` until the stable commands API 1.0 subset in Phase 2. `buf breaking` can't see inside `arguments_json` and `result_json`, so a schema-diff check over `schemas/commands/` is planned with that subset (contracts §4, §6.1).* *Note (2026-10-11), ADR-0038: `check-schema-diff` runs from M1, not with the stable subset. It diffs `schemas/commands/` and `schemas/events/` against the base branch and needs a contracts update for every change.*
 - *A fifth generated surface: one typed JavaScript wrapper per command (`modelLoad(executor, args)`), generated against the small `CommandExecutor` shape that both `DaemonClient` and `PluginHost` satisfy (contracts §12.4).*
 - *Decision 2: `ExecuteRequest` also carries `acting_plugin_id`, set only by the UI plugin host. It can only narrow the principal to that plugin's grant, never widen it (contracts §4.2, §16 row 3).*
+  - *Amended 2026-10-14 by SEC-01 (#230): only the owner may set `acting_plugin_id`; others get RRS-C1005 (contracts 4.2).*
 - *`apps/web` holds no domain logic: anything stateful or computed is a command, so every surface gets it (contracts §2.4 rule 9).*
 - *The decisions are unchanged.*
 
