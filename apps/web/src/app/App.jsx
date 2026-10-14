@@ -62,6 +62,7 @@ function Frame() {
       // A locked dialog owns its keys, so no window shortcut runs while one is open (see modalDialogOpen).
       if (modalDialogOpen()) {
         armGoPrefix(goPending, goTimer, false);
+        keepPaletteKey(event);
         return;
       }
       const step = keyStep(
@@ -166,6 +167,17 @@ function openPalette(shell) {
  */
 function modalDialogOpen() {
   return document.querySelector("dialog:modal") !== null;
+}
+
+/**
+ * Ctrl K stays the window's while a modal dialog is open: the browser would otherwise take it for its own address or
+ * search bar. Nothing opens over the dialog, so only the browser's default is stopped.
+ * @param {KeyboardEvent} event
+ */
+function keepPaletteKey(event) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+  }
 }
 
 /**

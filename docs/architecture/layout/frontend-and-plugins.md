@@ -439,7 +439,7 @@ Steps:
    - If the arguments have required fields that the context can't fill, the palette opens `CommandForm`, generated from the descriptor's `arguments_schema_json` (the same schema the MCP server lists as `inputSchema`).
    - Context prefill: a field named like a context id (`conversation_id`, `document_id`, `run_id`, `checkpoint_id`, `model_ref`) is filled from the current context. Sections set the context with `host.setContext`.
    - Then `execute`. A `job` command shows a `JobProgress` toast with a link; a `stream` command navigates to the view that shows the stream.
-   - `token.create` is never run from here, by the entry, the form or a shortcut: a token is made only behind the locked TokenConfirm prompt, so the palette closes and opens Settings > API tokens (`run-command.js`, `paletteHostOf`).
+   - `token.create` is never run from here, by the entry, the form or a shortcut: a token is made only behind the locked TokenConfirm prompt, so the palette closes and opens Settings, where API tokens is (`run-command.js`, `paletteHostOf`).
 7. **Copy as:** the entry's menu writes the same call four ways (`apps/web/src/commands/copy-as.js`):
 
 ```
