@@ -126,11 +126,14 @@ pub async fn record_job_changes(server: &Server, node_id: &str, jobs: &[JobInfo]
 }
 
 /// The move from a `jobs` row to what the node reports, or None when there is nothing to record: the same state, a
-/// row already final, or a state this build doesn't know.
+/// row already final, a move back to the start (see `moves_back_to_start`), or a state this build doesn't know.
 pub fn job_change(row: &JobRow, info: &JobInfo) -> Option<JobStateChanged> {
     let from = parse_job_state(&row.state)?;
     let to = JobState::try_from(info.state).ok()?;
     if from == to || is_terminal_job_state(from) || to == JobState::Unspecified {
+        return None;
+    }
+    if moves_back_to_start(from, to) {
         return None;
     }
     let reason = match info.exit_code {
@@ -145,6 +148,21 @@ pub fn job_change(row: &JobRow, info: &JobInfo) -> Option<JobStateChanged> {
         exit_code: info.exit_code,
         diagnostic: info.last_error.clone(),
     })
+}
+
+/// Whether a report would move a job back to `queued` or `starting` from a state past that. Snapshots may skip states,
+/// so a row can jump from `queued` to `running`, but they never go backward: a job reported as `queued` again would
+/// launch a second time, and one reported as `starting` after it ran would start its process over. A job that is
+/// `lost` and reports `running` again is the reattach path (contracts 9.1), which this does not refuse.
+fn moves_back_to_start(from: JobState, to: JobState) -> bool {
+    match to {
+        JobState::Queued => from != JobState::Queued,
+        JobState::Starting => matches!(
+            from,
+            JobState::Running | JobState::Paused | JobState::Stopping | JobState::Lost
+        ),
+        _ => false,
+    }
 }
 
 /// A node that stopped answering: its running jobs are lost until it is back (contracts 9.1, running → lost).
@@ -435,6 +453,25 @@ mod tests {
         let preempted = job_change(&row("stopping"), &info(JobState::Cancelled, Some(75))).unwrap();
         assert_eq!(preempted.reason, "preempted");
         assert_eq!(preempted.exit_code, Some(75));
+    }
+
+    // A report never moves a job back to the start, whatever state it was in (contracts 9.1).
+    #[test]
+    fn a_report_never_moves_a_job_back_to_queued_or_starting() {
+        assert_eq!(job_change(&row("running"), &info(JobState::Queued, None)), None);
+        assert_eq!(job_change(&row("running"), &info(JobState::Starting, None)), None);
+        assert_eq!(job_change(&row("starting"), &info(JobState::Queued, None)), None);
+        assert_eq!(job_change(&row("lost"), &info(JobState::Starting, None)), None);
+    }
+
+    // Skipped states and the reattach path are still recorded.
+    #[test]
+    fn a_skipped_state_or_a_reattach_is_still_recorded() {
+        assert!(job_change(&row("queued"), &info(JobState::Starting, None)).is_some());
+        assert!(job_change(&row("starting"), &info(JobState::Running, None)).is_some());
+        assert!(job_change(&row("queued"), &info(JobState::Running, None)).is_some());
+        assert!(job_change(&row("running"), &info(JobState::Lost, None)).is_some());
+        assert!(job_change(&row("lost"), &info(JobState::Running, None)).is_some());
     }
 
     #[test]

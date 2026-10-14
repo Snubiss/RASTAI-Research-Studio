@@ -10,7 +10,8 @@
 //!   migrated to this build's columns if it is older and removed once read. SQLite never opens the old file, so
 //!   `rastai.db.broken-<unix_ms>` holds the very bytes `rastai.db` had (with its `-wal`, if it had one).
 //!   A copy that can't be made stops the rebuild before it changes anything: an old file that can't be read is
-//!   `RRS-S0006` naming it, a copy that can't be written `RRS-S0004` (`RRS-S3002` for a full disk).
+//!   `RRS-S0006` naming it; a copy that can't be written for a permission reason is `RRS-S0004` naming the data
+//!   folder, any other failed write is `RRS-S3005` with the io error, and a full disk is `RRS-S3002`.
 //! - **Crash-safe.** The new index is written to `rastai.db.rebuilding` and only takes the old one's place once it
 //!   is whole and has passed `quick_check`. The old file is copied to `rastai.db.broken-<unix_ms>` first and stays
 //!   at `rastai.db` until the rename, so a kill at any point leaves a usable index: the old one, or the new one. A
@@ -229,8 +230,8 @@ fn write_rebuilt_index(
 /// copy, `rastai.db.salvage`, removed afterwards: opening the old file would migrate it and write to it, and the
 /// copy kept at `rastai.db.broken-<unix_ms>` must be the file as it was. A copy that can't be made stops the
 /// rebuild, since going on would drop every token and node: an old file that can't be read (a permission, an I/O
-/// error) is `RRS-S0006` naming it, since it may read again once the cause is fixed, and a copy that can't be written
-/// is `RRS-S0004` (`RRS-S3002` for a full disk).
+/// error) is `RRS-S0006` naming it, since it may read again once the cause is fixed. A copy that can't be written is
+/// the write codes of `write_error`.
 fn read_kept_tables(paths: &DataPaths, report: &mut RebuildReport) -> Result<KeptRows, StoreError> {
     let old_path = rastai_db_path(paths);
     if !old_path.exists() {
@@ -810,7 +811,7 @@ fn copy_database_files(database_path: &Path, copy_path: &Path) -> Result<(), Sto
 }
 
 /// Copies one file, telling a failed read of `source` (`RRS-S0006`, naming it) from a failed write of the copy
-/// (`RRS-S0004`, or `RRS-S3002` for a full disk), which `std::fs::copy` reports alike.
+/// (`write_error`), which `std::fs::copy` reports alike.
 fn copy_file(source: &Path, destination: &Path) -> Result<(), StoreError> {
     let mut source_file = File::open(source).map_err(|error| old_file_unreadable(source, &error))?;
     let permissions = source_file
@@ -889,17 +890,22 @@ fn sync_folder(_folder: &Path) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// A file in the data folder that can't be created, written, copied, renamed or removed: `RRS-S0004`, or
-/// `RRS-S3002` for a full disk, whose fix is space rather than permissions.
+/// A file in the data folder that can't be created, written, copied, renamed or removed. A permission (or a read-only
+/// folder) is `RRS-S0004` naming the data folder, whose fix is the folder's permissions. A full disk is `RRS-S3002`,
+/// whose fix is space. Any other failure is `RRS-S3005` with the file and the io error: the user needs to know which
+/// write failed and why, not only that the folder is the problem.
 fn write_error(path: &Path, error: &std::io::Error) -> StoreError {
-    if error.kind() == ErrorKind::StorageFull {
-        return StoreError::DiskFull {
+    match error.kind() {
+        ErrorKind::StorageFull => StoreError::DiskFull {
             reason: format!("{}: {error}", path.display()),
-        };
-    }
-    StoreError::DataDirectoryNotWritable {
-        path: path.to_path_buf(),
-        reason: error.to_string(),
+        },
+        ErrorKind::PermissionDenied | ErrorKind::ReadOnlyFilesystem => StoreError::DataDirectoryNotWritable {
+            path: path.parent().unwrap_or(path).to_path_buf(),
+            reason: error.to_string(),
+        },
+        _ => StoreError::DatabaseWriteFailed {
+            reason: format!("{}: {error}", path.display()),
+        },
     }
 }
 
@@ -1100,13 +1106,64 @@ mod tests {
 
     // std::fs::copy reports both alike; a full disk needs space, not permissions, so it gets its own code.
     #[test]
-    fn a_full_disk_is_rrs_s3002_and_any_other_failed_write_rrs_s0004() {
-        let path = Path::new("rastai.db.salvage");
+    fn a_full_disk_is_rrs_s3002_and_a_permission_rrs_s0004_naming_the_folder() {
+        let path = Path::new("/data/rastai.db.salvage");
         let disk_full = std::io::Error::from(ErrorKind::StorageFull);
         let permission_denied = std::io::Error::from(ErrorKind::PermissionDenied);
 
         assert_eq!(write_error(path, &disk_full).code(), "RRS-S3002");
-        assert_eq!(write_error(path, &permission_denied).code(), "RRS-S0004");
+        let denied = store_error_diagnostic(&write_error(path, &permission_denied)).message;
+        assert_eq!(denied, "The data directory /data is not writable.");
+    }
+
+    // Any other failed write names the file and keeps the io error's words, so a failed salvage write doesn't read as
+    // a folder that can't be written.
+    #[test]
+    fn any_other_failed_write_is_rrs_s3005_with_the_io_error() {
+        let path = Path::new("/data/rastai.db.salvage");
+        let injected = std::io::Error::other("injected write failure");
+
+        let error = write_error(path, &injected);
+        assert_eq!(error.code(), "RRS-S3005");
+        let message = store_error_diagnostic(&error).message;
+        assert!(
+            message.contains("/data/rastai.db.salvage: injected write failure"),
+            "{message}"
+        );
+    }
+
+    // A salvage copy into a read-only data folder: the write is refused, and the error names the folder (RRS-S0004),
+    // not the scratch file the rebuild was writing.
+    #[cfg(unix)]
+    #[test]
+    fn a_salvage_copy_into_a_read_only_folder_is_rrs_s0004_naming_the_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        const READ_ONLY_FOLDER_MODE: u32 = 0o500;
+        const OWNER_FOLDER_MODE: u32 = 0o700;
+        let paths = test_paths("read-only-salvage");
+        std::fs::create_dir_all(&paths.data).unwrap();
+        let index_path = rastai_db_path(&paths);
+        drop(open_database_for_writing(&index_path, &INDEX_DATABASE_SETTINGS, INDEX_MIGRATIONS).unwrap());
+        std::fs::set_permissions(&paths.data, std::fs::Permissions::from_mode(READ_ONLY_FOLDER_MODE)).unwrap();
+        let folder_refuses_writes = std::fs::File::create(paths.data.join("probe")).is_err();
+        if !folder_refuses_writes {
+            // Root writes into any folder, so no permission makes this one read-only.
+            eprintln!("skipped: this user writes into read-only folders");
+            std::fs::set_permissions(&paths.data, std::fs::Permissions::from_mode(OWNER_FOLDER_MODE)).unwrap();
+            std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
+            return;
+        }
+
+        let error = rebuild_index(&paths, &RebuildOptions::default()).unwrap_err();
+
+        std::fs::set_permissions(&paths.data, std::fs::Permissions::from_mode(OWNER_FOLDER_MODE)).unwrap();
+        assert_eq!(error.code(), "RRS-S0004");
+        let message = store_error_diagnostic(&error).message;
+        assert_eq!(
+            message,
+            format!("The data directory {} is not writable.", paths.data.display())
+        );
+        std::fs::remove_dir_all(paths.data.parent().unwrap()).unwrap();
     }
 
     // An older index is migrated to be read, but only in the scratch copy: the kept old index is the file as it was,

@@ -1123,8 +1123,8 @@ Source: `catalog/errors/RRS-S.json`.
 
 - **Severity:** error
 - **Message:** Couldn't read saved data: {reason}.
-- **In plain words:** Rastai couldn't read its saved data just now. Your data is not damaged.
-- **Fix:** Try again in a moment. If it keeps failing, check the disk.
+- **In plain words:** Rastai couldn't read some of its saved data.
+- **Fix:** Try again. If it keeps failing, check the disk and the permissions of the file the message names.
 
 <a id="rrs-s0007"></a>
 

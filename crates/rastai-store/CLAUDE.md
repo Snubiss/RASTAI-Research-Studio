@@ -25,8 +25,9 @@ are in `docs/architecture/contracts.md` §8.2 (tables and columns) and §15.1 (c
   `src/`. Every test removes its temporary folder at its end.
 - **A failed read is `RRS-S0006`, a failed write `RRS-S3005`** (or `RRS-S3002` for a full disk): `sqlite.rs`
   decides by the connection, a reader's or the writer's. A reader that can't open its file failed a read too;
-  `RRS-S0004` ("not writable") is the writer's alone. Event logs follow the same split: opening or reading a log is
-  `RRS-S0006`, creating, writing or syncing one `RRS-S3005` (`error.rs`).
+  `RRS-S0004` ("not writable") is a write a permission refused, in the writer's connection or the rebuild's copy of
+  the data folder (`rebuild.rs` `write_error`, which names the folder). Event logs follow the same split: opening or
+  reading a log is `RRS-S0006`, creating, writing or syncing one `RRS-S3005` (`error.rs`).
 - **One indexing path.** Live run logs, the daemon log, the rebuild and restored frames all index through
   `apply_event_record` (`indexer.rs`), whose writes are upserts or updates keyed by ids. `ApplyRunEvents` and
   `ApplyDaemonEvents` skip records at or below the ack and commit the rows with the ack in one transaction, so each
