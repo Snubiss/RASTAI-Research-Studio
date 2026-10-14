@@ -48,7 +48,8 @@
         },
         "token": {
           "description": "The token's text, shown this once; the daemon keeps only its hash.",
-          "type": "string"
+          "type": "string",
+          "x-rastai-secret": true
         },
         "token_id": {
           "description": "The token's id.",

@@ -4,6 +4,7 @@ import grpc
 import warnings
 
 from rastai_proto.events.v1 import event_record_pb2 as rastai_dot_events_dot_v1_dot_event__record__pb2
+from rastai_proto.node.v1 import environments_pb2 as rastai_dot_node_dot_v1_dot_environments__pb2
 from rastai_proto.node.v1 import jobs_pb2 as rastai_dot_node_dot_v1_dot_jobs__pb2
 from rastai_proto.node.v1 import live_pb2 as rastai_dot_node_dot_v1_dot_live__pb2
 from rastai_proto.node.v1 import node_service_pb2 as rastai_dot_node_dot_v1_dot_node__service__pb2
@@ -72,6 +73,11 @@ class NodeServiceStub:
                 request_serializer=rastai_dot_node_dot_v1_dot_live__pb2.WatchLiveRequest.SerializeToString,
                 response_deserializer=rastai_dot_node_dot_v1_dot_live__pb2.LiveEvent.FromString,
                 _registered_method=True)
+        self.EnsureEnvironment = channel.unary_stream(
+                '/rastai.node.v1.NodeService/EnsureEnvironment',
+                request_serializer=rastai_dot_node_dot_v1_dot_environments__pb2.EnsureEnvironmentRequest.SerializeToString,
+                response_deserializer=rastai_dot_node_dot_v1_dot_environments__pb2.EnsureEnvironmentEvent.FromString,
+                _registered_method=True)
 
 
 class NodeServiceServicer:
@@ -126,6 +132,14 @@ class NodeServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def EnsureEnvironment(self, request, context):
+        """Syncs an environment from its lockfile (M2-16). Progress comes first and the environment's info last; a sync
+        that fails ends the stream with a Diagnostic in the progress item (environments.proto).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_NodeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -163,6 +177,11 @@ def add_NodeServiceServicer_to_server(servicer, server):
                     servicer.WatchLive,
                     request_deserializer=rastai_dot_node_dot_v1_dot_live__pb2.WatchLiveRequest.FromString,
                     response_serializer=rastai_dot_node_dot_v1_dot_live__pb2.LiveEvent.SerializeToString,
+            ),
+            'EnsureEnvironment': grpc.unary_stream_rpc_method_handler(
+                    servicer.EnsureEnvironment,
+                    request_deserializer=rastai_dot_node_dot_v1_dot_environments__pb2.EnsureEnvironmentRequest.FromString,
+                    response_serializer=rastai_dot_node_dot_v1_dot_environments__pb2.EnsureEnvironmentEvent.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -354,6 +373,33 @@ class NodeService:
             '/rastai.node.v1.NodeService/WatchLive',
             rastai_dot_node_dot_v1_dot_live__pb2.WatchLiveRequest.SerializeToString,
             rastai_dot_node_dot_v1_dot_live__pb2.LiveEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def EnsureEnvironment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/rastai.node.v1.NodeService/EnsureEnvironment',
+            rastai_dot_node_dot_v1_dot_environments__pb2.EnsureEnvironmentRequest.SerializeToString,
+            rastai_dot_node_dot_v1_dot_environments__pb2.EnsureEnvironmentEvent.FromString,
             options,
             channel_credentials,
             insecure,

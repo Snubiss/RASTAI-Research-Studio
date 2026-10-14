@@ -21,6 +21,23 @@ use rastai_formats::semver::parse_version;
 use rastai_proto::commands::v1::CommandKind;
 use rastai_proto::common::v1::Stability;
 
+/// The M2 commands (plan M2-12, contracts 6.4): honest L0 stubs, registered before their handlers.
+const M2_COMMAND_IDS: &[&str] = &[
+    "system.hardware",
+    "system.env.list",
+    "system.env.install",
+    "system.doctor",
+    "system.bundle",
+    "secret.set",
+    "secret.delete",
+    "secret.list",
+    "hf.login",
+    "hf.license.check",
+    "model.list",
+    "model.inspect",
+    "model.download",
+];
+
 /// The app's section ids (contracts 15.6); a core command sits in one of them.
 const CORE_SECTIONS: &[&str] = &[
     "home",
@@ -217,10 +234,14 @@ fn the_checks_catch_each_bad_field() {
     assert_eq!(row_problems(&plugin_scope).len(), 1);
 }
 
+// The table lists the skeleton's commands first and then each milestone's, in the order they were added, so a later
+// milestone's rows never reorder an earlier one's.
 #[test]
 fn the_skeleton_commands_are_registered() {
     let registered: Vec<&str> = COMMANDS.iter().map(|row| row.command_id).collect();
-    assert_eq!(registered, SKELETON_COMMAND_IDS);
+    assert_eq!(&registered[..SKELETON_COMMAND_IDS.len()], SKELETON_COMMAND_IDS);
+    let after_skeleton = &registered[SKELETON_COMMAND_IDS.len()..];
+    assert_eq!(after_skeleton, M2_COMMAND_IDS);
 }
 
 #[test]

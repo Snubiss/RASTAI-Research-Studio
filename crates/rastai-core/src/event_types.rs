@@ -10,6 +10,8 @@ use rastai_proto::common::v1::{EventClass, Stability};
 
 /// The app version the M1 event types arrived in.
 const M1_VERSION: &str = "0.1.0";
+/// The app version the M2 event types arrived in (plan M2-12).
+const M2_VERSION: &str = "0.1.0";
 
 /// One row of the core table: an in-process twin of the proto `EventTypeDescriptor`, because a `const` table can't
 /// hold Strings (the same reason as `CommandRow`, contracts 2.4 rule 3). Same field names as the message; it leaves
@@ -122,6 +124,24 @@ pub const EVENT_TYPES: &[EventTypeRow] = &[
         "rastai.events.v1.DiagnosticReported",
         "any",
     ),
+    m2_row(
+        "download.progress",
+        EventClass::Ephemeral,
+        "rastai.events.v1.DownloadProgress",
+        "node",
+    ),
+    m2_row(
+        "download.finished",
+        EventClass::Durable,
+        "rastai.events.v1.DownloadFinished",
+        "node",
+    ),
+    m2_row(
+        "egress.active",
+        EventClass::Ephemeral,
+        "rastai.events.v1.EgressActive",
+        "daemon, node (from an `EgressReport`)",
+    ),
 ];
 
 /// A row of the M1 event types: every one is `Preview` and arrived in the same version.
@@ -138,6 +158,23 @@ const fn m1_row(
         emitter,
         stability: Stability::Preview,
         since_version: M1_VERSION,
+    }
+}
+
+/// A row of the M2 event types, the same shape as an M1 row.
+const fn m2_row(
+    event_type: &'static str,
+    event_class: EventClass,
+    payload_type: &'static str,
+    emitter: &'static str,
+) -> EventTypeRow {
+    EventTypeRow {
+        event_type,
+        event_class,
+        payload_type,
+        emitter,
+        stability: Stability::Preview,
+        since_version: M2_VERSION,
     }
 }
 
@@ -215,7 +252,11 @@ mod tests {
             assert!(!seen.contains(&row.event_type), "{} is listed twice", row.event_type);
             seen.push(row.event_type);
             assert_eq!(row.stability, Stability::Preview, "{}", row.event_type);
-            assert_eq!(row.since_version, M1_VERSION, "{}", row.event_type);
+            assert!(
+                row.since_version == M1_VERSION || row.since_version == M2_VERSION,
+                "{}",
+                row.event_type
+            );
         }
     }
 

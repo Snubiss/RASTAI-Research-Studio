@@ -1,12 +1,13 @@
 // NodeHubService: served by the daemon, called by nodes (contracts 3.2 and 4.4). The embedded node calls
 // node-hub.sock directly; a remote node calls the reverse-forwarded socket named in HandshakeRequest.hub_socket_path.
-// This file has the RPCs of the M1 skeleton; GatewayGenerate and GetSecret arrive with the milestones that use them
-// (node layout 3.6).
+// This file has the RPCs of the M1 skeleton and GetSecret with its M2 purpose; GatewayGenerate and the other
+// GetSecret purposes arrive with the milestones that use them (node layout 3.6).
 syntax = "proto3";
 
 package rastai.node.v1;
 
 import "rastai/commands/v1/command_service.proto";
+import "rastai/common/v1/diagnostic.proto";
 import "rastai/common/v1/hardware.proto";
 import "rastai/node/v1/jobs.proto";
 
@@ -16,6 +17,9 @@ service NodeHubService {
   // A plugin module or job runs a command; the daemon applies the plugin principal and its scopes. It takes the
   // daemon's own command messages, so a command looks the same from a node as from any other client.
   rpc ExecuteCommand(rastai.commands.v1.ExecuteRequest) returns (rastai.commands.v1.ExecuteResponse);
+  // A short-lived secret for one purpose, for a job the daemon started. The daemon answers only for a purpose the
+  // job's JobSpec allows; cloud and archive credentials never leave the daemon (contracts 8.5).
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
 }
 
 // The node's state as a snapshot, so the daemon reconciles by snapshot after a disconnect (contracts 7.3).
@@ -28,3 +32,18 @@ message HeartbeatRequest {
 
 // No fields yet; tokenization_overrides joins in M3 (node layout 3.2).
 message HeartbeatResponse {}
+
+// The purpose names a secret is for (contracts 15.7). M2 uses hf_download; M5-E07 adds mysql:<connection_name>.
+message GetSecretRequest {
+  string purpose = 1;
+  // The job asking; the daemon checks the purpose against that job's JobSpec.
+  string job_id = 2;
+}
+
+// The value lives in the node's memory until expires_unix_ms. It is never written to job.json, a log or an event.
+message GetSecretResponse {
+  string value = 1;
+  int64 expires_unix_ms = 2;
+  // Why the daemon refused the purpose or the job (the catalog code says which); unset on success.
+  rastai.common.v1.Diagnostic diagnostic = 3;
+}

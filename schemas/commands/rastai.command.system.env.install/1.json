@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "EnvironmentInstallPlan": {
+      "additionalProperties": false,
+      "description": "What an environment install would create or sync, with the disk check.",
+      "properties": {
+        "backend": {
+          "description": "The backend it is for.",
+          "type": "string"
+        },
+        "environment_id": {
+          "description": "The environment that would be synced.",
+          "type": "string"
+        },
+        "free_bytes": {
+          "description": "The free space under the data directory before the sync starts.",
+          "type": "integer"
+        },
+        "lock_hash": {
+          "description": "The hash of the lockfile the sync uses, as blake3:<64 hex>.",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "The bytes the backend's packages need, PyTorch included.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "environment_id",
+        "backend",
+        "lock_hash",
+        "size_bytes",
+        "free_bytes"
+      ],
+      "title": "EnvironmentInstallPlan",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Create or sync the environment of one backend.",
+      "properties": {
+        "backend": {
+          "description": "The backend whose environment to create or sync.",
+          "enum": [
+            "cuda13",
+            "cuda126",
+            "rocm",
+            "cpu"
+          ],
+          "type": "string"
+        },
+        "node_id": {
+          "description": "The node to sync on; empty for the embedded node.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "title": "SystemEnvInstallArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The install's plan; a real run also starts the job.",
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/EnvironmentInstallPlan",
+          "description": "What the install would create or sync, with the disk check."
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "title": "SystemEnvInstallResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.env.install/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Install environment",
+  "title": "system.env.install",
+  "x-rastai-kind": "job",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

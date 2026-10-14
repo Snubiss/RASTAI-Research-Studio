@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Store a secret under an account name.",
+      "properties": {
+        "name": {
+          "description": "The keychain account name, such as hf_token.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The secret's value. The journal never holds it.",
+          "type": "string",
+          "x-rastai-secret": true
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "SecretSetArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The account that was written.",
+      "properties": {
+        "name": {
+          "description": "The account name that was written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretSetResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.secret.set/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Store secret",
+  "title": "secret.set",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

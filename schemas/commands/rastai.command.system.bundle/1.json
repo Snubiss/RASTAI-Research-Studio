@@ -1,0 +1,46 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Pack logs, the hardware profile and versions into one file.",
+      "properties": {
+        "path": {
+          "description": "Where to write the zip, a path the user picks; a file already there is refused. The bundle never includes plugin-data.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SystemBundleArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The written bundle.",
+      "properties": {
+        "path": {
+          "description": "The written zip.",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "The zip's size in bytes.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "size_bytes"
+      ],
+      "title": "SystemBundleResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.bundle/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Make support bundle",
+  "title": "system.bundle",
+  "x-rastai-kind": "job",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

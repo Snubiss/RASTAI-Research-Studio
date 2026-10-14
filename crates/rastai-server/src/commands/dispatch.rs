@@ -72,6 +72,10 @@ pub async fn dispatch(context: &CommandContext<'_>, arguments_json: &str) -> Res
         "token.list" => token::list(context, typed_arguments(command_id, arguments_json)?).await,
         "token.revoke" => token::revoke(context, typed_arguments(command_id, arguments_json)?).await,
         "plugin.list" => plugin::list(context, typed_arguments(command_id, arguments_json)?).await,
+        // The M2 commands are honest L0 stubs until their handlers land (ADR-0017, plan M2-12).
+        "system.hardware" | "system.env.list" | "system.env.install" | "system.doctor" | "system.bundle"
+        | "secret.set" | "secret.delete" | "secret.list" | "hf.login" | "hf.license.check" | "model.list"
+        | "model.inspect" | "model.download" => not_yet_available(context),
         _ => dispatch_jobs_and_nodes(context, arguments_json).await,
     }
 }
@@ -115,6 +119,15 @@ fn typed_arguments<Arguments: DeserializeOwned>(
     arguments_json: &str,
 ) -> Result<Arguments, Vec<Diagnostic>> {
     parse_arguments(command_id, arguments_json).map_err(|findings| invalid_arguments(command_id, findings))
+}
+
+/// An L0 stub's answer: its area's "not available yet" code, with the command id the message names (catalog/README.md).
+fn not_yet_available(context: &CommandContext<'_>) -> Result<CommandOutput, Vec<Diagnostic>> {
+    let command_id = context.command.command_id.as_str();
+    Err(vec![diagnostic(
+        not_available_code(command_id),
+        &[("command_id", command_id)],
+    )])
 }
 
 /// Where everything without an arm goes. Forwarding a plugin's command to its module arrives with the plugin modules

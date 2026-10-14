@@ -1,0 +1,16 @@
+{
+  "model_ref": "Qwen/Qwen3-0.6B",
+  "revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+  "ok": true,
+  "model_hash": "blake3:1ddbbf9e7ade48fcdbfca73f5f0297600240a53ea6128ccbe0cd9c0bdaf3dac8",
+  "size_bytes": "1199000000",
+  "diagnostic": {
+    "code": "RRS-N3010",
+    "severity": "SEVERITY_INFO",
+    "message": "Waiting for another program's download of this file.",
+    "path": "#/model_ref",
+    "fix_text": "Nothing to fix: the download continues when the other program finishes.",
+    "fix_command_id": "model.download",
+    "fix_arguments_json": "{\"model_ref\":\"Qwen/Qwen3-0.6B\"}"
+  }
+}

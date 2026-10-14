@@ -38,6 +38,7 @@ import {
   file_rastai_events_v1_event_record,
   file_rastai_events_v1_event_service,
   file_rastai_events_v1_payloads,
+  file_rastai_node_v1_environments,
   file_rastai_node_v1_jobs,
   file_rastai_node_v1_live,
   file_rastai_node_v1_node_hub_service,
@@ -85,6 +86,7 @@ const GOLDEN_PACKAGES = [
     packageName: "rastai.node.v1",
     folder: "node",
     files: [
+      file_rastai_node_v1_environments,
       file_rastai_node_v1_jobs,
       file_rastai_node_v1_live,
       file_rastai_node_v1_node_hub_service,

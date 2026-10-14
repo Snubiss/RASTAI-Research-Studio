@@ -7,16 +7,19 @@
 
 use std::sync::Arc;
 
+use rastai_core::wire::diagnostic_to_proto;
+use rastai_diag::diagnostic::diagnostic;
 use rastai_proto::events::v1::EventRecord;
 use rastai_proto::node::v1::node_service_server::NodeService;
 use rastai_proto::node::v1::{
-    GetHardwareRequest, GetHardwareResponse, HandshakeRequest, HandshakeResponse, JobInfo, JobSpec, ListJobsRequest,
-    ListJobsResponse, LiveEvent, SignalJobRequest, SignalJobResponse, WatchLiveRequest, WatchRunEventsRequest,
+    EnsureEnvironmentEvent, EnsureEnvironmentRequest, EnvironmentProgress, GetHardwareRequest, GetHardwareResponse,
+    HandshakeRequest, HandshakeResponse, JobInfo, JobSpec, ListJobsRequest, ListJobsResponse, LiveEvent,
+    SignalJobRequest, SignalJobResponse, WatchLiveRequest, WatchRunEventsRequest, ensure_environment_event,
 };
 use tokio::sync::mpsc;
 use tonic::codegen::BoxStream;
-use tonic::codegen::tokio_stream::StreamExt;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
+use tonic::codegen::tokio_stream::{StreamExt, once};
 use tonic::{Request, Response, Status};
 
 use crate::handshake::answer_handshake;
@@ -28,6 +31,11 @@ use crate::run_events::watch_run_events;
 /// How many records or events a stream holds before its task waits for the daemon to read. The file is the buffer for
 /// records, and the live queues for events, so this only smooths the hand-over.
 const STREAM_CHANNEL_CAPACITY: usize = 64;
+/// The environment sync arrives with M2-16. Until then the node answers with the area's "not available yet" code
+/// (catalog/README.md), as a Diagnostic in the stream, not as a gRPC error (contracts 4).
+const ENVIRONMENT_NOT_AVAILABLE_CODE: &str = "RRS-H0003";
+/// The command the stream's "not available yet" message names.
+const ENSURE_ENVIRONMENT_CALL: &str = "system.env.install";
 
 /// The NodeService server's handle on the node's state.
 pub(crate) struct NodeServiceHandler {
@@ -96,5 +104,29 @@ impl NodeService for NodeServiceHandler {
             watch_live(&state.live, sender).await;
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(receiver).map(Ok))))
+    }
+
+    type EnsureEnvironmentStream = BoxStream<EnsureEnvironmentEvent>;
+
+    async fn ensure_environment(
+        &self,
+        request: Request<EnsureEnvironmentRequest>,
+    ) -> Result<Response<Self::EnsureEnvironmentStream>, Status> {
+        let environment_id = request.into_inner().environment_id;
+        let refusal = diagnostic(
+            ENVIRONMENT_NOT_AVAILABLE_CODE,
+            &[("command_id", ENSURE_ENVIRONMENT_CALL)],
+        );
+        let progress = EnvironmentProgress {
+            environment_id,
+            state: String::new(),
+            fraction: 0.0,
+            message: String::new(),
+            diagnostic: Some(diagnostic_to_proto(&refusal)),
+        };
+        let event = EnsureEnvironmentEvent {
+            payload: Some(ensure_environment_event::Payload::Progress(progress)),
+        };
+        Ok(Response::new(Box::pin(once(Ok(event)))))
     }
 }

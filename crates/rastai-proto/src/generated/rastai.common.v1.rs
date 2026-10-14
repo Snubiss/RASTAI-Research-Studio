@@ -85,7 +85,20 @@ pub struct GpuInfo {
     #[prost(string, tag="6")]
     pub driver_version: ::prost::alloc::string::String,
 }
-/// The node's hardware as detected at start. The numerical self-test result joins it in M2 (plan M2 contract task).
+/// One GPU's numerical self-test verdict (platform flow 1.6; contracts 10.3, RRS-H1xxx). A GPU whose verdict is not
+/// usable gets no leases; the node writes the verdicts to hardware_profile.json and sends them in HardwareProfile.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SelfTestVerdict {
+    #[prost(uint32, tag="1")]
+    pub gpu_index: u32,
+    /// True when the GPU passed every check the self-test ran, warnings included.
+    #[prost(bool, tag="2")]
+    pub usable: bool,
+    /// The error or warning that decided the verdict; unset when the GPU passed cleanly.
+    #[prost(message, optional, tag="3")]
+    pub diagnostic: ::core::option::Option<Diagnostic>,
+}
+/// The node's hardware as detected at start. The self-test fields hold the last numerical self-test (M2-20).
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HardwareProfile {
     #[prost(string, tag="1")]
@@ -104,6 +117,12 @@ pub struct HardwareProfile {
     /// The environment the node picked for this hardware: "cuda13", "cuda126", "rocm" or "cpu" (node layout 7.6).
     #[prost(string, tag="7")]
     pub backend: ::prost::alloc::string::String,
+    /// When the last self-test finished, in Unix milliseconds; 0 when none has run on this hardware.
+    #[prost(int64, tag="8")]
+    pub self_test_unix_ms: i64,
+    /// One verdict per visible GPU from the last self-test; empty on a CPU-only node or before any self-test.
+    #[prost(message, repeated, tag="9")]
+    pub self_tests: ::prost::alloc::vec::Vec<SelfTestVerdict>,
 }
 /// Everything that can change a run's numbers. Stored in run records and replays as protobuf JSON (contracts 4).
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -8,7 +8,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
-import type { JobLogLine, JobProgress } from "../../events/v1/payloads_pb.js";
+import type { DownloadProgress, EgressActive, JobLogLine, JobProgress } from "../../events/v1/payloads_pb.js";
 
 /**
  * Describes the file rastai/node/v1/live.proto.
@@ -30,8 +30,8 @@ export declare type WatchLiveRequest = Message<"rastai.node.v1.WatchLiveRequest"
 export declare const WatchLiveRequestSchema: GenMessage<WatchLiveRequest>;
 
 /**
- * One ephemeral event. The payloads of later milestones (LivePacket, GymPeekStep, TransferProgress,
- * DownloadProgress, EgressActive) join the oneof with the next free numbers, so it stays last (contracts 4.3).
+ * One ephemeral event. The payloads of later milestones (LivePacket, GymPeekStep, TransferProgress) join the oneof
+ * with the next free numbers, so it stays last (contracts 4.3).
  *
  * @generated from message rastai.node.v1.LiveEvent
  */
@@ -71,6 +71,18 @@ export declare type LiveEvent = Message<"rastai.node.v1.LiveEvent"> & {
      */
     value: JobLogLine;
     case: "jobLogLine";
+  } | {
+    /**
+     * @generated from field: rastai.events.v1.DownloadProgress download_progress = 6;
+     */
+    value: DownloadProgress;
+    case: "downloadProgress";
+  } | {
+    /**
+     * @generated from field: rastai.events.v1.EgressActive egress_active = 7;
+     */
+    value: EgressActive;
+    case: "egressActive";
   } | { case: undefined; value?: undefined };
 };
 

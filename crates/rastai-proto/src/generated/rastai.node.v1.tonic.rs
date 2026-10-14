@@ -131,6 +131,30 @@ pub mod node_hub_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn get_secret(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetSecretRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetSecretResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/rastai.node.v1.NodeHubService/GetSecret",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("rastai.node.v1.NodeHubService", "GetSecret"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -158,6 +182,13 @@ pub mod node_hub_service_server {
             request: tonic::Request<super::super::super::commands::v1::ExecuteRequest>,
         ) -> std::result::Result<
             tonic::Response<super::super::super::commands::v1::ExecuteResponse>,
+            tonic::Status,
+        >;
+        async fn get_secret(
+            &self,
+            request: tonic::Request<super::GetSecretRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetSecretResponse>,
             tonic::Status,
         >;
     }
@@ -316,6 +347,51 @@ pub mod node_hub_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ExecuteCommandSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/rastai.node.v1.NodeHubService/GetSecret" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetSecretSvc<T: NodeHubService>(pub Arc<T>);
+                    impl<
+                        T: NodeHubService,
+                    > tonic::server::UnaryService<super::GetSecretRequest>
+                    for GetSecretSvc<T> {
+                        type Response = super::GetSecretResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetSecretRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NodeHubService>::get_secret(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetSecretSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -618,6 +694,32 @@ pub mod node_service_client {
                 .insert(GrpcMethod::new("rastai.node.v1.NodeService", "WatchLive"));
             self.inner.server_streaming(req, path, codec).await
         }
+        pub async fn ensure_environment(
+            &mut self,
+            request: impl tonic::IntoRequest<super::EnsureEnvironmentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::EnsureEnvironmentEvent>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/rastai.node.v1.NodeService/EnsureEnvironment",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("rastai.node.v1.NodeService", "EnsureEnvironment"),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -691,6 +793,19 @@ pub mod node_service_server {
             &self,
             request: tonic::Request<super::WatchLiveRequest>,
         ) -> std::result::Result<tonic::Response<Self::WatchLiveStream>, tonic::Status>;
+        /// Server streaming response type for the EnsureEnvironment method.
+        type EnsureEnvironmentStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::EnsureEnvironmentEvent, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        async fn ensure_environment(
+            &self,
+            request: tonic::Request<super::EnsureEnvironmentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::EnsureEnvironmentStream>,
+            tonic::Status,
+        >;
     }
     #[derive(Debug)]
     pub struct NodeServiceServer<T> {
@@ -1068,6 +1183,54 @@ pub mod node_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = WatchLiveSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/rastai.node.v1.NodeService/EnsureEnvironment" => {
+                    #[allow(non_camel_case_types)]
+                    struct EnsureEnvironmentSvc<T: NodeService>(pub Arc<T>);
+                    impl<
+                        T: NodeService,
+                    > tonic::server::ServerStreamingService<
+                        super::EnsureEnvironmentRequest,
+                    > for EnsureEnvironmentSvc<T> {
+                        type Response = super::EnsureEnvironmentEvent;
+                        type ResponseStream = T::EnsureEnvironmentStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::EnsureEnvironmentRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as NodeService>::ensure_environment(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = EnsureEnvironmentSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

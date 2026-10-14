@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "GpuFit": {
+      "additionalProperties": false,
+      "description": "One GPU's fit for a model.",
+      "properties": {
+        "fits": {
+          "description": "True when that GPU has the VRAM free.",
+          "type": "boolean"
+        },
+        "gpu_index": {
+          "description": "The GPU's physical index.",
+          "type": "integer"
+        },
+        "vram_bytes_needed": {
+          "description": "The VRAM the weights need on that GPU.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "gpu_index",
+        "vram_bytes_needed",
+        "fits"
+      ],
+      "title": "GpuFit",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "The model to inspect.",
+      "properties": {
+        "model_ref": {
+          "description": "The model to inspect.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_ref"
+      ],
+      "title": "ModelInspectArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "A model's config, family, size and fit.",
+      "properties": {
+        "config": {
+          "description": "The model's config.json, as it is."
+        },
+        "family": {
+          "description": "The model family, such as llama.",
+          "type": "string"
+        },
+        "fits": {
+          "description": "Whether the weights fit on each visible GPU.",
+          "items": {
+            "$ref": "#/$defs/GpuFit"
+          },
+          "type": "array"
+        },
+        "license": {
+          "description": "The license the model names, or empty.",
+          "type": "string"
+        },
+        "model_ref": {
+          "description": "The model inspected.",
+          "type": "string"
+        },
+        "replay_twin": {
+          "description": "The full-precision model a quantized one replays on; empty when there is none.",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "The bytes the model's weights take.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model_ref",
+        "family",
+        "size_bytes",
+        "license",
+        "fits",
+        "config"
+      ],
+      "title": "ModelInspectResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.model.inspect/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Inspect model",
+  "title": "model.inspect",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

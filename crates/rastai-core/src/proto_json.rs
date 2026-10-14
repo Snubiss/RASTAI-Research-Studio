@@ -20,7 +20,8 @@
 //! compile here until it is written.
 
 use rastai_proto::common::v1::{
-    GpuInfo, GpuTelemetry, HardwareProfile, LeaseClass, NodeTelemetry, ProcessVram, ResourceRequest,
+    Diagnostic, GpuInfo, GpuTelemetry, HardwareProfile, LeaseClass, NodeTelemetry, ProcessVram, ResourceRequest,
+    SelfTestVerdict, Severity,
 };
 use rastai_proto::node::v1::{JobKind, JobSpec};
 use serde_json::{Map, Value};
@@ -94,6 +95,8 @@ pub fn hardware_profile_to_json(profile: &HardwareProfile) -> Value {
         gpus,
         driver_version,
         backend,
+        self_test_unix_ms,
+        self_tests,
     } = profile;
     let mut object = Map::new();
     put_text(&mut object, "cpu_model", cpu_model);
@@ -106,7 +109,55 @@ pub fn hardware_profile_to_json(profile: &HardwareProfile) -> Value {
     }
     put_text(&mut object, "driver_version", driver_version);
     put_text(&mut object, "backend", backend);
+    put_i64(&mut object, "self_test_unix_ms", *self_test_unix_ms);
+    if !self_tests.is_empty() {
+        let verdicts = self_tests.iter().map(self_test_verdict_to_json).collect();
+        object.insert("self_tests".to_string(), Value::Array(verdicts));
+    }
     Value::Object(object)
+}
+
+/// One GPU's self-test verdict as protobuf JSON (contracts 4.1).
+fn self_test_verdict_to_json(verdict: &SelfTestVerdict) -> Value {
+    let SelfTestVerdict {
+        gpu_index,
+        usable,
+        diagnostic,
+    } = verdict;
+    let mut object = Map::new();
+    put_u32(&mut object, "gpu_index", *gpu_index);
+    put_bool(&mut object, "usable", *usable);
+    if let Some(diagnostic) = diagnostic {
+        object.insert("diagnostic".to_string(), diagnostic_to_json(diagnostic));
+    }
+    Value::Object(object)
+}
+
+/// A `Diagnostic` as protobuf JSON (contracts 4.1): the code, severity by name, and the texts.
+fn diagnostic_to_json(diagnostic: &Diagnostic) -> Value {
+    let Diagnostic {
+        code,
+        severity,
+        message,
+        path,
+        fix_text,
+        fix_command_id,
+        fix_arguments_json,
+    } = diagnostic;
+    let mut object = Map::new();
+    put_text(&mut object, "code", code);
+    put_enum(&mut object, "severity", *severity, severity_name(*severity));
+    put_text(&mut object, "message", message);
+    put_text(&mut object, "path", path);
+    put_text(&mut object, "fix_text", fix_text);
+    put_text(&mut object, "fix_command_id", fix_command_id);
+    put_text(&mut object, "fix_arguments_json", fix_arguments_json);
+    Value::Object(object)
+}
+
+/// The name a `Severity` number has in the .proto, such as `SEVERITY_ERROR`; None for a number it doesn't have.
+fn severity_name(severity: i32) -> Option<&'static str> {
+    Severity::try_from(severity).ok().map(|value| value.as_str_name())
 }
 
 /// A node's `NodeTelemetry` as protobuf JSON.
@@ -346,6 +397,12 @@ fn put_f32(object: &mut Map<String, Value>, key: &str, value: f32) {
     let shortest: f64 = value.to_string().parse().unwrap_or(f64::from(value));
     if let Some(number) = serde_json::Number::from_f64(shortest) {
         object.insert(key.to_string(), Value::Number(number));
+    }
+}
+
+fn put_bool(object: &mut Map<String, Value>, key: &str, value: bool) {
+    if value {
+        object.insert(key.to_string(), Value::Bool(true));
     }
 }
 

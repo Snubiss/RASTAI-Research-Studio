@@ -29,6 +29,7 @@ use rastai_node::node::{NodeMode, NodeOptions, run_node};
 use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
 use rastai_proto::node::v1::node_hub_service_server::{NodeHubService, NodeHubServiceServer};
 use rastai_proto::node::v1::node_service_client::NodeServiceClient;
+use rastai_proto::node::v1::{GetSecretRequest, GetSecretResponse};
 use rastai_proto::node::v1::{HandshakeRequest, HeartbeatRequest, HeartbeatResponse};
 use rastai_transport::grpc_channel::{connect_grpc_channel, serve_grpc_on_socket};
 use rastai_transport::local_socket::bind_local_socket;
@@ -385,6 +386,10 @@ impl NodeHubService for FakeHubService {
 
     async fn execute_command(&self, _request: Request<ExecuteRequest>) -> Result<Response<ExecuteResponse>, Status> {
         Err(Status::unimplemented("the test hub runs no commands"))
+    }
+
+    async fn get_secret(&self, _request: Request<GetSecretRequest>) -> Result<Response<GetSecretResponse>, Status> {
+        Err(Status::unimplemented("the test hub holds no secrets"))
     }
 }
 

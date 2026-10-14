@@ -1,6 +1,7 @@
 // NodeService: served by every node, called by the daemon (contracts 3.2 and 4.4). The embedded node serves it on
 // node.sock; a remote node serves the same service through an SSH forward. This file has the RPCs of the M1
-// skeleton; every other RPC of contracts 4.4 arrives with the milestone that uses it (node layout 3.6).
+// skeleton and of M2's environments; every other RPC of contracts 4.4 arrives with the milestone that uses it
+// (node layout 3.6).
 syntax = "proto3";
 
 package rastai.node.v1;
@@ -8,6 +9,7 @@ package rastai.node.v1;
 import "rastai/common/v1/diagnostic.proto";
 import "rastai/common/v1/hardware.proto";
 import "rastai/events/v1/event_record.proto";
+import "rastai/node/v1/environments.proto";
 import "rastai/node/v1/jobs.proto";
 import "rastai/node/v1/live.proto";
 
@@ -26,6 +28,9 @@ service NodeService {
   rpc WatchRunEvents(WatchRunEventsRequest) returns (stream rastai.events.v1.EventRecord);
   // The node's ephemeral events, for the daemon's bus.
   rpc WatchLive(WatchLiveRequest) returns (stream LiveEvent);
+  // Syncs an environment from its lockfile (M2-16). Progress comes first and the environment's info last; a sync
+  // that fails ends the stream with a Diagnostic in the progress item (environments.proto).
+  rpc EnsureEnvironment(EnsureEnvironmentRequest) returns (stream EnsureEnvironmentEvent);
 }
 
 // The daemon's half of the handshake. The daemon signs ("rastai-node-handshake-v1", node_id, daemon_nonce,

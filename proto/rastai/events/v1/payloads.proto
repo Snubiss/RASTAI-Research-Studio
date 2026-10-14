@@ -36,6 +36,9 @@ message EventPayload {
     DiagnosticReported diagnostic_reported = 15;
     // Any event type a plugin declares in its manifest.
     PluginEventPayload plugin_event = 16;
+    DownloadProgress download_progress = 17;
+    DownloadFinished download_finished = 18;
+    EgressActive egress_active = 19;
   }
 }
 
@@ -197,4 +200,34 @@ message PluginEventPayload {
   // The name of the payload's type in the plugin's types.json.
   string schema = 2;
   string payload_json = 3;
+}
+
+// download.progress (ephemeral, from the node): bytes of one model download so far (M2-17).
+message DownloadProgress {
+  string model_ref = 1;
+  uint64 bytes_done = 2;
+  uint64 bytes_total = 3;
+}
+
+// download.finished (durable, from the node). ok is false when the download failed; the Diagnostic then says why, and it
+// can also carry a note on a success, such as RRS-N3010 when the download waited on another program.
+message DownloadFinished {
+  string model_ref = 1;
+  string revision = 2;
+  bool ok = 3;
+  string model_hash = 4;
+  uint64 size_bytes = 5;
+  // Why the download failed, for example RRS-N3009 (download interrupted, retries used up); or a note, when it
+  // succeeded. Unset when the download was clean.
+  rastai.common.v1.Diagnostic diagnostic = 6;
+}
+
+// egress.active (ephemeral, from the daemon or a node's EgressReport): one outbound connection that carries data.
+// The egress badge reads these three fields and nothing else.
+message EgressActive {
+  // One of the purposes of contracts 7.3, for example hf_download.
+  string purpose = 1;
+  string host = 2;
+  // The job, download or conversation the connection belongs to, when there is one.
+  string subject_id = 3;
 }

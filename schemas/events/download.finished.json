@@ -1,0 +1,52 @@
+{
+  "emitter": "node",
+  "event_class": "durable",
+  "event_type": "download.finished",
+  "fields": [
+    {
+      "name": "model_ref",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "revision",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "ok",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "bool"
+    },
+    {
+      "name": "model_hash",
+      "number": 4,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "size_bytes",
+      "number": 5,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "diagnostic",
+      "number": 6,
+      "optional": false,
+      "repeated": false,
+      "type": "rastai.common.v1.Diagnostic"
+    }
+  ],
+  "payload_type": "rastai.events.v1.DownloadFinished",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "ModelSummary": {
+      "additionalProperties": false,
+      "description": "One model in model.list.",
+      "properties": {
+        "license": {
+          "description": "The license the model names, if any.",
+          "type": "string"
+        },
+        "model_ref": {
+          "description": "The model's reference.",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "The bytes the model's files take.",
+          "type": "integer"
+        },
+        "source": {
+          "description": "Where the model is: local, hf_cache or api.",
+          "enum": [
+            "local",
+            "hf_cache",
+            "api"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_ref",
+        "source",
+        "size_bytes"
+      ],
+      "title": "ModelSummary",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "model.list takes no arguments.",
+      "properties": {},
+      "required": [],
+      "title": "ModelListArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The models the daemon can see.",
+      "properties": {
+        "models": {
+          "description": "The local, Hugging Face cache and API models.",
+          "items": {
+            "$ref": "#/$defs/ModelSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "models"
+      ],
+      "title": "ModelListResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.model.list/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "List models",
+  "title": "model.list",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

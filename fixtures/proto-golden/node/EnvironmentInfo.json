@@ -1,0 +1,9 @@
+{
+  "environment_id": "cuda13",
+  "lock_hash": "blake3:a76c73298caa55e868782537caf9ea82e9b405937d255601e006956bb886b133",
+  "path": "/home/user/.local/share/rastai/envs/cuda13-a76c73298caa/",
+  "python_version": "3.12.11",
+  "torch_version": "2.8.0+cu130",
+  "size_bytes": "5584123904",
+  "ready": true
+}

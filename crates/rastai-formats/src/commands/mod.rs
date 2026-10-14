@@ -13,9 +13,12 @@
 //! serde. `result_json` writes a handler's result back out.
 
 pub mod command;
+pub mod hf;
 pub mod job;
+pub mod model;
 pub mod node;
 pub mod plugin;
+pub mod secret;
 pub mod settings;
 pub mod system;
 pub mod token;
@@ -29,6 +32,7 @@ use serde_json::Value;
 use crate::describe::registry::describe_all_types;
 use crate::describe::structure_check::StructureCheck;
 use crate::describe::types::{FieldDescription, TypeDescription};
+use crate::documents::plans;
 use crate::json::reader::{ParsedJson, read_json};
 use crate::limits::ImportLimits;
 use crate::validate::structure::check_structure;
@@ -137,6 +141,71 @@ pub const COMMAND_TYPES: &[CommandTypes] = &[
         describe_arguments: node::describe_node_status_args,
         describe_result: node::describe_node_status_result,
     },
+    CommandTypes {
+        command_id: "system.hardware",
+        describe_arguments: system::describe_system_hardware_args,
+        describe_result: system::describe_system_hardware_result,
+    },
+    CommandTypes {
+        command_id: "system.env.list",
+        describe_arguments: system::describe_system_env_list_args,
+        describe_result: system::describe_system_env_list_result,
+    },
+    CommandTypes {
+        command_id: "system.env.install",
+        describe_arguments: system::describe_system_env_install_args,
+        describe_result: system::describe_system_env_install_result,
+    },
+    CommandTypes {
+        command_id: "system.doctor",
+        describe_arguments: system::describe_system_doctor_args,
+        describe_result: system::describe_system_doctor_result,
+    },
+    CommandTypes {
+        command_id: "system.bundle",
+        describe_arguments: system::describe_system_bundle_args,
+        describe_result: system::describe_system_bundle_result,
+    },
+    CommandTypes {
+        command_id: "secret.set",
+        describe_arguments: secret::describe_secret_set_args,
+        describe_result: secret::describe_secret_set_result,
+    },
+    CommandTypes {
+        command_id: "secret.delete",
+        describe_arguments: secret::describe_secret_delete_args,
+        describe_result: secret::describe_secret_delete_result,
+    },
+    CommandTypes {
+        command_id: "secret.list",
+        describe_arguments: secret::describe_secret_list_args,
+        describe_result: secret::describe_secret_list_result,
+    },
+    CommandTypes {
+        command_id: "hf.login",
+        describe_arguments: hf::describe_hf_login_args,
+        describe_result: hf::describe_hf_login_result,
+    },
+    CommandTypes {
+        command_id: "hf.license.check",
+        describe_arguments: hf::describe_hf_license_check_args,
+        describe_result: hf::describe_hf_license_check_result,
+    },
+    CommandTypes {
+        command_id: "model.list",
+        describe_arguments: model::describe_model_list_args,
+        describe_result: model::describe_model_list_result,
+    },
+    CommandTypes {
+        command_id: "model.inspect",
+        describe_arguments: model::describe_model_inspect_args,
+        describe_result: model::describe_model_inspect_result,
+    },
+    CommandTypes {
+        command_id: "model.download",
+        describe_arguments: model::describe_model_download_args,
+        describe_result: model::describe_model_download_result,
+    },
 ];
 
 /// The types the arguments and results above are built from. Each belongs to the command that first needs it
@@ -149,6 +218,11 @@ const COMMAND_PART_TYPES: &[fn() -> TypeDescription] = &[
     token::describe_token_summary,
     train::describe_training_plan,
     train::describe_train_job_args,
+    model::describe_model_summary,
+    model::describe_gpu_fit,
+    model::describe_model_download_file,
+    plans::describe_model_download_plan,
+    plans::describe_environment_install_plan,
 ];
 
 /// `rastai.command.model.load/1`: the schema id every type of one command shares.

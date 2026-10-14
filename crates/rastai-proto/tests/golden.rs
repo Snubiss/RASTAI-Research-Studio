@@ -14,18 +14,19 @@ use rastai_proto::commands::v1::{
 };
 use rastai_proto::common::v1::{
     BlobRef, Diagnostic, GpuInfo, GpuTelemetry, HardwareFingerprint, HardwareProfile, NodeTelemetry, ProcessVram,
-    ResourceRequest, Stability,
+    ResourceRequest, SelfTestVerdict, Stability,
 };
 use rastai_proto::events::v1::{
     ArtifactCreated, ArtifactParent, BusEvent, CheckpointSaved, CommandFinished, DiagnosticReported, DocumentChanged,
-    EventPayload, EventRecord, EventTypeDescriptor, JobLogLine, JobProgress, JobStateChanged, ListEventTypesRequest,
-    ListEventTypesResponse, NodeStateChanged, PinChanged, PluginEventPayload, PluginStateChanged, RunMetrics,
-    RunStateChanged, RunTagsChanged, SubscribeRequest,
+    DownloadFinished, DownloadProgress, EgressActive, EventPayload, EventRecord, EventTypeDescriptor, JobLogLine,
+    JobProgress, JobStateChanged, ListEventTypesRequest, ListEventTypesResponse, NodeStateChanged, PinChanged,
+    PluginEventPayload, PluginStateChanged, RunMetrics, RunStateChanged, RunTagsChanged, SubscribeRequest,
 };
 use rastai_proto::node::v1::{
-    GetHardwareRequest, GetHardwareResponse, HandshakeRequest, HandshakeResponse, HeartbeatRequest, HeartbeatResponse,
-    JobInfo, JobSpec, ListJobsRequest, ListJobsResponse, LiveEvent, SignalJobRequest, SignalJobResponse,
-    WatchLiveRequest, WatchRunEventsRequest,
+    EnsureEnvironmentEvent, EnsureEnvironmentRequest, EnvironmentInfo, EnvironmentProgress, GetHardwareRequest,
+    GetHardwareResponse, GetSecretRequest, GetSecretResponse, HandshakeRequest, HandshakeResponse, HeartbeatRequest,
+    HeartbeatResponse, JobInfo, JobSpec, ListJobsRequest, ListJobsResponse, LiveEvent, SignalJobRequest,
+    SignalJobResponse, WatchLiveRequest, WatchRunEventsRequest,
 };
 use rastai_proto::worker::v1::{
     ControlRequest, ControlResponse, HelloRequest, RegisterRequest, RegisterResponse, WorkerInfo,
@@ -34,6 +35,8 @@ use rastai_proto::worker::v1::{
 const GOLDEN_ROOT: &str = "../../fixtures/proto-golden";
 const BINARY_EXTENSION: &str = "binpb";
 const JSON_EXTENSION: &str = "json";
+// The states an environment sync reports, in order, then the end state (node layout 7.6, contracts 4.9).
+const ENVIRONMENT_PROGRESS_STATES: &[&str] = &["resolving", "downloading", "installing", "verifying", "ready"];
 // Descriptors written by a daemon that predates the stability field (layout 3.5, "Unset stability").
 const WITHOUT_STABILITY_FOLDER: &str = "without_stability";
 // A message with no fields encodes to no bytes at all, so these goldens are the only ones allowed to be empty.
@@ -66,6 +69,7 @@ const COMMON_MESSAGES: &[(&str, RoundTrip)] = &[
     ("HardwareProfile", round_trip::<HardwareProfile>),
     ("NodeTelemetry", round_trip::<NodeTelemetry>),
     ("ProcessVram", round_trip::<ProcessVram>),
+    ("SelfTestVerdict", round_trip::<SelfTestVerdict>),
     ("ResourceRequest", round_trip::<ResourceRequest>),
 ];
 
@@ -85,6 +89,9 @@ const EVENTS_MESSAGES: &[(&str, RoundTrip)] = &[
     ("CommandFinished", round_trip::<CommandFinished>),
     ("DiagnosticReported", round_trip::<DiagnosticReported>),
     ("DocumentChanged", round_trip::<DocumentChanged>),
+    ("DownloadFinished", round_trip::<DownloadFinished>),
+    ("DownloadProgress", round_trip::<DownloadProgress>),
+    ("EgressActive", round_trip::<EgressActive>),
     ("EventPayload", round_trip::<EventPayload>),
     ("EventRecord", round_trip::<EventRecord>),
     ("EventTypeDescriptor", round_trip::<EventTypeDescriptor>),
@@ -104,8 +111,14 @@ const EVENTS_MESSAGES: &[(&str, RoundTrip)] = &[
 ];
 
 const NODE_MESSAGES: &[(&str, RoundTrip)] = &[
+    ("EnsureEnvironmentEvent", round_trip::<EnsureEnvironmentEvent>),
+    ("EnsureEnvironmentRequest", round_trip::<EnsureEnvironmentRequest>),
+    ("EnvironmentInfo", round_trip::<EnvironmentInfo>),
+    ("EnvironmentProgress", round_trip::<EnvironmentProgress>),
     ("GetHardwareRequest", round_trip::<GetHardwareRequest>),
     ("GetHardwareResponse", round_trip::<GetHardwareResponse>),
+    ("GetSecretRequest", round_trip::<GetSecretRequest>),
+    ("GetSecretResponse", round_trip::<GetSecretResponse>),
     ("HandshakeRequest", round_trip::<HandshakeRequest>),
     ("HandshakeResponse", round_trip::<HandshakeResponse>),
     ("HeartbeatRequest", round_trip::<HeartbeatRequest>),
@@ -232,4 +245,17 @@ fn descriptors_without_stability_decode_as_the_zero_value() {
     let event_type = EventTypeDescriptor::decode(&*event_bytes).unwrap();
     assert_eq!(event_type.stability(), Stability::Unspecified);
     assert_eq!(event_type.encode_to_vec(), event_bytes);
+}
+
+/// The golden progress names a state the sync reports (node layout 7.6): a state name outside the list is one the
+/// layout doesn't name, so the golden and the .proto comment would disagree about it.
+#[test]
+fn the_environment_progress_golden_names_a_layout_state() {
+    let bytes = read_golden_bytes("node", "EnvironmentProgress");
+    let progress = EnvironmentProgress::decode(bytes.as_slice()).expect("the golden decodes");
+    assert!(
+        ENVIRONMENT_PROGRESS_STATES.contains(&progress.state.as_str()),
+        "EnvironmentProgress.state {:?} is not one of {ENVIRONMENT_PROGRESS_STATES:?}",
+        progress.state
+    );
 }

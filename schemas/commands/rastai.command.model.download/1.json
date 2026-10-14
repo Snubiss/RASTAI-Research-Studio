@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "ModelDownloadFile": {
+      "additionalProperties": false,
+      "description": "One file of a download.",
+      "properties": {
+        "hash": {
+          "description": "blake3:<64 hex> of the file's content, checked after the download. Required whenever `url` is set.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The file's name in the repository or the cache.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Where to fetch a file outside the repository; left out for a repository file. Set together with `hash`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ModelDownloadFile",
+      "type": "object"
+    },
+    "ModelDownloadPlan": {
+      "additionalProperties": false,
+      "description": "What a model download would fetch, with the disk check.",
+      "properties": {
+        "files": {
+          "description": "The files the download fetches, in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "free_bytes": {
+          "description": "The free space on the cache's disk before the download starts.",
+          "type": "integer"
+        },
+        "headers_only": {
+          "description": "True when only the safetensors headers would be fetched.",
+          "type": "boolean"
+        },
+        "model_ref": {
+          "description": "The model that would be downloaded.",
+          "type": "string"
+        },
+        "size_bytes": {
+          "description": "The bytes the files need in total.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model_ref",
+        "files",
+        "headers_only",
+        "size_bytes",
+        "free_bytes"
+      ],
+      "title": "ModelDownloadPlan",
+      "type": "object"
+    },
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Download a model into the Hugging Face cache.",
+      "properties": {
+        "files": {
+          "description": "Chosen files, such as SAE layers; left out for the whole repository.",
+          "items": {
+            "$ref": "#/$defs/ModelDownloadFile"
+          },
+          "type": "array"
+        },
+        "headers_only": {
+          "description": "Fetch only the safetensors headers; left out for the whole files.",
+          "type": "boolean"
+        },
+        "model_ref": {
+          "description": "The model to download, a Hugging Face repository id.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_ref"
+      ],
+      "title": "ModelDownloadArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The download's plan; a real run also starts the job.",
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/ModelDownloadPlan",
+          "description": "What the download would fetch, with the disk check."
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "title": "ModelDownloadResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.model.download/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Download model",
+  "title": "model.download",
+  "x-rastai-kind": "job",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

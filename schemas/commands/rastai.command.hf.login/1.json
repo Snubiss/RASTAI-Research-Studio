@@ -1,0 +1,42 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Store and verify a Hugging Face token.",
+      "properties": {
+        "token": {
+          "description": "The Hugging Face token. The journal never holds it.",
+          "type": "string",
+          "x-rastai-secret": true
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "title": "HfLoginArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The account the token signed in as.",
+      "properties": {
+        "username": {
+          "description": "The account the token belongs to.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ],
+      "title": "HfLoginResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.hf.login/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Sign in to Hugging Face",
+  "title": "hf.login",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

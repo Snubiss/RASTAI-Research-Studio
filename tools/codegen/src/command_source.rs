@@ -116,13 +116,14 @@ mod tests {
 
     #[test]
     fn a_row_without_types_is_an_error_naming_the_type_table() {
+        // `system.update.check` has no row in COMMAND_TYPES yet (M9), so it is the id with no types.
         let row = CommandRow {
-            command_id: "system.doctor",
+            command_id: "system.update.check",
             ..COMMANDS[0].clone()
         };
         let error = command_description(&row).unwrap_err();
         assert_eq!(error.path, Path::new(COMMAND_TYPES_FILE));
-        assert!(error.problem.contains("`system.doctor`"), "{error}");
+        assert!(error.problem.contains("`system.update.check`"), "{error}");
     }
 
     #[test]

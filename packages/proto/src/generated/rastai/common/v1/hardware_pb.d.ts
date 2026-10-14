@@ -9,6 +9,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
+import type { Diagnostic } from "./diagnostic_pb.js";
 
 /**
  * Describes the file rastai/common/v1/hardware.proto.
@@ -65,7 +66,40 @@ export declare type GpuInfo = Message<"rastai.common.v1.GpuInfo"> & {
 export declare const GpuInfoSchema: GenMessage<GpuInfo>;
 
 /**
- * The node's hardware as detected at start. The numerical self-test result joins it in M2 (plan M2 contract task).
+ * One GPU's numerical self-test verdict (platform flow 1.6; contracts 10.3, RRS-H1xxx). A GPU whose verdict is not
+ * usable gets no leases; the node writes the verdicts to hardware_profile.json and sends them in HardwareProfile.
+ *
+ * @generated from message rastai.common.v1.SelfTestVerdict
+ */
+export declare type SelfTestVerdict = Message<"rastai.common.v1.SelfTestVerdict"> & {
+  /**
+   * @generated from field: uint32 gpu_index = 1;
+   */
+  gpuIndex: number;
+
+  /**
+   * True when the GPU passed every check the self-test ran, warnings included.
+   *
+   * @generated from field: bool usable = 2;
+   */
+  usable: boolean;
+
+  /**
+   * The error or warning that decided the verdict; unset when the GPU passed cleanly.
+   *
+   * @generated from field: rastai.common.v1.Diagnostic diagnostic = 3;
+   */
+  diagnostic?: Diagnostic | undefined;
+};
+
+/**
+ * Describes the message rastai.common.v1.SelfTestVerdict.
+ * Use `create(SelfTestVerdictSchema)` to create a new message.
+ */
+export declare const SelfTestVerdictSchema: GenMessage<SelfTestVerdict>;
+
+/**
+ * The node's hardware as detected at start. The self-test fields hold the last numerical self-test (M2-20).
  *
  * @generated from message rastai.common.v1.HardwareProfile
  */
@@ -108,6 +142,20 @@ export declare type HardwareProfile = Message<"rastai.common.v1.HardwareProfile"
    * @generated from field: string backend = 7;
    */
   backend: string;
+
+  /**
+   * When the last self-test finished, in Unix milliseconds; 0 when none has run on this hardware.
+   *
+   * @generated from field: int64 self_test_unix_ms = 8;
+   */
+  selfTestUnixMs: bigint;
+
+  /**
+   * One verdict per visible GPU from the last self-test; empty on a CPU-only node or before any self-test.
+   *
+   * @generated from field: repeated rastai.common.v1.SelfTestVerdict self_tests = 9;
+   */
+  selfTests: SelfTestVerdict[];
 };
 
 /**

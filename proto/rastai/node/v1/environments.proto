@@ -1,0 +1,53 @@
+// Environments: the uv-managed Python environments a node runs its jobs in (contracts 4.4 and 4.9; node layout 7.6,
+// 3.2). EnsureEnvironment syncs one from its lockfile, streams progress and ends with the environment's info.
+syntax = "proto3";
+
+package rastai.node.v1;
+
+import "rastai/common/v1/diagnostic.proto";
+
+// Names the environment and the lock it must match. The node checks the lock it ships against lock_hash; a mismatch
+// means the node is the wrong version (flows/designer-gym-remote C4).
+message EnsureEnvironmentRequest {
+  // The environment's id on this node (contracts 8.6).
+  string environment_id = 1;
+  // "blake3:<64 hex>" of the lockfile the environment must be synced from (ADR-0009 decision 8).
+  string lock_hash = 2;
+  // Set for a plugin's environment; empty for the core environment of the node's backend.
+  string plugin_id = 3;
+  // The plugin version the lockfile belongs to; empty for the core environment.
+  string plugin_version = 4;
+}
+
+// One step of the sync: resolving, downloading, installing or verifying (node layout 7.6), then ready once the
+// marker is written. The same names are in contracts 4.9 and flows/platform.md 1.3.
+message EnvironmentProgress {
+  string environment_id = 1;
+  string state = 2;
+  // The fraction of the sync done, from 0 to 1, when the step can tell.
+  float fraction = 3;
+  string message = 4;
+  // Set when the step failed, for example RRS-H2004 (environment sync failed) or RRS-S3001 (not enough disk).
+  rastai.common.v1.Diagnostic diagnostic = 5;
+}
+
+// The environment as it is on the node, after a sync or in a listing (system.env.list).
+message EnvironmentInfo {
+  string environment_id = 1;
+  string lock_hash = 2;
+  // The folder on the node: <data>/envs/<environment_id>-<lock_hash12>/ (flows/designer-gym-remote C4).
+  string path = 3;
+  string python_version = 4;
+  string torch_version = 5;
+  uint64 size_bytes = 6;
+  // True only once the environment's marker is written, which happens last (contracts 16 row 12).
+  bool ready = 7;
+}
+
+// One item of the EnsureEnvironment stream: progress first, the environment's info last.
+message EnsureEnvironmentEvent {
+  oneof payload {
+    EnvironmentProgress progress = 1;
+    EnvironmentInfo info = 2;
+  }
+}

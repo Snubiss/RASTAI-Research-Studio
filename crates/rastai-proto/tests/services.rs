@@ -10,9 +10,10 @@ use rastai_proto::events::v1::EventRecord;
 use rastai_proto::node::v1::node_hub_service_server::{NodeHubService, NodeHubServiceServer};
 use rastai_proto::node::v1::node_service_server::{NodeService, NodeServiceServer};
 use rastai_proto::node::v1::{
-    GetHardwareRequest, GetHardwareResponse, HandshakeRequest, HandshakeResponse, HeartbeatRequest, HeartbeatResponse,
-    JobInfo, JobSpec, ListJobsRequest, ListJobsResponse, LiveEvent, SignalJobRequest, SignalJobResponse,
-    WatchLiveRequest, WatchRunEventsRequest,
+    EnsureEnvironmentEvent, EnsureEnvironmentRequest, GetHardwareRequest, GetHardwareResponse, GetSecretRequest,
+    GetSecretResponse, HandshakeRequest, HandshakeResponse, HeartbeatRequest, HeartbeatResponse, JobInfo, JobSpec,
+    ListJobsRequest, ListJobsResponse, LiveEvent, SignalJobRequest, SignalJobResponse, WatchLiveRequest,
+    WatchRunEventsRequest,
 };
 use rastai_proto::worker::v1::worker_host_service_server::{WorkerHostService, WorkerHostServiceServer};
 use rastai_proto::worker::v1::worker_service_server::{WorkerService, WorkerServiceServer};
@@ -78,6 +79,15 @@ impl NodeService for StubNode {
     async fn watch_live(&self, _request: Request<WatchLiveRequest>) -> Result<Response<Self::WatchLiveStream>, Status> {
         Ok(Response::new(tokio_stream::empty()))
     }
+
+    type EnsureEnvironmentStream = NoItems<EnsureEnvironmentEvent>;
+
+    async fn ensure_environment(
+        &self,
+        _request: Request<EnsureEnvironmentRequest>,
+    ) -> Result<Response<Self::EnsureEnvironmentStream>, Status> {
+        not_in_this_stub()
+    }
 }
 
 struct StubNodeHub;
@@ -89,6 +99,10 @@ impl NodeHubService for StubNodeHub {
     }
 
     async fn execute_command(&self, _request: Request<ExecuteRequest>) -> Result<Response<ExecuteResponse>, Status> {
+        not_in_this_stub()
+    }
+
+    async fn get_secret(&self, _request: Request<GetSecretRequest>) -> Result<Response<GetSecretResponse>, Status> {
         not_in_this_stub()
     }
 }

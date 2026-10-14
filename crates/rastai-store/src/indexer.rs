@@ -96,13 +96,17 @@ pub fn apply_event_record(transaction: &SqliteTransaction<'_>, record: &EventRec
         // Live state comes from heartbeats, a diagnostic is shown, not stored, and plugin events are the plugin's.
         // A plugin's `plugins.state` is the user's decision, written with `UpsertPlugin` when it is made; the
         // record also carries the host's own outcomes (`incompatible`, a `disabled` for a missing capability), which
-        // are decided again at every start and must not be saved over that decision (layout 6.4, 12.1).
+        // are decided again at every start and must not be saved over that decision (layout 6.4, 12.1). Downloads and
+        // egress reports are shown on the bus and never stored in an index row (contracts 7.3).
         Payload::JobProgress(_)
         | Payload::JobLogLine(_)
         | Payload::NodeHeartbeat(_)
         | Payload::DiagnosticReported(_)
         | Payload::PluginEvent(_)
-        | Payload::PluginStateChanged(_) => Ok(()),
+        | Payload::PluginStateChanged(_)
+        | Payload::DownloadProgress(_)
+        | Payload::DownloadFinished(_)
+        | Payload::EgressActive(_) => Ok(()),
     }
 }
 
@@ -210,7 +214,10 @@ fn run_log_may_carry(payload: &Payload) -> bool {
         | Payload::NodeStateChanged(_)
         | Payload::DocumentChanged(_)
         | Payload::CommandFinished(_)
-        | Payload::PluginStateChanged(_) => false,
+        | Payload::PluginStateChanged(_)
+        | Payload::DownloadProgress(_)
+        | Payload::DownloadFinished(_)
+        | Payload::EgressActive(_) => false,
     }
 }
 
@@ -318,6 +325,9 @@ fn payload_event_type(payload: &Payload) -> &'static str {
         Payload::PluginStateChanged(_) => "plugin.state_changed",
         Payload::DiagnosticReported(_) => "diagnostic.reported",
         Payload::PluginEvent(_) => "a plugin event",
+        Payload::DownloadProgress(_) => "download.progress",
+        Payload::DownloadFinished(_) => "download.finished",
+        Payload::EgressActive(_) => "egress.active",
     }
 }
 

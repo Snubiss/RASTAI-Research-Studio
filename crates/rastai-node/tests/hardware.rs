@@ -144,6 +144,8 @@ mod on_unix {
             gpus: expected["gpus"].as_array().unwrap().iter().map(expected_gpu).collect(),
             driver_version: text_field(&expected, "driver_version"),
             backend: text_field(&expected, "backend"),
+            self_test_unix_ms: 0,
+            self_tests: Vec::new(),
         };
         let notes = expected["notes"]
             .as_array()

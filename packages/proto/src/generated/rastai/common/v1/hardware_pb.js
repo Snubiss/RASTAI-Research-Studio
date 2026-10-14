@@ -8,12 +8,13 @@
 /* eslint-disable */
 
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_rastai_common_v1_diagnostic } from "./diagnostic_pb.js";
 
 /**
  * Describes the file rastai/common/v1/hardware.proto.
  */
 export const file_rastai_common_v1_hardware = /*@__PURE__*/
-  fileDesc("Ch9yYXN0YWkvY29tbW9uL3YxL2hhcmR3YXJlLnByb3RvEhByYXN0YWkuY29tbW9uLnYxIngKB0dwdUluZm8SDQoFaW5kZXgYASABKA0SDAoEbmFtZRgCIAEoCRIUCgxhcmNoaXRlY3R1cmUYAyABKAkSEgoKdnJhbV9ieXRlcxgEIAEoBBIOCgZ2ZW5kb3IYBSABKAkSFgoOZHJpdmVyX3ZlcnNpb24YBiABKAkiuwEKD0hhcmR3YXJlUHJvZmlsZRIRCgljcHVfbW9kZWwYASABKAkSEQoJY3B1X2NvdW50GAIgASgNEhcKD3JhbV90b3RhbF9ieXRlcxgDIAEoBBIXCg9kaXNrX2ZyZWVfYnl0ZXMYBCABKAQSJwoEZ3B1cxgFIAMoCzIZLnJhc3RhaS5jb21tb24udjEuR3B1SW5mbxIWCg5kcml2ZXJfdmVyc2lvbhgGIAEoCRIPCgdiYWNrZW5kGAcgASgJIoQCChNIYXJkd2FyZUZpbmdlcnByaW50EhgKEGVudmlyb25tZW50X2hhc2gYASABKAkSJwoEZ3B1cxgCIAMoCzIZLnJhc3RhaS5jb21tb24udjEuR3B1SW5mbxIWCg5kcml2ZXJfdmVyc2lvbhgDIAEoCRIXCg9iYWNrZW5kX3ZlcnNpb24YBCABKAkSFQoNdG9yY2hfdmVyc2lvbhgFIAEoCRINCgVkdHlwZRgGIAEoCRIUCgxxdWFudGl6YXRpb24YByABKAkSGAoQYXR0ZW50aW9uX2tlcm5lbBgIIAEoCRIMCgRzZWVkGAkgASgEEhUKDWRldGVybWluaXN0aWMYCiABKAgiLgoLUHJvY2Vzc1ZyYW0SCwoDcGlkGAEgASgNEhIKCnZyYW1fYnl0ZXMYAiABKAQi1QEKDEdwdVRlbGVtZXRyeRIRCglncHVfaW5kZXgYASABKA0SGwoTdXRpbGl6YXRpb25fcGVyY2VudBgCIAEoDRIXCg92cmFtX3VzZWRfYnl0ZXMYAyABKAQSGAoQdnJhbV90b3RhbF9ieXRlcxgEIAEoBBIbChN0ZW1wZXJhdHVyZV9jZWxzaXVzGAUgASgCEhMKC3Bvd2VyX3dhdHRzGAYgASgCEjAKCXByb2Nlc3NlcxgHIAMoCzIdLnJhc3RhaS5jb21tb24udjEuUHJvY2Vzc1ZyYW0ioAEKDU5vZGVUZWxlbWV0cnkSFwoPc2FtcGxlZF91bml4X21zGAEgASgDEiwKBGdwdXMYAiADKAsyHi5yYXN0YWkuY29tbW9uLnYxLkdwdVRlbGVtZXRyeRIWCg5yYW1fdXNlZF9ieXRlcxgDIAEoBBIXCg9yYW1fdG90YWxfYnl0ZXMYBCABKAQSFwoPZGlza19mcmVlX2J5dGVzGAUgASgEYgZwcm90bzM");
+  fileDesc("Ch9yYXN0YWkvY29tbW9uL3YxL2hhcmR3YXJlLnByb3RvEhByYXN0YWkuY29tbW9uLnYxIngKB0dwdUluZm8SDQoFaW5kZXgYASABKA0SDAoEbmFtZRgCIAEoCRIUCgxhcmNoaXRlY3R1cmUYAyABKAkSEgoKdnJhbV9ieXRlcxgEIAEoBBIOCgZ2ZW5kb3IYBSABKAkSFgoOZHJpdmVyX3ZlcnNpb24YBiABKAkiZgoPU2VsZlRlc3RWZXJkaWN0EhEKCWdwdV9pbmRleBgBIAEoDRIOCgZ1c2FibGUYAiABKAgSMAoKZGlhZ25vc3RpYxgDIAEoCzIcLnJhc3RhaS5jb21tb24udjEuRGlhZ25vc3RpYyKNAgoPSGFyZHdhcmVQcm9maWxlEhEKCWNwdV9tb2RlbBgBIAEoCRIRCgljcHVfY291bnQYAiABKA0SFwoPcmFtX3RvdGFsX2J5dGVzGAMgASgEEhcKD2Rpc2tfZnJlZV9ieXRlcxgEIAEoBBInCgRncHVzGAUgAygLMhkucmFzdGFpLmNvbW1vbi52MS5HcHVJbmZvEhYKDmRyaXZlcl92ZXJzaW9uGAYgASgJEg8KB2JhY2tlbmQYByABKAkSGQoRc2VsZl90ZXN0X3VuaXhfbXMYCCABKAMSNQoKc2VsZl90ZXN0cxgJIAMoCzIhLnJhc3RhaS5jb21tb24udjEuU2VsZlRlc3RWZXJkaWN0IoQCChNIYXJkd2FyZUZpbmdlcnByaW50EhgKEGVudmlyb25tZW50X2hhc2gYASABKAkSJwoEZ3B1cxgCIAMoCzIZLnJhc3RhaS5jb21tb24udjEuR3B1SW5mbxIWCg5kcml2ZXJfdmVyc2lvbhgDIAEoCRIXCg9iYWNrZW5kX3ZlcnNpb24YBCABKAkSFQoNdG9yY2hfdmVyc2lvbhgFIAEoCRINCgVkdHlwZRgGIAEoCRIUCgxxdWFudGl6YXRpb24YByABKAkSGAoQYXR0ZW50aW9uX2tlcm5lbBgIIAEoCRIMCgRzZWVkGAkgASgEEhUKDWRldGVybWluaXN0aWMYCiABKAgiLgoLUHJvY2Vzc1ZyYW0SCwoDcGlkGAEgASgNEhIKCnZyYW1fYnl0ZXMYAiABKAQi1QEKDEdwdVRlbGVtZXRyeRIRCglncHVfaW5kZXgYASABKA0SGwoTdXRpbGl6YXRpb25fcGVyY2VudBgCIAEoDRIXCg92cmFtX3VzZWRfYnl0ZXMYAyABKAQSGAoQdnJhbV90b3RhbF9ieXRlcxgEIAEoBBIbChN0ZW1wZXJhdHVyZV9jZWxzaXVzGAUgASgCEhMKC3Bvd2VyX3dhdHRzGAYgASgCEjAKCXByb2Nlc3NlcxgHIAMoCzIdLnJhc3RhaS5jb21tb24udjEuUHJvY2Vzc1ZyYW0ioAEKDU5vZGVUZWxlbWV0cnkSFwoPc2FtcGxlZF91bml4X21zGAEgASgDEiwKBGdwdXMYAiADKAsyHi5yYXN0YWkuY29tbW9uLnYxLkdwdVRlbGVtZXRyeRIWCg5yYW1fdXNlZF9ieXRlcxgDIAEoBBIXCg9yYW1fdG90YWxfYnl0ZXMYBCABKAQSFwoPZGlza19mcmVlX2J5dGVzGAUgASgEYgZwcm90bzM", [file_rastai_common_v1_diagnostic]);
 
 /**
  * Describes the message rastai.common.v1.GpuInfo.
@@ -23,37 +24,44 @@ export const GpuInfoSchema = /*@__PURE__*/
   messageDesc(file_rastai_common_v1_hardware, 0);
 
 /**
+ * Describes the message rastai.common.v1.SelfTestVerdict.
+ * Use `create(SelfTestVerdictSchema)` to create a new message.
+ */
+export const SelfTestVerdictSchema = /*@__PURE__*/
+  messageDesc(file_rastai_common_v1_hardware, 1);
+
+/**
  * Describes the message rastai.common.v1.HardwareProfile.
  * Use `create(HardwareProfileSchema)` to create a new message.
  */
 export const HardwareProfileSchema = /*@__PURE__*/
-  messageDesc(file_rastai_common_v1_hardware, 1);
+  messageDesc(file_rastai_common_v1_hardware, 2);
 
 /**
  * Describes the message rastai.common.v1.HardwareFingerprint.
  * Use `create(HardwareFingerprintSchema)` to create a new message.
  */
 export const HardwareFingerprintSchema = /*@__PURE__*/
-  messageDesc(file_rastai_common_v1_hardware, 2);
+  messageDesc(file_rastai_common_v1_hardware, 3);
 
 /**
  * Describes the message rastai.common.v1.ProcessVram.
  * Use `create(ProcessVramSchema)` to create a new message.
  */
 export const ProcessVramSchema = /*@__PURE__*/
-  messageDesc(file_rastai_common_v1_hardware, 3);
+  messageDesc(file_rastai_common_v1_hardware, 4);
 
 /**
  * Describes the message rastai.common.v1.GpuTelemetry.
  * Use `create(GpuTelemetrySchema)` to create a new message.
  */
 export const GpuTelemetrySchema = /*@__PURE__*/
-  messageDesc(file_rastai_common_v1_hardware, 4);
+  messageDesc(file_rastai_common_v1_hardware, 5);
 
 /**
  * Describes the message rastai.common.v1.NodeTelemetry.
  * Use `create(NodeTelemetrySchema)` to create a new message.
  */
 export const NodeTelemetrySchema = /*@__PURE__*/
-  messageDesc(file_rastai_common_v1_hardware, 5);
+  messageDesc(file_rastai_common_v1_hardware, 6);
 

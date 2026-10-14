@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from rastai_proto.events.v1 import payloads_pb2 as rastai_dot_events_dot_v1_dot_payloads__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19rastai/node/v1/live.proto\x12\x0erastai.node.v1\x1a\x1frastai/events/v1/payloads.proto\"\x12\n\x10WatchLiveRequest\"\xfa\x01\n\tLiveEvent\x12\x15\n\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1d\n\nsession_id\x18\x02 \x01(\tR\tsessionId\x12&\n\x0f\x65mitted_unix_ms\x18\x03 \x01(\x03R\remittedUnixMs\x12\x42\n\x0cjob_progress\x18\x04 \x01(\x0b\x32\x1d.rastai.events.v1.JobProgressH\x00R\x0bjobProgress\x12@\n\x0cjob_log_line\x18\x05 \x01(\x0b\x32\x1c.rastai.events.v1.JobLogLineH\x00R\njobLogLineB\t\n\x07payloadb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19rastai/node/v1/live.proto\x12\x0erastai.node.v1\x1a\x1frastai/events/v1/payloads.proto\"\x12\n\x10WatchLiveRequest\"\x94\x03\n\tLiveEvent\x12\x15\n\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1d\n\nsession_id\x18\x02 \x01(\tR\tsessionId\x12&\n\x0f\x65mitted_unix_ms\x18\x03 \x01(\x03R\remittedUnixMs\x12\x42\n\x0cjob_progress\x18\x04 \x01(\x0b\x32\x1d.rastai.events.v1.JobProgressH\x00R\x0bjobProgress\x12@\n\x0cjob_log_line\x18\x05 \x01(\x0b\x32\x1c.rastai.events.v1.JobLogLineH\x00R\njobLogLine\x12Q\n\x11\x64ownload_progress\x18\x06 \x01(\x0b\x32\".rastai.events.v1.DownloadProgressH\x00R\x10\x64ownloadProgress\x12\x45\n\regress_active\x18\x07 \x01(\x0b\x32\x1e.rastai.events.v1.EgressActiveH\x00R\x0c\x65gressActiveB\t\n\x07payloadb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,5 +35,5 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_WATCHLIVEREQUEST']._serialized_start=78
   _globals['_WATCHLIVEREQUEST']._serialized_end=96
   _globals['_LIVEEVENT']._serialized_start=99
-  _globals['_LIVEEVENT']._serialized_end=349
+  _globals['_LIVEEVENT']._serialized_end=503
 # @@protoc_insertion_point(module_scope)

@@ -23,21 +23,26 @@ _sym_db = _symbol_database.Default()
 
 
 from rastai_proto.commands.v1 import command_service_pb2 as rastai_dot_commands_dot_v1_dot_command__service__pb2
+from rastai_proto.common.v1 import diagnostic_pb2 as rastai_dot_common_dot_v1_dot_diagnostic__pb2
 from rastai_proto.common.v1 import hardware_pb2 as rastai_dot_common_dot_v1_dot_hardware__pb2
 from rastai_proto.node.v1 import jobs_pb2 as rastai_dot_node_dot_v1_dot_jobs__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%rastai/node/v1/node_hub_service.proto\x12\x0erastai.node.v1\x1a(rastai/commands/v1/command_service.proto\x1a\x1frastai/common/v1/hardware.proto\x1a\x19rastai/node/v1/jobs.proto\"\x97\x01\n\x10HeartbeatRequest\x12\x17\n\x07node_id\x18\x01 \x01(\tR\x06nodeId\x12=\n\ttelemetry\x18\x02 \x01(\x0b\x32\x1f.rastai.common.v1.NodeTelemetryR\ttelemetry\x12+\n\x04jobs\x18\x03 \x03(\x0b\x32\x17.rastai.node.v1.JobInfoR\x04jobs\"\x13\n\x11HeartbeatResponse2\xbd\x01\n\x0eNodeHubService\x12P\n\tHeartbeat\x12 .rastai.node.v1.HeartbeatRequest\x1a!.rastai.node.v1.HeartbeatResponse\x12Y\n\x0e\x45xecuteCommand\x12\".rastai.commands.v1.ExecuteRequest\x1a#.rastai.commands.v1.ExecuteResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%rastai/node/v1/node_hub_service.proto\x12\x0erastai.node.v1\x1a(rastai/commands/v1/command_service.proto\x1a!rastai/common/v1/diagnostic.proto\x1a\x1frastai/common/v1/hardware.proto\x1a\x19rastai/node/v1/jobs.proto\"\x97\x01\n\x10HeartbeatRequest\x12\x17\n\x07node_id\x18\x01 \x01(\tR\x06nodeId\x12=\n\ttelemetry\x18\x02 \x01(\x0b\x32\x1f.rastai.common.v1.NodeTelemetryR\ttelemetry\x12+\n\x04jobs\x18\x03 \x03(\x0b\x32\x17.rastai.node.v1.JobInfoR\x04jobs\"\x13\n\x11HeartbeatResponse\"C\n\x10GetSecretRequest\x12\x18\n\x07purpose\x18\x01 \x01(\tR\x07purpose\x12\x15\n\x06job_id\x18\x02 \x01(\tR\x05jobId\"\x8f\x01\n\x11GetSecretResponse\x12\x14\n\x05value\x18\x01 \x01(\tR\x05value\x12&\n\x0f\x65xpires_unix_ms\x18\x02 \x01(\x03R\rexpiresUnixMs\x12<\n\ndiagnostic\x18\x03 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic2\x8f\x02\n\x0eNodeHubService\x12P\n\tHeartbeat\x12 .rastai.node.v1.HeartbeatRequest\x1a!.rastai.node.v1.HeartbeatResponse\x12Y\n\x0e\x45xecuteCommand\x12\".rastai.commands.v1.ExecuteRequest\x1a#.rastai.commands.v1.ExecuteResponse\x12P\n\tGetSecret\x12 .rastai.node.v1.GetSecretRequest\x1a!.rastai.node.v1.GetSecretResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'rastai_proto.node.v1.node_hub_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_HEARTBEATREQUEST']._serialized_start=160
-  _globals['_HEARTBEATREQUEST']._serialized_end=311
-  _globals['_HEARTBEATRESPONSE']._serialized_start=313
-  _globals['_HEARTBEATRESPONSE']._serialized_end=332
-  _globals['_NODEHUBSERVICE']._serialized_start=335
-  _globals['_NODEHUBSERVICE']._serialized_end=524
+  _globals['_HEARTBEATREQUEST']._serialized_start=195
+  _globals['_HEARTBEATREQUEST']._serialized_end=346
+  _globals['_HEARTBEATRESPONSE']._serialized_start=348
+  _globals['_HEARTBEATRESPONSE']._serialized_end=367
+  _globals['_GETSECRETREQUEST']._serialized_start=369
+  _globals['_GETSECRETREQUEST']._serialized_end=436
+  _globals['_GETSECRETRESPONSE']._serialized_start=439
+  _globals['_GETSECRETRESPONSE']._serialized_end=582
+  _globals['_NODEHUBSERVICE']._serialized_start=585
+  _globals['_NODEHUBSERVICE']._serialized_end=856
 # @@protoc_insertion_point(module_scope)

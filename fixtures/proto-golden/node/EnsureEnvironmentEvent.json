@@ -1,0 +1,17 @@
+{
+  "progress": {
+    "environment_id": "cuda13",
+    "state": "installing",
+    "fraction": 0.375,
+    "message": "Installing torch 2.8.0 (2.1 GB of 5.2 GB)",
+    "diagnostic": {
+      "code": "RRS-H2004",
+      "severity": "SEVERITY_ERROR",
+      "message": "Environment sync failed: the package index can't be reached.",
+      "path": "envs/sync.log",
+      "fix_text": "Check the network, then sync the environment again.",
+      "fix_command_id": "system.env.install",
+      "fix_arguments_json": "{\"backend\":\"cuda13\"}"
+    }
+  }
+}
