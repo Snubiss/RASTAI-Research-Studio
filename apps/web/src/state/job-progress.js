@@ -62,3 +62,22 @@ export function withoutEndedJob(progressByJob, event) {
   delete remaining[jobId];
   return remaining;
 }
+
+/**
+ * The map without the progress of any job the job list no longer holds. A resync (RRS-C0401) can miss a job's final
+ * event, so the refreshed list is what tells the bar the job is gone; without it the entry would stay until reload.
+ * @param {JobProgressMap} progressByJob
+ * @param {{ job_id: string }[]} listedJobs
+ * @returns {JobProgressMap}
+ */
+export function withOnlyListedJobs(progressByJob, listedJobs) {
+  const listedIds = new Set(listedJobs.map((job) => job.job_id));
+  /** @type {JobProgressMap} */
+  const kept = {};
+  for (const jobId of Object.keys(progressByJob)) {
+    if (listedIds.has(jobId)) {
+      kept[jobId] = progressByJob[jobId];
+    }
+  }
+  return kept;
+}

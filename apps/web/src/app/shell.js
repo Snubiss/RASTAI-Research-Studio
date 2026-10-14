@@ -12,7 +12,7 @@ import { egressReportOf, heldEgress, recordEgress } from "../frame/egress-state.
 import { watchRoute } from "../routing/navigate.js";
 import { createAppStores } from "../state/app-stores.js";
 import { globalMode } from "../state/mode.js";
-import { withJobProgress, withoutEndedJob } from "../state/job-progress.js";
+import { withJobProgress, withOnlyListedJobs, withoutEndedJob } from "../state/job-progress.js";
 import { emptySettings } from "../state/settings.js";
 import { applyTheme, themeTokensFor, watchMediaQuery } from "../state/theme.js";
 import { pluginDiagnostic } from "@rastai/plugin";
@@ -195,6 +195,7 @@ async function refreshJobs(shell) {
   const outcome = await jobList(shell.client, {});
   if (outcome.ok) {
     shell.stores.jobs.set(outcome.result.jobs);
+    shell.stores.jobProgress.set(withOnlyListedJobs(shell.stores.jobProgress.get(), outcome.result.jobs));
   }
 }
 
