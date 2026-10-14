@@ -3,11 +3,19 @@
 //!
 //! - `hash_bytes` and the stream hasher: blob names and file hashes.
 //! - `content_hash_of_value`: a document's `content_hash`, BLAKE3 of its canonical JSON without that key (5.1).
-//! - `model_hash`: a model's identity from its weight files (8.6).
+//! - `model_hash`: a model's identity from its tensors, read through the safetensors reader (8.6).
 
+// A refusal is a `Diagnostic`, as the reader returns it (layout 4.5). A refused model is rare, so it is not boxed.
+#![allow(clippy::result_large_err)]
+
+use rastai_diag::diagnostic::{Diagnostic, diagnostic_at};
 use serde_json::Value;
 
+use crate::byte_source::ByteSource;
+use crate::error::CODE_UNPLANNABLE_LAYOUT;
 use crate::json::canonical::canonical_json;
+use crate::safetensors::dtypes::{SafetensorsDtype, dtype_name};
+use crate::safetensors::reader::{read_safetensors_header, read_tensor_bytes};
 
 const HASH_PREFIX: &str = "blake3:";
 /// The shared-header field that holds the hash, so it is left out of what it hashes (contracts 5.1).
@@ -48,16 +56,77 @@ pub fn content_hash_of_value(document: &Value) -> String {
     hash_bytes(canonical_json(&without_hash).as_bytes())
 }
 
-/// A model's hash from its weight files, given as (file name, file hash) pairs in any order: BLAKE3 over one
-/// `<file name> <file hash>` line per file, sorted, each line ending in `\n` (contracts 8.6). Renaming,
-/// adding or changing any file changes it; the order files were listed in doesn't.
-pub fn model_hash(weight_files: &[(String, String)]) -> String {
-    let mut lines: Vec<String> = weight_files
-        .iter()
-        .map(|(file_name, file_hash)| format!("{file_name} {file_hash}\n"))
-        .collect();
-    lines.sort();
-    hash_bytes(lines.concat().as_bytes())
+/// A model's hash (contracts 8.6): BLAKE3 over one line per tensor, sorted by name, so the weights' identity doesn't
+/// depend on how they are split into files, in what order the files are given, or on the metadata. Each line is
+/// `<name> <dtype> <shape> <data hash>` followed by `\n`. Two files holding one tensor name are refused (`RRS-E1007`).
+pub fn model_hash(weight_files: &[&dyn ByteSource]) -> Result<String, Diagnostic> {
+    let mut digests = Vec::new();
+    for file in weight_files {
+        digests.extend(file_tensor_digests(*file)?);
+    }
+    digests.sort_by(|left, right| left.name.cmp(&right.name));
+    refuse_repeated_names(&digests)?;
+    let listing: String = digests.iter().map(tensor_line).collect();
+    Ok(hash_bytes(listing.as_bytes()))
+}
+
+/// One tensor as a model hash line names it: its name, dtype, shape and the BLAKE3 of its data bytes.
+struct TensorDigest {
+    name: String,
+    dtype: SafetensorsDtype,
+    shape: Vec<u64>,
+    data_hash: String,
+}
+
+/// Reads a file's header through the reader's checks, then each tensor's bytes one at a time.
+fn file_tensor_digests(source: &dyn ByteSource) -> Result<Vec<TensorDigest>, Diagnostic> {
+    let header = read_safetensors_header(source)?;
+    let mut buffer = Vec::new();
+    let mut digests = Vec::with_capacity(header.entries.len());
+    for entry in &header.entries {
+        read_tensor_bytes(source, &header, entry, &mut buffer)?;
+        digests.push(TensorDigest {
+            name: entry.name.clone(),
+            dtype: entry.dtype,
+            shape: entry.shape.clone(),
+            data_hash: hash_bytes(&buffer),
+        });
+    }
+    Ok(digests)
+}
+
+/// Two tensors with one name would give the listing two lines for one tensor, so the model would have no single
+/// identity. Checked on the sorted list, where equal names sit next to each other.
+fn refuse_repeated_names(sorted: &[TensorDigest]) -> Result<(), Diagnostic> {
+    for pair in sorted.windows(2) {
+        if pair[0].name == pair[1].name {
+            let reason = format!("two files hold a tensor named {}", pair[0].name);
+            return Err(diagnostic_at(
+                CODE_UNPLANNABLE_LAYOUT,
+                &[("reason", reason.as_str())],
+                "",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// One listing line, ending in a newline (contracts 8.6). The name is a JSON string, so a space or a newline in a
+/// name can't blur into the next field.
+fn tensor_line(digest: &TensorDigest) -> String {
+    format!(
+        "{} {} {} {}\n",
+        Value::String(digest.name.clone()),
+        dtype_name(digest.dtype),
+        shape_text(&digest.shape),
+        digest.data_hash
+    )
+}
+
+/// The dimensions as compact JSON: `[2,3]`, and `[]` for a scalar.
+fn shape_text(shape: &[u64]) -> String {
+    let sizes: Vec<String> = shape.iter().map(u64::to_string).collect();
+    format!("[{}]", sizes.join(","))
 }
 
 fn format_hash(hash: &blake3::Hash) -> String {
@@ -108,15 +177,13 @@ mod tests {
     }
 
     #[test]
-    fn model_hash_is_sorted_lines() {
-        let files = [
-            ("model-00002.safetensors".to_string(), "blake3:bb".to_string()),
-            ("model-00001.safetensors".to_string(), "blake3:aa".to_string()),
-        ];
-        let expected = hash_bytes(b"model-00001.safetensors blake3:aa\nmodel-00002.safetensors blake3:bb\n");
-        assert_eq!(model_hash(&files), expected);
-        let reversed = [files[1].clone(), files[0].clone()];
-        assert_eq!(model_hash(&reversed), expected);
-        assert_ne!(model_hash(&files[..1]), expected);
+    fn model_hash_of_no_files_is_the_hash_of_the_empty_listing() {
+        assert_eq!(model_hash(&[]).unwrap(), EMPTY_HASH);
+    }
+
+    #[test]
+    fn shape_text_is_compact_json() {
+        assert_eq!(shape_text(&[2, 3]), "[2,3]");
+        assert_eq!(shape_text(&[]), "[]");
     }
 }
