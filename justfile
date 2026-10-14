@@ -196,8 +196,11 @@ env-cpu:
 # resolution would change its lock: a new package, a new version or a changed hash (spec 28 risk 11). Online, so CI
 # runs it (the env-locks job); `just check` doesn't, and it reads the locks offline in test-python instead
 # (python/envs/tests/test_env_locks.py). A folder with a pyproject.toml and no uv.lock fails, so a lock can't be left out.
+# --directory, not --project: with uv 0.13.0 the --project form run from the repo root reports "needs to be updated"
+# for a lock that a fresh `uv lock` leaves byte for byte unchanged. --refresh stays: without it --locked misses a
+# tampered hash.
 env-locks:
-    for project in python/envs/*/pyproject.toml; do uv lock --locked --refresh --project "$(dirname "$project")"; done
+    for project in python/envs/*/pyproject.toml; do uv lock --locked --refresh --directory "$(dirname "$project")"; done
 
 # --frozen-lockfile installs exactly the lock and fails instead of changing it.
 # Install the JavaScript dev tools (typescript checker, vitest, prettier) from pnpm-lock.yaml into node_modules/.

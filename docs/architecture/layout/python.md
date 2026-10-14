@@ -2023,12 +2023,17 @@ Who calls what across the packages, for the main flows:
 ```
 python/envs/
   README.md                   which backend gets which environment, how to update a lock, CI checks
-  environments.json           per environment: selection rule, supported AMD gfx targets, expected download size
+  environments.json           per environment: selection rule, supported AMD gfx targets, expected download size, the lock
+                              (`lock`, null while pending) and the PyTorch build (`pytorch_build`); with `format_version`
+                              and `about`, these keys go beyond contracts.md 15.8's description, which M2-16's reader
+                              follows
   cpu/
     pyproject.toml
     uv.lock
-  tests/                      the cpu environment's smoke test (test_cpu_environment.py), run by `just test-python`, and
-                              by `just test-python-portable` on macOS and Windows with the pure-compute packages' tests
+  tests/                      the cpu environment's smoke test (test_cpu_environment.py) and the lock checks
+                              (test_env_locks.py: each lock listed, each torchvision matching its torch), run offline by
+                              `just test-python`; `just test-python-portable` on macOS and Windows runs the pure-compute
+                              packages' tests
   cuda13/                     default for NVIDIA (driver 580 or newer)
     pyproject.toml
     uv.lock

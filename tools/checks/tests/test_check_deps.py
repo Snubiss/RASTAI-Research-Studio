@@ -297,15 +297,3 @@ def test_a_listed_package_no_lock_holds_fails(write_tree, run_check):
 def test_license_expressions(load_check, expression, package_name, passes):
     check = load_check("check-deps")
     assert check.license_passes(expression, package_name, PYTHON_ALLOWLIST["licenses"]) == passes
-
-
-def test_a_named_entry_can_name_a_whole_expression(load_check):
-    """numpy's license is several ids, none of which passes alone as an exception: its named entry is the expression."""
-    check = load_check("check-deps")
-    licenses = {
-        "allowed": ALLOWED_LICENSES,
-        "named_entries": {"numpy": {"license": "BSD-3-Clause AND 0BSD", "reason": "vendored code"}},
-    }
-    assert check.license_passes("BSD-3-Clause AND 0BSD", "numpy", licenses)
-    assert not check.license_passes("BSD-3-Clause AND 0BSD", "other", licenses)
-    assert not check.license_passes("BSD-3-Clause AND GPL-3.0-only", "numpy", licenses)

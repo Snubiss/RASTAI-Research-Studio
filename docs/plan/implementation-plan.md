@@ -2057,7 +2057,7 @@ Each job is one `just` recipe; the workflow files stay thin (contracts §1). Whi
 | `e2e-web` (Playwright, Chromium and WebKit) | `ci.yml` | Linux | PR, push | M1-54 | yes |
 | `fuzz` (10 minutes per target; every in-house parser of untrusted input, ADR-0037) | `nightly.yml` | Linux | schedule, `main` only | M1-06; targets `json_reader` (M1-14), `read_document` (M1-15), `event_frame` (M1-24), `request_gate` and `connect_json` (M1-26), `jsonrpc_decode` (M1-29), `safetensors_header` (M1-34), `zip_reader` and `inflate` (M2-22), `gguf_header` (M3-E01), `conversation_import` (M3-E02), `sse_reader` (M3-E08), `handshake` (M9-E02), `archived_frame` (M11-E05), `tool_call_parse` (M3-E06), `exec_stream` (M5-E10, the sandbox epic that lands `exec_stream.rs`), `connect_request` (M7-E02) | no |
 | `parity-cpu` | `ci.yml` | Linux | PR, push | M2-08 | yes |
-| `env-locks` | `ci.yml` | Linux | PR touching `python/envs` or `deps/` | M2-15 | yes |
+| `env-locks` | `ci.yml` | Linux | PR, push | M2-15 | yes |
 | `nightly-gpu` (real-weight parity, doctor, the live-panel overhead budget, the M4 latency budget, the DPO anchor drift test, later budgets) | `nightly-gpu.yml` | self-hosted `gpu-nvidia` | schedule, manual, `main` only | M2-10 | no |
 | `nightly-amd` | `nightly-gpu.yml` | self-hosted `gpu-amd` | schedule, manual, `main` only | M2-11 and M10-E01 (both in M10) | no |
 | `llama-server-cpu` (pinned CPU build, tiny GGUF) | `ci.yml` | Linux | PR, push | M5-E13 (mock-based tests from M3-E05) | yes |
