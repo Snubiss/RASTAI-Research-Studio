@@ -23,12 +23,14 @@ use rastai_proto::common::v1::JobState;
 use rastai_proto::node::v1::node_hub_service_client::NodeHubServiceClient;
 use rastai_proto::node::v1::{HeartbeatRequest, JobInfo};
 use rastai_server::daemon::RunningDaemon;
+use rastai_server::server_state::StartJobPause;
 use rastai_store::index::reads::open_index_reader;
 use rastai_store::index::runs::{JobRow, RunRow, get_job, get_run};
 use rastai_store::index::writes::IndexWrite;
 use rastai_store::writer_thread::write_index;
 use rastai_transport::grpc_channel::connect_grpc_channel;
 use serde_json::{Value, json};
+use tokio::sync::oneshot;
 
 use common::{
     execute_request, ok_result, remove_test_folder, response_codes, run_command, start_test_daemon, stop_test_daemon,
@@ -87,8 +89,13 @@ async fn wait_until(limit: Duration, what: &str, ready: impl Fn() -> bool) {
     }
 }
 
-/// A run and its job, written as `submit_job` writes them, for a node of the test's choosing.
+/// A run and its train job, written as `submit_job` writes them, for a node of the test's choosing.
 async fn insert_run_and_job(running: &RunningDaemon, node_id: &str, job_state: &str) {
+    insert_run_and_job_of_kind(running, node_id, "train", job_state).await;
+}
+
+/// A run and its job of any kind, written as `submit_job` writes them.
+async fn insert_run_and_job_of_kind(running: &RunningDaemon, node_id: &str, kind: &str, job_state: &str) {
     let run = RunRow {
         run_id: RUN_ID.to_string(),
         kind: "train".to_string(),
@@ -107,7 +114,7 @@ async fn insert_run_and_job(running: &RunningDaemon, node_id: &str, job_state: &
         job_id: JOB_ID.to_string(),
         run_id: RUN_ID.to_string(),
         node_id: node_id.to_string(),
-        kind: "train".to_string(),
+        kind: kind.to_string(),
         state: job_state.to_string(),
         pid: None,
         process_group_id: None,
@@ -391,6 +398,74 @@ async fn a_heartbeat_never_waits_for_a_launch_in_flight() {
     assert!(answered.is_ok(), "the beat waited for the launch");
     answered.unwrap().unwrap();
     drop(launching);
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+// contracts 6.4: a job of a kind no command of this build starts can be cancelled only with system.admin. A token
+// holding `training` passes the row's check, and the starting-scope check refuses it with RRS-C1005 naming
+// system.admin, before the node is asked; the job keeps running. The owner passes the check and gets as far as the
+// node, which doesn't know the job (RRS-J0004).
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_job_no_command_starts_needs_system_admin() {
+    let paths = test_paths("nl-admin-kind");
+    let running = start_test_daemon(&paths).await;
+    let node_id = embedded_node_id(&running);
+    insert_run_and_job_of_kind(&running, &node_id, "eval", "running").await;
+    let cancel = execute_request("job.cancel", &json!({"job_id": JOB_ID}).to_string());
+
+    let trainer = run_command(&running.server, &token_principal(vec![Scope::Training]), cancel.clone()).await;
+    assert_eq!(response_codes(&trainer), ["RRS-C1005"]);
+    let message = &trainer.diagnostics[0].message;
+    assert!(message.contains("needs the scope system.admin"), "{message}");
+    assert_eq!(job_row(&running, JOB_ID).unwrap().state, "running");
+    let owner = run_command(&running.server, &owner_principal(), cancel).await;
+    assert_eq!(response_codes(&owner), ["RRS-J0004"]);
+    assert_eq!(job_row(&running, JOB_ID).unwrap().state, "running");
+    stop_test_daemon(running).await;
+    remove_test_folder(&paths);
+}
+
+// contracts 9.1 and flows/platform.md 5.1: a launch holds its launch lock across StartJob and never the job lock, so
+// a heartbeat from the node is applied while StartJob is in flight. The test holds the launch just before the call
+// (`Server.start_job_pause`) and sends a heartbeat that reports the job running. A launch that held job_state_lock
+// across the call would keep the heartbeat waiting; the bounded wait below then fails the test instead of hanging.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_heartbeat_is_applied_while_a_launch_is_in_start_job() {
+    let paths = test_paths("nl-start-held");
+    let running = start_test_daemon(&paths).await;
+    let arguments =
+        json!({"recipe": "classification", "design_path": "/d/textcnn.rrsmodel", "dataset_path": "/d/x.jsonl"});
+    let (reached_sender, reached) = oneshot::channel();
+    let (resume_sender, resume) = oneshot::channel();
+    let pause = StartJobPause {
+        reached: reached_sender,
+        resume,
+    };
+    *running.server.start_job_pause.lock().unwrap() = Some(pause);
+    let started = run(&running, "train.start", arguments).await;
+    let job_id = started.job_id.clone();
+    assert!(job_id.starts_with("job_"), "{job_id}");
+    let launch_reached = tokio::time::timeout(END_WAIT, reached).await;
+    assert!(
+        matches!(launch_reached, Ok(Ok(()))),
+        "the launch never reached StartJob"
+    );
+
+    let reports_running = JobInfo {
+        job_id: job_id.clone(),
+        state: JobState::Running as i32,
+        ..JobInfo::default()
+    };
+    let (mut hub, beat) = hub_and_heartbeat(&running, &paths, vec![reports_running]).await;
+    let answered = tokio::time::timeout(PROMPT_ANSWER, hub.heartbeat(beat)).await;
+    // Read before the launch goes on, so the state is the heartbeat's, not StartJob's answer.
+    let state_during_start_job = job_row(&running, &job_id).unwrap().state;
+    // Let the launch go whatever the answer was, so a regression fails here rather than hanging the test.
+    let _ = resume_sender.send(());
+    assert!(answered.is_ok(), "the heartbeat waited for the launch's StartJob");
+    answered.unwrap().unwrap();
+    assert_eq!(state_during_start_job, "running");
     stop_test_daemon(running).await;
     remove_test_folder(&paths);
 }

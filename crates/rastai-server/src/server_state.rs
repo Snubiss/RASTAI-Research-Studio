@@ -56,6 +56,10 @@ pub struct Server {
     /// its checks and its insert, still holding `plugin_host_lock` for a `plugin:` creator, until the test lets it
     /// go. tests/token_creators.rs puts a disable in that window, so a create that let the lock go early fails it.
     pub token_create_pause: Mutex<Option<TokenCreatePause>>,
+    /// A test seam, always `None` in a running daemon: when a test sets it, the next launch stops just before its
+    /// `StartJob` call, still holding whatever lock the launch holds there, until the test lets it go
+    /// (scheduler/launch.rs). tests/node_link.rs uses it to show a heartbeat is applied while a launch is in flight.
+    pub start_job_pause: Mutex<Option<StartJobPause>>,
     /// Login codes, sessions, the owner token's hash and the scoped tokens' hashes.
     pub auth: AuthState,
     /// The daemon-wide bus: the last `daemon.bus_buffer_events` events and every `Subscribe` stream's source.
@@ -87,6 +91,13 @@ pub struct Server {
 /// How a paused `token.create` tells the test it has stopped (`reached`), and waits for the test to let it go on
 /// (`resume`, or the test dropping its sender).
 pub struct TokenCreatePause {
+    pub reached: oneshot::Sender<()>,
+    pub resume: oneshot::Receiver<()>,
+}
+
+/// How a launch held by the `start_job_pause` seam tells the test it has stopped (`reached`), and waits for the test to
+/// let it go on (`resume`, or the test dropping its sender).
+pub struct StartJobPause {
     pub reached: oneshot::Sender<()>,
     pub resume: oneshot::Receiver<()>,
 }
@@ -123,6 +134,7 @@ pub fn build_server(parts: ServerParts) -> Server {
         plugins: RwLock::new(PluginHost::default()),
         plugin_host_lock: tokio::sync::Mutex::new(()),
         token_create_pause: Mutex::new(None),
+        start_job_pause: Mutex::new(None),
         auth,
         bus: new_bus(bus_buffer_events, now_unix_ms()),
         daemon_log: tokio::sync::Mutex::new(new_daemon_log()),
