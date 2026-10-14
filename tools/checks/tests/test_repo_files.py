@@ -45,3 +45,16 @@ def test_an_apostrophe_in_jsx_text_starts_no_string():
 def test_a_tagged_template_is_still_a_string():
     source = "css`color: red;`"
     assert [kind for kind, _, _ in split_javascript(source)] == ["code", "string"]
+
+
+def test_a_quote_right_after_from_or_import_starts_a_string():
+    """Minified and prettier-ignored code writes no space before the specifier (FU-276 item 1)."""
+    source = 'import{X}from"@rastai/ui/security";import"a";'
+    strings = [source[start:end] for kind, start, end in split_javascript(source) if kind == "string"]
+    assert strings == ['"@rastai/ui/security"', '"a"']
+
+
+def test_a_quote_after_a_longer_word_stays_jsx_text():
+    """reimport' and Let's are words that end in the keywords' letters or hold an apostrophe: still text."""
+    source = "<p>Let's reimport'</p>"
+    assert [kind for kind, _, _ in split_javascript(source)] == ["code"]

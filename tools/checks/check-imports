@@ -9,12 +9,20 @@
   frontend layout 1 names, and each library only where contracts 2.5 allows it.
 - Rust: cargo-deny and check-deps pin each single-owner crate to its owning crate; this check pins the file
   inside the owner (contracts 2.5 "Enforced owners").
+- JavaScript specifiers are read from the code, not from the text around it: static imports and re-exports, import(),
+  import.meta.glob patterns (a string or an array of strings in its first argument), and JSDoc import types in
+  comments. A relative specifier from a package's src/ must stay inside that src/, and every symlink under a scanned
+  src/ is a problem: Vite follows symlinks and this check's walk does not.
+Out of scope (a static check can't see these, and they are not a working import in the shipped ESM bundle): a
+specifier held in a variable, a ternary or comma expression inside import(), CommonJS require and .cjs files, and
+new URL(..., import.meta.url). The real boundary for third-party plugins is the M8 sandboxed iframe.
 The tables below restate contracts 2.2, 2.3 and 2.5; tools/checks/tests checks that every package those tables
 name has a row here.
 """
 
 import ast
 import json
+import os
 import posixpath
 import re
 import sys
@@ -26,6 +34,7 @@ from repo_files import (
     list_files,
     parse_root_argument,
     read_text,
+    relative_path,
     report,
     rust_code_only,
     split_javascript,
@@ -218,13 +227,32 @@ JS_LIBRARY_FILES = {
 # files beside it (vite.config.js) are dev tooling.
 JS_PACKAGE_FOLDER_PATTERNS = ["apps/*/", "packages/*/", "plugins/*/ui/"]
 JS_SOURCE_FOLDER = "src/"
-JS_SUFFIXES = (".js", ".jsx", ".mjs")
+# The package's own manifest, which a test reads as data (`import manifest from "../package.json"`). It is JSON, so
+# importing it runs no code from outside src/; it is the one file beside src/ that a src/ file may name.
+JS_MANIFEST_FILE = "package.json"
+# .ts and .mts sources too: src/generated/ may hold them (check-no-typescript allows only that), and a TypeScript
+# file is still bundled by Vite, so its imports count like a .js file's.
+JS_SUFFIXES = (".js", ".jsx", ".mjs", ".ts", ".mts")
+# A declaration file only has types in it: every import in it is type-only, erased at build time.
+TYPE_DECLARATION_SUFFIXES = (".d.ts", ".d.mts")
 JS_TEST_SUFFIXES = (".test.js", ".test.jsx")
 OUR_SCOPE = "@rastai/"
-# A string right after these is an import specifier: `... from "x"`, `import "x"` and `import("x")`.
-SPECIFIER_BEFORE = re.compile(r"(\bfrom|\bimport|\bimport\s*\()\s*$")
+# A string right after these is an import specifier: `... from "x"`, `import "x"`, `import("x")` and the redundant
+# `import(("x"))`. Comments count as spaces by the time this is read, so `import /* c */ (` matches too.
+SPECIFIER_BEFORE = re.compile(r"(?:\bfrom|\bimport(?:\s*\()*)\s*$")
 # A JSDoc type import inside a comment: {import("@rastai/proto").Diagnostic}.
 TYPE_IMPORT = re.compile(r"\bimport\(\s*[\"']([^\"']+)[\"']\s*\)")
+# The code right before the parenthesis of a call whose first argument holds the glob patterns:
+# import.meta.glob("...") or import.meta.glob(["...", "..."]). Vite reads those patterns as module paths, so they
+# are specifiers; the options after them are not.
+GLOB_CALL_BEFORE = re.compile(r"\bimport\.meta\.glob\s*$")
+# How much code before a position is enough to recognize GLOB_CALL_BEFORE.
+GLOB_CALL_CONTEXT_LENGTH = 32
+# Specifiers with a backslash (a unicode escape reads as a path inside the package) or a node_modules segment (a
+# relative path through pnpm's per-package link into another package) are refused before anything else is read.
+BACKSLASH_REASON = "a backslash (an escape reads as a path); write the specifier as plain text"
+NODE_MODULES_REASON = "a node_modules path; import the other package by its name, not through its installed copy"
+ROOT_ABSOLUTE_REASON = "a root-absolute path ('/...') is not a path inside this package; import by name or go relative"
 
 # ---- Rust: contracts 2.5 ----
 
@@ -384,8 +412,25 @@ def check_javascript(root: Path) -> list[str]:
             )
             continue
         source_folder = package_folder + JS_SOURCE_FOLDER
+        problems.extend(symlink_problems(root, source_folder))
         for path in list_files(root / source_folder, JS_SUFFIXES):
             problems.extend(check_js_file(root, source_folder + path, package_name, package_folder))
+    return problems
+
+
+def symlink_problems(root: Path, source_folder: str) -> list[str]:
+    """Every symlink under a scanned src/, and src/ itself if it is one. os.walk doesn't follow a symlinked folder,
+    so this check would not read what it points to, while Vite follows it into the bundle. A symlink is refused
+    rather than followed, so the scanned tree is the tree that gets bundled."""
+    source = root / source_folder
+    problems = []
+    if source.is_symlink():
+        problems.append(f"{source_folder.rstrip('/')}: is a symlink; src/ must hold real files only")
+    for folder, child_folders, file_names in os.walk(source):
+        for name in child_folders + file_names:
+            entry = Path(folder) / name
+            if entry.is_symlink():
+                problems.append(f"{relative_path(root, entry)}: is a symlink; src/ must hold real files only")
     return problems
 
 
@@ -402,26 +447,29 @@ def find_js_packages(root: Path) -> list[tuple[str, str]]:
 def check_js_file(root: Path, path: str, package: str, package_folder: str) -> list[str]:
     text = read_text(root, path)
     problems = []
+    declares_types = path.endswith(TYPE_DECLARATION_SUFFIXES)
     for offset, specifier, is_type_only in js_imports(text):
-        reason = js_import_problem(specifier, is_type_only, path, package, package_folder)
+        reason = js_import_problem(specifier, is_type_only or declares_types, path, package, package_folder)
         if reason:
             problems.append(f"{path}:{line_number_at(text, offset)}: imports `{specifier}`: {reason}")
     return problems
 
 
 def js_imports(text: str) -> list[tuple[int, str, bool]]:
-    """(offset, specifier, is_type_only) for each import: strings right after `from` or `import` in code, and
-    JSDoc `import("...")` types in comments."""
+    """(offset, specifier, is_type_only) for each import: strings right after `from` or `import` in code, the
+    patterns of import.meta.glob, and JSDoc `import("...")` types in comments."""
     imports = []
+    spans = split_javascript(text)
+    glob_patterns = glob_pattern_starts(text, spans)
     # The code since the last string. A comment is whitespace in JavaScript, so it becomes one space here: the
     # code on both sides stays apart (`await/**/import(` must still read as `await import(`), and a comment
     # between `import(` and the specifier (`import(/* @vite-ignore */ "x")`) can't hide the `import(` before it.
     code_before = ""
-    for kind, start, end in split_javascript(text):
+    for kind, start, end in spans:
         if kind == "code":
             code_before += text[start:end]
         elif kind == "string":
-            if SPECIFIER_BEFORE.search(code_before):
+            if start in glob_patterns or SPECIFIER_BEFORE.search(code_before):
                 imports.append((start, text[start + 1 : end - 1], False))
             code_before = ""
         elif kind == "comment":
@@ -430,11 +478,49 @@ def js_imports(text: str) -> list[tuple[int, str, bool]]:
     return imports
 
 
+def glob_pattern_starts(text: str, spans: list[tuple[str, int, int]]) -> set[int]:
+    """The offsets of the string literals that are import.meta.glob patterns: the string itself, or each string
+    of the array, when it is the call's first argument. Strings after that comma are options (query: "?raw"),
+    not paths, so they are not returned. Brackets are counted from the call's own parenthesis, so the commas
+    inside an array don't end the first argument."""
+    starts = set()
+    # 0 outside a glob call's first argument; otherwise the brackets open from the call's parenthesis onwards.
+    depth = 0
+    code_before = ""
+    for kind, start, end in spans:
+        if kind == "string":
+            if depth > 0:
+                starts.add(start)
+            code_before = ""
+            continue
+        characters = text[start:end] if kind == "code" else " "
+        for character in characters:
+            depth = next_glob_depth(depth, character, code_before)
+            code_before = (code_before + character)[-GLOB_CALL_CONTEXT_LENGTH:]
+    return starts
+
+
+def next_glob_depth(depth: int, character: str, code_before: str) -> int:
+    """The bracket depth after one character of code, given the code before it (see glob_pattern_starts)."""
+    if depth == 0:
+        return 1 if character == "(" and GLOB_CALL_BEFORE.search(code_before) else 0
+    if character in "([{":
+        return depth + 1
+    if character in ")]}":
+        return depth - 1
+    if character == "," and depth == 1:
+        return 0  # the first argument ends at a comma of the call itself
+    return depth
+
+
 def type_imports_in_comment(comment: str, comment_start: int) -> list[tuple[int, str, bool]]:
     return [(comment_start + match.start(), match.group(1), True) for match in TYPE_IMPORT.finditer(comment)]
 
 
 def js_import_problem(specifier: str, is_type_only: bool, path: str, package: str, package_folder: str) -> str | None:
+    shape_problem = js_specifier_shape_problem(specifier)
+    if shape_problem:
+        return shape_problem
     if specifier.startswith("."):
         return js_relative_problem(specifier, path, package_folder)
     if specifier.startswith(OUR_SCOPE):
@@ -444,11 +530,26 @@ def js_import_problem(specifier: str, is_type_only: bool, path: str, package: st
     return js_library_problem(specifier, path)
 
 
+def js_specifier_shape_problem(specifier: str) -> str | None:
+    """A specifier that is refused whatever it names: a backslash, a node_modules segment or a root-absolute path."""
+    if "\\" in specifier:
+        return BACKSLASH_REASON
+    if "node_modules" in specifier.split("/"):
+        return NODE_MODULES_REASON
+    if specifier.startswith("/"):
+        return ROOT_ABSOLUTE_REASON
+    return None
+
+
 def js_relative_problem(specifier: str, path: str, package_folder: str) -> str | None:
+    """A relative import from src/ must land in the same src/. Code outside src/ (a plugin's lib/ folder) is not
+    scanned, so a src/ file that reaches it would move a locked import out of the scan."""
     target = posixpath.normpath(posixpath.join(posixpath.dirname(path), specifier))
-    if (target + "/").startswith(package_folder):
+    if (target + "/").startswith(package_folder + JS_SOURCE_FOLDER):
         return None
-    return "reaches outside its package; import the other package by name"
+    if target == package_folder + JS_MANIFEST_FILE:
+        return None
+    return "reaches outside its package's src/; import the other package by name, and keep the code in src/"
 
 
 def js_internal_problem(specifier: str, is_type_only: bool, path: str, package: str) -> str | None:
