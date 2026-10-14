@@ -22,6 +22,14 @@ const MIN_TARGET_PX = 24;
 const MAX_TAB_PRESSES = 30;
 // A command with no arguments, as its descriptor's arguments schema says.
 const EMPTY_SCHEMA = '{"type":"object","properties":{}}';
+// token.create as the palette lists it: its name is required, so the palette opens its form and never runs it blind.
+const TOKEN_CREATE_COMMAND = {
+  commandId: "token.create",
+  title: "Create API token",
+  summary: "Makes an API token. The value is shown once.",
+  argumentsSchemaJson:
+    '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}',
+};
 
 beforeAll(async () => {
   await loadAppStyles();
@@ -550,6 +558,20 @@ describe("default shortcuts and locked dialogs", () => {
     }
   });
 
+  test("Ctrl K keeps the browser's default while a locked dialog is open, and opens no palette over it", async () => {
+    await renderApp();
+    const dialog = openLockedDialog(() => {});
+    try {
+      const press = new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true });
+      window.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+      expect(dialogTitled("Command palette")?.open).not.toBe(true);
+    } finally {
+      dialog.close();
+      dialog.remove();
+    }
+  });
+
   test("once the dialog closes, the Mod shortcut runs, and Enter still never runs a command", async () => {
     const { client } = await renderApp({
       commands: SHORTCUT_COMMANDS,
@@ -581,6 +603,29 @@ describe("token.create from the palette", () => {
     const ranStatus = await runFromPalette(shell, { commandId: "system.status", title: "System status" }, {});
     expect(ranStatus).toBe(true);
     expect(callsTo(client, "system.status")).toBe(1);
+  });
+
+  test("the palette form's Run sends token.create to Settings: no call is made and the palette closes", async () => {
+    const { shell, client } = await renderApp({ commands: [TOKEN_CREATE_COMMAND] });
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await vi.waitFor(() => expect(dialogTitled("Command palette")?.open).toBe(true));
+    const filter = /** @type {HTMLInputElement | null} */ (document.querySelector("dialog[open] input"));
+    filter?.focus();
+    await userEvent.keyboard("token");
+    await userEvent.keyboard("{Enter}");
+
+    await vi.waitFor(() => expect(document.querySelector(".rr-palette-detail input")).not.toBeNull());
+    const nameField = /** @type {HTMLInputElement} */ (document.querySelector(".rr-palette-detail input"));
+    nameField.focus();
+    await userEvent.keyboard("ci");
+    const run = /** @type {HTMLButtonElement | null} */ (
+      document.querySelector('.rr-palette-detail button[type="submit"]')
+    );
+    await inAct(async () => run?.click());
+
+    await vi.waitFor(() => expect(window.location.hash).toBe("#/settings"));
+    expect(callsTo(client, "token.create")).toBe(0);
+    expect(shell.stores.palette.get().open).toBe(false);
   });
 
   test("the palette form's host sends token.create to Settings too", async () => {

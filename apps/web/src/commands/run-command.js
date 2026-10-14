@@ -61,11 +61,19 @@ export function paletteHostOf(shell) {
     execute: (commandId, args, options) => {
       if (isRedirectedCommand(commandId)) {
         openSettings(shell);
-        return Promise.resolve({ ok: false, result: null, jobId: null, diagnostics: [], journalId: null });
+        return Promise.resolve(redirectedOutcome());
       }
       return coreHost.execute(commandId, args, options);
     },
   };
+}
+
+/**
+ * The outcome of a command that was not run: nothing ran, so there is no result, job or diagnostic to report.
+ * @returns {{ ok: false, result: null, jobId: null, diagnostics: never[], journalId: null }}
+ */
+function redirectedOutcome() {
+  return { ok: false, result: null, jobId: null, diagnostics: [], journalId: null };
 }
 
 /**

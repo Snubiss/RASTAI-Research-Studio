@@ -154,7 +154,7 @@ fn check_commands(manifest: &PluginManifest, source: &MeaningSource) -> Vec<Diag
 /// A default shortcut the web app can bind: its parts split on `+`, each trimmed and lowercased, with the empty parts
 /// dropped. Every part but the last is Mod, Shift or Alt, and the last is the key. It needs Mod or Alt, so a bare key
 /// (`Enter`, `x`) or a Shift-only key (`Shift+K`) is refused. `Ctrl` isn't a modifier word here, so `Ctrl+K` is refused.
-pub fn is_usable_shortcut(text: &str) -> bool {
+fn is_usable_shortcut(text: &str) -> bool {
     let parts: Vec<String> = text
         .split(SHORTCUT_PART_SEPARATOR)
         .map(|part| part.trim().to_lowercase())
