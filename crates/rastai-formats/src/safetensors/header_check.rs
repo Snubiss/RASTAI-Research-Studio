@@ -294,7 +294,7 @@ fn read_shape(name: &str, fields: &Map<String, Value>) -> Result<Vec<HeaderCount
 fn read_offsets(name: &str, fields: &Map<String, Value>, data_length: u64) -> Result<(u64, u64), Diagnostic> {
     let pointer = tensor_pointer(name, OFFSETS_KEY);
     let bad_offsets = || tensor_diagnostic(CODE_BAD_OFFSETS, name, &[], &pointer);
-    let outside = || tensor_diagnostic(CODE_OFFSETS_OUTSIDE, name, &[], &pointer);
+    let outside = || offsets_outside_diagnostic(name);
     let Some(Value::Array(offsets)) = fields.get(OFFSETS_KEY) else {
         return Err(bad_offsets());
     };
@@ -377,6 +377,12 @@ fn read_count(value: &Value) -> HeaderCount {
         Some(number) if number >= FIRST_NUMBER_PAST_64_BITS => HeaderCount::Past64Bits,
         _ => HeaderCount::NotACount,
     }
+}
+
+/// The `RRS-E6011` refusal for a tensor whose data offsets fall outside the data section. The reader's refusal for a
+/// source shorter than the header claims is built here too, so both name the tensor's `data_offsets` the same way.
+pub(crate) fn offsets_outside_diagnostic(name: &str) -> Diagnostic {
+    tensor_diagnostic(CODE_OFFSETS_OUTSIDE, name, &[], &tensor_pointer(name, OFFSETS_KEY))
 }
 
 /// `/<tensor name>` or `/<tensor name>/<key>`, the pointer a diagnostic names.

@@ -12,13 +12,16 @@ use rastai_diag::diagnostic::{Diagnostic, diagnostic_at};
 use crate::byte_source::ByteSource;
 use crate::error::FormatsError;
 use crate::safetensors::header_check::{
-    HEADER_LENGTH_BYTES, SafetensorsHeader, TensorEntry, check_safetensors_header, read_safetensors_header_length,
+    HEADER_LENGTH_BYTES, SafetensorsHeader, TensorEntry, check_safetensors_header, offsets_outside_diagnostic,
+    read_safetensors_header_length,
 };
 
-// Catalog codes (contracts 10.3) this file reports. The header check owns the other RRS-E60xx codes.
-const CODE_OFFSETS_OUTSIDE: &str = "RRS-E6011";
+// Catalog code (contracts 10.3) this file reports for a source it can't read. The header check owns the RRS-E60xx codes,
+// including RRS-E6011 for offsets outside the data section.
 const CODE_SOURCE_NOT_READABLE: &str = "RRS-D3001";
 const READ_FAILED_REASON: &str = "the source could not be read";
+// The largest buffer this platform can hold. A tensor past it is refused, not cut short (a 32-bit target, WASM in M4).
+const LARGEST_BUFFER: u64 = usize::MAX as u64;
 
 /// Reads and checks a whole header from a source. Every refusal is a `Diagnostic` with the code of the first problem
 /// found (the length, then the header rules of `check_safetensors_header`). A file shorter than the length prefix is
@@ -42,14 +45,14 @@ pub fn read_tensor_bytes(
     entry: &TensorEntry,
     buffer: &mut Vec<u8>,
 ) -> Result<(), Diagnostic> {
-    let outside = || outside_diagnostic(&entry.name);
+    let outside = || offsets_outside_diagnostic(&entry.name);
     let offset = header.data_start.checked_add(entry.start).ok_or_else(outside)?;
     let length = entry.end.checked_sub(entry.start).ok_or_else(outside)?;
     let end = offset.checked_add(length).ok_or_else(outside)?;
     if end > source.length() {
         return Err(outside());
     }
-    let length = usize::try_from(length).map_err(|_| outside())?;
+    let length = tensor_buffer_length(&entry.name, length, LARGEST_BUFFER)?;
     buffer.clear();
     buffer.resize(length, 0);
     source.read_at(offset, buffer).map_err(read_diagnostic)
@@ -69,16 +72,26 @@ fn read_bytes(source: &dyn ByteSource, offset: u64, length: usize) -> Result<Vec
     Ok(buffer)
 }
 
+/// A tensor's length as a buffer size. A length past `largest` is refused as an unreadable source: the file is fine,
+/// this platform just can't hold that tensor in memory.
+fn tensor_buffer_length(tensor_name: &str, length: u64, largest: u64) -> Result<usize, Diagnostic> {
+    if length > largest {
+        let reason = format!("tensor {tensor_name} is {length} bytes, more than this platform can hold in memory");
+        return Err(source_refused(&reason));
+    }
+    Ok(length as usize)
+}
+
 fn read_diagnostic(error: FormatsError) -> Diagnostic {
     let reason = match error {
         FormatsError::ReadFailed { reason, .. } => reason,
         _ => READ_FAILED_REASON.to_string(),
     };
-    diagnostic_at(CODE_SOURCE_NOT_READABLE, &[("reason", &reason)], "")
+    source_refused(&reason)
 }
 
-fn outside_diagnostic(tensor_name: &str) -> Diagnostic {
-    diagnostic_at(CODE_OFFSETS_OUTSIDE, &[("tensor_name", tensor_name)], "")
+fn source_refused(reason: &str) -> Diagnostic {
+    diagnostic_at(CODE_SOURCE_NOT_READABLE, &[("reason", reason)], "")
 }
 
 #[cfg(test)]
@@ -151,8 +164,34 @@ mod tests {
         let refused =
             read_tensor_bytes(&SliceSource { bytes: short }, &header, &header.entries[0], &mut buffer).unwrap_err();
         assert_eq!(refused.code, "RRS-E6011");
+        assert_eq!(refused.path, "#/a/data_offsets");
         assert!(refused.message.contains("tensor a "), "{}", refused.message);
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn a_short_source_names_the_same_place_as_the_check() {
+        let header = check_safetensors_header(TWO_TENSOR_HEADER.as_bytes(), 32).unwrap();
+        let refused = read_tensor_bytes(
+            &SliceSource { bytes: &[] },
+            &header,
+            &header.entries[1],
+            &mut Vec::new(),
+        );
+        let same = offsets_outside_diagnostic("b");
+        assert_eq!(refused.unwrap_err(), same);
+    }
+
+    #[test]
+    fn a_tensor_past_the_platform_buffer_is_refused_as_unreadable_not_as_offsets() {
+        assert_eq!(tensor_buffer_length("a", 4, 4).unwrap(), 4);
+        let refused = tensor_buffer_length("a", 5, 4).unwrap_err();
+        assert_eq!(refused.code, "RRS-D3001");
+        assert!(
+            refused.message.contains("more than this platform"),
+            "{}",
+            refused.message
+        );
     }
 
     #[test]
