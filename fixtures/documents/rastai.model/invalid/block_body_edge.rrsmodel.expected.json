@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2001",
+      "path": "block_body_edge.rrsmodel:92:11#/blocks/decoder_layer/edges/1/to_node"
+    }
+  ]
+}

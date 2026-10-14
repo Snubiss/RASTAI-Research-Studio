@@ -1,7 +1,7 @@
 {
   "op": "attention",
   "flop_convention": "flops counts one forward pass over input_shapes, as torch.utils.flop_counter.FlopCounterMode counts it: 2 per multiply-accumulate of a matrix multiplication or convolution. Bias adds, activations, pooling, dropout, embedding lookups and concatenation count 0.",
-  "notes": "Projections: query head_count * head_dim, key and value kv_head_count * head_dim, output back to hidden_size; no biases. Scores and the weighted sum are counted over every query and key position, so a sliding layer counts the same FLOPs as a full one: its window masks positions, it doesn't skip them. qk_norm adds two RMS norms of head_dim (2 * head_dim parameters, 0 FLOPs). rope rotates by elementwise products and counts 0 FLOPs.",
+  "notes": "Projections: query head_count * head_dim, key and value kv_head_count * head_dim, output back to hidden_size; no biases. Scores and the weighted sum are counted over every query and key position, so a sliding layer counts the same FLOPs as a full one: its window masks positions, it doesn't skip them. qk_norm adds two RMS norms of head_dim (2 * head_dim parameters, 0 FLOPs). rope rotates by elementwise products and counts 0 FLOPs. The score (q @ k^T) and weighted-sum (@ v) matmuls are counted as explicit matmuls, the way contracts 5.3 writes them: torch's scaled_dot_product_attention counts 0 FLOPs under FlopCounterMode, so an implementation must not take these numbers from it.",
   "cases": [
     {
       "name": "mha",

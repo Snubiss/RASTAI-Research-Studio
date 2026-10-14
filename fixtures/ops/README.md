@@ -21,6 +21,7 @@ One golden file per ModelSpec op, `<op>.json` (contracts §5.3 and §12.5). Each
 }
 ```
 
+- `notes` (optional) is a free-text note about the op's numbers, such as how sliding layers count their FLOPs; it doesn't affect any check.
 - `attributes` are the graph node's `attributes` as a `.rrsmodel` writes them; an attribute left out takes its default (`documents/model_ops.rs` describes each op's).
 - `input_shapes` lists the op's inputs in `to_input` order. Sequence tensors are channels-last, `[batch, length, channels]`, the layout an embedding gives; an embedding's input holds token ids.
 - `output_shapes` lists the op's outputs; every op so far has one.
@@ -36,7 +37,7 @@ They were written from PyTorch 2.14 on CPU in eval mode: each case built as a ch
 
 ## The decoder ops (M2-01)
 
-`attention`, `feed_forward`, `residual_add`, `rms_norm`, `layer_norm` and `unembed` take their numbers from the formulas in contracts 5.3 and the FLOP convention above, worked out by hand from the attributes of each case, not by running PyTorch. The Python compiler (M2-03) runs each case under `FlopCounterMode` and must match. Attention's `notes` field states how sliding layers and qk_norm count.
+`attention`, `feed_forward`, `residual_add`, `rms_norm`, `layer_norm` and `unembed` take their numbers from the formulas in contracts 5.3 and the FLOP convention above, worked out by hand from the attributes of each case. The attention cases were then checked by running a reference module (bias-free projections, `repeat_interleave` for grouped heads, and explicit `q @ kᵀ` and `@ v` matmuls, not `scaled_dot_product_attention`, which `FlopCounterMode` counts as 0) under `FlopCounterMode` on PyTorch 2.14: all four match. The Python compiler (M2-03) runs each case under `FlopCounterMode` and must match. Attention's `notes` field states how sliding layers and qk_norm count.
 
 ## Adding an op
 

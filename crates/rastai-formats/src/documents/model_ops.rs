@@ -199,8 +199,11 @@ pub struct AttentionAttributes {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RopeScaling {
+    /// The frequencies as the base gives them. Not `None`: that name reads as Option's absent value next to an
+    /// attention's `rope`. Its serde value is still `none`.
     #[default]
-    None,
+    #[serde(rename = "none")]
+    NoScaling,
     /// Every frequency divided by `factor`.
     Linear,
     /// Llama 3's per-band scaling by `factor`, with the frequency bands of the two factors below.
@@ -565,15 +568,8 @@ fn check_attention(problems: &mut Vec<AttributeProblem>, attention: &AttentionAt
     require_positive(problems, "hidden_size", attention.hidden_size);
     require_positive(problems, "head_count", attention.head_count);
     require_positive(problems, "head_dim", attention.head_dim);
-    let kv_head_count = attention.kv_head_count.unwrap_or(attention.head_count);
-    let divides = kv_head_count > 0 && attention.head_count.is_multiple_of(kv_head_count);
-    let shares_heads = kv_head_count < attention.head_count;
-    let kv_fits = match attention.variant {
-        AttentionVariant::Mha => kv_head_count == attention.head_count,
-        AttentionVariant::Gqa => divides && shares_heads,
-        AttentionVariant::Sliding => divides,
-    };
-    if !kv_fits {
+    // A head count of 0 is reported once, at head_count: no key or value head count can be checked against it.
+    if attention.head_count > 0 && !kv_heads_fit(attention) {
         problems.push(problem("kv_head_count", EXPECTED_KV_HEADS));
     }
     let window_fits = match attention.variant {
@@ -588,10 +584,22 @@ fn check_attention(problems: &mut Vec<AttributeProblem>, attention: &AttentionAt
     }
 }
 
+/// Whether the key and value head count suits the variant. A left-out count means one per query head.
+fn kv_heads_fit(attention: &AttentionAttributes) -> bool {
+    let kv_head_count = attention.kv_head_count.unwrap_or(attention.head_count);
+    let divides = kv_head_count > 0 && attention.head_count.is_multiple_of(kv_head_count);
+    let shares_heads = kv_head_count < attention.head_count;
+    match attention.variant {
+        AttentionVariant::Mha => kv_head_count == attention.head_count,
+        AttentionVariant::Gqa => divides && shares_heads,
+        AttentionVariant::Sliding => divides,
+    }
+}
+
 fn rope_fits(rope: &RopeSettings) -> bool {
     let scaled_with_length = match rope.scaling {
         RopeScaling::Llama3 | RopeScaling::Yarn => rope.original_max_position > 0,
-        RopeScaling::None | RopeScaling::Linear => true,
+        RopeScaling::NoScaling | RopeScaling::Linear => true,
     };
     above_zero(rope.base) && above_zero(rope.factor) && scaled_with_length
 }
@@ -1115,7 +1123,7 @@ mod tests {
         let rope: RopeSettings = serde_json::from_value(json!({})).unwrap();
         assert_eq!(
             (rope.base, rope.factor, rope.scaling),
-            (10_000.0, 1.0, RopeScaling::None)
+            (10_000.0, 1.0, RopeScaling::NoScaling)
         );
     }
 
@@ -1190,6 +1198,17 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_head_count_is_one_problem_at_head_count() {
+        let mut typed = attention(AttentionVariant::Gqa, Some(2), None);
+        if let OpAttributes::Attention(attributes) = &mut typed {
+            attributes.head_count = 0;
+        }
+        let problems = op_attribute_problems(&typed);
+        let attributes: Vec<&str> = problems.iter().map(|problem| problem.attribute).collect();
+        assert_eq!(attributes, ["head_count"]);
+    }
+
+    #[test]
     fn rope_scaling_that_needs_a_length_names_it() {
         let mut rope = RopeSettings {
             base: 10_000.0,
@@ -1239,7 +1258,7 @@ mod tests {
             .collect();
         assert_eq!(variants, FEED_FORWARD_VARIANT_VALUES);
         let scalings: Vec<Value> = [
-            RopeScaling::None,
+            RopeScaling::NoScaling,
             RopeScaling::Linear,
             RopeScaling::Llama3,
             RopeScaling::Yarn,

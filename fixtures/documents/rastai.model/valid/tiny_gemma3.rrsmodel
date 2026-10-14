@@ -46,6 +46,14 @@
         }
       },
       {
+        "node_id": "post_attn_norm",
+        "op": "rms_norm",
+        "attributes": {
+          "size": 16,
+          "scale_offset": true
+        }
+      },
+      {
         "node_id": "add_1",
         "op": "residual_add",
         "attributes": {}
@@ -69,6 +77,14 @@
         }
       },
       {
+        "node_id": "post_ffn_norm",
+        "op": "rms_norm",
+        "attributes": {
+          "size": 16,
+          "scale_offset": true
+        }
+      },
+      {
         "node_id": "add_2",
         "op": "residual_add",
         "attributes": {}
@@ -87,8 +103,7 @@
         "attributes": {
           "hidden_size": 16,
           "vocab_size": 32,
-          "tied": true,
-          "final_softcap": 30.0
+          "tied": true
         }
       }
     ],
@@ -110,6 +125,11 @@
       },
       {
         "from_node": "attn",
+        "to_node": "post_attn_norm",
+        "to_input": 0
+      },
+      {
+        "from_node": "post_attn_norm",
         "to_node": "add_1",
         "to_input": 1
       },
@@ -130,6 +150,11 @@
       },
       {
         "from_node": "ffn",
+        "to_node": "post_ffn_norm",
+        "to_input": 0
+      },
+      {
+        "from_node": "post_ffn_norm",
         "to_node": "add_2",
         "to_input": 1
       },
