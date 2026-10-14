@@ -79,7 +79,8 @@ export async function startDaemon() {
  * Opens the app in a new page, signed in, once the frame has drawn.
  * @param {(typeof ENGINES)[number]} engine
  * @param {RunningDaemon} daemon
- * @param {{ colorScheme?: "light" | "dark", viewport?: { width: number, height: number } }} [options]
+ * @param {{ colorScheme?: "light" | "dark", viewport?: { width: number, height: number }, reducedMotion?: "reduce" | "no-preference" }} [options]
+ *   reducedMotion sets the OS preference the page reads; "reduce" makes every transition duration 0 (base.css).
  * @returns {Promise<{ page: import("playwright").Page, close: () => Promise<void> }>}
  */
 export async function openApp(engine, daemon, options = {}) {
@@ -87,6 +88,7 @@ export async function openApp(engine, daemon, options = {}) {
   const context = await browser.newContext({
     colorScheme: options.colorScheme ?? "light",
     viewport: options.viewport ?? VIEWPORT,
+    reducedMotion: options.reducedMotion ?? "no-preference",
   });
   if (engine === "chromium") {
     await grantClipboard(context, daemon.baseUrl);
