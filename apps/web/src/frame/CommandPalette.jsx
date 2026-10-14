@@ -180,7 +180,7 @@ export function CommandPalette() {
             shownCount={items.length}
           />
           {selected && !selected.isView ? (
-            <div className="rr-palette__chips" aria-label="Filled from the context">
+            <div className="rr-palette__chips" role="group" aria-label="Filled from the context">
               {contextChips(selected.prefilled).map((chip) => (
                 <span key={chip.name} className="rr-palette__chip">
                   {`${chip.name} = ${chip.value}`}
