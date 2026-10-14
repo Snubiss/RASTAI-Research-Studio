@@ -2097,7 +2097,7 @@ Warm reinstall from the uv cache took under 1 s for every backend (spike). The c
 
 - Every package in a lock must be in `deps/allowlist-python.json` (`tools/checks/check-deps`); `pillow` and `numpy` are listed there as transitive packages of `torchvision`, and no Rastai file may import them.
 - CI resolves every lockfile on every change (§28 risk 11) and fails on a hash change it didn't expect.
-- The installer shows the download size per backend before starting; the node sums the wheel sizes recorded in `uv.lock`, so no extra file is needed.
+- The installer shows the download size per backend before starting. It reads `expected_download_gib` from `environments.json` (contracts.md 15.8), which holds the spike's measured cold size; M2-16 re-measures it with torchvision, numpy, pillow and PyMySQL included (open point 1).
 - Extras are synced from the same lock by `system.env.install` with an extras list; this is a locked sync, not a runtime install. Installed extras go in the hardware fingerprint.
 - Plugin environments layer on top through a `.pth` file (contracts.md §8.1), each from its own lockfile.
 - The node sets `TORCHINDUCTOR_CACHE_DIR` to `<cache>/torch/` and never sets `HSA_OVERRIDE_GFX_VERSION` (§22; the spike's integrated GPU returned silently wrong matmuls with it).

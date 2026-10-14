@@ -14,8 +14,9 @@ ENVIRONMENTS_FOLDER = "python/envs"
 LOCK_FILE_NAME = "uv.lock"
 PROJECT_FILE_NAME = "pyproject.toml"
 JUSTFILE = "justfile"
-# The env-locks recipe's first line: the for loop over every project folder (justfile, `env-locks`).
-ENV_LOCKS_LOOP_START = "    for project in python/envs/*/pyproject.toml;"
+# The env-locks recipe's loop over every project folder (justfile, `env-locks`). Matched without its indent, so
+# reindenting the justfile doesn't break the test.
+ENV_LOCKS_LOOP_START = "for project in python/envs/*/pyproject.toml;"
 TORCH = "torch"
 TORCHVISION = "torchvision"
 ROCM = "rocm"
@@ -106,6 +107,9 @@ def test_env_locks_recipe_resolves_each_folder_with_directory_and_refresh(repo_r
     """`--directory`, not `--project`: from the repo root `--project` reports a stale lock on a clean tree (uv 0.13.0).
     `--refresh` stays, so `--locked` also sees a tampered hash. Fails on a recipe that drops either."""
     recipe_lines = (repo_root / JUSTFILE).read_text(encoding="utf-8").splitlines()
-    loop_lines = [line for line in recipe_lines if line.startswith(ENV_LOCKS_LOOP_START)]
-    assert len(loop_lines) == 1, "the env-locks recipe holds one loop over python/envs/*/pyproject.toml"
+    loop_lines = [line for line in recipe_lines if line.strip().startswith(ENV_LOCKS_LOOP_START)]
+    assert len(loop_lines) == 1, (
+        f"justfile: expected one line starting '{ENV_LOCKS_LOOP_START}' in the env-locks recipe, "
+        f"found {len(loop_lines)}; keep that loop's first words when the recipe is edited"
+    )
     assert "uv lock --locked --refresh --directory" in loop_lines[0], loop_lines[0]
