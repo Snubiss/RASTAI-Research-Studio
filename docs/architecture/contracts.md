@@ -1751,7 +1751,7 @@ Headless Linux falls back to the kernel keyring, then an encrypted file `<config
 | Archive source id | `daemon_<base32 of the daemon's Ed25519 public key>` (from `daemon.key`); on every archive row | |
 | Hash | `blake3:<64 lowercase hex>` | |
 | Model ref | `hf:<org>/<name>@<revision>`, `ckpt:<checkpoint_id>`, `blob:<hash>`, `design:<document_id>`, `api:<adapter>/<model>`, `job:<job_id>` (a policy served live by an RL or gym job, reachable through the gateway) | `hf:google/gemma-3-1b-it@main` |
-| Model hash | BLAKE3 over the sorted list of `<file name> <file hash>` lines of the weight files | |
+| Model hash | BLAKE3 over the model's tensors, one line each, sorted by name (UTF-8 byte order), every line `<name> <dtype> <shape> <data hash>` followed by `\n`. `<name>` is the tensor's name as a JSON string literal: RFC 8259 escapes only, `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, and `\u00XX` for the other control characters in lowercase hex (`\u001f`); every other character, non-ASCII included, is written as its UTF-8 bytes, unescaped. `<dtype>` is the safetensors dtype name as the header writes it (`F32`, `BF16`). `<shape>` is the dimensions as compact JSON (`[2,3]`, `[]` for a scalar). `<data hash>` is `blake3:<64 lowercase hex>` of the tensor's data bytes as stored (the bytes its `data_offsets` cover). `__metadata__` and the header's padding are left out. The hash doesn't depend on how the tensors are split into files, on the order of the files or on the header, so a re-sharded copy of the same tensors keeps it. Two files holding one tensor name are refused with `RRS-E1007`. The empty model (no tensors) is the BLAKE3 of the empty listing. | |
 | Environment id | `cpu`, `cuda13`, `cuda126`, `rocm` (later `mps`; `rocm-<gfx arch>` only if wheels differ per arch). Each backend lock has a `compat` dependency group holding `transformers`. | |
 | Node capability flags | `generate.inspectable`, `generate.fast`, `lens.live`, `sandbox.engine`, `transfer.resume`, `self_update`, `gym` | |
 | Container labels | `rastai.node_id`, `rastai.run_id`, `rastai.job_id`, `rastai.sandbox_id` | |
@@ -2026,6 +2026,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-E1004` | error | Value is not one of the allowed values |
 | `RRS-E1005` | error | The `type` field doesn't match the file extension |
 | `RRS-E1006` | error | A value can't be written as JSON (a bug: a map whose keys aren't strings) |
+| `RRS-E1007` | error | A safetensors layout can't be planned or hashed (a set of weights that can't be laid out or identified as one model) |
 | `RRS-E2001` | error | Reference doesn't resolve |
 | `RRS-E2002` | error | Shapes don't match along a graph edge |
 | `RRS-E2003` | error | Graph has a cycle with no recurrent node |

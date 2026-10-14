@@ -101,6 +101,15 @@ Source: `catalog/errors/RRS-E.json`.
 - **In plain words:** Rastai hit an internal problem while saving. This is a bug, not something you did.
 - **Fix:** Please report this bug; the log has the details.
 
+<a id="rrs-e1007"></a>
+
+### RRS-E1007: A safetensors layout can't be planned or hashed
+
+- **Severity:** error
+- **Message:** A safetensors layout can't be planned or hashed: {reason}.
+- **In plain words:** Rastai can't lay out or identify these weights as one model. Nothing was saved.
+- **Fix:** If the weights came from a download, delete that copy and download it again. Otherwise report this bug; the log has the details.
+
 <a id="rrs-e2001"></a>
 
 ### RRS-E2001: Reference doesn't resolve

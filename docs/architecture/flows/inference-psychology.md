@@ -693,7 +693,7 @@ What each state means per runtime:
 
 **Persisted:**
 - `model.state_changed` is durable but node-originated, so it isn't in an event log. Every `Heartbeat` carries `ModelInfo[]`, sent at once on any change, and the daemon reconciles by snapshot (contracts §7.3; node layout §7.5).
-- `models.model_hash` is computed once per weight set (BLAKE3 over the files) and cached in `rastai.db`.
+- `models.model_hash` is computed once per weight set from its tensors (contracts §8.6, not the files' bytes) and cached in `rastai.db`.
 
 **Tests:** `crates/rastai-node/tests/model_states.rs`: each transition, driven by a fake worker and a fake llama-server script, including every `failed` edge.
 

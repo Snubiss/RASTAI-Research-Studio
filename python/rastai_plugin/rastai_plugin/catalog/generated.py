@@ -89,6 +89,7 @@ RRS_E1003 = "RRS-E1003"
 RRS_E1004 = "RRS-E1004"
 RRS_E1005 = "RRS-E1005"
 RRS_E1006 = "RRS-E1006"
+RRS_E1007 = "RRS-E1007"
 RRS_E2001 = "RRS-E2001"
 RRS_E2002 = "RRS-E2002"
 RRS_E2003 = "RRS-E2003"
@@ -1022,6 +1023,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Please report this bug; the log has the details.",
         fix_command_id="",
         docs_anchor="rrs-e1006",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_E1007,
+        severity="error",
+        title="A safetensors layout can't be planned or hashed",
+        message="A safetensors layout can't be planned or hashed: {reason}.",
+        basic_text="Rastai can't lay out or identify these weights as one model. Nothing was saved.",
+        fix_text="If the weights came from a download, delete that copy and download it again. Otherwise report this bug; the log has the details.",
+        fix_command_id="",
+        docs_anchor="rrs-e1007",
         retired=False,
     ),
     CatalogEntry(
