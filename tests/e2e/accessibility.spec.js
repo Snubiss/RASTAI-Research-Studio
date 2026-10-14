@@ -36,6 +36,11 @@ const MODES = ["Basic", "Advanced"];
 const HIGH_CONTRAST_THEME = "high_contrast";
 // The name typed before Create token, so the locked prompt opens (it needs a name).
 const PROMPT_TOKEN_NAME = "axe check";
+// axe must read the final colors, not a color caught mid-transition, so every page here opens with reduced motion: the
+// motion durations are then 0 and a theme change lands at once (base.css; the app honours the OS preference).
+const REDUCED_MOTION = "reduce";
+// A segmented option fades its background over --rr-motion-fast (components.css); this is the transition that flaked.
+const SEGMENTED_OPTION = ".rr-segmented__option";
 
 for (const engine of ENGINES) {
   describe(`accessibility in ${engine}`, () => {
@@ -43,7 +48,7 @@ for (const engine of ENGINES) {
       const daemon = await startDaemon();
       try {
         for (const colorScheme of COLOR_SCHEMES) {
-          const app = await openApp(engine, daemon, { colorScheme });
+          const app = await openApp(engine, daemon, { colorScheme, reducedMotion: REDUCED_MOTION });
           try {
             await app.page.evaluate(AXE_SOURCE);
             for (const mode of MODES) {
@@ -66,11 +71,17 @@ for (const engine of ENGINES) {
     test("no WCAG 2.2 AA violation in the high contrast theme on any section", async () => {
       const daemon = await startDaemon();
       try {
-        const app = await openApp(engine, daemon);
+        const app = await openApp(engine, daemon, { reducedMotion: REDUCED_MOTION });
         try {
           await app.page.evaluate(AXE_SOURCE);
           await goToSection(app.page, "Settings");
           await app.page.locator(`input[name="theme"][value="${HIGH_CONTRAST_THEME}"]`).check();
+          // Proof that reduced motion took: with it off, this transition has a real duration and axe could catch it mid-fade.
+          const transitionDuration = await app.page
+            .locator(SEGMENTED_OPTION)
+            .first()
+            .evaluate((option) => getComputedStyle(option).transitionDuration);
+          assert.equal(transitionDuration, "0s", "the segmented option's transition under reduced motion");
           for (const section of SECTIONS) {
             await goToSection(app.page, section);
             const violations = await axeViolations(app.page);
@@ -87,7 +98,7 @@ for (const engine of ENGINES) {
     test("no WCAG 2.2 AA violation with the command palette open", async () => {
       const daemon = await startDaemon();
       try {
-        const app = await openApp(engine, daemon);
+        const app = await openApp(engine, daemon, { reducedMotion: REDUCED_MOTION });
         try {
           await app.page.evaluate(AXE_SOURCE);
           await openPalette(app.page);
@@ -103,7 +114,7 @@ for (const engine of ENGINES) {
     test("no WCAG 2.2 AA violation with the locked token prompt open", async () => {
       const daemon = await startDaemon();
       try {
-        const app = await openApp(engine, daemon);
+        const app = await openApp(engine, daemon, { reducedMotion: REDUCED_MOTION });
         try {
           await app.page.evaluate(AXE_SOURCE);
           await goToSection(app.page, "Settings");
