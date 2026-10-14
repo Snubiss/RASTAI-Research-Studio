@@ -3,7 +3,7 @@
 //! (python/rastai_formats/tests/test_parity.py), so both languages agree by construction and by test.
 //!
 //! The file is read the way every caller reads one: the length from the first 8 bytes first, then the header and
-//! the data section's length.
+//! the data section's length. The reader over a `ByteSource` (M2-13) is checked against the same check on every file.
 
 #![allow(clippy::unwrap_used)]
 // check_file returns the check's own Diagnostic, as every caller gets it.
@@ -12,9 +12,11 @@
 use std::path::{Path, PathBuf};
 
 use rastai_diag::diagnostic::Diagnostic;
+use rastai_formats::byte_source::SliceSource;
 use rastai_formats::safetensors::header_check::{
     HEADER_LENGTH_BYTES, SafetensorsHeader, check_safetensors_header, read_safetensors_header_length,
 };
+use rastai_formats::safetensors::reader::{read_safetensors_header, read_tensor_bytes};
 use serde_json::Value;
 
 const EXPECTED_FILE_NAME: &str = "expected.json";
@@ -89,4 +91,37 @@ fn a_valid_file_reads_to_its_tensors_and_metadata() {
     assert_eq!(header.entries[0].name, "a");
     assert_eq!(header.entries[0].shape, [2, 3]);
     assert_eq!(header.data_start + header.entries[0].end, bytes.len() as u64);
+}
+
+/// The reader over a source (`read_safetensors_header`, M2-13) gives every corpus file the same answer as the check
+/// alone: the same header for an accepted file, the same diagnostic (code, path and message) for a refused one.
+#[test]
+fn the_reader_gives_every_file_the_same_answer_as_the_check() {
+    let verdicts = expected_verdicts();
+    for file_name in verdicts.keys() {
+        let bytes = std::fs::read(corpus_folder().join(file_name)).unwrap();
+        let read = read_safetensors_header(&SliceSource { bytes: &bytes });
+        let checked = check_file(&bytes);
+        assert_eq!(read, checked, "{file_name}");
+    }
+}
+
+/// Every accepted file's tensors read back to the bytes the header places them at, one tensor at a time.
+#[test]
+fn tensor_bytes_read_on_demand_for_every_valid_file() {
+    let verdicts = expected_verdicts();
+    for (file_name, verdict) in &verdicts {
+        if verdict["accepted"] != true {
+            continue;
+        }
+        let bytes = std::fs::read(corpus_folder().join(file_name)).unwrap();
+        let source = SliceSource { bytes: &bytes };
+        let header = read_safetensors_header(&source).unwrap();
+        let mut buffer = Vec::new();
+        for entry in &header.entries {
+            read_tensor_bytes(&source, &header, entry, &mut buffer).unwrap();
+            let expected = &bytes[(header.data_start + entry.start) as usize..(header.data_start + entry.end) as usize];
+            assert_eq!(buffer, expected, "{file_name}: {}", entry.name);
+        }
+    }
 }
