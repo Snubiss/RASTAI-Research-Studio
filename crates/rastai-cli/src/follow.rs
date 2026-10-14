@@ -15,6 +15,8 @@ use std::path::Path;
 use prost::Message;
 use rastai_core::states::{is_terminal_job_state, job_state_name, parse_job_state};
 use rastai_core::wire::diagnostic_from_proto;
+use rastai_diag::catalog::find_entry;
+use rastai_diag::diagnostic::{Diagnostic, diagnostic};
 use rastai_formats::commands::job::{JobGetArgs, JobGetResult, JobSummary};
 use rastai_proto::commands::v1::ExecuteRequest;
 use rastai_proto::common::v1::JobState;
@@ -163,8 +165,21 @@ async fn job_ended_while_reopening(
         job_id: job_id.to_string(),
         final_state,
         from_state: last_state,
-        diagnostics: Vec::new(),
+        diagnostics: row_diagnostics(&job),
     })
+}
+
+/// The diagnostic of a job that failed, from the row's `error_code`: the row has no values for the message's
+/// placeholders, so the message is the catalog title, which says the same in a line a user reads.
+fn row_diagnostics(job: &JobSummary) -> Vec<Diagnostic> {
+    if job.error_code.is_empty() {
+        return Vec::new();
+    }
+    let mut failure = diagnostic(&job.error_code, &[]);
+    if let Some(entry) = find_entry(&job.error_code) {
+        failure.message = entry.title.to_string();
+    }
+    vec![failure]
 }
 
 fn job_get_request(job_id: &str) -> ExecuteRequest {
@@ -362,7 +377,6 @@ fn broken_stream(socket_path: &Path, reason: &str) -> CliError {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rastai_diag::diagnostic::diagnostic;
     use rastai_proto::events::v1::EventPayload;
     use rastai_server::http::connect::end_of_stream_envelope;
 
@@ -409,6 +423,27 @@ mod tests {
         let running = job_of_result(&row("running").to_string()).unwrap();
         assert_eq!(ended_state(&running), None);
         assert_eq!(job_of_result("{}"), None);
+    }
+
+    #[test]
+    fn a_failed_row_carries_its_error_code_as_a_diagnostic() {
+        let failed = job_of_result(
+            &json!({"job": {"job_id": "job_a", "node_id": "local", "kind": "train", "state": "failed",
+                "error_code": "RRS-N0004"}})
+            .to_string(),
+        )
+        .unwrap();
+        let diagnostics = row_diagnostics(&failed);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "RRS-N0004");
+        assert_eq!(diagnostics[0].message, find_entry("RRS-N0004").unwrap().title);
+        let succeeded = job_of_result(
+            &json!({"job": {"job_id": "job_a", "node_id": "local", "kind": "train",
+            "state": "succeeded"}})
+            .to_string(),
+        )
+        .unwrap();
+        assert!(row_diagnostics(&succeeded).is_empty());
     }
 
     #[test]

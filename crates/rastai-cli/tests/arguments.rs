@@ -255,7 +255,6 @@ fn a_mode_refuses_the_flags_and_words_it_would_ignore() {
         "mcp --node gpu-box",
         "mcp --project p",
         "help --dry-run",
-        "system status --help --detach",
         "validate a.json --project p",
         "validate a.json --arguments-json {}",
         "version --arguments-file a.json",
@@ -285,6 +284,26 @@ fn a_mode_refuses_the_flags_and_words_it_would_ignore() {
         mode_of("system status --project p --dry-run -- x"),
         Mode::Verb(owned(&["system", "status"]))
     );
+}
+
+/// `--help` on a verb line wins: the verb's flags are read for the help they are not, so they pass, while the words
+/// after `--` keep their rule. A line without `--help` still refuses them.
+#[test]
+fn help_on_a_verb_line_lets_the_verbs_flags_through() {
+    assert_eq!(
+        mode_of("train start --dry-run --help"),
+        Mode::Help(owned(&["train", "start"]))
+    );
+    assert_eq!(
+        mode_of("job get --idempotency-key k --help"),
+        Mode::Help(owned(&["job", "get"]))
+    );
+    assert_eq!(
+        mode_of("system status --help --detach"),
+        Mode::Help(owned(&["system", "status"]))
+    );
+    assert_eq!(refusal_exit_code("train start --help -- x"), 2);
+    assert_eq!(refusal_exit_code("open --dry-run"), 2);
 }
 
 #[test]

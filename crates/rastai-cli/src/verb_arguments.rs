@@ -16,9 +16,15 @@
 //! message (unknown flags, missing required fields, enum values); the daemon checks it again in full.
 
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
 use rastai_core::commands::naming::{cli_words, flag_name, negated_flag_name};
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
+use rastai_formats::error::FormatsError;
+use rastai_formats::limits::ImportLimits;
+use rastai_formats::validate::syntax::syntax_diagnostic;
 use rastai_proto::commands::v1::CommandDescriptor;
 use serde_json::{Map, Value, json};
 
@@ -167,7 +173,7 @@ fn base_arguments(arguments: &ParsedArguments) -> Result<Map<String, Value>, Dia
         (Some(_), Some(_)) => return Err(invalid("--arguments-json and --arguments-file", EXPECTED_ONE_SOURCE)),
         (Some(text), None) => (text.clone(), shortened(text)),
         (None, Some(path)) => {
-            let text = std::fs::read_to_string(path).map_err(|_| invalid(path, EXPECTED_OBJECT))?;
+            let text = read_arguments_file(path, ImportLimits::default().max_file_bytes)?;
             (text, path.clone())
         }
         (None, None) => return Ok(Map::new()),
@@ -176,6 +182,35 @@ fn base_arguments(arguments: &ParsedArguments) -> Result<Map<String, Value>, Dia
         Ok(Value::Object(object)) => Ok(object),
         _ => Err(invalid(&shown, EXPECTED_OBJECT)),
     }
+}
+
+/// The text of an `--arguments-file`, read at most one byte past `max_bytes`, the same cap `validate` puts on a file
+/// (local_commands.rs). A FIFO or a growing file can't fill memory, and a file past the cap is refused with the
+/// size code (`RRS-E5003`) before any JSON is parsed. Text that isn't UTF-8 is refused like any other non-object.
+#[allow(clippy::result_large_err)]
+fn read_arguments_file(path: &str, max_bytes: u64) -> Result<String, Diagnostic> {
+    let opened = File::open(Path::new(path)).map_err(|_| invalid(path, EXPECTED_OBJECT))?;
+    // A FIFO or a device says 0 here, so the size it reports is only the best guess once the read says more.
+    let size_said = opened.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    let mut bytes = Vec::new();
+    opened
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid(path, EXPECTED_OBJECT))?;
+    let size_read = bytes.len() as u64;
+    if size_read > max_bytes {
+        return Err(too_large(path, size_said.max(size_read), max_bytes));
+    }
+    String::from_utf8(bytes).map_err(|_| invalid(path, EXPECTED_OBJECT))
+}
+
+/// The size refusal `validate` gives a file past the import limit, so both commands name the same code.
+fn too_large(path: &str, size_bytes: u64, limit_bytes: u64) -> Diagnostic {
+    let error = FormatsError::FileTooLarge {
+        size_bytes,
+        limit_bytes,
+    };
+    syntax_diagnostic(&error, path)
 }
 
 /// The first `SHOWN_TEXT_CHARACTERS` characters of a text, marked when cut.
@@ -504,6 +539,47 @@ mod tests {
         let _ = std::fs::remove_file(&file);
         assert!(refusal.message.contains(&path), "{}", refusal.message);
         assert!(!refusal.message.contains("[0,0,0,"), "{}", refusal.message);
+    }
+
+    fn scratch_path(name: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("rastai-cli-{name}-{}.json", std::process::id()))
+            .display()
+            .to_string()
+    }
+
+    #[test]
+    fn an_arguments_file_is_read_up_to_its_limit_and_no_further() {
+        let path = scratch_path("at-limit");
+        std::fs::write(&path, "{}    ").unwrap();
+        let read = read_arguments_file(&path, 6);
+        std::fs::write(&path, "{}     ").unwrap();
+        let too_long = read_arguments_file(&path, 6);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(read.unwrap(), "{}    ");
+        let refusal = too_long.unwrap_err();
+        assert_eq!(refusal.code, "RRS-E5003");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_past_the_limit_is_refused_with_the_size_code() {
+        let fifo = scratch_path("fifo");
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
+        assert!(made.success());
+        let limit = ImportLimits::default().max_file_bytes;
+        let padding = limit as usize + 1024;
+        let writer_path = fifo.clone();
+        // The reader stops after limit+1 bytes and closes the pipe, so the writer's last writes fail; that is the
+        // expected end of this stream, not a test failure.
+        let writer = std::thread::spawn(move || {
+            let mut pipe = std::fs::OpenOptions::new().write(true).open(&writer_path).unwrap();
+            let _ = std::io::Write::write_all(&mut pipe, &vec![b'{'; padding]);
+        });
+        let refusal = base_arguments(&with_arguments(None, Some(fifo.clone()))).unwrap_err();
+        writer.join().unwrap();
+        let _ = std::fs::remove_file(&fifo);
+        assert_eq!(refusal.code, "RRS-E5003", "{}", refusal.message);
     }
 
     #[test]

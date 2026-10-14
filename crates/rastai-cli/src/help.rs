@@ -60,6 +60,8 @@ const FLAGS_HEADING: &str = "Flags:";
 const GLOBAL_FLAGS_HEADING: &str = "Global flags:";
 const REQUIRED_NOTE: &str = "(required)";
 const INDENT: &str = "  ";
+/// The one control character a descriptor's text keeps: a summary runs over several lines.
+const LINE_BREAK: char = '\n';
 
 /// Prints help for the words: everything when there are none, a mode's usage, or a command's flags.
 pub async fn run_help(paths: &DataPaths, words: &[String], settings: OutputSettings) -> Result<(), CliError> {
@@ -126,8 +128,11 @@ fn overview(registry: &CommandRegistry) -> String {
         lines.push(COMMANDS_HEADING.to_string());
     }
     for command in &registry.commands {
-        let verb = cli_words(&command.command_id).join(" ");
-        lines.push(format!("{INDENT}{PROGRAM_NAME} {verb}   {}", command.title));
+        let verb = printable_text(&cli_words(&command.command_id).join(" "));
+        lines.push(format!(
+            "{INDENT}{PROGRAM_NAME} {verb}   {}",
+            printable_text(&command.title)
+        ));
     }
     lines.push(String::new());
     lines.push(format!("{GLOBAL_FLAGS_HEADING} {}", GLOBAL_FLAGS.join(" ")));
@@ -157,9 +162,13 @@ fn overview_json(registry: &CommandRegistry) -> Value {
 /// One command: its usage line with positionals, its title and summary, then its flags.
 fn command_help(command: &CommandDescriptor) -> String {
     let fields = command_fields(command);
-    let mut lines = vec![usage_line(command, &fields), String::new(), command.title.clone()];
+    let mut lines = vec![
+        printable_text(&usage_line(command, &fields)),
+        String::new(),
+        printable_text(&command.title),
+    ];
     if !command.summary.is_empty() {
-        lines.push(command.summary.clone());
+        lines.push(printable_text(&command.summary));
     }
     if !fields.is_empty() {
         lines.push(String::new());
@@ -225,7 +234,16 @@ fn flag_line(field: &ArgumentField) -> String {
         line.push(' ');
         line.push_str(REQUIRED_NOTE);
     }
-    line
+    printable_text(&line)
+}
+
+/// Descriptor text as the terminal may show it. A plugin's title or summary could hold an escape sequence (ESC, or
+/// the C1 range) that rewrites the screen, or a carriage return that overwrites the line, so every control character
+/// goes except the line break. Nothing else in the text changes.
+fn printable_text(text: &str) -> String {
+    text.chars()
+        .filter(|character| *character == LINE_BREAK || !character.is_control())
+        .collect()
 }
 
 #[cfg(test)]
@@ -258,6 +276,22 @@ mod tests {
             json!({"command_id": "job.cancel", "verb": "job cancel", "title": "Cancel a job"})
         );
         assert_eq!(overview["global_flags"][0], "--json");
+    }
+
+    #[test]
+    fn a_plugin_title_cannot_write_control_characters_to_the_terminal() {
+        let command = CommandDescriptor {
+            command_id: "plugin.demo.run".to_string(),
+            title: "Run\u{1b}[2J now".to_string(),
+            summary: "First line\rover\nSecond \u{9b}line".to_string(),
+            ..CommandDescriptor::default()
+        };
+        let text = command_help(&command);
+        assert!(!text.contains('\u{1b}'), "{text:?}");
+        assert!(!text.contains('\r'), "{text:?}");
+        assert!(!text.contains('\u{9b}'), "{text:?}");
+        assert!(text.contains("Run[2J now"), "{text:?}");
+        assert!(text.contains("First lineover\nSecond line"), "{text:?}");
     }
 
     #[test]
