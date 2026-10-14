@@ -39,6 +39,10 @@ const HTTPS_DEFAULT_PORT: u16 = 443;
 /// How often an HTTPS request reports itself while its body streams (section 4.6). The UI's egress badge expects a
 /// refresh at least this often.
 pub const EGRESS_REPORT_INTERVAL_SECONDS: u64 = 5;
+/// How many reports the test channels hold. Both test modules share it: a report is small and the tests read them as
+/// they come.
+#[cfg(test)]
+const REPORT_CHANNEL_CAPACITY: usize = 8;
 
 /// Where a request goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +158,13 @@ async fn read_whole_response(request: HttpRequest, roots: RootCertStore) -> Resu
 }
 
 async fn open_stream(request: HttpRequest, roots: RootCertStore) -> Result<HttpStream, TransportError> {
+    // Checked before the hyper request is built, so an untagged HTTPS request is refused as untagged whatever else is
+    // wrong with it (section 4.6).
+    if let HttpTarget::Https { host, .. } = &request.target {
+        if request.egress.is_none() {
+            return Err(TransportError::EgressTagMissing { host: host.clone() });
+        }
+    }
     let header_host = host_header(&request.target);
     let http_request = build_http_request(&request, &header_host)?;
     let timeout_ms = request.timeout_ms;
@@ -182,6 +193,7 @@ async fn open_https(
     roots: RootCertStore,
     http_request: Request<RequestBody>,
 ) -> Result<(Response<Incoming>, Option<EgressReporting>), TransportError> {
+    // open_stream has already refused an untagged request; the tag is needed here for the reports.
     let tag = egress.ok_or_else(|| TransportError::EgressTagMissing { host: host.to_string() })?;
     let tcp_stream = connect_tcp(host, port).await?;
     send_egress_report(tag, host);
@@ -440,9 +452,6 @@ impl Body for RequestBody {
 mod tests {
     use super::*;
 
-    /// How many reports the test channels hold. A report is small and the test reads them as they come.
-    const REPORT_CHANNEL_CAPACITY: usize = 8;
-
     fn request(method: &str, path: &str, headers: Vec<(String, String)>) -> HttpRequest {
         HttpRequest {
             method: method.to_string(),
@@ -530,6 +539,24 @@ mod tests {
         assert_eq!(body.size_hint().exact(), Some(0));
     }
 
+    #[tokio::test]
+    async fn an_untagged_https_request_is_refused_before_a_bad_path_or_header_is_looked_at() {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            target: HttpTarget::Https {
+                host: "huggingface.co".to_string(),
+                port: 443,
+            },
+            path: "/bad path".to_string(),
+            headers: vec![("bad header".to_string(), "x".to_string())],
+            body: Vec::new(),
+            timeout_ms: 1000,
+            egress: None,
+        };
+        let refusal = open_stream(request, RootCertStore::empty()).await.map(|_| ());
+        assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N3008"));
+    }
+
     #[test]
     fn a_report_is_sent_once_the_interval_has_passed() {
         let (sender, mut reports) = mpsc::channel(REPORT_CHANNEL_CAPACITY);
@@ -582,7 +609,6 @@ mod tls_tests {
     const TEST_SERVER_KEY_PEM: &str = include_str!("../tests/fixtures/tls/test-server-key.pem");
     /// The one name the test certificate covers.
     const TEST_HOST: &str = "localhost";
-    const REPORT_CHANNEL_CAPACITY: usize = 8;
     /// Long enough for any test machine, short enough that the timeout test stays quick.
     const SILENT_SERVER_TIMEOUT_MS: u64 = 300;
     const REQUEST_TIMEOUT_MS: u64 = 5000;
@@ -709,7 +735,7 @@ mod tls_tests {
             tls.write_all(b"6\r\nsecond\r\n0\r\n\r\n").await.unwrap();
             tls.flush().await.unwrap();
         });
-        let (reports_to, _reports) = mpsc::channel(REPORT_CHANNEL_CAPACITY);
+        let (reports_to, mut reports) = mpsc::channel(REPORT_CHANNEL_CAPACITY);
 
         let mut stream = open_response_stream_with_roots(
             https_request(TEST_HOST, port, Some(tag_reporting_to(reports_to)), REQUEST_TIMEOUT_MS),
@@ -719,8 +745,24 @@ mod tls_tests {
         .unwrap();
         let first = next_body_chunk(&mut stream).await.unwrap();
         second_chunk_sender.send(()).unwrap();
+        // Only the report at the connection so far. Moving the last report back by the whole interval makes the next
+        // read due, without sleeping.
+        assert_eq!(reports.try_recv().unwrap().host, TEST_HOST);
+        assert!(reports.try_recv().is_err());
+        let egress = stream.egress.as_mut().unwrap();
+        egress.last_report_at -= Duration::from_secs(EGRESS_REPORT_INTERVAL_SECONDS);
+
         let second = next_body_chunk(&mut stream).await.unwrap();
+        assert_eq!(
+            reports.try_recv().unwrap().host,
+            TEST_HOST,
+            "the streaming read reports once the interval has passed"
+        );
         let end = next_body_chunk(&mut stream).await.unwrap();
+        assert!(
+            reports.try_recv().is_err(),
+            "a read inside the interval sends no report"
+        );
 
         assert_eq!(stream.status, 200);
         assert_eq!(first, Some(b"first".to_vec()));
@@ -788,10 +830,12 @@ mod tls_tests {
     #[tokio::test]
     async fn a_certificate_that_does_not_name_the_host_is_refused() {
         // The test CA is trusted, but the certificate is for localhost only, so connecting to 127.0.0.1 is refused.
+        // The server says whether its side of the handshake finished: a client that skipped the name check would
+        // finish it, and the request would then fail for some other reason.
         let (listener, port) = listen().await;
-        tokio::spawn(async move {
+        let server = tokio::spawn(async move {
             let (tcp, _peer) = listener.accept().await.unwrap();
-            let _ = test_server_acceptor().accept(tcp).await;
+            test_server_acceptor().accept(tcp).await.is_ok()
         });
         let (reports_to, _reports) = mpsc::channel(REPORT_CHANNEL_CAPACITY);
 
@@ -806,6 +850,14 @@ mod tls_tests {
         )
         .await;
 
-        assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N2008"));
+        assert!(
+            !server.await.unwrap(),
+            "the handshake must not finish for a name the certificate doesn't cover"
+        );
+        let error = refusal.unwrap_err();
+        assert_eq!(error.code(), "RRS-N2008");
+        let reason = format!("{error:?}");
+        assert!(reason.contains("TLS handshake"), "{reason}");
+        assert!(reason.contains("not valid for name"), "{reason}");
     }
 }

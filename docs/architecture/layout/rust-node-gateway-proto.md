@@ -329,7 +329,7 @@ pub async fn upload_over_ssh(target_host: &str, local_path: &Path, remote_path: 
 pub const EGRESS_REPORT_INTERVAL_SECONDS: u64 = 5;   // the UI's egress badge expects a refresh at least this often
 
 pub enum HttpTarget { Https { host: String, port: u16 }, LoopbackHttp { port: u16 }, LocalSocket { socket_path: PathBuf } }
-// LocalSocket is HTTP/1.1 over a local socket: daemon.sock for the CLI and the MCP bridge (M1-41). Https arrives with M2-14.
+// LocalSocket is HTTP/1.1 over a local socket: daemon.sock for the CLI and the MCP bridge (M1-41). Https is the same client with TLS (M2-14).
 /// Who is sending data off the machine and why. Every Https request carries one; the owner of the
 /// channel (the daemon's bus or the node's WatchLive) turns each report into an ephemeral egress.active event.
 pub struct EgressTag { pub purpose: String, pub subject_id: String, pub reports: tokio::sync::mpsc::Sender<EgressReport> }
