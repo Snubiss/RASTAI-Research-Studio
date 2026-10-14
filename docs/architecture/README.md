@@ -2,7 +2,7 @@
 
 **Status:** v1.2, 2026-10-11. Pre-build. Built on spec v5.4 and contracts.md v1.2. The entry point to the design: what to read, in what order, and where each kind of decision lives. Nothing here is new; every rule below points to the doc that owns it.
 
-The design is about 28,000 lines across 15 documents and 39 ADRs. Nobody needs all of it for one task. Read the core once (section 1), then only the layout and flow docs for the part you're building.
+The design is about 28,000 lines across 15 documents and 40 ADRs. Nobody needs all of it for one task. Read the core once (section 1), then only the layout and flow docs for the part you're building.
 
 ---
 
@@ -47,7 +47,7 @@ The design is about 28,000 lines across 15 documents and 39 ADRs. Nobody needs a
 | `flows/training-evaluation.md` | Data import, recipe selection, a training run, checkpoints and preemption, chains, Teach it, Evaluation suites and metrics, auto-run and Elo, RLHF, model diff and SAE fit check, export, log import | You build Training or Evaluation |
 | `flows/designer-gym-remote.md` | A: HF import, compile and parity, edits and live stats, Eject, ONNX, `rastai.load()`, layer placement. B: harnesses, gym runs, rollouts, peek, step mode, sandboxes. C: SSH pairing, handshake, remote jobs, drops, transfers, headless, node update | You build the Designer, the Agent Gym or remote nodes |
 | `design/ui-design.md` (`docs/design/`) | The UI design, version 1.0 ("Instrument"): the look, principles, information architecture, keyboard shortcuts, tokens per theme, components, the nine screen specs, the command requests and the owner's decisions of 2026-10-13. Names not yet in contracts are marked as proposals (its §10) | You build or review any UI, theme or locked security prompt |
-| `docs/adr/README.md` + ADR-0001–0039 | Why each architectural decision was made, alternatives rejected, the tests that check it; notes since acceptance | You're about to change or question a decision |
+| `docs/adr/README.md` + ADR-0001–0040 | Why each architectural decision was made, alternatives rejected, the tests that check it; notes since acceptance | You're about to change or question a decision |
 | `docs/plan/implementation-plan.md` | M1–M11 (M11, long-term storage, comes after the 90-day plan), tasks for M1 and M2, epics for M3–M11, the L0–L3 feature table, GitHub setup, schedule risks, conflicts (§10), open questions | You pick, size or review work |
 | `docs/plan/backlog.json` | One GitHub issue per M1/M2 task and per later epic, generated from the plan's tables | You open an issue (M1-07 syncs it to GitHub) |
 | `docs/security/threat-model.md` | Assets, attackers, the trust boundaries B1–B13 with each mitigation and the test that proves it (or the task or epic that adds it), every in-house parser against its fuzz target, open risks with owners | You add a boundary, a protocol or a parser of untrusted input, or review security (M1-56; reviewed in M8-E03, M9-E02 and M11) |

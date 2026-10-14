@@ -1,6 +1,6 @@
 # ADR-0006: The UI talks to the daemon over HTTP only; Tauri is just a shell
 
-**Status:** Accepted, 2026-10-10. Decision 4 superseded in part by [ADR-0034](0034-login-codes-loopback-host-owner-token.md), 2026-10-10.
+**Status:** Accepted, 2026-10-10. Decision 4 superseded in part by [ADR-0034](0034-login-codes-loopback-host-owner-token.md), 2026-10-10. Decision 4 amended in part by [ADR-0040](0040-browser-first-desktop-shell-deferred.md), 2026-10-14 (the shell engine is reopened; its rules stand).
 
 **Superseded in part:** decision 4's sign-in and file-association steps. The shell makes no HTTP request: it starts or finds the daemon only by running `rastai open --print-url` and loads the URL it prints, and it passes file associations to the web app as a `#/open?path=` URL fragment; the web app then runs `file.open` (ADR-0034 decision 2). The window and the updater stand as decided.
 
@@ -36,6 +36,9 @@
 - *Cross-origin browser clients are refused in v1; the Phase 2 routes are daemon-hosted alternative UIs on the daemon's own origin and an origin allowlist with pairing (ADR-0034 decision 7).*
 - *`EventService` is binary-only Connect in the prototype; a generated proto-JSON codec for it comes in M9 if needed, else Phase 2 (contracts §3.2, §4).*
 - *The other decisions are unchanged.*
+
+*Note since acceptance (2026-10-14):*
+- *The desktop shell is deferred to M6 and its choice is reopened (ADR-0040). The shell rules of this ADR stay for any shell; "Tauri" in the title names the shell of M1-55, which is not built.*
 
 **Checked by:** the Playwright e2e suite runs against the web build in a plain browser, not the Tauri window, so anything that only works in Tauri fails CI. A grep check fails if `apps/web` or any package imports `@tauri-apps/*`.
 

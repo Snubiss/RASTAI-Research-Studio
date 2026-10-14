@@ -16,7 +16,7 @@
 3. **The key travels only by `postMessage` to the opener's own origin.** It never goes into a URL. The opener accepts a reply only when `event.source` is the window handle its `window.open` call returned and `event.origin` is its own origin; any other message is ignored. The new window accepts the key only from an `event.origin` equal to its own origin. A denied or unanswered window shows `SignedOutScreen` and cannot run commands.
 4. **The prompt is a new locked component, `SessionApproval`, in `@rastai/ui/security`.** It is drawn only with `--rr-locked-*` tokens and the fixed system font, as the other locked components are (contracts §5.6).
 5. **The desktop-shell case signs in again.** A second `WebviewWindow` that has no `window.opener` signs in again with a new login code, as a reload does (frontend layout 9.3). It is not given the key.
-6. **The mechanism is built before any second window ships.** Second windows are built only through this mechanism. The desktop work (M1-55) opens second windows no other way.
+6. **The mechanism is built before any second window ships.** Second windows are built only through this mechanism. The desktop work (M1-55, deferred by ADR-0040) opens second windows no other way.
 7. **This ADR is at design level.** It adds no wire message, command, event or setting name. The message shape and the names it uses go into `contracts.md` in a later contract PR, before the code that uses them (ADR-0038). The threat-model row for the prompt comes with that contract PR.
 
 ## Consequences

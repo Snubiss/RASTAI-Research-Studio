@@ -109,5 +109,5 @@ sequenceDiagram
 - Spec: [§0](../spec/rastai_spec_v5.md#0-decisions) items 19 and 21, [§16](../spec/rastai_spec_v5.md#16-architecture-overview), [§21](../spec/rastai_spec_v5.md#21-command-layer-and-local-api-security), [§30](../spec/rastai_spec_v5.md#30-adrs-to-write-now)
 - Contracts: [§3.2 sign-in and the request gate](../architecture/contracts.md#32-who-talks-to-whom), [§3.3 daemon HTTP surface](../architecture/contracts.md#33-daemon-http-surface), [§8.4 `job.json`](../architecture/contracts.md#84-blob-store-runs-and-checkpoints), [§9.1 job states](../architecture/contracts.md#91-job), [§16 rows 2, 5, 6, 22, 36](../architecture/contracts.md#16-plan-10-conflicts-the-answers-in-v11)
 - Flows: platform 2.3 (reattach), 4.1 (signing in), 4.2 (the request gate)
-- Plan: M1-01 (writes this ADR), M1-26 (the gate), M1-55 (the desktop shell)
+- Plan: M1-01 (writes this ADR), M1-26 (the gate), M1-55 (the desktop shell, deferred by ADR-0040)
 - Related: [ADR-0001](0001-process-layout.md), [ADR-0006](0006-ui-transport-http-only.md), [ADR-0007](0007-local-api-security.md), [ADR-0011](0011-remote-transport-ssh-first.md)

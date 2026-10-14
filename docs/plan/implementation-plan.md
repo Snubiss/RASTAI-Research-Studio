@@ -79,12 +79,12 @@ M11 Long-term storage (§31 step 10) comes after the 90-day plan and is not part
 
 | Milestone | §31 step | §32 weeks | Goal | Work | Exit gate (the test that closes it) |
 |---|---|---|---|---|---|
-| M1 Foundation and skeleton | 1 | 3–4 | Monorepo, CI, contracts in code, the command layer over HTTP, CLI and MCP, durable storage, daemon with embedded node, worker protocol v0 running TextCNN, plugin host, the theme token contract and locked security UI, web shell in plain JavaScript, threat model v1, the names and schema checks | 59 tasks, 80.5 size-days | kill -9 the daemon mid-run; it restarts and reattaches with no lost events (M1-48) |
+| M1 Foundation and skeleton | 1 | 3–4 | Monorepo, CI, contracts in code, the command layer over HTTP, CLI and MCP, durable storage, daemon with embedded node, worker protocol v0 running TextCNN, plugin host, the theme token contract and locked security UI, web shell in plain JavaScript, threat model v1, the names and schema checks | 58 tasks, 79.5 size-days | kill -9 the daemon mid-run; it restarts and reattaches with no lost events (M1-48) |
 | M2 Unified runtime | 2 | 5–6 | Re-plan with M1's velocity, ModelSpec compiler, Gemma 3 and Llama with parity, uv environments per backend, `rastai doctor`, model downloads including gated ones | 22 tasks, 28.5 size-days | both families pass parity in fp32 and bf16 on NVIDIA (M2-10); the AMD half moved to M10 (M2-11) |
 | M3 Inference | 3 | 7–8 | Gateway and tokenization, both runtimes, VRAM leases, the conversation tree and the archive outbox, `/v1` endpoints, the Inference section; then projects | 42.5 of 46.5 epic-days in the 90-day plan | Navi chats through `/v1` with token-ID logging and the runtime toggle working (M3-E07) |
 | M4 Psychology | 4 | 9–10 (thin slice) | Live lenses, SAEs, steering, replay; then branching, diff and the advanced views | 34.5 of 51.5 epic-days in the 90-day plan | slice: First Run minutes 3–7 on an 8 GB budget, the slider round trip under 50 ms p95; full: every `psychology.*` command at L1 |
 | M5 Training and Evaluation | 5 | 11–12 (the loop) | Teach it, the Evaluation plugin, chains; then every recipe, RLHF, data import with the MySQL reader, export, plugin event handlers, CUDA IPC sharing if it measures well | 27.5 of 72.5 epic-days in the 90-day plan | slice: the loop in under 10 minutes from cold; the invented fact caught; full: every recipe and metric at L1 |
-| M6 Designer | 6 | 13 (thin slice and packaging) | Canvas, stats, import, compile, ONNX; then all families and blocks, templates, Eject | 23 of 51 epic-days in the 90-day plan | slice: design → train → ONNX export from the UI, AppImage and `.deb`, the months-4+ plan; full: every family passes the import golden test |
+| M6 Designer | 6 | 13 (thin slice and packaging) | Canvas, stats, import, compile, ONNX; then all families and blocks, templates, Eject | 23 of 51 epic-days in the 90-day plan and M1-55 (1 size-day) | slice: design → train → ONNX export from the UI, AppImage and `.deb`, the months-4+ plan; full: every family passes the import golden test |
 | M7 Agent Gym | 7 | after the 90 days | RL engine on harnesses with sandboxes, peek and step mode, Harbor import | 24 epic-days | GRPO on a harness end to end on Linux; step mode keeps advantages correct |
 | M8 Plugins | 8 | after the 90 days | SDK basics, `rastai plugin new, dev, test, pack`, local install, the iframe bridge, theme plugins and icon sets | 25.5 epic-days | every template goes through new, codegen, lint, test and pack in CI |
 | M9 Remote | 9 | 11–12 (SSH slice) | SSH pairing, headless serve, resumable transfers, jobs that survive drops | 11 of 26 epic-days in the 90-day plan | slice: a remote job survives a network drop; full: first remote run under 15 minutes from pairing |
@@ -221,14 +221,14 @@ A PR is done when all of these hold. Reviewers check the PR template's boxes (8.
 
 ### 3.4 Sizes and the honest estimate
 
-- M1 is 80.5 size-days (41.75 on lane A, 38.75 on lane B). M2 is 28.5 (14.5 and 14).
+- M1 is 79.5 size-days (41.75 on lane A, 37.75 on lane B). M2 is 28.5 (14.5 and 14).
 - **What the decisions of 2026-10-10 added to M1 (5.5 size-days):** the archive names in M1-01 (0.5); the theming and frontend-contract work (3: M1-01a 1, M1-05 0.25, M1-09 0.25, M1-17 0.25, M1-26 0.25, M1-50 0.25, M1-51 0.5, M1-52 0.25); JSDoc instead of TypeScript (1.5: M1-50, M1-52, M1-53 and M1-54 0.25 each, M1-51 0.5); the Rust safetensors header check moved into M1 (0.5, M1-34). M2 lost M2-11 (moved to M10) and half of M2-22 (no in-house DEFLATE), and gained M2-23 (the re-plan) and 0.5 of JSDoc in M2-21.
 - **What the decisions of 2026-10-11 added to M1 (2 size-days):** M1-57 (`check-names`, 1) and M1-58 (`check-schema-diff`, 1), ADR-0038. They are placed as early as their inputs allow (lane-days 16.25–19), so the server, node, worker and UI tasks are checked from their first PR. That moves everything after them by one lane-day. Placed last, they would cost nothing on the schedule but leave most of M1 unchecked. The reviewer agent per PR (3.5) and the verification comment (3.6) add review time per PR, not size-days; M2-23 measures it.
 - **The theming "do now" work is 3.5 size-days:** the 3 in M1 above, plus 0.5 in the first renderer PRs (`setColors` on the viz classes in M4-E04 and on `GraphRenderer` in M6-E03, 0.25 each).
 - **JSDoc costs about 8 size-days** (ADR-0036): 1.5 in M1, 0.5 in M2-21, and 6 in the UI epics (M3-E09 1, M4-E04 0.75, M4-E06 0.5, M4-E10 1, M5-E06 0.5, M5-E12 1, M6-E03 0.75, M8-E04 0.5).
-- Simulating the two lanes with every dependency, at one size-day per lane per working day, with M2 tasks waiting for M1's exit gate: M1-01 merges at lane-day 2.5; M1's exit gate (M1-48, M1-49) lands at lane-day 39.25, all of M1 at 44.25 (M1-55 and M1-56 run on lane B beside the first M2 tasks), M2's NVIDIA parity gate (M2-10) at 55.25 and all of M2 at 56.25.
+- Simulating the two lanes with every dependency, at one size-day per lane per working day, with M2 tasks waiting for M1's exit gate: M1-01 merges at lane-day 2.5; M1's exit gate (M1-48, M1-49) lands at lane-day 39.25, all of M1 at 44.25 (M1-56 runs on lane B beside the first M2 tasks), M2's NVIDIA parity gate (M2-10) at 55.25 and all of M2 at 56.25.
 - §32 gives M1 and M2 four weeks (20 working days). Meeting that needs about 2.7 size-days merged per lane per working day: agents write and self-test the PRs, and the owner reviews about five PRs a day.
-- The whole 90-day plan (M1, M2 and the `gate:90-day` epics of M3, M4, M5, M6 and M9) is 247.5 size-days. §32 gives it weeks 3–13: 55 working days on two lanes, 110 lane-days. That is about 2.25 size-days per lane per working day. All epics of M3 to M10 are 314 epic-days; M11 adds 21.
+- The whole 90-day plan (M1, M2 and the `gate:90-day` epics of M3, M4, M5, M6 and M9) is 247.5 size-days. §32 gives it weeks 3–13: 55 working days on two lanes, 110 lane-days. That is about 2.25 size-days per lane per working day. All epics of M3 to M10 are 314 epic-days, plus M1-55 as one size-day (M6, the same way M2-11 is counted in M10); M11 adds 21.
 - If review can't keep that pace, the dates move, not the scope or the bar (§0.8). M2-23 replaces these estimates with M1's measured velocity, and M6-E06 does it again at week 13.
 
 ### 3.5 Agent build protocol
@@ -384,7 +384,6 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 | M1-52 | `@rastai/plugin`: host interface, registry and state tools | A | M + 0.5 | M1-51 | 35.75–37.25 |
 | M1-53 | apps/web shell, embedded in the daemon | A | L + 0.25 | M1-52, M1-32 | 37.25–39.5 |
 | M1-54 | apps/web: the generated palette, copy-as, Settings with Appearance, Plugins and Remote; Playwright | A | L + 0.25 | M1-53, M1-31 | 39.5–41.75 |
-| M1-55 | apps/desktop: the Tauri window and `rastai open` | B | M | M1-54, M1-31 | 42.25–43.25 |
 | M1-56 | Threat model v1 | B | M | M1-26, M1-29 | 43.25–44.25 |
 | M1-57 | check-names: generated names registry and contracts comparison | B | M | M1-05, M1-13, M1-16, M1-21, M1-23 | 16.25–17.25 |
 | M1-58 | check-schema-diff: command and event schema diff against base | A | M | M1-05, M1-16, M1-22, M1-57 | 18–19 |
@@ -393,7 +392,7 @@ Build what every later step stands on (§31 step 1, §32 weeks 3–4): the monor
 
 ### 4.6 Dependencies
 
-The M1 graph has 59 tasks, so it is drawn in four figures. A task from another figure appears as a node marked "(other figure)".
+The M1 graph has 58 tasks, so it is drawn in four figures. A task from another figure appears as a node marked "(other figure)".
 
 **Figure 4.1: repo, contracts, formats and the names and schema checks**
 
@@ -631,7 +630,6 @@ flowchart TD
   M1_52["M1-52 @rastai/plugin core"]
   M1_53["M1-53 Web shell"]
   M1_54["M1-54 Palette and sections"]
-  M1_55["M1-55 Desktop window"]
   M1_28["M1-28 (other figure)"]
   M1_16["M1-16 (other figure)"]
   M1_17["M1-17 (other figure)"]
@@ -646,15 +644,14 @@ flowchart TD
   M1_32 --> M1_53
   M1_53 --> M1_54
   M1_31 --> M1_54
-  M1_54 --> M1_55
-  M1_31 --> M1_55
 ```
 
 - The UI is not on the exit gate's path, but §31 step 1 loads first-party sections through the plugin host from day one, and M2's First Run checklist needs the shell.
 - **All of it is plain JavaScript and JSX** with short JSDoc types (ADR-0036). `just check-js` runs the `typescript` package's checker over `jsconfig.json` in checkJs mode; it never emits code, and nobody writes TypeScript syntax.
 - M1-51 is the largest UI task (L + 1) and ships as two PRs: the token contract with the locked security UI, then the components and mode primitives.
 - **What is persisted:** nothing new; the UI reads state through commands and the event stream only (ADR-0006), and holds no domain logic (contracts §2.4 rule 9). `ui.theme` and `ui.density` live in `settings.json`; resolved tokens are never stored.
-- **Failure branches:** if WebKitGTK misbehaves in M1-55, the browser is a full client (§16), so M2 continues in Chrome.
+- **Failure branches:** none in M1. The browser is the only client (ADR-0040), so there is no shell to fail.
+- **Desktop shell moved out of M1:** the Tauri window is M1-55, moved from M1 to M6 (ADR-0040), because Tauri 2 on Linux depends on the archived GTK3 bindings (RUSTSEC-2024-0411 and related, RUSTSEC-2024-0429 for glib), and the owner doesn't want deprecated packages. The browser is a full client, so M1 doesn't need a shell.
 
 ### 4.7 Lanes week by week: what runs in parallel in the two worktrees
 
@@ -668,7 +665,7 @@ flowchart TD
 | 6 (days 25–30) | M1-31, M1-39, M1-32, M1-50 | M1-34, M1-35, M1-37, M1-38 |
 | 7 (days 30–35) | M1-40, M1-51 | M1-30, M1-33, M1-46, M1-47 |
 | 8 (days 35–40) | M1-52, M1-53, M1-54 | M1-48, M1-49; then M2 tasks (5.7) |
-| 9 (days 40–45) | M2 tasks (5.7) | M1-55, M1-56 between M2 tasks |
+| 9 (days 40–45) | M2 tasks (5.7) | M1-56 between M2 tasks |
 
 A cell lists the tasks that lane starts in that lane-week (five lane-days). "Waiting" means the lane's next tasks are blocked; "M2 tasks" means the lane is already in the next milestone.
 
@@ -1114,14 +1111,6 @@ Lane A · size L + 0.25 · type task · depends on M1-53, M1-31 · claims L1
 - **Test:** palette.spec.js: the palette lists the skeleton commands, Basic mode filters them, system.status runs from it, and 'copy as CLI' equals copy-as.json, which the CLI test parses back. basic-advanced.spec.js (spec §7, frontend 2.4) for Settings, Plugins and Remote: the interactive elements in Basic (role and accessible name) are a subsequence of those in Advanced, a value typed in Basic survives a switch to Advanced and back, and a per-panel override wins over the global setting. theme.spec.js: light, dark, `system` with an emulated OS dark scheme, then compact density restyle the shell, and no `--rr-locked-*` variable changes (the canvas and charts join with M4-E04 and M6-E03). Every later section's UI epic adds its section to these specs.
 - **Docs:** [Layout: frontend and plugins §2.4–2.5, §2.10, §8.7, §8.9](../architecture/layout/frontend-and-plugins.md)
 
-#### M1-55 apps/desktop: the Tauri window and `rastai open`
-Lane B · size M · type task · depends on M1-54, M1-31
-
-- **Goal:** The shell as a dev build on the owner's box: start or find the daemon with `rastai open --print-url`, open the printed URL, keep one instance (a second launch forwards its file paths), refuse navigation outside the daemon origin, and sign in again when the window reloads without a login code, because a reload loses the web app's session key (ADR-0034 decision 10). No HTTP or crypto in the shell, and it never reads owner.token (ADR-0034). Packaging is M6-E05.
-- **Files:** `apps/desktop/{package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/src/}`; `apps/desktop/src-tauri/tests/`
-- **Test:** Launch-line parsing of the DesktopLaunchInfo JSON; a second launch forwards its paths over desktop.sock; navigation to another origin is refused. Manual check in WebKitGTK on the owner's box, including a reload that signs in again, noted in the PR.
-- **Docs:** [Layout: frontend and plugins §9](../architecture/layout/frontend-and-plugins.md)
-
 #### M1-56 Threat model v1
 Lane B · size M · type docs · depends on M1-26, M1-29
 
@@ -1157,7 +1146,7 @@ The ModelSpec compiler becomes the Inspectable runtime for real models (§17, §
 
 ### 5.2 Entry criteria
 
-- M1's exit gate passed (M1-48, M1-49). The M1 UI tail and M1-55, M1-56 may still be landing; M2 tasks start as lanes free up, never before the exit gate.
+- M1's exit gate passed (M1-48, M1-49). The M1 UI tail and M1-56 may still be landing; M2 tasks start as lanes free up, never before the exit gate.
 - The owner's HF token has accepted the Gemma and Llama licenses (for the nightly real-weight parity).
 - The self-hosted runner on the owner's box is registered under the policy of 8.8, or GPU runs are done by hand and recorded in the PR.
 
@@ -1310,7 +1299,7 @@ Lane-days continue from M1's count, so M2 starts where each lane finishes its M1
 | Lane week | Lane A | Lane B |
 |---|---|---|
 | 8 (days 35–40) | M1 tasks (4.7) | M1-48 and M1-49, then M2-23, M2-13 |
-| 9 (days 40–45) | M2-12, M2-14, M2-15, M2-18 | M2-22, M2-01, M1-55, M1-56, M2-02 |
+| 9 (days 40–45) | M2-12, M2-14, M2-15, M2-18 | M2-22, M2-01, M1-56, M2-02 |
 | 10 (days 45–50) | M2-16, M2-17, M2-19 | M2-03, M2-04, M2-05 |
 | 11 (days 50–55) | M2-20, M2-21 | M2-06, M2-07, M2-08, M2-09, M2-10 |
 | 12 (days 55–60) | M2-21 ends at 56.25; free for M3 | M2-10 ends at 55.25; free for M3 |
@@ -1606,6 +1595,7 @@ M5-E15 builds the dispatcher behind the manifest field `contributes.event_handle
 | M6-E02 | ModelSpec analysis: live stats (90-day) | 3 | M6-E01 | L1 | Parameter counts equal the PyTorch module counts for TextCNN, tiny Gemma 3 and Llama (modelspec_stats.rs); every op's shapes, parameter count and FLOPs equal its `fixtures/ops/<op>.json`, the files the Python compiler matches too. |
 | M6-E03 | Thin Designer: canvas editing and the TextCNN template (90-day) | 6 | M6-E02 | L1 | designer.spec.js first half (TextCNN template, edit, stats update, undo); theme.spec.js: the canvas recolors through `GraphRenderer.setColors(canvasColors(tokens))` (contracts §5.6) without a new WebGL context, and a font change rebuilds only the glyph atlas; nightly canvas bench: 1,000 nodes at the refresh cap in Chrome and WebKitGTK. |
 | M6-E04 | Import, compile, train and ONNX export from the UI (90-day) | 5 | M6-E03, M2-09 | L1 | designer.spec.js: design → train → ONNX export from the UI; an unknown model_type imports as an opaque node with diagnostics, never an exception. |
+| M1-55 | Desktop window: the deferred shell, `rastai open` and one instance (90-day, ADR-0040) | 1 | M1-54, M1-31 | L1 | Launch-line parsing of the DesktopLaunchInfo JSON; a second launch forwards its paths; navigation to another origin is refused; manual check in the chosen engine on the owner's box, noted in the PR. |
 | M6-E05 | Linux packaging and updates (90-day) | 4 | M1-55, M6-E04 | L1 | Nightly on the owner's box: the AppImage launches, a daemon comes up, double-clicking a fixture .rrsreplay journals file.open; a tampered package is refused (RRS-U0105); on Ubuntu with the `.deb` installed, its AppArmor profile lets a network-off plugin module start in its own namespace with no RRS-P2005; crash reports (spec §24, platform flow §11): a daemon kill -9 leaves one redacted local report on the next start, the review prompt shows only with `privacy.crash_reports` on, and nothing leaves the machine through Rastai (sending is a GitHub issue the user files by hand). |
 | M6-E06 | The months-4+ plan and level audit (90-day) | 2 | M6-E04 | none | The plan PR is merged. |
 | M6-E07 | Dense families II: Qwen, Mistral, GPT-2, BERT, ViT | 5 | M2-09 | L1 | Tiny-config parity in CI for each family; the HF import golden test (import → compile → logits match) per family; test_image_decode.py: the `fixtures/images/` corpus decodes to its expected pixels, and GIF, WebP and truncated files are refused, never half-decoded; a ViT trains one step on `images_tiny` on CPU; nightly real weights for one size each. |
@@ -1614,6 +1604,14 @@ M5-E15 builds the dispatcher behind the manifest field `contributes.event_handle
 | M6-E10 | ALiBi and attention residuals | 3 | M6-E01 | L1 | ALiBi bias values; BLOOM and MPT tiny parity; an AttnRes design compiles and trains, and its lens is labeled approximate. |
 | M6-E11 | Templates, composition and hierarchy | 5 | M6-E04 | L1 | Every template compiles and trains one step on CPU; overlapping ranges are caught; an 80-block model stays under the node limit with collapse. |
 | M6-E12 | Round trips: Eject, ONNX import, torch.export, rastai.load, compat runtime | 5 | M6-E04 | L1 | test_eject (runs with only torch installed); tests/loop under 10 minutes in CI (§29); the compat runtime chats with an unsupported architecture. |
+
+#### M1-55 Desktop window: the deferred shell (ADR-0040)
+Moved from M1 to M6 · size M · type task · 90-day · depends on M1-54, M1-31 · the shell choice is decided when M6 starts
+
+- **Goal:** The shell as a dev build on the owner's box: start or find the daemon with `rastai open --print-url`, open the printed URL, keep one instance (a second launch forwards its file paths), refuse navigation outside the daemon origin, and sign in again when the window reloads without a login code, because a reload loses the web app's session key (ADR-0034 decision 10). No HTTP or crypto in the shell, and it never reads owner.token (ADR-0034). Packaging is M6-E05. The engine is chosen first: Electron (a new dependency, which needs the owner's approval and an ADR that replaces ADR-0040's shell part) or Tauri once a release ships the GTK4 port (ADR-0040 decision 3). The Tauri branch `m1/M1-55` (commit 8c72221) exists only in the owner's local clone, not on origin; it is kept there for reference.
+- **Files:** Tauri: `apps/desktop/{package.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/src/}` and `apps/desktop/src-tauri/tests/`. Electron: the same paths with its own main process file in place of `src-tauri/`.
+- **Test:** Launch-line parsing of the DesktopLaunchInfo JSON; a second launch forwards its paths over desktop.sock; navigation to another origin is refused. Manual check in the chosen engine on the owner's box, including a reload that signs in again, noted in the PR.
+- **Docs:** [Layout: frontend and plugins §9](../architecture/layout/frontend-and-plugins.md) (deferred)
 
 ### 6.5 M7 Agent Gym
 
@@ -1711,6 +1709,7 @@ Not in the prototype; listed so nobody builds them early or forgets them.
 | Item | When | Source |
 |---|---|---|
 | An unsupported user stylesheet, with the security UI moved into closed shadow roots | Phase 2 | owner decision 20 |
+| The icon rail below 1024 px (collapsed section rail) | Phase 2 | ui-design §3.1 and §9 (d); ADR-0040 |
 | Per-panel `theme_override`, if M8-E06 doesn't fit it | Phase 2 | owner decision 20 |
 | JSON for `EventService` through a generated proto-JSON codec | M9-E05 if a client needs it, else Phase 2 | owner decision 20 |
 | `token.pair` for non-browser clients | Phase 2 | owner decision 20 |

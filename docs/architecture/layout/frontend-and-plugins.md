@@ -2336,6 +2336,8 @@ None directly. Lessons: render at frame rate, not event rate (spike 02 packet ra
 
 ## 9. `apps/desktop` (`@rastai/desktop`)
 
+*Deferred (ADR-0040, 2026-10-14): the desktop shell moved from M1 to M6 (task M1-55). The browser is the client for now; the design below is kept for the shell's return, and its engine is chosen when M6 starts.*
+
 The Tauri 2 shell: the window, file associations and the updater (spec §16). It never talks to the daemon over HTTP; the web app does.
 
 ### 9.1 Tree
@@ -3573,5 +3575,5 @@ Each has the default this doc uses until the owner decides. Row numbers are stab
 | 9 | Browser upload cap for dropped files. | 256 MiB; bigger files open by path with `file.browse`. |
 | 10 | AppImage file associations. | Not self-registered in the prototype; the `.deb` registers them. |
 | 11 | The language-model assistant: free-text questions, and "show me" or "do it" decided by a model (spec §7). | Phase 2, with the tutorials (checks through `tutorial.check`, Show me that opens a view or a prefilled `CommandForm`) and assistant-skill registration (skills listed, their commands runnable by the user): tutorials are L3 work (ADR-0017 decision 3), and plan §10 row 45 schedules both in Phase 2. Their design in 8.4 is ready for then. Nothing in the prototype interprets free text or runs a command the user didn't press. |
-| 12 | Does the pinned Tauri version expose a new-window hook on the webview, so `window.open` can create a second guarded window? | Verify against the pinned version in M1-55. If it doesn't, the navigation guard does it: `view.window.open` navigates to `/?new_window=1#<route>`, and the guard cancels that navigation and opens a second window at `/#<route>` instead. The page detects neither case; both are plain URLs. |
+| 12 | Does the pinned Tauri version expose a new-window hook on the webview, so `window.open` can create a second guarded window? | Verify against the pinned version in M1-55 (now M6; the engine is chosen then, ADR-0040). If it doesn't, the navigation guard does it: `view.window.open` navigates to `/?new_window=1#<route>`, and the guard cancels that navigation and opens a second window at `/#<route>` instead. The page detects neither case; both are plain URLs. |
 | 14 | How do npm packages (Phase 2) ship declarations for `@rastai/plugin`'s hand-written JSDoc? | Not needed in the prototype: packages export their source, and editors read the JSDoc directly. At Phase 2 publishing, decide between shipping source only and generating a `.d.ts` bundle; generating one with `tsc --emitDeclarationOnly` would widen the `typescript` package's dev-tool role, so it needs the owner's yes. |
