@@ -280,6 +280,26 @@
     "retired": false
   },
   {
+    "code": "RRS-E5007",
+    "severity": "error",
+    "title": "Zip is cut short or its records disagree",
+    "message": "The zip file is incomplete or damaged: {reason}.",
+    "basic_text": "This zip file is incomplete or damaged, so Rastai can't read its contents safely.",
+    "fix_text": "Get the file again from its source, or create the zip again.",
+    "docs_anchor": "rrs-e5007",
+    "retired": false
+  },
+  {
+    "code": "RRS-E5008",
+    "severity": "error",
+    "title": "Zip uses a feature Rastai doesn't read",
+    "message": "The zip file uses a feature Rastai doesn't read: {reason}.",
+    "basic_text": "This zip file uses a feature Rastai can't read: encryption, several disks, or an unusual compression method.",
+    "fix_text": "Create the zip again without encryption or splitting, using stored or deflate compression.",
+    "docs_anchor": "rrs-e5008",
+    "retired": false
+  },
+  {
     "code": "RRS-E6001",
     "severity": "error",
     "title": "Safetensors: file is shorter than the 8-byte header length",

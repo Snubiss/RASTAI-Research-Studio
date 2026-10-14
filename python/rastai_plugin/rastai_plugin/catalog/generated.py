@@ -107,6 +107,8 @@ RRS_E5003 = "RRS-E5003"
 RRS_E5004 = "RRS-E5004"
 RRS_E5005 = "RRS-E5005"
 RRS_E5006 = "RRS-E5006"
+RRS_E5007 = "RRS-E5007"
+RRS_E5008 = "RRS-E5008"
 RRS_E6001 = "RRS-E6001"
 RRS_E6002 = "RRS-E6002"
 RRS_E6003 = "RRS-E6003"
@@ -1218,6 +1220,28 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Split the file into smaller ones.",
         fix_command_id="",
         docs_anchor="rrs-e5006",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_E5007,
+        severity="error",
+        title="Zip is cut short or its records disagree",
+        message="The zip file is incomplete or damaged: {reason}.",
+        basic_text="This zip file is incomplete or damaged, so Rastai can't read its contents safely.",
+        fix_text="Get the file again from its source, or create the zip again.",
+        fix_command_id="",
+        docs_anchor="rrs-e5007",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_E5008,
+        severity="error",
+        title="Zip uses a feature Rastai doesn't read",
+        message="The zip file uses a feature Rastai doesn't read: {reason}.",
+        basic_text="This zip file uses a feature Rastai can't read: encryption, several disks, or an unusual compression method.",
+        fix_text="Create the zip again without encryption or splitting, using stored or deflate compression.",
+        fix_command_id="",
+        docs_anchor="rrs-e5008",
         retired=False,
     ),
     CatalogEntry(

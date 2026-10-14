@@ -263,6 +263,24 @@ Source: `catalog/errors/RRS-E.json`.
 - **In plain words:** This file holds more items than Rastai will read safely at once.
 - **Fix:** Split the file into smaller ones.
 
+<a id="rrs-e5007"></a>
+
+### RRS-E5007: Zip is cut short or its records disagree
+
+- **Severity:** error
+- **Message:** The zip file is incomplete or damaged: {reason}.
+- **In plain words:** This zip file is incomplete or damaged, so Rastai can't read its contents safely.
+- **Fix:** Get the file again from its source, or create the zip again.
+
+<a id="rrs-e5008"></a>
+
+### RRS-E5008: Zip uses a feature Rastai doesn't read
+
+- **Severity:** error
+- **Message:** The zip file uses a feature Rastai doesn't read: {reason}.
+- **In plain words:** This zip file uses a feature Rastai can't read: encryption, several disks, or an unusual compression method.
+- **Fix:** Create the zip again without encryption or splitting, using stored or deflate compression.
+
 <a id="rrs-e6001"></a>
 
 ### RRS-E6001: Safetensors: file is shorter than the 8-byte header length
