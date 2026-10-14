@@ -160,11 +160,7 @@ async fn read_whole_response(request: HttpRequest, roots: RootCertStore) -> Resu
 async fn open_stream(request: HttpRequest, roots: RootCertStore) -> Result<HttpStream, TransportError> {
     // Checked before the hyper request is built, so an untagged HTTPS request is refused as untagged whatever else is
     // wrong with it (section 4.6).
-    if let HttpTarget::Https { host, .. } = &request.target {
-        if request.egress.is_none() {
-            return Err(TransportError::EgressTagMissing { host: host.clone() });
-        }
-    }
+    check_egress_tag(&request)?;
     let header_host = host_header(&request.target);
     let http_request = build_http_request(&request, &header_host)?;
     let timeout_ms = request.timeout_ms;
@@ -182,6 +178,14 @@ async fn open_stream(request: HttpRequest, roots: RootCertStore) -> Result<HttpS
         }
     };
     Ok(stream_from_response(response, timeout_ms, egress))
+}
+
+/// An HTTPS request without its egress tag is refused before anything connects (RRS-N3008).
+fn check_egress_tag(request: &HttpRequest) -> Result<(), TransportError> {
+    match (&request.target, &request.egress) {
+        (HttpTarget::Https { host, .. }, None) => Err(TransportError::EgressTagMissing { host: host.clone() }),
+        _ => Ok(()),
+    }
 }
 
 /// An HTTPS request: the tag is checked first, so an untagged request connects to nothing. The tag gets its first
