@@ -11,6 +11,7 @@ import { useEffect, useId, useState } from "react";
  * @property {string} title
  * @property {string} [detail]   the section or a short description
  * @property {string} [shortcut] as the user presses it, e.g. "Ctrl+K"
+ * @property {string} [note]     a short state, such as "Needs input"
  */
 
 /**
@@ -20,6 +21,8 @@ import { useEffect, useId, useState } from "react";
  * @param {(query: string) => void} props.onQueryChange
  * @param {(entryId: string) => void} props.onRun
  * @param {() => void} props.onClose
+ * @param {(entryId: string) => void} [props.onHighlight]   the highlighted entry's id, or "" for none; the caller's
+ *                                                         detail pane follows it
  * @param {string} [props.label]         the filter box's accessible name
  * @param {string} [props.emptyText]
  */
@@ -29,6 +32,7 @@ export function CommandPaletteView({
   onQueryChange,
   onRun,
   onClose,
+  onHighlight,
   label = "Run a command",
   emptyText = "No matching commands.",
 }) {
@@ -39,6 +43,11 @@ export function CommandPaletteView({
   useEffect(() => {
     setActiveIndex(0);
   }, [entries]);
+
+  // The caller shows the highlighted entry's details, so it hears about every move of the highlight.
+  useEffect(() => {
+    onHighlight?.(entries[activeIndex]?.id ?? "");
+  }, [entries, activeIndex]);
 
   /** @param {import("react").KeyboardEvent} event */
   function handleKeyDown(event) {
@@ -88,6 +97,7 @@ export function CommandPaletteView({
           >
             <span className="rr-palette__title">{entry.title}</span>
             {entry.detail ? <span className="rr-palette__detail">{entry.detail}</span> : null}
+            {entry.note ? <span className="rr-palette__detail">{entry.note}</span> : null}
             {entry.shortcut ? <kbd className="rr-palette__shortcut">{entry.shortcut}</kbd> : null}
           </li>
         ))}

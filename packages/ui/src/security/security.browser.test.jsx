@@ -252,6 +252,30 @@ describe("the token confirmation", () => {
     await mounted.unmount();
   });
 
+  test("while the token is made the focus stays in the prompt on Cancel, and the button says Creating", async () => {
+    /** @type {string[]} */
+    const decisions = [];
+    const mounted = await mount(
+      <TokenConfirm
+        tokenName="laptop"
+        canDo={TOKEN_CAN}
+        cannotDo={TOKEN_CANNOT}
+        onApprove={() => decisions.push("approve")}
+        onCancel={() => decisions.push("cancel")}
+      />,
+    );
+    const dialog = /** @type {HTMLDialogElement} */ (document.querySelector("dialog"));
+    const create = /** @type {HTMLButtonElement} */ (buttonNamed(dialog, "Create token"));
+    create.click();
+    await expect.poll(() => create.disabled).toBe(true);
+    // A disabled button drops the focus; the prompt must not lose it to the page behind.
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(create.textContent).toBe("Creating…");
+    expect(dialog.getAttribute("aria-busy")).toBe("true");
+    await mounted.unmount();
+  });
+
   test("Create token is disabled once pressed, so a second click cannot approve again", async () => {
     /** @type {string[]} */
     const decisions = [];
@@ -355,6 +379,18 @@ describe("the token confirmation", () => {
 });
 
 describe("the locked buttons", () => {
+  test("the trust prompt's Install is the filled button and Don't install the outlined one", async () => {
+    applyThemeTokens(document.documentElement, builtInTheme("light", OPTIONS));
+    const mounted = await mount(
+      <TrustPrompt pluginName="Example" permissions={PERMISSIONS} onAccept={noop} onDecline={noop} />,
+    );
+    const install = /** @type {HTMLElement} */ (buttonNamed(mounted.container, "Install"));
+    const decline = /** @type {HTMLElement} */ (buttonNamed(mounted.container, "Don't install"));
+    expect(getComputedStyle(install).backgroundColor).toBe(cssRgb(LOCKED_TOKENS.light["security-text"]));
+    expect(getComputedStyle(decline).backgroundColor).toBe(cssRgb(LOCKED_TOKENS.light["security-surface"]));
+    await mounted.unmount();
+  });
+
   test("a disabled button is an outlined dashed button, not a copy of the filled enabled one", async () => {
     applyThemeTokens(document.documentElement, builtInTheme("light", OPTIONS));
     const mounted = await mount(

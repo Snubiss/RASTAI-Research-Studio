@@ -202,7 +202,7 @@ class ThemeColors:
     canvas_label: str | None = None
     # Node input and output ports. A #rrggbb color.
     canvas_port: str | None = None
-    # Chat text shading by model confidence. A #rrggbb color.
+    # Saturated base hue of chat confidence shading: chat mixes it into surface at 16, 30 and 46 percent. A #rrggbb color.
     confidence_tint: str | None = None
 
 

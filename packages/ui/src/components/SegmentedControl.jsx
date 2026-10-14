@@ -33,7 +33,10 @@ export function SegmentedControl({ label, options, value, onChange, disabled = f
     0,
     options.findIndex((option) => option.value === value),
   );
-  const tabStopIndex = focusedIndex ?? pressedIndex;
+  // The options can shrink while focus is inside the group; the Tab stop then clamps to the last option, so the group
+  // is never left without one.
+  const lastIndex = Math.max(0, options.length - 1);
+  const tabStopIndex = focusedIndex === null ? pressedIndex : Math.min(focusedIndex, lastIndex);
 
   /** @param {import("react").KeyboardEvent} event */
   function handleKeyDown(event) {

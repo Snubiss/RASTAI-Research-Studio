@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { matchesQuery } from "./palette-match.js";
+import { matchesQuery, matchRank } from "./palette-match.js";
 
 describe("matchesQuery", () => {
   test("a subsequence matches, ignoring case", () => {
@@ -18,5 +18,21 @@ describe("matchesQuery", () => {
     expect(matchesQuery("", "Home")).toBe(true);
     expect(matchesQuery("  ", "Home")).toBe(true);
     expect(matchesQuery(" ho ", "Home")).toBe(true);
+  });
+});
+
+describe("matchRank", () => {
+  test("a match at the start ranks above one inside the text, which ranks above a scattered one", () => {
+    const prefix = matchRank("set", "Settings");
+    const contains = matchRank("set", "Reset layout");
+    const scattered = matchRank("set", "Stream every token");
+    expect(prefix).toBeLessThan(contains);
+    expect(contains).toBeLessThan(scattered);
+    expect(scattered).toBeGreaterThanOrEqual(0);
+  });
+
+  test("no match is -1, and an empty query ranks every text the same", () => {
+    expect(matchRank("xyz", "Training")).toBe(-1);
+    expect(matchRank("", "Training")).toBe(matchRank("", "Home"));
   });
 });

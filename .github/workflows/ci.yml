@@ -231,6 +231,19 @@ jobs:
       - *pnpm-cache
       - *test-js
 
+  # The web app in a real daemon, in Chromium and WebKit (plan M1-54): the palette, Basic and Advanced, the themes and
+  # axe-core on every section. The daemon serves the built app, so the job builds the web app and the binary first.
+  e2e-web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - *checkout
+      - *install-just-node
+      - *pnpm-cache
+      - *cargo-cache
+      - name: just e2e-web
+        run: just e2e-web
+
   # HTTP, the CLI and MCP against one real daemon (plan M1-49): the same commands give the same outcomes on all
   # three, and the MCP sessions match fixtures/mcp/e2e/. Linux only: the daemon's job tests read /proc and signal
   # process groups. It runs the real TextCNN job in the cpu environment, hence the uv and cargo caches.

@@ -11,8 +11,9 @@ Read the root `CLAUDE.md` first. This file adds the local rules of `docs/archite
 - `src/routing/`: the fragment grammar (`route.js`) and navigation (`navigate.js`).
 - `src/workspace/`: the layout tree (pure functions), the workspace and the panel frame.
 - `src/plugin-host/`: the plugin loader (`load-plugins.js`, the only caller of `registerPluginUi`), the first-party table, the core sections and the in-process host's services.
-- `src/frame/`: the top bar, the section rail, the status bar, the palette entry and the dialogs.
-- `src/sections/`: the core sections (Home now; the other sections show their honest "not available yet" state).
+- `src/commands/`: the palette's pure parts: the entries (`palette-entries.js`), the match (`palette-match.js`), copy-as (`copy-as.js`, read against `fixtures/command-golden/copy-as.json`), the keys, the context prefill and running a command.
+- `src/frame/`: the top bar, the section rail, the status bar, the palette (`CommandPalette.jsx`, `PaletteDetail.jsx`) and the dialogs.
+- `src/sections/`: the core sections: Home, Settings (Appearance and API tokens), Plugins (the list) and Remote (the nodes). The others show their honest "not available yet" state.
 
 ## Rules
 
@@ -27,3 +28,4 @@ Read the root `CLAUDE.md` first. This file adds the local rules of `docs/archite
 ## Tests
 
 `just test-js` runs the `*.test.js` files in Node and the `*.browser.test.jsx` files in Chromium and WebKit (the shell's regions, keyboard navigation, Basic/Advanced, the empty and error states). `just check-js` type-checks the JSDoc. `just web-embed` builds `dist/`.
+`just e2e-web` runs `tests/e2e/*.spec.js` (Playwright, Chromium and WebKit) against a real `rastai serve --headless` that serves the built app: the palette, the Basic and Advanced rules, the themes and axe-core.

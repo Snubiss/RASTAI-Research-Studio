@@ -117,7 +117,7 @@
       "schema_id": "rastai.settings/1"
     },
     {
-      "content_hash": "blake3:16bf9eb86a980a63090d9ae8fe69e178f9f7603dfdb8c972d49885955d777f82",
+      "content_hash": "blake3:aa59cea6dec8b4ba4283995fec3648f03d3233569d58fe822cc6f69c98c85ce3",
       "file": "rastai.theme/1.json",
       "schema_id": "rastai.theme/1"
     }

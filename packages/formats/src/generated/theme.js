@@ -69,7 +69,7 @@
  * @property {string} [canvas_edge_active] Edges carrying data in a live view. A #rrggbb color.
  * @property {string} [canvas_label] Labels on the canvas. A #rrggbb color.
  * @property {string} [canvas_port] Node input and output ports. A #rrggbb color.
- * @property {string} [confidence_tint] Chat text shading by model confidence. A #rrggbb color.
+ * @property {string} [confidence_tint] Saturated base hue of chat confidence shading: chat mixes it into surface at 16, 30 and 46 percent. A #rrggbb color.
  */
 
 /**

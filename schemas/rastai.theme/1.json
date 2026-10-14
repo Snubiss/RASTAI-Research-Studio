@@ -65,7 +65,7 @@
           "type": "string"
         },
         "confidence_tint": {
-          "description": "Chat text shading by model confidence. A #rrggbb color.",
+          "description": "Saturated base hue of chat confidence shading: chat mixes it into surface at 16, 30 and 46 percent. A #rrggbb color.",
           "type": "string"
         },
         "diverging_negative": {

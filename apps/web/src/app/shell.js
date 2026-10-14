@@ -13,7 +13,7 @@ import { watchRoute } from "../routing/navigate.js";
 import { createAppStores } from "../state/app-stores.js";
 import { globalMode } from "../state/mode.js";
 import { withJobProgress, withOnlyListedJobs, withoutEndedJob } from "../state/job-progress.js";
-import { emptySettings } from "../state/settings.js";
+import { emptySettings, withSetting } from "../state/settings.js";
 import { applyTheme, themeTokensFor, watchMediaQuery } from "../state/theme.js";
 import { pluginDiagnostic } from "@rastai/plugin";
 
@@ -47,6 +47,8 @@ const SETTINGS_SET = "settings.set";
  * @property {() => Promise<void>} refreshPlugins
  * @property {(diagnostic: Diagnostic) => void} notify
  * @property {(mode: "basic" | "advanced") => Promise<void>} setMode   the global Basic/Advanced switch (ui.mode)
+ * @property {(key: string, value: any) => Promise<void>} setSetting   settings.set for one key; the display changes at
+ *                                          once and a refusal puts the stored value back (ui-design 6.8)
  */
 
 /**
@@ -81,6 +83,7 @@ export function createShell(client, options = {}) {
     refreshPlugins: () => refreshPlugins(shell),
     notify: (diagnostic) => notify(shell, diagnostic),
     setMode: (mode) => setMode(shell, mode),
+    setSetting: (key, value) => setSetting(shell, key, value),
   };
   shell.coreHost = coreHostOf(shell);
   applySettings(shell, emptySettings());
@@ -174,6 +177,25 @@ async function setMode(shell, mode) {
   if (outcome.ok) {
     await refreshSettings(shell);
   } else {
+    outcome.diagnostics.forEach((diagnostic) => notify(shell, diagnostic));
+  }
+}
+
+/**
+ * Any setting: the display follows the new value at once, settings.set writes it, and the answer's settings replace the
+ * shown ones. A refusal restores the stored settings and shows the daemon's diagnostic.
+ * @param {Shell} shell
+ * @param {string} key   a dotted key, such as "ui.density"
+ * @param {any} value
+ */
+async function setSetting(shell, key, value) {
+  const stored = shell.stores.settings.get();
+  shell.applySettings(withSetting(stored, key, value));
+  const outcome = await settingsSet(shell.client, { key, value });
+  if (outcome.ok) {
+    await refreshSettings(shell);
+  } else {
+    shell.applySettings(stored);
     outcome.diagnostics.forEach((diagnostic) => notify(shell, diagnostic));
   }
 }

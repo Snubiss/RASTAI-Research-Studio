@@ -22,3 +22,20 @@ export function readSetting(values, dottedKey, fallback) {
 export function emptySettings() {
   return { values: {}, sources: [] };
 }
+
+/**
+ * The settings.get result with one dotted key changed, for showing a change at once, before settings.set answers. The
+ * daemon's answer replaces it, so a refused change is put back from the stored result.
+ * @param {{ values: any, sources: any[] }} result
+ * @param {string} dottedKey   e.g. "ui.theme"
+ * @param {any} value
+ * @returns {{ values: any, sources: any[] }}
+ */
+export function withSetting(result, dottedKey, value) {
+  const [section, name] = dottedKey.split(".");
+  const values = result.values ?? {};
+  return {
+    ...result,
+    values: { ...values, [section]: { ...(values[section] ?? {}), [name]: value } },
+  };
+}
