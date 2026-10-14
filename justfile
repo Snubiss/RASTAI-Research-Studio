@@ -192,6 +192,13 @@ env-cpu:
     UV_PROJECT_ENVIRONMENT="{{cpu_environment}}" uv sync --frozen --reinstall-package rastai-formats \
         --project python/envs/cpu
 
+# Every locked environment under python/envs/ resolves against its indexes, and `uv lock --locked` fails when the
+# resolution would change its lock: a new package, a new version or a changed hash (spec 28 risk 11). Online, so CI
+# runs it (the env-locks job); `just check` doesn't, and it reads the locks offline in test-python instead
+# (python/envs/tests/test_env_locks.py). A folder with a pyproject.toml and no uv.lock fails, so a lock can't be left out.
+env-locks:
+    for project in python/envs/*/pyproject.toml; do uv lock --locked --refresh --project "$(dirname "$project")"; done
+
 # --frozen-lockfile installs exactly the lock and fails instead of changing it.
 # Install the JavaScript dev tools (typescript checker, vitest, prettier) from pnpm-lock.yaml into node_modules/.
 env-js:

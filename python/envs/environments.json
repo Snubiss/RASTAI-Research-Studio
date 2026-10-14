@@ -1,0 +1,46 @@
+{
+  "format_version": 1,
+  "about": "The locked Python environments, one per backend (layout python.md section 11; contracts.md 14 question 10). The node reads it to pick an environment from the hardware (M2-16), to show the download size before a sync, and to refuse an AMD card whose gfx target isn't listed. `lock` is the environment's uv.lock, or null while its lock is pending. `expected_download_gib` is the measured cold download of spike 05 (torch and tokenizers only; re-measured at release time). `env-locks` resolves every lock listed here, and `python/envs/tests/test_env_locks.py` checks that each lock's torchvision matches its torch.",
+  "environments": {
+    "cpu": {
+      "lock": "python/envs/cpu/uv.lock",
+      "pytorch_build": "2.14.1+cpu",
+      "selection_rule": "No supported GPU; every CI runner; the M1 embedded node until M2-16 replaces `just env-cpu`.",
+      "supported_amd_gfx_targets": [],
+      "expected_download_gib": 0.74
+    },
+    "cuda13": {
+      "lock": null,
+      "pytorch_build": "2.14.1+cu130",
+      "selection_rule": "NVIDIA GPU with driver 580 or newer. The default for NVIDIA.",
+      "supported_amd_gfx_targets": [],
+      "expected_download_gib": 5.15
+    },
+    "cuda126": {
+      "lock": null,
+      "pytorch_build": "2.14.1+cu126",
+      "selection_rule": "NVIDIA Maxwell, Pascal and Volta GPUs, which cuda13 doesn't support.",
+      "supported_amd_gfx_targets": [],
+      "expected_download_gib": null
+    },
+    "rocm": {
+      "lock": null,
+      "pytorch_build": "2.14.1+rocm7.14",
+      "selection_rule": "An AMD GPU whose gfx target is listed below. Any other AMD chip gets cpu with the reason; the node never sets HSA_OVERRIDE_GFX_VERSION (spike 05, flows/platform.md).",
+      "supported_amd_gfx_targets": [
+        "gfx1100",
+        "gfx1101",
+        "gfx1102",
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1153",
+        "gfx1200",
+        "gfx1201",
+        "gfx1250"
+      ],
+      "expected_download_gib": 16.47
+    }
+  }
+}

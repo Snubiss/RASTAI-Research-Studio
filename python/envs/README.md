@@ -7,11 +7,27 @@ One uv project and one hash-pinned `uv.lock` per backend (ADR-0009; layout `docs
 | Environment | PyTorch build | Picked when | Status |
 |---|---|---|---|
 | `cpu` | CPU | no supported GPU; every CI runner; the M1 embedded node | M1 (this folder) |
-| `cuda13` | CUDA 13.x | NVIDIA, driver 580 or newer (the default for NVIDIA) | M2 |
-| `cuda126` | CUDA 12.6 | NVIDIA Maxwell, Pascal and Volta | M2 |
-| `rocm` | ROCm | supported AMD GPUs | M2 (resolved in CI, run from M10) |
+| `cuda13` | CUDA 13.x | NVIDIA, driver 580 or newer (the default for NVIDIA) | Pending: its lock waits for the owner's license decision (below) |
+| `cuda126` | CUDA 12.6 | NVIDIA Maxwell, Pascal and Volta | Pending: the same license decision (below) |
+| `rocm` | ROCm | supported AMD GPUs | Pending: the ROCm meta package can't be locked from its index (below); run from M10 |
 
-`environments.json` (M2) holds the selection rules and download sizes.
+`environments.json` holds the selection rules, the supported AMD gfx targets (RDNA3 and newer, from the device packages
+of the ROCm 7.14 index) and the cold download sizes measured in spike 05. Each entry's `lock` is null while its lock is
+pending.
+
+## Pending locks (M2-15)
+
+The cuda13, cuda126 and rocm locks are not in the repository yet, for two reasons that need a decision rather than a
+change to this folder:
+
+- **NVIDIA licenses.** The PyTorch CUDA builds bring about twenty `nvidia-*` and `cuda-*` packages whose license is NVIDIA's
+  proprietary one (`LicenseRef-NVIDIA-Proprietary`, `NVIDIA Proprietary Software`), or no license field at all on PyPI.
+  None is on the allowlist's `licenses`. Spec §27 lists PyTorch's GPU backends as foundations, but not their license; a
+  named entry needs the owner's approval, as torch's did (2026-10-11). Until then `check-deps` cannot pass a CUDA lock.
+- **The ROCm meta package.** PyTorch's ROCm build requires `rocm[device-all]==7.14.*`, and that package is published only
+  as an sdist (`rocm-7.14.1.tar.gz`). Its `setup.py` builds its own dependency list on the machine it is built on, from
+  the installed GPU and environment variables, so uv cannot lock it reproducibly. Pinning its device packages by hand
+  (a `[tool.uv] override-dependencies` entry plus direct pins) is the likely route, and it is a decision too.
 
 ## The cpu environment
 
@@ -32,4 +48,9 @@ uv itself is pinned: `required-version` in each `pyproject.toml` refuses any uv 
 
 - `just check` syncs the cpu environment and runs its tests, ruff format and ruff lint.
 - From M1-05, `check-deps` fails a lock that holds a package or version missing from `deps/allowlist-python.json`.
-- From M2, the `env-locks` job resolves every lock on every change and fails on a hash change it didn't expect (§28 risk 11).
+- `python/envs/tests/test_env_locks.py` (in `just test-python`, offline) checks that each lock folder is listed in
+  `environments.json`, and that each lock's torchvision carries the same build tag as its torch and is the release
+  `TORCHVISION_FOR_TORCH` names for it.
+- From M2, the `env-locks` job runs `just env-locks`: `uv lock --locked --refresh` in every folder under `python/envs/`.
+  It resolves each lock against its indexes and fails on a new package, a new version or a hash it didn't expect (§28
+  risk 11). A folder with a `pyproject.toml` and no `uv.lock` fails too.
