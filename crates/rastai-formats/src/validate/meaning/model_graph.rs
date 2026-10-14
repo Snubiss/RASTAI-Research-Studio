@@ -7,9 +7,10 @@
 //!   documents/model_ops.rs, but reported with layer 3's code: layer 3 never blocks loading;
 //! - an edge, input map entry, head or placement that names no graph node: `RRS-E2001`;
 //! - an input map range that is empty or runs past `defaults.sequence_length`, or a default size of 0: `RRS-E2006`;
-//! - an edge into an input an op doesn't have: `RRS-E2006` at its `to_input`; an input of an op with shapes fed by
-//!   nothing or by two things: `RRS-E2007`;
-//! - a loop with no `rnn` graph node on it: `RRS-E2003` at the edge that closes it;
+//! - an edge into an input an op doesn't have: `RRS-E2006` at its `to_input`; an input of an op with shapes, or of a
+//!   block instance (one input, op `block`), fed by nothing or by two things: `RRS-E2007`;
+//! - a loop with no `rnn` graph node on it: `RRS-E2003` at the edge that closes it (block bodies get the same search,
+//!   in model_blocks.rs);
 //! - an input or output name used twice: `RRS-E2005`; a weights source that isn't a model ref: `RRS-E2006`;
 //! - then, only when none of the above found an error, the shapes along the graph (validate/meaning/model_shapes.rs):
 //!   a shape an op can't take is `RRS-E2002` at the edge that carries it.
@@ -26,13 +27,13 @@ use serde_json::Value;
 
 use crate::describe::structure_check::{MismatchKind, StructureCheck, StructureMismatch, find_mismatches};
 use crate::describe::types::TypeDescription;
-use crate::documents::model::ModelSpec;
+use crate::documents::model::{ModelGraph, ModelSpec};
 use crate::documents::model_ops::{
     MANY_INPUTS_OP, MODEL_OPS, OpAttributes, RECURRENT_OP, describe_model_op_types, fixed_input_count,
     op_attribute_problems, op_attributes_from_value, op_attributes_name,
 };
 use crate::json::pointer::join_pointer;
-use crate::validate::meaning::model_blocks::check_blocks;
+use crate::validate::meaning::model_blocks::{BLOCK_OP, check_blocks};
 use crate::validate::meaning::model_shapes::{InputSource, ShapeWalk, check_model_shapes};
 use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
 
@@ -77,7 +78,7 @@ pub fn check_model(model: &ModelSpec, source: &MeaningSource) -> Vec<Diagnostic>
     let edge_ends = check_edges(model, &node_index, source, &mut diagnostics);
     diagnostics.extend(check_inputs(model, &node_index, source));
     let inputs = check_input_connections(model, &node_index, &attributes, source, &mut diagnostics);
-    diagnostics.extend(check_loops(model, &edge_ends, source));
+    diagnostics.extend(check_loops(&model.graph, EDGES_POINTER, &edge_ends, source));
     diagnostics.extend(check_outputs(model, &node_index, source));
     diagnostics.extend(check_defaults(model, source));
     diagnostics.extend(check_weights(model, source));
@@ -150,7 +151,7 @@ fn check_nodes(
 
 /// One node's attributes against its op's description, then their values. None when the op has no shapes yet or
 /// an attribute is reported.
-fn check_attributes(
+pub(super) fn check_attributes(
     op: &str,
     attributes: &BTreeMap<String, Value>,
     op_types: &[TypeDescription],
@@ -392,7 +393,7 @@ fn input_connections(
             continue;
         };
         let op = nodes[target].op.as_str();
-        if op_attributes_name(op).is_none() {
+        if !connects_inputs(op) {
             continue;
         }
         let to_input = edge.to_input as usize;
@@ -442,6 +443,12 @@ fn inputs_text(op: &str, input_count: usize) -> String {
     format!("0 to {last}: this {op} has {input_count} inputs connected")
 }
 
+/// Whether an op's inputs are connected and counted: the ops with shapes, and a block instance, whose one input is
+/// the block's input.
+fn connects_inputs(op: &str) -> bool {
+    op_attributes_name(op).is_some() || op == BLOCK_OP
+}
+
 fn add_connection(node_connections: &mut Vec<Vec<InputSource>>, input: usize, connection: InputSource) {
     if node_connections.len() <= input {
         node_connections.resize(input + 1, Vec::new());
@@ -459,7 +466,7 @@ fn check_node_connections(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<InputSource> {
     let node = &model.graph.nodes[index];
-    if op_attributes_name(&node.op).is_none() {
+    if !connects_inputs(&node.op) {
         return Vec::new();
     }
     // Every input of an op with a fixed number of inputs is listed, even when nothing is connected to it; a concat
@@ -499,10 +506,16 @@ fn connection_pointer(connection: InputSource) -> String {
 
 /// `RRS-E2003` at each edge that closes a loop with no `rnn` graph node on it. A depth-first search with its own
 /// stack over the graph without its `rnn` nodes: an edge to a node still on the current path closes a loop through
-/// the path's nodes from there. Every loop with no `rnn` has at least one such edge, so each one is reported.
-fn check_loops(model: &ModelSpec, edge_ends: &[Option<(usize, usize)>], source: &MeaningSource) -> Vec<Diagnostic> {
-    let nodes = &model.graph.nodes;
-    let outgoing = outgoing_edges_without_recurrence(model, edge_ends);
+/// the path's nodes from there. Every loop with no `rnn` has at least one such edge, so each one is reported. The
+/// main graph and each block body share this search; `edges_pointer` is where the graph's edges live.
+pub(super) fn check_loops(
+    graph: &ModelGraph,
+    edges_pointer: &str,
+    edge_ends: &[Option<(usize, usize)>],
+    source: &MeaningSource,
+) -> Vec<Diagnostic> {
+    let nodes = &graph.nodes;
+    let outgoing = outgoing_edges_without_recurrence(graph, edge_ends);
     let mut marks = vec![NOT_VISITED; nodes.len()];
     let mut diagnostics = Vec::new();
     for start in 0..nodes.len() {
@@ -525,7 +538,7 @@ fn check_loops(model: &ModelSpec, edge_ends: &[Option<(usize, usize)>], source: 
                 path.push((next, 0));
             } else if marks[next] == ON_PATH {
                 let loop_nodes = loop_from(&path, next);
-                diagnostics.push(loop_diagnostic(model, &loop_nodes, edge_index, source));
+                diagnostics.push(loop_diagnostic(graph, &loop_nodes, edges_pointer, edge_index, source));
             }
         }
     }
@@ -535,10 +548,10 @@ fn check_loops(model: &ModelSpec, edge_ends: &[Option<(usize, usize)>], source: 
 /// Each node's outgoing edges as (edge index, node it goes to), leaving out every edge that starts or ends at an
 /// `rnn` graph node, since a loop through an `rnn` is recurrence and not an error.
 fn outgoing_edges_without_recurrence(
-    model: &ModelSpec,
+    graph: &ModelGraph,
     edge_ends: &[Option<(usize, usize)>],
 ) -> Vec<Vec<(usize, usize)>> {
-    let nodes = &model.graph.nodes;
+    let nodes = &graph.nodes;
     let mut outgoing: Vec<Vec<(usize, usize)>> = vec![Vec::new(); nodes.len()];
     for (edge_index, ends) in edge_ends.iter().enumerate() {
         let Some((from_index, to_index)) = *ends else {
@@ -559,8 +572,14 @@ fn loop_from(path: &[(usize, usize)], first: usize) -> Vec<usize> {
 }
 
 /// `RRS-E2003` for a loop with no `rnn` on it, at the edge that closes it.
-fn loop_diagnostic(model: &ModelSpec, loop_nodes: &[usize], edge_index: usize, source: &MeaningSource) -> Diagnostic {
-    let nodes = &model.graph.nodes;
+fn loop_diagnostic(
+    graph: &ModelGraph,
+    loop_nodes: &[usize],
+    edges_pointer: &str,
+    edge_index: usize,
+    source: &MeaningSource,
+) -> Diagnostic {
+    let nodes = &graph.nodes;
     let mut names: Vec<&str> = loop_nodes
         .iter()
         .take(MAX_LOOP_NODES_SHOWN)
@@ -573,7 +592,7 @@ fn loop_diagnostic(model: &ModelSpec, loop_nodes: &[usize], edge_index: usize, s
     }
     let graph_nodes = names.join(", ");
     let values = [("graph_nodes", graph_nodes.as_str())];
-    let pointer = format!("{EDGES_POINTER}/{edge_index}");
+    let pointer = format!("{edges_pointer}/{edge_index}");
     meaning_diagnostic(CODE_CYCLE, &values, source, &pointer)
 }
 

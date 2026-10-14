@@ -1,0 +1,12 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "block_instance_to_input.rrsmodel:51:9#/graph/edges/0/to_input"
+    },
+    {
+      "code": "RRS-E2007",
+      "path": "block_instance_to_input.rrsmodel:23:7#/graph/nodes/1"
+    }
+  ]
+}

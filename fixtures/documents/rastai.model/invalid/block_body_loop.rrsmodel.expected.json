@@ -2,7 +2,7 @@
   "diagnostics": [
     {
       "code": "RRS-E2003",
-      "path": "block_body_loop.rrsmodel:66:5#/blocks/decoder_layer"
+      "path": "block_body_loop.rrsmodel:90:9#/blocks/decoder_layer/edges/1"
     },
     {
       "code": "RRS-E2006",

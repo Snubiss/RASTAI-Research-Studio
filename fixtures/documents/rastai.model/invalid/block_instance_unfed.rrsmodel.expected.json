@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2007",
+      "path": "block_instance_unfed.rrsmodel:23:7#/graph/nodes/1"
+    }
+  ]
+}

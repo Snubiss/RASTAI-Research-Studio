@@ -2,34 +2,41 @@
 //! - a block instance (op `block`) with no `block_ref`, or a `block_ref` on any other op: `RRS-E2006`;
 //! - a `block_ref` that names no block in `blocks`: `RRS-E2001` at the reference;
 //! - a `repeat` of 0, or one on an op other than `block`: `RRS-E2006`;
+//! - a block instance's input: `to_input` past 0 is `RRS-E2006`, and an instance fed by nothing or by two things is
+//!   `RRS-E2007` (the instance's one input is checked in model_graph.rs with every other op's inputs);
 //! - inside a block body: an op that isn't in the vocabulary (`RRS-E2001`), an id used twice (`RRS-E2005`), or a
 //!   block instance, which would let a block contain itself (`RRS-E2006`);
+//! - a body node's attributes, checked as any graph node's are (`RRS-E2006`, model_graph.rs `check_attributes`);
 //! - an edge that names a node of another graph, or no node (`RRS-E2001`); a `to_input` the op doesn't have
-//!   (`RRS-E2006`); a loop with no `rnn` on it (`RRS-E2003`, at the body);
+//!   (`RRS-E2006`); an input of a body node fed by two body edges (`RRS-E2007`, at the second edge);
+//! - a loop with no `rnn` on it (`RRS-E2003`, at the edge that closes it, the search model_graph.rs shares);
 //! - a body with other than one output node (`RRS-E2006`, at the body).
 //!
 //! The block interface (contracts 5.2): an input of a body node that no edge of the body feeds takes the block
 //! instance's input, so a layer's first norm and its residual add both read the layer's input. The body's output is
 //! its one node that no edge leaves; a block instance (op `block`) stands for that node's outputs.
 //!
-//! A block body's ops get no attribute or shape checks here: the decoder blocks are built with M2-03, and the shape
-//! walk stops at a block instance until then, the same as at any op without shapes.
+//! A body node's shapes aren't worked out here: the decoder blocks are built with M2-03, and the shape walk stops at
+//! a block instance until then, the same as at any op without shapes.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rastai_diag::diagnostic::Diagnostic;
 
+use crate::describe::types::TypeDescription;
 use crate::documents::model::{GraphNode, ModelGraph, ModelSpec};
-use crate::documents::model_ops::{MANY_INPUTS_OP, MODEL_OPS, fixed_input_count};
+use crate::documents::model_ops::{MANY_INPUTS_OP, MODEL_OPS, describe_model_op_types, fixed_input_count};
 use crate::json::pointer::join_pointer;
+use crate::validate::meaning::model_graph::{check_attributes, check_loops};
 use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
 
 const CODE_UNRESOLVED: &str = "RRS-E2001";
-const CODE_CYCLE: &str = "RRS-E2003";
 const CODE_DUPLICATE_ID: &str = "RRS-E2005";
 const CODE_VALUE_FORM: &str = "RRS-E2006";
+const CODE_INPUT_CONNECTIONS: &str = "RRS-E2007";
 
-const BLOCK_OP: &str = "block";
+/// The op of a block instance. model_graph.rs reads it too, for the instance's one input.
+pub(super) const BLOCK_OP: &str = "block";
 const NODES_POINTER: &str = "/graph/nodes";
 const BLOCKS_POINTER: &str = "/blocks";
 const BLOCK_REF_KEY: &str = "block_ref";
@@ -37,7 +44,6 @@ const REPEAT_KEY: &str = "repeat";
 const OP_KEY: &str = "op";
 const NODES_KEY: &str = "nodes";
 const EDGES_KEY: &str = "edges";
-const RECURRENT_OP: &str = "rnn";
 
 const EXPECTED_ONE_OUTPUT: &str = "exactly one node that no edge leaves: the block's output";
 
@@ -55,8 +61,9 @@ pub fn check_blocks(model: &ModelSpec, source: &MeaningSource) -> Vec<Diagnostic
     for (index, node) in model.graph.nodes.iter().enumerate() {
         check_instance(model, index, node, source, &mut diagnostics);
     }
+    let op_types = describe_model_op_types();
     for (name, graph) in &model.blocks {
-        check_block_body(name, graph, source, &mut diagnostics);
+        check_block_body(name, graph, &op_types, source, &mut diagnostics);
     }
     diagnostics
 }
@@ -103,14 +110,24 @@ fn check_instance(
     }
 }
 
-/// One block body: its ops are in the vocabulary, its ids are unique and it holds no block instances; its edges
-/// name its own nodes and have no loop; it has one output node.
-fn check_block_body(name: &str, graph: &ModelGraph, source: &MeaningSource, diagnostics: &mut Vec<Diagnostic>) {
+/// One block body: its ops are in the vocabulary, its ids are unique and it holds no block instances; its nodes'
+/// attributes are sound; its edges name its own nodes, each input is fed at most once, it has no loop without `rnn`,
+/// and it has one output node.
+fn check_block_body(
+    name: &str,
+    graph: &ModelGraph,
+    op_types: &[TypeDescription],
+    source: &MeaningSource,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let body_pointer = join_pointer(BLOCKS_POINTER, name);
     check_body_nodes(&body_pointer, graph, source, diagnostics);
-    let edges = check_body_edges(&body_pointer, graph, source, diagnostics);
-    check_body_loops(&body_pointer, graph, &edges, source, diagnostics);
-    check_body_output(&body_pointer, graph, &edges, source, diagnostics);
+    check_body_attributes(&body_pointer, graph, op_types, source, diagnostics);
+    let edge_ends = check_body_edges(&body_pointer, graph, source, diagnostics);
+    check_body_feeds(&body_pointer, graph, &edge_ends, source, diagnostics);
+    let edges_pointer = join_pointer(&body_pointer, EDGES_KEY);
+    diagnostics.extend(check_loops(graph, &edges_pointer, &edge_ends, source));
+    check_body_output(&body_pointer, graph, &edge_ends, source, diagnostics);
 }
 
 /// Each body node's id and op.
@@ -135,20 +152,43 @@ fn check_body_nodes(body_pointer: &str, graph: &ModelGraph, source: &MeaningSour
     }
 }
 
-/// Each body edge's ends name body nodes and its `to_input` is one the op takes. Returns the (from, to) node index of
-/// each edge whose ends resolve, in edge order; the other checks read only these.
+/// Each body node's attributes, against its op's description, exactly as a top-level node's are. A node whose op has
+/// no attributes yet, or whose attributes are reported, gives no typed value here, and nothing reads one.
+fn check_body_attributes(
+    body_pointer: &str,
+    graph: &ModelGraph,
+    op_types: &[TypeDescription],
+    source: &MeaningSource,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let nodes_pointer = join_pointer(body_pointer, NODES_KEY);
+    for (index, node) in graph.nodes.iter().enumerate() {
+        let attributes_pointer = join_pointer(&format!("{nodes_pointer}/{index}"), "attributes");
+        check_attributes(
+            &node.op,
+            &node.attributes,
+            op_types,
+            &attributes_pointer,
+            source,
+            diagnostics,
+        );
+    }
+}
+
+/// Each body edge's ends name body nodes. Returns the (from, to) node index of each edge, in edge order, None for an
+/// edge with an end that doesn't resolve; the other checks read only these.
 fn check_body_edges(
     body_pointer: &str,
     graph: &ModelGraph,
     source: &MeaningSource,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<(usize, usize)> {
+) -> Vec<Option<(usize, usize)>> {
     let edges_pointer = join_pointer(body_pointer, EDGES_KEY);
     let mut index_of: BTreeMap<&str, usize> = BTreeMap::new();
     for (index, node) in graph.nodes.iter().enumerate() {
         index_of.entry(node.node_id.as_str()).or_insert(index);
     }
-    let mut resolved = Vec::new();
+    let mut edge_ends = Vec::new();
     for (edge_index, edge) in graph.edges.iter().enumerate() {
         let edge_pointer = format!("{edges_pointer}/{edge_index}");
         let from = resolve_body_end(
@@ -160,20 +200,9 @@ fn check_body_edges(
             diagnostics,
         );
         let to = resolve_body_end(&index_of, &edge.to_node, &edge_pointer, "to_node", source, diagnostics);
-        let (Some(from), Some(to)) = (from, to) else {
-            continue;
-        };
-        let op = graph.nodes[to].op.as_str();
-        if let Some(input_count) = body_input_count(op).filter(|&count| edge.to_input as usize >= count) {
-            let found = edge.to_input.to_string();
-            let expected = format!("0 to {}: {op} takes {input_count} input(s)", input_count - 1);
-            let values = [("found", found.as_str()), ("expected", expected.as_str())];
-            let pointer = join_pointer(&edge_pointer, "to_input");
-            diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &pointer));
-        }
-        resolved.push((from, to));
+        edge_ends.push(from.zip(to));
     }
-    resolved
+    edge_ends
 }
 
 /// The node index a body edge's end names, or `RRS-E2001` at `<edge>/<key>`.
@@ -194,8 +223,56 @@ fn resolve_body_end(
     found
 }
 
+/// Each body edge's `to_input` is one its op takes (`RRS-E2006`), and each input is fed by at most one body edge
+/// (`RRS-E2007`, at the second one). An input no body edge feeds takes the block instance's input, so it isn't an
+/// error here. A concat takes as many inputs as are connected, so only its feeds are counted.
+fn check_body_feeds(
+    body_pointer: &str,
+    graph: &ModelGraph,
+    edge_ends: &[Option<(usize, usize)>],
+    source: &MeaningSource,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let edges_pointer = join_pointer(body_pointer, EDGES_KEY);
+    // (node index, input) to the edges that feed it, in edge order.
+    let mut feeds: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
+    for (edge_index, ends) in edge_ends.iter().enumerate() {
+        let Some((_from, to)) = *ends else {
+            continue;
+        };
+        let op = graph.nodes[to].op.as_str();
+        let to_input = graph.edges[edge_index].to_input as usize;
+        if let Some(input_count) = body_input_count(op)
+            && to_input >= input_count
+        {
+            let found = graph.edges[edge_index].to_input.to_string();
+            let expected = format!("0 to {}: {op} takes {input_count} input(s)", input_count - 1);
+            let values = [("found", found.as_str()), ("expected", expected.as_str())];
+            let pointer = format!("{edges_pointer}/{edge_index}/to_input");
+            diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &pointer));
+            continue;
+        }
+        feeds.entry((to, to_input)).or_default().push(edge_index);
+    }
+    for ((node_index, input), edges) in &feeds {
+        if edges.len() < 2 {
+            continue;
+        }
+        let input_text = input.to_string();
+        let count_text = edges.len().to_string();
+        let node_id = graph.nodes[*node_index].node_id.as_str();
+        let values = [
+            ("input_index", input_text.as_str()),
+            ("graph_node", node_id),
+            ("connection_count", count_text.as_str()),
+        ];
+        let pointer = format!("{edges_pointer}/{}", edges[1]);
+        diagnostics.push(meaning_diagnostic(CODE_INPUT_CONNECTIONS, &values, source, &pointer));
+    }
+}
+
 /// How many inputs a body node's op takes, when the number is fixed: a concat takes as many as are connected, so it
-/// has no fixed count and any `to_input` is checked against the feed later.
+/// has no fixed count and any `to_input` is taken as it comes.
 fn body_input_count(op: &str) -> Option<usize> {
     if op == MANY_INPUTS_OP {
         return None;
@@ -203,59 +280,16 @@ fn body_input_count(op: &str) -> Option<usize> {
     Some(fixed_input_count(op))
 }
 
-/// `RRS-E2003` at the body when its edges form a loop with no `rnn` node on it. Kahn's method, which keeps no call
-/// stack: repeatedly take off the nodes with no edge coming in; what is left after none can be taken off is a loop.
-fn check_body_loops(
-    body_pointer: &str,
-    graph: &ModelGraph,
-    edges: &[(usize, usize)],
-    source: &MeaningSource,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let recurrent: Vec<bool> = graph.nodes.iter().map(|node| node.op == RECURRENT_OP).collect();
-    let mut incoming = vec![0usize; graph.nodes.len()];
-    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); graph.nodes.len()];
-    for &(from, to) in edges {
-        if !recurrent[from] && !recurrent[to] {
-            incoming[to] += 1;
-            outgoing[from].push(to);
-        }
-    }
-    let mut ready: Vec<usize> = (0..graph.nodes.len())
-        .filter(|&node| incoming[node] == 0 && !recurrent[node])
-        .collect();
-    let mut taken_off = vec![false; graph.nodes.len()];
-    while let Some(node) = ready.pop() {
-        taken_off[node] = true;
-        for &next in &outgoing[node] {
-            incoming[next] -= 1;
-            if incoming[next] == 0 {
-                ready.push(next);
-            }
-        }
-    }
-    // Nodes that never came free are the loop and whatever it feeds: all of them are named, as the loop's graph.
-    let names: Vec<&str> = (0..graph.nodes.len())
-        .filter(|&node| !recurrent[node] && !taken_off[node])
-        .map(|node| graph.nodes[node].node_id.as_str())
-        .collect();
-    if !names.is_empty() {
-        let graph_nodes = names.join(", ");
-        let values = [("graph_nodes", graph_nodes.as_str())];
-        diagnostics.push(meaning_diagnostic(CODE_CYCLE, &values, source, body_pointer));
-    }
-}
-
 /// The body's output is its one node that no edge leaves; any other count is `RRS-E2006` at the body.
 fn check_body_output(
     body_pointer: &str,
     graph: &ModelGraph,
-    edges: &[(usize, usize)],
+    edge_ends: &[Option<(usize, usize)>],
     source: &MeaningSource,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut has_outgoing = vec![false; graph.nodes.len()];
-    for &(from, _to) in edges {
+    for &(from, _to) in edge_ends.iter().flatten() {
         has_outgoing[from] = true;
     }
     let outputs = has_outgoing.iter().filter(|&&leaves| !leaves).count();

@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_head_count.rrsmodel:83:13#/blocks/decoder_layer/nodes/1/attributes/kv_head_count"
+    }
+  ]
+}

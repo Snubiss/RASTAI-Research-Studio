@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2007",
+      "path": "block_body_input_twice.rrsmodel:104:9#/blocks/decoder_layer/edges/2"
+    }
+  ]
+}
