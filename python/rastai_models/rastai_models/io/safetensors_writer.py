@@ -5,8 +5,10 @@ sorted tensor names, contiguous offsets and string-only `__metadata__`, padded w
 the data section starts aligned, then the raw tensor bytes in the same order. The file is written under a `.partial`
 name, synced and renamed, so a crash never leaves a half-written file under the real name.
 
-The layout planner moves into rastai-formats with M2-13 (`plan_safetensors`); until then this file and the wheel's
-check keep each other honest: tests/test_safetensors_writer.py opens every file it writes through the reader.
+The layout planner is `plan_safetensors` in rastai-formats. This writer and that planner are kept equal by one committed
+file, fixtures/safetensors-writer/planned_layout.safetensors: tests/test_safetensors_writer.py checks this writer still
+writes those exact bytes, and rastai-formats reads the same file and checks its header and offsets against the plan.
+Every file this writer writes is also opened through the reader (tests/test_safetensors_writer.py).
 """
 
 import ctypes

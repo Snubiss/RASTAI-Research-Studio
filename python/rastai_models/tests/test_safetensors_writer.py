@@ -20,6 +20,27 @@ TENSOR_BYTES = 48
 SEED = 34
 
 
+# The layout the Rust planner is checked against (rastai-formats writer.rs reads this file). The tensors are fixed, so
+# the bytes are fixed: the header holds metadata first, then the tensors in name order; the data section is 30 bytes.
+PLANNED_LAYOUT_FILE = (
+    Path(__file__).resolve().parents[3] / "fixtures" / "safetensors-writer" / "planned_layout.safetensors"
+)
+
+
+def planned_layout_tensors() -> dict[str, torch.Tensor]:
+    return {
+        "weight": torch.arange(6, dtype=torch.float32).reshape(2, 3),
+        "bias": torch.tensor([1.0, 2.0, 3.0], dtype=torch.bfloat16),
+        "Head": torch.zeros(0, dtype=torch.uint8),
+    }
+
+
+def test_the_writer_still_writes_the_committed_planned_layout(tmp_path: Path) -> None:
+    path = tmp_path / "planned_layout.safetensors"
+    write_safetensors(path, planned_layout_tensors(), {"step": "3", "format": "pt"})
+    assert path.read_bytes() == PLANNED_LAYOUT_FILE.read_bytes()
+
+
 def random_tensor(dtype: torch.dtype, generator: torch.Generator) -> torch.Tensor:
     """A [2, n] tensor of seeded random bytes viewed as `dtype`. A bool may only hold 0 or 1."""
     high = 2 if dtype == torch.bool else 256

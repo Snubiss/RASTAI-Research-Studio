@@ -17,6 +17,8 @@ python/rastai_formats/rastai_formats/_native.*
 # ...except the strict-contract corpus: 33 hand-built files of at most a few hundred bytes, test inputs that Rust and
 # Python both check byte for byte (contracts 12.5). tools/fixtures/make_safetensors_corpus.py writes them.
 !fixtures/safetensors/*.safetensors
+# The writer's layout file (M2-13): a few hundred bytes, checked byte for byte by Python and read by Rust.
+!fixtures/safetensors-writer/*.safetensors
 *.gguf
 *.onnx
 *.pt

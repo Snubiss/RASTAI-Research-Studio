@@ -4,7 +4,8 @@
 //!
 //! The header is the one the Python writer writes (`rastai_models/io/safetensors_writer.py`): tensors sorted by name,
 //! metadata first with its keys sorted, compact JSON, padded with spaces to 8 bytes. For ASCII names the bytes are the
-//! same, and a planned layout reads back through `read_safetensors_header` with the same offsets (the tests check it).
+//! same, and a planned layout reads back through `read_safetensors_header` with the same offsets. The tests read the file
+//! the Python writer wrote (fixtures/safetensors-writer/) and check it against the plan.
 //!
 //! A refusal is `FormatsError::NotSerializable` (RRS-E1006): the caller asked for a layout that can't be written, so
 //! nothing is written. The reader's RRS-E60xx codes are for files already on disk.
@@ -33,7 +34,8 @@ pub struct SafetensorsLayout {
 }
 
 /// Plans a file holding `tensors` and string `metadata`. Refused when two tensors share a name, a tensor is named like
-/// the metadata key, a metadata key is given twice, a byte size overflows 64 bits, or the header would pass 100 MB.
+/// the metadata key, a metadata key is given twice, a byte size overflows 64 bits, or the header would pass
+/// `MAX_HEADER_BYTES`.
 pub fn plan_safetensors(
     tensors: &[TensorPlan],
     metadata: &[(String, String)],
@@ -42,13 +44,18 @@ pub fn plan_safetensors(
     let sorted_metadata = sorted_metadata(metadata)?;
     let entries = place_tensors(&sorted)?;
     let header_bytes = build_header(&entries, &sorted_metadata);
-    if header_bytes.len() as u64 > MAX_HEADER_BYTES {
+    check_header_length(header_bytes.len() as u64)?;
+    Ok(SafetensorsLayout { header_bytes, entries })
+}
+
+/// The reader refuses a header past `MAX_HEADER_BYTES`, so a plan it would refuse is refused before anything is written.
+fn check_header_length(header_length: u64) -> Result<(), FormatsError> {
+    if header_length > MAX_HEADER_BYTES {
         return Err(refused(format!(
-            "the header would be {} bytes, over the 100 MB limit",
-            header_bytes.len()
+            "the header would be {header_length} bytes, over the {MAX_HEADER_BYTES} byte limit"
         )));
     }
-    Ok(SafetensorsLayout { header_bytes, entries })
+    Ok(())
 }
 
 /// The tensors in name order, the order their bytes are laid out in. A repeated name or the metadata key would make
@@ -166,12 +173,20 @@ fn refused(reason: String) -> FormatsError {
 mod tests {
     use super::*;
     use crate::byte_source::SliceSource;
-    use crate::safetensors::header_check::HEADER_LENGTH_BYTES;
+    use std::path::Path;
+
+    use crate::safetensors::header_check::{HEADER_LENGTH_BYTES, MAX_HEADER_BYTES};
     use crate::safetensors::reader::read_safetensors_header;
 
     /// The header the Python writer's `build_header` gives for `sample_tensors` and `sample_metadata`, copied from
     /// its output: metadata first, then the tensors in name order.
     const PYTHON_HEADER: &[u8] = br#"{"__metadata__":{"format":"pt","step":"3"},"Head":{"dtype":"U8","shape":[0],"data_offsets":[0,0]},"bias":{"dtype":"BF16","shape":[3],"data_offsets":[0,6]},"weight":{"dtype":"F32","shape":[2,3],"data_offsets":[6,30]}}"#;
+    /// The file `write_safetensors` writes for the same tensors and metadata. The Python test
+    /// (python/rastai_models/tests/test_safetensors_writer.py) checks the writer still writes these bytes, so the two
+    /// layouts are kept equal by this file, not by a copy.
+    const PYTHON_WRITTEN_FILE: &str = "../../fixtures/safetensors-writer/planned_layout.safetensors";
+    /// The data section's length: the bias (6 bytes) and the weight (24 bytes).
+    const SAMPLE_DATA_BYTES: u64 = 30;
     /// The Python writer's header for no tensors and no metadata: `{}` padded to 8 bytes.
     const PYTHON_EMPTY_HEADER: &[u8] = b"{}      ";
 
@@ -294,6 +309,36 @@ mod tests {
             FormatsError::NotSerializable { reason } => assert!(reason.contains("big"), "{reason}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn a_header_past_the_cap_is_refused_and_one_at_the_cap_is_not() {
+        assert!(check_header_length(MAX_HEADER_BYTES).is_ok());
+        let refused = check_header_length(MAX_HEADER_BYTES + 1).unwrap_err();
+        assert_eq!(refused.code(), "RRS-E1006");
+        let FormatsError::NotSerializable { reason } = refused else {
+            panic!("a header past the cap is not serializable");
+        };
+        assert!(reason.contains("104857600 byte limit"), "{reason}");
+    }
+
+    #[test]
+    fn the_planned_layout_is_the_layout_the_python_writer_wrote() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(PYTHON_WRITTEN_FILE);
+        let bytes = std::fs::read(path).unwrap();
+        let header = read_safetensors_header(&SliceSource { bytes: &bytes }).unwrap();
+        let layout = plan_safetensors(&sample_tensors(), &sample_metadata()).unwrap();
+        assert_eq!(header.entries, layout.entries);
+        assert_eq!(
+            header.data_start,
+            HEADER_LENGTH_BYTES + layout.header_bytes.len() as u64
+        );
+        let header_end = (HEADER_LENGTH_BYTES as usize) + layout.header_bytes.len();
+        assert_eq!(
+            &bytes[HEADER_LENGTH_BYTES as usize..header_end],
+            layout.header_bytes.as_slice()
+        );
+        assert_eq!(bytes.len() as u64, header.data_start + SAMPLE_DATA_BYTES);
     }
 
     #[test]
