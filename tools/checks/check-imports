@@ -15,7 +15,8 @@
   src/ is a problem: Vite follows symlinks and this check's walk does not. An import.meta.glob call whose options name
   `base` is refused outright: Vite resolves the patterns against base, so it can move them outside src/. Its options
   may not hold a backslash either, since an escape can spell `base` where this check reads plain text.
-- .js, .jsx, .mjs, .ts and .mts files are all read the same way, so a TypeScript file in src/generated/ is covered.
+- .js, .jsx, .mjs, .ts, .tsx, .mts and .cts files are all read the same way, so a TypeScript file in src/generated/ is
+  covered (check-no-typescript allows exactly these TypeScript suffixes there).
   Vite detects import.meta.glob calls with a type argument too (import.meta.glob<M>(...)), and so does this check.
 Out of scope (a static check can't see these, and they are not a working import in the shipped ESM bundle): a
 specifier held in a variable, a ternary or comma expression inside import(), an options object held in a variable,
@@ -236,11 +237,12 @@ JS_SOURCE_FOLDER = "src/"
 # The package's own manifest, which a test reads as data (`import manifest from "../package.json"`). It is JSON, so
 # importing it runs no code from outside src/; it is the one file beside src/ that a src/ file may name.
 JS_MANIFEST_FILE = "package.json"
-# .ts and .mts sources too: src/generated/ may hold them (check-no-typescript allows only that), and a TypeScript
-# file is still bundled by Vite, so its imports count like a .js file's.
-JS_SUFFIXES = (".js", ".jsx", ".mjs", ".ts", ".mts")
+# The TypeScript sources too: src/generated/ may hold them (check-no-typescript allows only that, with the same
+# suffixes as check-no-typescript's TYPESCRIPT_SUFFIXES), and a TypeScript file is still bundled by Vite, so its
+# imports count like a .js file's. A .js file's import of ./generated/x resolves to any of these, so each is read.
+JS_SUFFIXES = (".js", ".jsx", ".mjs", ".ts", ".tsx", ".mts", ".cts")
 # A declaration file only has types in it: every import in it is type-only, erased at build time.
-TYPE_DECLARATION_SUFFIXES = (".d.ts", ".d.mts")
+TYPE_DECLARATION_SUFFIXES = (".d.ts", ".d.mts", ".d.cts")
 JS_TEST_SUFFIXES = (".test.js", ".test.jsx")
 OUR_SCOPE = "@rastai/"
 # A string right after these is an import specifier: `... from "x"`, `import "x"`, `import("x")` and the redundant
@@ -263,6 +265,12 @@ GLOB_BASE_QUOTED_KEY = re.compile(r"([\"'`])base\1")
 # Specifiers with a backslash (a unicode escape reads as a path inside the package) or a node_modules segment (a
 # relative path through pnpm's per-package link into another package) are refused before anything else is read.
 BACKSLASH_REASON = "a backslash (an escape reads as a path); write the specifier as plain text"
+# Vite reads a leading ! as "leave these files out": the set of files is then what the negation leaves, which this
+# check can't follow. A specifier or pattern that starts with ! is refused rather than read as a library name.
+NEGATED_PATTERN_PREFIX = "!"
+NEGATED_PATTERN_REASON = (
+    "a negated pattern (!) leaves its files to Vite's negation, which this check can't follow; list the files to load"
+)
 GLOB_BASE_REASON = (
     "its options name `base`, which moves the patterns outside this src/; write each pattern as a path inside src/"
 )
@@ -464,23 +472,28 @@ def find_js_packages(root: Path) -> list[tuple[str, str]]:
 
 def check_js_file(root: Path, path: str, package: str, package_folder: str) -> list[str]:
     text = read_text(root, path)
+    # Read once here and handed on: the imports and the glob options both need the same spans and glob calls.
+    spans = split_javascript(text)
+    code = javascript_code_only(text)
+    calls = glob_calls(text, code, spans)
     problems = []
     declares_types = path.endswith(TYPE_DECLARATION_SUFFIXES)
-    for offset, specifier, is_type_only in js_imports(text):
+    for offset, specifier, is_type_only in js_imports(text, spans, calls):
         reason = js_import_problem(specifier, is_type_only or declares_types, path, package, package_folder)
         if reason:
             problems.append(f"{path}:{line_number_at(text, offset)}: imports `{specifier}`: {reason}")
-    for offset, reason in glob_option_problems(text):
+    for offset, reason in glob_option_problems(text, code, calls):
         problems.append(f"{path}:{line_number_at(text, offset)}: imports `import.meta.glob`: {reason}")
     return problems
 
 
-def js_imports(text: str) -> list[tuple[int, str, bool]]:
+def js_imports(
+    text: str, spans: list[tuple[str, int, int]], calls: list[tuple[int, int, int, list[int]]]
+) -> list[tuple[int, str, bool]]:
     """(offset, specifier, is_type_only) for each import: strings right after `from` or `import` in code, the
     patterns of import.meta.glob, and JSDoc `import("...")` types in comments."""
     imports = []
-    spans = split_javascript(text)
-    glob_patterns = {start for _, _, _, patterns in glob_calls(text) for start in patterns}
+    glob_patterns = {start for _, _, _, patterns in calls for start in patterns}
     # The code since the last string. A comment is whitespace in JavaScript, so it becomes one space here: the
     # code on both sides stays apart (`await/**/import(` must still read as `await import(`), and a comment
     # between `import(` and the specifier (`import(/* @vite-ignore */ "x")`) can't hide the `import(` before it.
@@ -498,13 +511,13 @@ def js_imports(text: str) -> list[tuple[int, str, bool]]:
     return imports
 
 
-def glob_calls(text: str) -> list[tuple[int, int, int, list[int]]]:
+def glob_calls(text: str, code: str, spans: list[tuple[str, int, int]]) -> list[tuple[int, int, int, list[int]]]:
     """Each import.meta.glob call as (offset of its parenthesis, offset of the one that closes it, offset of the comma
-    that starts its options, offsets of the string literals that are its patterns). The calls are found in code only.
+    that starts its options, offsets of the string literals that are its patterns). The calls are found in code only,
+    where `code` is the text with its comments and strings blanked, and `spans` is its split_javascript spans.
     The patterns are the strings of the first argument: the string itself, or each string of an array. Strings after
     that first comma are options (query: "?raw"), not paths."""
-    code = javascript_code_only(text)
-    string_starts = [start for kind, start, _ in split_javascript(text) if kind == "string"]
+    string_starts = [start for kind, start, _ in spans if kind == "string"]
     calls = []
     for match in GLOB_CALL_START.finditer(code):
         open_at = match.end() - 1
@@ -542,12 +555,11 @@ def end_of_first_argument(code: str, open_at: int, close_at: int) -> int:
     return close_at
 
 
-def glob_option_problems(text: str) -> list[tuple[int, str]]:
+def glob_option_problems(text: str, code: str, calls: list[tuple[int, int, int, list[int]]]) -> list[tuple[int, str]]:
     """(offset of the call, reason) for each import.meta.glob call whose options can move its patterns outside src/.
     Only the options are read: a base in a string pattern (./base/*.jsx) or in the first argument is not an option."""
-    code = javascript_code_only(text)
     problems = []
-    for open_at, close_at, options_start, _ in glob_calls(text):
+    for open_at, close_at, options_start, _ in calls:
         reason = glob_option_problem(text, code, options_start, close_at)
         if reason:
             problems.append((open_at, reason))
@@ -573,6 +585,8 @@ def js_import_problem(specifier: str, is_type_only: bool, path: str, package: st
     shape_problem = js_specifier_shape_problem(specifier)
     if shape_problem:
         return shape_problem
+    if specifier.startswith(NEGATED_PATTERN_PREFIX):
+        return NEGATED_PATTERN_REASON
     if specifier.startswith("."):
         return js_relative_problem(specifier, path, package_folder)
     if specifier.startswith(OUR_SCOPE):
