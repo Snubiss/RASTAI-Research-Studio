@@ -262,12 +262,34 @@ pub async fn connect_node(server: &Arc<Server>, node_id: &str) -> Result<(), Dia
 }
 
 /// `NodeService.StartJob`: the node's answer is the job's own state, `failed` included (contracts 4).
+///
+/// A launch holds `Scheduler.launch_lock` across this call, never `job_state_lock` (scheduler/launch.rs): a heartbeat
+/// from the node is applied while the call is in flight (contracts 9.1). The test seam `Server.start_job_pause` sits
+/// right before the RPC, so whatever lock a caller holds around this call is held across the pause too, and a test
+/// that sends a heartbeat meanwhile sees a caller that took the job lock.
 pub async fn start_job_on_node(server: &Server, node_id: &str, spec: JobSpec) -> Result<JobInfo, Diagnostic> {
     let mut channel = current_channel(server, node_id)?;
     let request = session_request(spec, &channel, node_id)?;
+    pause_start_job_if_a_test_asked(server).await;
     let answered = timed(channel.client.start_job(request)).await;
     let info = call_result(answered, node_id)?;
     Ok(info)
+}
+
+/// The test seam `Server.start_job_pause`: a test stops the next StartJob here until it lets it go. Nothing happens
+/// unless a test set it.
+async fn pause_start_job_if_a_test_asked(server: &Server) {
+    let pause = match server.start_job_pause.lock() {
+        Ok(mut pause) => pause.take(),
+        Err(poisoned) => poisoned.into_inner().take(),
+    };
+    let Some(pause) = pause else {
+        return;
+    };
+    if pause.reached.send(()).is_ok() {
+        // Resumed or dropped by the test, the call goes on either way.
+        let _ = pause.resume.await;
+    }
 }
 
 /// `NodeService.SignalJob`. A signal the node didn't deliver is its `RRS-J0004` diagnostic.

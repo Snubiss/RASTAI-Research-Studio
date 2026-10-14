@@ -106,8 +106,8 @@ test-node-jobs: env-cpu
 
 # The real TextCNN train job through the daemon: train.start, the embedded node, the run tail, job.cancel and a
 # restart mid-run (plan M1-47), and `rastai storage rebuild-index` after a trained run, compared row by row with the
-# index the daemon wrote (plan M1-33). The #[ignore]d tests are crates/rastai-server/tests/train_jobs.rs and
-# crates/rastai-cli/tests/rebuild_index.rs.
+# index the daemon wrote (plan M1-33). Like test-node-jobs, it needs the cpu environment's Python. The #[ignore]d
+# tests are crates/rastai-server/tests/train_jobs.rs and crates/rastai-cli/tests/rebuild_index.rs.
 test-daemon-jobs: env-cpu
     RASTAI_TEST_WORKER_THREADS={{test_worker_threads}} cargo test --locked -p rastai-server --test train_jobs \
         -- --ignored
