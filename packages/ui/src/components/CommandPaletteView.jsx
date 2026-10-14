@@ -36,13 +36,15 @@ export function CommandPaletteView({
   label = "Run a command",
   emptyText = "No matching commands.",
 }) {
-  const [activeIndex, setActiveIndex] = useState(0);
+  // The highlight is kept with the list it was set on. A new list has no highlight, so its first entry is the highlighted one
+  // in the same render: a key pressed before any effect has run (typing, then Enter) acts on the list on screen.
+  const [highlight, setHighlight] = useState({ list: entries, index: 0 });
+  const activeIndex = highlight.list === entries ? highlight.index : 0;
+  /** @param {number} index */
+  function moveHighlight(index) {
+    setHighlight({ list: entries, index });
+  }
   const listId = useId();
-
-  // A new list (the query changed) starts at its first entry.
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [entries]);
 
   // The caller shows the highlighted entry's details, so it hears about every move of the highlight.
   useEffect(() => {
@@ -53,10 +55,10 @@ export function CommandPaletteView({
   function handleKeyDown(event) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex(nextIndex(activeIndex, 1, entries.length));
+      moveHighlight(nextIndex(activeIndex, 1, entries.length));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex(nextIndex(activeIndex, -1, entries.length));
+      moveHighlight(nextIndex(activeIndex, -1, entries.length));
     } else if (event.key === "Enter") {
       event.preventDefault();
       if (entries[activeIndex]) {
@@ -92,7 +94,7 @@ export function CommandPaletteView({
             role="option"
             aria-selected={index === activeIndex}
             className={index === activeIndex ? "rr-palette__entry rr-palette__entry--active" : "rr-palette__entry"}
-            onMouseMove={() => setActiveIndex(index)}
+            onMouseMove={() => moveHighlight(index)}
             onClick={() => onRun(entry.id)}
           >
             <span className="rr-palette__title">{entry.title}</span>

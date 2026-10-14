@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
-import { ENGINES, goToSection, openApp, setMode, startDaemon } from "./harness.js";
+import { ENGINES, goToSection, highlightEntry, openApp, openPalette, setMode, startDaemon } from "./harness.js";
 
 const GOLDEN = JSON.parse(readFileSync(new URL("../../fixtures/command-golden/copy-as.json", import.meta.url), "utf8"));
 const TOKEN_CREATE_GOLDEN = GOLDEN.examples.find((example) => example.command_id === "token.create");
@@ -21,7 +21,7 @@ for (const engine of ENGINES) {
       const daemon = await startDaemon();
       const app = await openApp(engine, daemon);
       try {
-        await app.page.keyboard.press("Control+K");
+        await openPalette(app.page);
         const titles = await paletteTitles(app.page);
         for (const title of SKELETON_TITLES) {
           assert.ok(titles.includes(title), `the palette lists "${title}": ${titles.join(", ")}`);
@@ -37,7 +37,7 @@ for (const engine of ENGINES) {
       const app = await openApp(engine, daemon);
       try {
         await setMode(app.page, "Basic");
-        await app.page.keyboard.press("Control+K");
+        await openPalette(app.page);
         // The mode change is a settings.set round trip; the footer's count shows the palette has the Basic list.
         await app.page.getByRole("button", { name: /more in Advanced$/ }).waitFor();
         const titles = await paletteTitles(app.page);
@@ -53,8 +53,9 @@ for (const engine of ENGINES) {
       const daemon = await startDaemon();
       const app = await openApp(engine, daemon);
       try {
-        await app.page.keyboard.press("Control+K");
+        await openPalette(app.page);
         await app.page.getByRole("combobox", { name: "Search or run a command" }).fill("show status");
+        await highlightEntry(app.page, "Show status");
         await app.page.keyboard.press("Enter");
         await app.page.locator(".rr-toast", { hasText: "Show status finished." }).waitFor();
       } finally {
@@ -67,7 +68,7 @@ for (const engine of ENGINES) {
       const daemon = await startDaemon();
       const app = await openApp(engine, daemon);
       try {
-        await app.page.keyboard.press("Control+K");
+        await openPalette(app.page);
         const search = app.page.getByRole("combobox", { name: "Search or run a command" });
         await search.fill("create api token");
         await app.page.locator(".rr-palette__entry", { hasText: CREATE_TOKEN_TITLE }).first().click();
@@ -95,12 +96,14 @@ for (const engine of ENGINES) {
       const app = await openApp(engine, daemon);
       try {
         await goToSection(app.page, "Settings");
-        await app.page.keyboard.press("Control+K");
+        await openPalette(app.page);
         await app.page.getByRole("combobox", { name: "Search or run a command" }).fill("show status");
+        await highlightEntry(app.page, "Show status");
         await app.page.keyboard.press("Control+.");
         await app.page.locator(".rr-palette-detail__status", { hasText: /Copied|did not work/ }).waitFor();
         assert.equal(await copiedText(app.page), "rastai system status");
         await app.page.getByRole("combobox", { name: "Search or run a command" }).fill("create api token");
+        await highlightEntry(app.page, CREATE_TOKEN_TITLE);
         await app.page.keyboard.press("Enter");
         // The form takes the focus; nothing ran, so no toast says a token was made.
         await app.page.getByLabel(/^Name/).waitFor();
