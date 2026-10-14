@@ -167,7 +167,12 @@ pub fn node_variables() -> Vec<(String, String)> {
 /// machine would each start a thread per core, so the crash rows and the daemon-job tests cap them. Only a test build
 /// passes it on: a release node never does, so a shipped worker keeps torch's own default.
 fn worker_test_threads(node_variables: &[(String, String)]) -> Option<String> {
-    if !cfg!(debug_assertions) {
+    worker_test_threads_for(cfg!(debug_assertions), node_variables)
+}
+
+/// The decision of `worker_test_threads`, with the build given: the tests check both answers in every build.
+fn worker_test_threads_for(build_is_debug: bool, node_variables: &[(String, String)]) -> Option<String> {
+    if !build_is_debug {
         return None;
     }
     for (name, value) in node_variables {
@@ -403,6 +408,7 @@ fn path_text(path: &Path) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::pause_points::worker_test_pause_variable_for;
 
     fn inputs() -> WorkerVariableInputs {
         WorkerVariableInputs {
@@ -488,6 +494,23 @@ mod tests {
 
     // The kill -9 tests name a worker point in the daemon's environment; the cleared environment must still carry
     // it to the worker (test builds are debug builds), and without it the worker gets no such variable.
+    // Both answers of each build decision, in every build (a release build's answer is the shipped one).
+    #[test]
+    fn the_build_decides_what_the_test_variables_reach_the_worker() {
+        let mut with_test_variables = node();
+        with_test_variables.push(("RASTAI_TEST_PAUSE_AT".to_string(), "worker.point".to_string()));
+        with_test_variables.push(("RASTAI_TEST_WORKER_THREADS".to_string(), "2".to_string()));
+        assert_eq!(
+            worker_test_threads_for(true, &with_test_variables),
+            Some("2".to_string())
+        );
+        assert_eq!(worker_test_threads_for(false, &with_test_variables), None);
+        assert!(worker_test_pause_variable_for(true, &with_test_variables).is_some());
+        assert_eq!(worker_test_pause_variable_for(false, &with_test_variables), None);
+    }
+
+    // Test builds are debug builds: the point the kill -9 tests name reaches the worker.
+    #[cfg(debug_assertions)]
     #[test]
     fn the_test_pause_point_reaches_the_worker() {
         assert_eq!(
@@ -506,8 +529,22 @@ mod tests {
         );
     }
 
+    // The release twin: a shipped node never passes the point on, so the worker never sees the variable.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn the_test_pause_point_never_reaches_the_worker_in_a_release_build() {
+        let mut with_point = node();
+        with_point.push((
+            "RASTAI_TEST_PAUSE_AT".to_string(),
+            "worker.event_log.mid_metrics_frame".to_string(),
+        ));
+        let result = worker_variables(&with_point, &inputs());
+        assert_eq!(value_of(&result, "RASTAI_TEST_PAUSE_AT"), None);
+    }
+
     // Several test workers train at once; the cap the test names must reach each worker as its thread count, and a
     // worker started without a test environment gets none, so a shipped node is unchanged.
+    #[cfg(debug_assertions)]
     #[test]
     fn the_test_thread_cap_reaches_the_worker_as_omp_num_threads() {
         assert_eq!(value_of(&worker_variables(&node(), &inputs()), "OMP_NUM_THREADS"), None);
@@ -516,6 +553,16 @@ mod tests {
         let result = worker_variables(&capped, &inputs());
         assert_eq!(value_of(&result, "OMP_NUM_THREADS"), Some("2"));
         assert_eq!(value_of(&result, "RASTAI_TEST_WORKER_THREADS"), None);
+    }
+
+    // The release twin: a shipped node passes no thread cap, so the worker keeps torch's own default.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn the_test_thread_cap_never_reaches_the_worker_in_a_release_build() {
+        let mut capped = node();
+        capped.push(("RASTAI_TEST_WORKER_THREADS".to_string(), "2".to_string()));
+        let result = worker_variables(&capped, &inputs());
+        assert_eq!(value_of(&result, "OMP_NUM_THREADS"), None);
     }
 
     // A token printed with {:?} would end up in a log or a test failure, where anyone reading it could act as the

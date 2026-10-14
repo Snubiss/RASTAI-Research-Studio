@@ -323,17 +323,28 @@ class WorkerProcess:
         try:
             return self.process.wait(timeout=PROCESS_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
-            self.process.kill()
+            # The whole group, not only the leader: a child the worker started would outlive the test otherwise.
+            self.kill_group()
+            self.process.wait()
             raise
 
     def stderr(self) -> str:
         return self.stderr_path.read_text(encoding="utf-8")
 
-    def kill_if_running(self) -> None:
-        """SIGKILL to the worker's group when a failed test left it running, so no worker outlives the run."""
-        if self.process.poll() is None:
+    def kill_group(self) -> None:
+        """SIGKILL to every process of the worker's group. The group id is the leader's pid, which stays valid while
+        any member is left, even after the leader has been reaped. No member left is ProcessLookupError, which is
+        fine."""
+        try:
             os.killpg(self.process.pid, signal.SIGKILL)
-            self.process.wait(timeout=PROCESS_TIMEOUT_SECONDS)
+        except ProcessLookupError:
+            pass
+
+    def kill_if_running(self) -> None:
+        """SIGKILL to the worker's group when a failed test left it running, so no worker outlives the run. The group
+        is signalled even when the leader has exited: its children may still run."""
+        self.kill_group()
+        self.process.wait(timeout=PROCESS_TIMEOUT_SECONDS)
 
 
 @pytest.fixture
@@ -459,6 +470,62 @@ def test_a_refused_registration_is_a_bad_launch(
     assert worker.stderr().strip().splitlines()[-1].startswith(f"{RRS_J2002}: ")
     # The job never ran, so the log holds no record of it.
     assert read_records(worker.launch.event_log_path) == []
+
+
+# ---- A worker that outlives its wait ----
+
+STAND_IN_MODULE_NAME = "rastai_test_group_stand_in"
+# A stand-in worker that starts a sleeping child in its own group (the child inherits the group), writes the child's
+# pid beside job.json, and sleeps. Only a SIGKILL to the group ends both processes.
+STAND_IN_MODULE_SOURCE = """
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+(Path(sys.argv[-1]).parent / "child.pid").write_text(str(child.pid), encoding="utf-8")
+time.sleep(600)
+"""
+CHILD_PID_FILE_NAME = "child.pid"
+# How long the group may take to have no members left after the SIGKILL.
+GROUP_GONE_SECONDS = 5.0
+# The wait's budget in this test: short, so the timeout comes at once.
+SHORT_WAIT_SECONDS = 0.5
+
+
+def test_a_timed_out_wait_kills_the_whole_worker_group(
+    socket_folder: Path,
+    tmp_path: Path,
+    entries_folder: Path,
+    started_workers: list[WorkerProcess],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (entries_folder / f"{STAND_IN_MODULE_NAME}.py").write_text(STAND_IN_MODULE_SOURCE, encoding="utf-8")
+    launch = write_launch(socket_folder, tmp_path / "run", "JOB_KIND_TRAIN")
+    worker = WorkerProcess(launch, entries_folder, module_name=STAND_IN_MODULE_NAME)
+    started_workers.append(worker)
+    child_pid_file = launch.run_folder / CHILD_PID_FILE_NAME
+    deadline = time.monotonic() + PROCESS_TIMEOUT_SECONDS
+    while not child_pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(POLL_SECONDS)
+    assert child_pid_file.exists(), worker.stderr()
+
+    # The child runs in the worker's group, so the timeout must reach it too, not only the leader.
+    monkeypatch.setattr(sys.modules[__name__], "PROCESS_TIMEOUT_SECONDS", SHORT_WAIT_SECONDS)
+    with pytest.raises(subprocess.TimeoutExpired):
+        worker.wait()
+
+    process_group_id = worker.process.pid
+    deadline = time.monotonic() + GROUP_GONE_SECONDS
+    while True:
+        # Signal 0 only asks: the group has no members left once it raises ProcessLookupError.
+        try:
+            os.killpg(process_group_id, 0)
+        except ProcessLookupError:
+            break
+        assert time.monotonic() < deadline, f"group {process_group_id} still has members"
+        time.sleep(POLL_SECONDS)
 
 
 # ---- The train job's process ----

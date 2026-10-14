@@ -22,6 +22,8 @@ use rastai_node::error::NodeError;
 use rastai_node::handshake::{daemon_challenge_bytes, pin_daemon_key, session_token_from_metadata};
 use rastai_node::hardware::HardwareSources;
 use rastai_node::identity::{daemon_id_from_public_key, load_or_create_identity, public_key_bytes, sign_challenge};
+use rastai_node::jobs::job_file::{JOB_FILE, read_job_file, recorded_process};
+use rastai_node::jobs::signals::is_same_process;
 use rastai_node::jobs::supervisor::default_job_options;
 use rastai_node::node::{NodeMode, NodeOptions, run_node};
 use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
@@ -51,6 +53,9 @@ const DAEMON_KEY_FILE: &str = "daemon.key";
 const NONCE_BYTES: usize = 32;
 /// How long a test waits for a heartbeat that should come.
 const HEARTBEAT_WAIT: Duration = Duration::from_secs(10);
+/// The procps tool that signals a process group, as rastai-node's signals.rs does (no `unsafe`, no libc).
+const KILL_TOOL: &str = "kill";
+const KILL_SIGNAL: &str = "KILL";
 
 /// Numbers the folders of one test binary, so tests running at the same time never share one.
 static NEXT_FOLDER_NUMBER: AtomicU32 = AtomicU32::new(0);
@@ -246,6 +251,53 @@ pub async fn wait_until_socket_released(socket_path: &Path) {
         );
         tokio::time::sleep(NODE_START_POLL).await;
     }
+}
+
+/// SIGKILLs the process group of every job under `folder` whose leader is still the process its job.json records.
+/// Test Drop impls call it: aborting a node task leaves its workers running (each leads its own group, so nothing
+/// else stops them), and a test that fails or panics would leave them behind. The leader's identity is checked
+/// first, as the node does before any group signal, so a reused pid is never signalled. A group already gone is
+/// skipped.
+pub fn kill_job_groups_under(folder: &Path) {
+    for job_file_path in job_files_under(folder) {
+        let Ok(job_file) = read_job_file(&job_file_path) else {
+            continue;
+        };
+        let Some(leader) = recorded_process(&job_file) else {
+            continue;
+        };
+        if is_same_process(&leader) {
+            kill_group(leader.process_group_id);
+        }
+    }
+}
+
+/// SIGKILL to a process group. Its exit status is ignored: the group may be gone already.
+fn kill_group(process_group_id: u32) {
+    let group_target = format!("-{process_group_id}");
+    let _ = std::process::Command::new(KILL_TOOL)
+        .args(["-s", KILL_SIGNAL, "--", &group_target])
+        .status();
+}
+
+/// Every job.json under `folder`, at any depth.
+fn job_files_under(folder: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut folders_to_read = vec![folder.to_path_buf()];
+    while let Some(next_folder) = folders_to_read.pop() {
+        let Ok(entries) = fs::read_dir(&next_folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders_to_read.push(path);
+            } else if path.file_name().is_some_and(|name| name == JOB_FILE) {
+                found.push(path);
+            }
+        }
+    }
+    found
 }
 
 #[allow(clippy::unwrap_used)]

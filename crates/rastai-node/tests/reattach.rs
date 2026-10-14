@@ -62,8 +62,8 @@ mod on_linux {
     use tonic::transport::Channel;
 
     use crate::common::{
-        NvidiaSmi, machine_from_fixture, new_test_folder, paired_daemon_handshake, start_fake_hub, start_node,
-        test_node_options, test_paths, write_tool,
+        NvidiaSmi, kill_job_groups_under, machine_from_fixture, new_test_folder, paired_daemon_handshake,
+        start_fake_hub, start_node, test_node_options, test_paths, write_tool,
     };
 
     const TEST_FOLDER_PREFIX: &str = "rnra";
@@ -162,16 +162,23 @@ exec sleep 600
         write_tool(&environment.join("bin/python"), script);
     }
 
-    /// A node process and a client of its node.sock. It is SIGKILLed when dropped.
+    /// A node process and a client of its node.sock. It is SIGKILLed when dropped, and so are the workers it started
+    /// in `folder`, unless the test killed it on purpose (`kill_9`).
     struct NodeProcess {
         process: Child,
         client: NodeServiceClient<Channel>,
+        folder: PathBuf,
+        /// Set by `kill_9`: the workers it leaves are the next node's to reattach, so they must outlive this drop.
+        workers_outlive_it: bool,
     }
 
     impl Drop for NodeProcess {
         fn drop(&mut self) {
             let _ = self.process.kill();
             let _ = self.process.wait();
+            if !self.workers_outlive_it {
+                kill_job_groups_under(&self.folder);
+            }
         }
     }
 
@@ -180,6 +187,7 @@ exec sleep 600
         fn kill_9(mut self) {
             self.process.kill().unwrap();
             self.process.wait().unwrap();
+            self.workers_outlive_it = true;
         }
     }
 
@@ -203,10 +211,22 @@ exec sleep 600
         loop {
             if let Ok(channel) = connect_grpc_channel(&socket_path).await {
                 let client = NodeServiceClient::new(channel);
-                return NodeProcess { process, client };
+                return NodeProcess {
+                    process,
+                    client,
+                    folder: folder.to_path_buf(),
+                    workers_outlive_it: false,
+                };
             }
             let exited = process.try_wait().unwrap();
             let output = fs::read_to_string(folder.join(NODE_OUTPUT_FILE)).unwrap_or_default();
+            if exited.is_some() || started.elapsed() >= WAIT_LIMIT {
+                // The failing assertions below panic before a NodeProcess exists, so the start's own process and
+                // any worker it started are stopped here, not left for the next test.
+                let _ = process.kill();
+                let _ = process.wait();
+                kill_job_groups_under(folder);
+            }
             assert!(exited.is_none(), "the node process stopped: {exited:?}\n{output}");
             assert!(started.elapsed() < WAIT_LIMIT, "node.sock didn't answer\n{output}");
             tokio::time::sleep(POLL).await;

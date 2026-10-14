@@ -5,11 +5,13 @@
 //! Each test binary uses only the helpers it needs, so the rest look unused to that binary.
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rastai_core::paths::DataPaths;
 use rastai_core::principal::{Principal, PrincipalKind, owner_principal};
 use rastai_core::scopes::{Scope, scope_name};
+use rastai_node::jobs::job_file::{JOB_FILE, read_job_file, recorded_process};
+use rastai_node::jobs::signals::is_same_process;
 use rastai_proto::commands::v1::{ExecuteRequest, ExecuteResponse};
 use rastai_server::commands::execute::execute_command;
 use rastai_server::daemon::{DaemonOptions, RunningDaemon, start_daemon};
@@ -19,6 +21,10 @@ use rastai_server::server_state::Server;
 use rastai_server::shutdown::{request_shutdown, wait_for_shutdown};
 use rastai_store::error::StoreError;
 use rastai_transport::http_client::{HttpRequest, HttpResponse, HttpTarget, send_request};
+
+/// The procps tool that signals a process group, as rastai-node's signals.rs does (no `unsafe`, no libc).
+const KILL_TOOL: &str = "kill";
+const KILL_SIGNAL: &str = "KILL";
 
 /// Port 0: the operating system picks a free port, so tests running at once never fight over 47820–47829.
 pub const ANY_FREE_PORT: u16 = 0;
@@ -51,11 +57,74 @@ fn test_root(test_name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rsv-{}-{test_name}", std::process::id()))
 }
 
-/// Removes the parent folder `test_paths` made. Call it after the daemon stopped.
+/// Removes the parent folder `test_paths` made. Call it after the daemon stopped. Jobs the test left running are
+/// killed first: the folder's job.json files are the only record of their groups, and removing them would lose it.
 pub fn remove_test_folder(paths: &DataPaths) {
+    kill_job_groups_under(&paths.data);
     if let Some(root) = paths.data.parent() {
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+/// Kills every job group recorded under a test daemon's data folder when dropped, whatever the test left running:
+/// `stop_test_daemon` leaves jobs running on purpose, and a test that fails before ending its job would leave its
+/// worker behind (issue #244). Hold one in every test that starts jobs.
+pub struct JobGroupGuard {
+    data_folder: PathBuf,
+}
+
+impl JobGroupGuard {
+    pub fn for_paths(paths: &DataPaths) -> JobGroupGuard {
+        JobGroupGuard {
+            data_folder: paths.data.clone(),
+        }
+    }
+}
+
+impl Drop for JobGroupGuard {
+    fn drop(&mut self) {
+        kill_job_groups_under(&self.data_folder);
+    }
+}
+
+/// SIGKILLs the process group of every job.json under `folder` whose leader is still the recorded process, checked
+/// by identity first, as the node does before a group signal. A group already gone is skipped. The same check as the
+/// node tests' helper: rastai-node's test code isn't shared with this crate's tests.
+pub fn kill_job_groups_under(folder: &Path) {
+    for job_file_path in job_files_under(folder) {
+        let Ok(job_file) = read_job_file(&job_file_path) else {
+            continue;
+        };
+        let Some(leader) = recorded_process(&job_file) else {
+            continue;
+        };
+        if is_same_process(&leader) {
+            let group_target = format!("-{}", leader.process_group_id);
+            let _ = std::process::Command::new(KILL_TOOL)
+                .args(["-s", KILL_SIGNAL, "--", &group_target])
+                .status();
+        }
+    }
+}
+
+/// Every job.json under `folder`, at any depth.
+fn job_files_under(folder: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut folders_to_read = vec![folder.to_path_buf()];
+    while let Some(next_folder) = folders_to_read.pop() {
+        let Ok(entries) = std::fs::read_dir(&next_folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders_to_read.push(path);
+            } else if path.file_name().is_some_and(|name| name == JOB_FILE) {
+                found.push(path);
+            }
+        }
+    }
+    found
 }
 
 /// Options that serve on a port the operating system picks.

@@ -295,9 +295,25 @@ mod end_to_end {
         assert_eq!(json_answer.status, 200);
         assert_eq!(header_value(&json_answer, "content-type"), Some(JSON));
         let decoded = execute_response_from_json(&json_answer.body).unwrap();
-        assert_eq!(decoded.result_json, answer.result_json);
+        assert!(decoded.result_json.contains("rastai.commands.v1"));
+        // The two answers hold the same status. A node's last heartbeat time moves whenever it beats, so the two
+        // result strings aren't compared byte for byte (issue #282).
+        assert_eq!(stable_status(&decoded.result_json), stable_status(&answer.result_json));
         stop_test_daemon(running).await;
         remove_test_folder(&paths);
+    }
+
+    /// The node entry field that moves each time the node beats.
+    const HEARTBEAT_TIME_FIELD: &str = "last_heartbeat_unix_ms";
+
+    /// A `system.status` result with the time-varying fields of its node entries removed, so two answers compare by
+    /// what they say about the system, not by when a node last beat.
+    fn stable_status(result_json: &str) -> Value {
+        let mut status: Value = serde_json::from_str(result_json).unwrap();
+        for node in status["nodes"].as_array_mut().unwrap() {
+            node.as_object_mut().unwrap().remove(HEARTBEAT_TIME_FIELD);
+        }
+        status
     }
 
     #[tokio::test(flavor = "multi_thread")]
