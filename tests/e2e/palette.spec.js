@@ -14,6 +14,10 @@ const SKELETON_TITLES = ["Show status", "List jobs", "Show settings", "Stop the 
 const CREATE_TOKEN_TITLE = "Create an API token";
 const TOKEN_NAME = "ci bot's token";
 const TOKEN_SCOPES_TEXT = '["training", "eval"]';
+// The status lines the palette says after a copy (frame/CommandPalette.jsx).
+const COPIED_TEXT = "Copied.";
+const COPIED_CLI_TEXT = "Copied the CLI line.";
+const SHOW_STATUS_CLI_LINE = "rastai system status";
 
 for (const engine of ENGINES) {
   describe(`the palette in ${engine}`, () => {
@@ -78,13 +82,13 @@ for (const engine of ENGINES) {
         await app.page.getByLabel("Scopes", { exact: true }).fill(TOKEN_SCOPES_TEXT);
         const copyAs = app.page.getByRole("group", { name: "Copy as" });
         await copyAs.getByRole("button", { name: "CLI", exact: true }).click();
-        assert.equal(await copiedText(app.page), TOKEN_CREATE_GOLDEN.cli);
+        assert.equal(await copyAndRead(app.page, engine), TOKEN_CREATE_GOLDEN.cli);
         await copyAs.getByRole("button", { name: "Python", exact: true }).click();
-        assert.equal(await copiedText(app.page), TOKEN_CREATE_GOLDEN.python);
+        assert.equal(await copyAndRead(app.page, engine), TOKEN_CREATE_GOLDEN.python);
         await copyAs.getByRole("button", { name: "JavaScript", exact: true }).click();
-        assert.equal(await copiedText(app.page), TOKEN_CREATE_GOLDEN.javascript);
+        assert.equal(await copyAndRead(app.page, engine), TOKEN_CREATE_GOLDEN.javascript);
         await copyAs.getByRole("button", { name: "MCP", exact: true }).click();
-        assert.deepEqual(JSON.parse(await copiedText(app.page)), TOKEN_CREATE_GOLDEN.mcp);
+        assert.deepEqual(JSON.parse(await copyAndRead(app.page, engine)), TOKEN_CREATE_GOLDEN.mcp);
       } finally {
         await app.close();
         await daemon.stop();
@@ -100,8 +104,14 @@ for (const engine of ENGINES) {
         await app.page.getByRole("combobox", { name: "Search or run a command" }).fill("show status");
         await highlightEntry(app.page, "Show status");
         await app.page.keyboard.press("Control+.");
-        await app.page.locator(".rr-palette-detail__status", { hasText: /Copied|did not work/ }).waitFor();
-        assert.equal(await copiedText(app.page), "rastai system status");
+        if (engine === "chromium") {
+          await app.page.locator(".rr-palette-detail__status", { hasText: COPIED_CLI_TEXT }).waitFor();
+          assert.equal(await clipboardText(app.page), SHOW_STATUS_CLI_LINE);
+        } else {
+          // WebKit has no clipboard permission here, so the line on the page (the CLI format's) is what is checked.
+          await app.page.locator(".rr-palette-detail__status").waitFor();
+          assert.equal(await codeText(app.page), SHOW_STATUS_CLI_LINE);
+        }
         await app.page.getByRole("combobox", { name: "Search or run a command" }).fill("create api token");
         await highlightEntry(app.page, CREATE_TOKEN_TITLE);
         await app.page.keyboard.press("Enter");
@@ -127,10 +137,36 @@ async function paletteTitles(page) {
 }
 
 /**
- * The text of the Copy as block's code, which is what the copy writes.
+ * The text of the Copy as block's code: the format the palette shows, which is what Copy writes.
  * @param {import("playwright").Page} page
  * @returns {Promise<string>}
  */
-async function copiedText(page) {
+async function codeText(page) {
   return (await page.locator(".rr-palette-detail__code code").textContent()) ?? "";
+}
+
+/**
+ * The clipboard's text, as the page reads it (Chromium has the clipboard-read permission from the harness).
+ * @param {import("playwright").Page} page
+ * @returns {Promise<string>}
+ */
+async function clipboardText(page) {
+  return page.evaluate(() => navigator.clipboard.readText());
+}
+
+/**
+ * Presses the palette's Copy button and returns what was copied. In Chromium that is the clipboard, and the test waits for
+ * the palette to say it copied, so a failed write fails the test. WebKit has no clipboard permission here, so there the
+ * text the Copy as block shows (the format's line) stands for what Copy writes.
+ * @param {import("playwright").Page} page
+ * @param {string} engine   "chromium" or "webkit"
+ * @returns {Promise<string>}
+ */
+async function copyAndRead(page, engine) {
+  await page.locator(".rr-palette-detail").getByRole("button", { name: "Copy", exact: true }).click();
+  if (engine === "chromium") {
+    await page.locator(".rr-palette-detail__status", { hasText: COPIED_TEXT }).waitFor();
+    return clipboardText(page);
+  }
+  return codeText(page);
 }

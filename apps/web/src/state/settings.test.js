@@ -19,3 +19,10 @@ describe("withSetting", () => {
     expect(next.values).toEqual({ ui: { theme: "dark" } });
   });
 });
+
+describe("the dotted key", () => {
+  test("a key with more than two parts is refused, not written under a wrong name", () => {
+    expect(() => withSetting(STORED, "ui.theme.extra", "dark")).toThrow(/"section.name"/);
+    expect(() => readSetting(STORED.values, "ui", "")).toThrow(/"section.name"/);
+  });
+});

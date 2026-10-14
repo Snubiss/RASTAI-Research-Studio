@@ -10,7 +10,7 @@
  * @returns {any}
  */
 export function readSetting(values, dottedKey, fallback) {
-  const [section, name] = dottedKey.split(".");
+  const [section, name] = settingParts(dottedKey);
   const value = values?.[section]?.[name];
   return value === undefined || value === null ? fallback : value;
 }
@@ -32,10 +32,24 @@ export function emptySettings() {
  * @returns {{ values: any, sources: any[] }}
  */
 export function withSetting(result, dottedKey, value) {
-  const [section, name] = dottedKey.split(".");
+  const [section, name] = settingParts(dottedKey);
   const values = result.values ?? {};
   return {
     ...result,
     values: { ...values, [section]: { ...(values[section] ?? {}), [name]: value } },
   };
+}
+
+/**
+ * The section and the name of a dotted key. Settings keys are exactly two parts (contracts 11.1: a section, then a key),
+ * so a key with more or fewer parts is a bug in the caller and is refused rather than written under a wrong name.
+ * @param {string} dottedKey
+ * @returns {string[]}
+ */
+function settingParts(dottedKey) {
+  const parts = dottedKey.split(".");
+  if (parts.length !== 2 || parts[0] === "" || parts[1] === "") {
+    throw new Error(`a setting key is "section.name", not "${dottedKey}"`);
+  }
+  return parts;
 }

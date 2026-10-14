@@ -2,22 +2,22 @@
 
 import { describe, expect, test } from "vitest";
 
-import { matchesQuery, matchRank } from "./palette-match.js";
+import { isMatch, matchRank } from "./palette-match.js";
 
-describe("matchesQuery", () => {
+describe("the subsequence match", () => {
   test("a subsequence matches, ignoring case", () => {
-    expect(matchesQuery("trn", "Training")).toBe(true);
-    expect(matchesQuery("AGT", "Agent Gym")).toBe(true);
+    expect(isMatch(matchRank("trn", "Training"))).toBe(true);
+    expect(isMatch(matchRank("AGT", "Agent Gym"))).toBe(true);
   });
 
   test("letters out of order don't match", () => {
-    expect(matchesQuery("nt", "Training")).toBe(false);
+    expect(isMatch(matchRank("nt", "Training"))).toBe(false);
   });
 
   test("an empty query matches everything, and surrounding spaces are ignored", () => {
-    expect(matchesQuery("", "Home")).toBe(true);
-    expect(matchesQuery("  ", "Home")).toBe(true);
-    expect(matchesQuery(" ho ", "Home")).toBe(true);
+    expect(isMatch(matchRank("", "Home"))).toBe(true);
+    expect(isMatch(matchRank("  ", "Home"))).toBe(true);
+    expect(isMatch(matchRank(" ho ", "Home"))).toBe(true);
   });
 });
 

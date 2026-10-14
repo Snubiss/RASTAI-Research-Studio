@@ -9,13 +9,12 @@ const RANK_SUBSEQUENCE = 2;
 const RANK_NONE = -1;
 
 /**
- * Whether every character of the query appears in the text, in order, ignoring case. An empty query matches all.
- * @param {string} query
- * @param {string} text
+ * Whether a rank from matchRank is a match.
+ * @param {number} rank
  * @returns {boolean}
  */
-export function matchesQuery(query, text) {
-  return matchRank(query, text) !== RANK_NONE;
+export function isMatch(rank) {
+  return rank !== RANK_NONE;
 }
 
 /**

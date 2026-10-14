@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 import { FOCUS_REGIONS, GO_PREFIX_TIMEOUT_MS } from "../constants.js";
 import { CommandPalette } from "../frame/CommandPalette.jsx";
 import { requiredArgumentNames } from "../commands/command-index.js";
+import { readSetting } from "../state/settings.js";
 import { commandForKeys } from "../commands/keybindings.js";
 import { runFromPalette } from "../commands/run-command.js";
 import { Overlays } from "../frame/Overlays.jsx";
@@ -32,6 +33,10 @@ import { ConnectionBanner } from "./ConnectionBanner.jsx";
 import { ShellProvider, useShell } from "./shell-context.js";
 
 /** @typedef {import("./shell.js").Shell} Shell */
+
+// The same setting and mode name the palette filters by (frame/CommandPalette.jsx, state/mode.js).
+const EXPERIMENTAL_SETTING = "plugins.experimental_apis";
+const BASIC_MODE = "basic";
 
 /**
  * @param {object} props
@@ -155,8 +160,21 @@ function openPalette(shell) {
  * @param {KeyboardEvent} event
  */
 function runDefaultShortcut(shell, event) {
+  // A key that types text is never a shortcut: a plain letter in a field is the user's text, not a command.
+  if (isTextField(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    return;
+  }
   const command = commandForKeys(shell.stores.commands.get(), event);
   if (command === null) {
+    return;
+  }
+  // The shortcut obeys the same filters as the palette: experimental commands wait until they are switched on, and a
+  // Basic view hides the advanced ones.
+  const experimentalOn = readSetting(shell.stores.settings.get().values, EXPERIMENTAL_SETTING, false) === true;
+  if (command.experimental && !experimentalOn) {
+    return;
+  }
+  if (shell.stores.display.get().mode === BASIC_MODE && !command.basic) {
     return;
   }
   if (requiredArgumentNames(command.argumentsSchemaJson).length > 0) {
