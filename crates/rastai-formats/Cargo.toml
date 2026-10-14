@@ -16,6 +16,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # Only src/hashing.rs imports it (contracts 2.5; deny.toml names this crate its one owner).
 blake3 = { workspace = true }
+# Only src/zip/inflate.rs imports it (contracts 2.5; deny.toml names this crate its one owner, ADR-0037).
+miniz_oxide = { workspace = true }
 
 [dev-dependencies]
 # tests/commands_described.rs checks that every row of rastai-core's COMMANDS has its types here (layout 4.11). Only

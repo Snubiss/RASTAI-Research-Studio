@@ -365,8 +365,8 @@ Every in-house parser of bytes that cross a boundary has a fuzz target, or a row
 | `parse_message` (JSON-RPC) | `rastai-mcp` | MCP clients (A5) | `jsonrpc_decode` | main (M1-29) |
 | In-house semver `parse_version` and `version_matches` (`semver.rs`) | `rastai-formats` | plugin versions, `engines.rastai` and `dependencies` in plugin manifests, which the plugin host reads at every load, and the shared header's `requires` (A6, A10) | `semver` | main (M1-32) |
 | `read_safetensors_header_length` and `check_safetensors_header` (`safetensors/header_check.rs`; Python calls both through the wheel) | `rastai-formats` | weight files from model repos (A10) | `safetensors_header` | main (M1-34) |
-| Zip container | `rastai-formats` | `.rrsproj`, `.rrsplugin` and other archives (A6, A10) | `zip_reader` | M2-22 |
-| DEFLATE (borrowed `miniz_oxide`, behind `inflate.rs`) | `rastai-formats` | compressed zip entries (A10) | `inflate` | M2-22 |
+| Zip container | `rastai-formats` | `.rrsproj`, `.rrsplugin` and other archives (A6, A10) | `zip_reader` | main (M2-22) |
+| DEFLATE (borrowed `miniz_oxide`, behind `inflate.rs`) | `rastai-formats` | compressed zip entries (A10) | `inflate` | main (M2-22) |
 | GGUF header | `rastai-formats` | GGUF files for the Fast runtime (A10) | `gguf_header` | M3-E01 |
 | Conversation import | `rastai-formats` | ChatGPT, Claude, OpenAI JSONL and ShareGPT exports (A10) | `conversation_import` | M3-E02 |
 | Tool-call parsing | `rastai-gateway` | model output (A10) | `tool_call_parse` | M3-E06 |

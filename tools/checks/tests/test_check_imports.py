@@ -532,6 +532,20 @@ def test_rust_wrapper_files(write_tree, run_check):
     assert "1 problem(s)" in result.stdout
 
 
+def test_miniz_oxide_is_used_only_by_the_inflate_file(write_tree, run_check):
+    """DEFLATE comes from miniz_oxide in zip/inflate.rs alone (contracts 2.5, ADR-0037)."""
+    root = write_tree(
+        {
+            "crates/rastai-formats/src/zip/inflate.rs": "use miniz_oxide::inflate::stream::inflate;\n",
+            "crates/rastai-formats/src/zip/reader.rs": "let raw = miniz_oxide::inflate::decompress_to_vec(&[]);\n",
+        }
+    )
+    result = run_check("check-imports", "--root", str(root))
+    assert result.returncode == 1
+    assert "crates/rastai-formats/src/zip/reader.rs:1: uses `miniz_oxide`, which only" in result.stdout
+    assert "1 problem(s)" in result.stdout
+
+
 def test_http_body_is_used_only_by_the_connect_file(write_tree, run_check):
     """The frame type of Subscribe's streamed body comes from http-body, in rastai-server's http/connect.rs alone."""
     root = write_tree(

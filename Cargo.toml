@@ -72,6 +72,9 @@ hyper-util = { version = "=0.1.21", default-features = false }
 # One statvfs call in rastai-store's disk_space.rs (ADR-0033). The version Cargo.lock already held under tokio, so
 # the lock gains no second copy.
 libc = "=0.2.190"
+# DEFLATE for zip archives, only in crates/rastai-formats/src/zip/inflate.rs (ADR-0037). 0.9.1 was three months old
+# when this was pinned (March 2026). Default features (`with-alloc`) give the streaming inflate API the wrapper uses.
+miniz_oxide = "=0.9.1"
 # The node and daemon identities and the handshake signatures, only in rastai-node's identity.rs (M1-42). 3.0.0 was
 # three months old when this was pinned. Default features: `fast` (precomputed tables) and `zeroize` (the secret key
 # is wiped from memory when it is dropped).
@@ -83,7 +86,7 @@ ed25519-dalek = "=3.0.0"
 pyo3 = "=0.29.2"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
 # rustls, tokio-rustls, webpki-roots, tower,
-# miniz_oxide, tokenizers, minijinja, keyring, wasm-bindgen, tauri, tauri-build,
+# tokenizers, minijinja, keyring, wasm-bindgen, tauri, tauri-build,
 # tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 
 [workspace.lints.rust]

@@ -264,7 +264,14 @@ fuzz crate target seconds="60":
     # cargo-fuzz finds the fuzz/ folder from the crate's root. fuzz/Cargo.lock is checked in, so the targets build
     # against the same dependency versions every night; `check-fuzz-locks` keeps it current, so a run never rewrites it.
     cd "crates/{{crate}}"
-    cargo +{{fuzz_toolchain}} fuzz run "{{target}}" -- -max_total_time="{{seconds}}"
+    # Checked-in seeds (fuzz/seeds/<target>/, small valid inputs) join the corpus, so a run starts past the first
+    # check instead of searching for a valid container by chance. The corpus folder stays first: new inputs go there.
+    corpus=()
+    if [ -d "fuzz/seeds/{{target}}" ]; then
+        mkdir -p "fuzz/corpus/{{target}}"
+        corpus=("fuzz/corpus/{{target}}" "fuzz/seeds/{{target}}")
+    fi
+    cargo +{{fuzz_toolchain}} fuzz run "{{target}}" "${corpus[@]}" -- -max_total_time="{{seconds}}"
 
 # ---- Repo checks (layout rust-control-plane.md 2.1 and 2.3). Each is one script in tools/checks. ----
 
