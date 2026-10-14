@@ -9,8 +9,8 @@ publish.workspace = true
 
 # M1-41 lands the local half (layout: rust-node-gateway-proto.md section 4, build-order step 1): local sockets,
 # peer checks, tonic channels and servers over them, the local NodeConnection and plain HTTP over a local socket or
-# loopback. HTTPS (rustls), ssh.rs, sse.rs and transfer.rs arrive with their own tasks, and with them rastai-formats
-# (hashing) and the rest of rastai-proto's types.
+# loopback. HTTPS (rustls) came with M2-14; ssh.rs, sse.rs and transfer.rs arrive with their own tasks, and with them
+# rastai-formats (hashing) and the rest of rastai-proto's types.
 [dependencies]
 rastai-diag = { path = "../rastai-diag" }
 # DataPaths, which open_node_connection takes (node_connection.rs).
@@ -25,6 +25,11 @@ tonic = { workspace = true, features = ["channel", "server", "router", "codegen"
 # only: no pool, one connection per request, which is all a local socket or loopback needs.
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
+# HTTPS (M2-14): the same one file, http_client.rs, imports these three too. rustls verifies the server's certificate
+# against webpki-roots, and tokio-rustls wraps the TCP stream in TLS. Rustls's crypto provider is ring.
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
 # tests/grpc_local.rs serves the generated WorkerService over a Unix socket. The tonic service code is behind

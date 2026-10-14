@@ -89,7 +89,8 @@ deny = [
   # needs, installs its handlers through signal-hook-registry and reads errno through errno (M1-26). tokio's
   # `process` feature, which rastai-node runs nvidia-smi and rocm-smi with (M1-42), reaps children through the same
   # signal-hook-registry (SIGCHLD). pyo3 and pyo3-ffi, under the rastai-formats wheel (M1-19), declare the C types of
-  # Python's API with it.
+  # Python's API with it. ring, the rustls crypto provider (M2-14), and getrandom 0.2 under it read the OS random
+  # source and the CPU features through libc.
   { crate = "libc", wrappers = [
     "rastai-store",
     "cpufeatures",
@@ -102,7 +103,9 @@ deny = [
     "errno",
     "pyo3",
     "pyo3-ffi",
-  ], reason = "rastai-store (disk_space.rs, ADR-0033); the system calls of blake3, tokio and hyper-util underneath" },
+    "getrandom",
+    "ring",
+  ], reason = "rastai-store (disk_space.rs, ADR-0033); the system calls of blake3, tokio, hyper-util, ring and getrandom underneath" },
   { crate = "pyo3", wrappers = ["rastai-formats-python"], reason = "one owner: the Python binding crate" },
   { crate = "wasm-bindgen", wrappers = ["rastai-formats-wasm"], reason = "one owner: the WASM binding crate" },
   { crate = "keyring", wrappers = ["rastai-server"], reason = "one owner: rastai-server (secrets.rs)" },

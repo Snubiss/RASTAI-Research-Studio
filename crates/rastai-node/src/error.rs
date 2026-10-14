@@ -158,6 +158,7 @@ fn transport_error_diagnostic(error: &TransportError) -> Diagnostic {
         TransportError::NotSupportedOnThisPlatform { .. } => {
             diagnostic("RRS-N2009", &[("platform", std::env::consts::OS)])
         }
+        TransportError::EgressTagMissing { host } => diagnostic("RRS-N3008", &[("host", host.as_str())]),
     }
 }
 

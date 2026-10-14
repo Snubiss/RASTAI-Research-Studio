@@ -1,7 +1,9 @@
 //! The plain-HTTP half of the client (layout: rust-node-gateway-proto.md section 4.7): a request over a Unix socket
 //! round-trips (daemon.sock, for the CLI and the MCP bridge), a streamed body arrives chunk by chunk, a silent
-//! server times out, and the same calls work over loopback TCP. HTTPS, egress tags and TLS refusals join this file
-//! with M2-14.
+//! server times out, and the same calls work over loopback TCP. An HTTPS request without its egress tag is refused
+//! before it connects (RRS-N3008). The HTTPS round trips, the chunked HTTPS body, the TLS timeout and the refused
+//! certificates are unit tests at the bottom of src/http_client.rs: rustls may only be imported in that one file
+//! (contracts 2.5), and an integration test is a separate crate that couldn't reach its test CA anyway.
 //!
 //! The test servers are a few lines of raw HTTP/1.1 rather than a server library, so they also check the exact
 //! bytes the client sends.
@@ -96,6 +98,7 @@ mod over_loopback {
             headers: Vec::new(),
             body: Vec::new(),
             timeout_ms: 5000,
+            egress: None,
         };
         let response = send_request(request).await.unwrap();
         let received = server.await.unwrap();
@@ -133,6 +136,7 @@ mod over_loopback {
             headers: vec![("Host".to_string(), "localhost".to_string())],
             body: Vec::new(),
             timeout_ms: 5000,
+            egress: None,
         };
         send_request(request).await.unwrap();
         let received = server.await.unwrap();
@@ -184,6 +188,7 @@ mod over_a_unix_socket {
             headers: vec![("Content-Type".to_string(), "application/json".to_string())],
             body: body.to_vec(),
             timeout_ms,
+            egress: None,
         }
     }
 
@@ -289,5 +294,39 @@ mod over_a_unix_socket {
         let refusal = send_request(request_to(&socket_path, "GET", b"", 5000)).await;
         assert_eq!(refusal.map_err(|error| error.code()), Err("RRS-N2004"));
         fs::remove_dir_all(&test_folder).unwrap();
+    }
+}
+
+#[allow(clippy::unwrap_used)]
+mod over_https_without_a_tag {
+    use rastai_transport::error::TransportError;
+    use rastai_transport::http_client::{HttpRequest, HttpTarget, send_request};
+
+    /// Nothing listens on port 9 here, so a request that connected would fail with RRS-N2008 instead: the code
+    /// RRS-N3008 shows the tag was checked first, before any connection.
+    #[tokio::test]
+    async fn the_request_is_refused_before_it_connects() {
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            target: HttpTarget::Https {
+                host: "localhost".to_string(),
+                port: 9,
+            },
+            path: "/".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            timeout_ms: 5000,
+            egress: None,
+        };
+
+        let refusal = send_request(request).await;
+
+        assert_eq!(
+            refusal,
+            Err(TransportError::EgressTagMissing {
+                host: "localhost".to_string()
+            })
+        );
+        assert_eq!(refusal.unwrap_err().code(), "RRS-N3008");
     }
 }

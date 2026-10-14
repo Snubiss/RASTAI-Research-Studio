@@ -222,6 +222,7 @@ pub async fn send_to_port(port: u16, method: &str, path: &str, headers: &[(&str,
         headers: owned_headers(headers),
         body: body.to_vec(),
         timeout_ms: REQUEST_TIMEOUT_MS,
+        egress: None,
     };
     send_request(request).await.unwrap()
 }
@@ -244,6 +245,7 @@ pub async fn send_to_socket(
         headers: owned_headers(headers),
         body: body.to_vec(),
         timeout_ms: REQUEST_TIMEOUT_MS,
+        egress: None,
     };
     send_request(request).await.unwrap()
 }

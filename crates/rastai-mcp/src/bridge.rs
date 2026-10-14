@@ -231,6 +231,8 @@ async fn post_message(
         headers: request_headers(token, session, message),
         body: message_json(message).into_bytes(),
         timeout_ms: REQUEST_TIMEOUT_MS,
+        // The daemon's socket is local, so no egress tag applies (only HTTPS requests carry one).
+        egress: None,
     };
     send_request(request).await
 }
@@ -337,6 +339,7 @@ fn transport_diagnostic(daemon: &DaemonEndpoint, error: &TransportError) -> Diag
         TransportError::NotSupportedOnThisPlatform { .. } => {
             diagnostic(error.code(), &[("platform", std::env::consts::OS)])
         }
+        TransportError::EgressTagMissing { host } => diagnostic(error.code(), &[("host", host)]),
     }
 }
 

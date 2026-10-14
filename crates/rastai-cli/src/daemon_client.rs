@@ -115,6 +115,7 @@ pub async fn read_health(socket_path: &Path) -> Result<DaemonHealth, TransportEr
         headers: vec![client_header()],
         body: Vec::new(),
         timeout_ms: HEALTH_TIMEOUT_MS,
+        egress: None,
     };
     let response = send_request(request).await?;
     let body: Value = serde_json::from_slice(&response.body).unwrap_or_default();
@@ -297,6 +298,7 @@ fn post_request(client: &DaemonClient, path: &str, content_type: &str, body: Vec
         ],
         body,
         timeout_ms,
+        egress: None,
     }
 }
 
@@ -352,6 +354,7 @@ pub fn transport_diagnostic(error: &TransportError, socket_path: &Path) -> Diagn
         TransportError::TimedOut { timeout_ms } => format!("no answer within {timeout_ms} ms"),
         TransportError::PeerIsAnotherUser { peer_user_id, .. } => format!("user {peer_user_id}"),
         TransportError::NotSupportedOnThisPlatform { what } => what.to_string(),
+        TransportError::EgressTagMissing { host } => format!("an HTTPS request to {host} had no egress tag"),
     };
     if error.code() == NOT_SUPPORTED_PLATFORM_CODE {
         return diagnostic(error.code(), &[("platform", std::env::consts::OS)]);

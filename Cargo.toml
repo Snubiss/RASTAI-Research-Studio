@@ -84,9 +84,15 @@ ed25519-dalek = "=3.0.0"
 # wheel per platform for CPython 3.12) and no `extension-module`, which pyo3 0.29 deprecates in favor of the
 # PYO3_BUILD_EXTENSION_MODULE variable that maturin sets.
 pyo3 = "=0.29.2"
+# HTTPS for rastai-transport's http_client.rs (M2-14), the only file that imports them. The crypto provider is ring,
+# not aws-lc-rs: ring builds with a C compiler alone (no cmake or nasm), and mysql_async's `default-rustls-ring` picks
+# the same one. Default features are off so aws-lc-rs stays out of Cargo.lock. webpki-roots is Mozilla's root store,
+# the trust every production HTTPS request verifies against.
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "=1.0.9"
 # Pinned to an exact version by the PR that first adds each one (it reads the version from crates.io then):
-# rustls, tokio-rustls, webpki-roots, tower,
-# tokenizers, minijinja, keyring, wasm-bindgen, tauri, tauri-build,
+# tower, tokenizers, minijinja, keyring, wasm-bindgen, tauri, tauri-build,
 # tauri-plugin-updater, mysql_async (default-features = false, features = ["default-rustls-ring"]; M11).
 
 [workspace.lints.rust]

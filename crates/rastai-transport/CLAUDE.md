@@ -16,7 +16,8 @@ names are in `docs/architecture/contracts.md` §2.1 and §15.1, its codes in §1
   the folder check alone, because tonic's `unix:` endpoint reads no peer credentials; the gRPC server accepts
   through `accept_local`. There is no TCP bind function here: the daemon's TCP listener is `rastai-server`'s.
 - **One wrapper file per library** (contracts §2.5, `check-imports`): only `http_client.rs` imports hyper and
-  hyper-util (and rustls from M2-14); only `grpc_channel.rs` would import tower. Nothing imports blake3.
+  hyper-util, rustls, tokio-rustls and webpki-roots; only `grpc_channel.rs` would import tower. Nothing imports blake3.
+  The HTTPS tests therefore live at the bottom of `http_client.rs`, not in `tests/`.
 - **No `unsafe` and no libc.** Our own user id comes from a socket pair (`peer.rs`, whose header says why
   `rastai-core` reads it from /proc/self instead), not getuid.
 - **Unix first, Windows compiles.** Unix-only code sits behind `#[cfg(unix)]`, and on Windows each public function
