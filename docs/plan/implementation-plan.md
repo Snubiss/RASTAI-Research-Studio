@@ -2006,7 +2006,7 @@ gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input protection.j
 
 ```json
 {
-  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-crash", "test-js", "test-js-macos", "e2e-surfaces", "e2e-web"] },
+  "required_status_checks": { "strict": true, "contexts": ["checks", "dco", "test-rust-linux", "test-rust-macos", "test-rust-windows", "test-python", "test-python-macos", "test-python-windows", "test-crash", "test-js", "test-js-macos", "e2e-surfaces", "e2e-web", "env-locks"] },
   "enforce_admins": true,
   "required_pull_request_reviews": { "required_approving_review_count": 1, "dismiss_stale_reviews": true },
   "required_linear_history": true,

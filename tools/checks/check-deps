@@ -386,6 +386,10 @@ def license_passes(expression: str, package_name: str, licenses: dict) -> bool:
     passes when `allowed` lists it or when `named_entries` gives this package that exact id (or "id WITH
     exception")."""
     named_entry = licenses.get("named_entries", {}).get(package_name, {})
+    # A named entry may name a whole expression, for a package whose license is several ids that each pass only as
+    # the package's own exception (numpy). Its exact text passes; any other expression for it goes through the tokens.
+    if named_entry and expression == named_entry["license"]:
+        return True
     allowed = set(licenses["allowed"])
     if named_entry:
         allowed.add(named_entry["license"])

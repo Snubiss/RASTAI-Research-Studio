@@ -257,3 +257,16 @@ jobs:
       - *cargo-cache
       - name: just e2e-surfaces
         run: just e2e-surfaces
+
+  # Every locked Python environment resolves against its indexes and its lock doesn't change (python/envs, plan M2-15;
+  # spec 28 risk 11): `uv lock --locked --refresh` fails on a new package, a new version or a hash it didn't expect.
+  # Online, so it runs here and not in `just check`; the offline half is test-python's python/envs/tests.
+  env-locks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - *checkout
+      - *install-just-uv
+      - *uv-cache
+      - name: just env-locks
+        run: just env-locks
