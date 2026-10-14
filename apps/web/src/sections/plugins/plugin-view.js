@@ -9,7 +9,10 @@ const SOURCE_WORDS = {
   installed: "Installed by you",
   dev: "A development folder",
 };
+// The PluginState names (contracts 9.7). A state not in these lists is neutral, so a new state shows no false alarm.
 const ENABLED_STATE = "enabled";
+const WARNING_STATES = ["awaiting_trust"];
+const ERROR_STATES = ["incompatible", "failed"];
 
 /**
  * The name people know a plugin by.
@@ -47,7 +50,8 @@ export function trustLine(plugin) {
 }
 
 /**
- * The state pill's tone: enabled is ok, a plugin that waits for review is a warning, and one that can't load is an error.
+ * The state pill's tone: enabled is ok, a plugin that waits for the owner's trust is a warning, and one that is
+ * incompatible or failed is an error.
  * @param {string} state
  * @returns {"ok" | "warning" | "error" | "neutral"}
  */
@@ -55,10 +59,10 @@ export function stateTone(state) {
   if (state === ENABLED_STATE) {
     return "ok";
   }
-  if (state.includes("review") || state.includes("await")) {
+  if (WARNING_STATES.includes(state)) {
     return "warning";
   }
-  if (state.includes("incompatible") || state.includes("fail")) {
+  if (ERROR_STATES.includes(state)) {
     return "error";
   }
   return "neutral";

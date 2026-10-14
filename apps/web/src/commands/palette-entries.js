@@ -5,7 +5,7 @@
 import { sectionLabel } from "../state/mode.js";
 import { argumentNames, requiredArgumentNames } from "./command-index.js";
 import { prefillArguments } from "./context-arguments.js";
-import { matchRank } from "./palette-match.js";
+import { isMatch, matchRank } from "./palette-match.js";
 import { shortcutLabel } from "./keybindings.js";
 import { sectionViewActions } from "./view-actions.js";
 
@@ -70,7 +70,7 @@ export function buildPaletteItems(options) {
   });
   for (const view of sectionViewActions(options.sectionIds, options.mode)) {
     const rank = matchRank(options.query, view.title);
-    if (rank >= 0) {
+    if (isMatch(rank)) {
       ranked.push({ rank, group: GROUP_VIEW, position: 0, item: viewItem(view) });
     }
   }
@@ -87,7 +87,7 @@ export function buildPaletteItems(options) {
 function commandRank(command, options, sectionName) {
   const ranks = [command.title, command.commandId, sectionName]
     .map((text) => matchRank(options.query, String(text ?? "")))
-    .filter((rank) => rank >= 0);
+    .filter(isMatch);
   return ranks.length === 0 ? -1 : Math.min(...ranks);
 }
 

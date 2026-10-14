@@ -145,7 +145,7 @@ e2e-surfaces: env-cpu
 e2e-web: env-js web-embed
     cargo build --locked -p rastai-cli
     node --test --test-concurrency=1 tests/e2e/palette.spec.js tests/e2e/basic-advanced.spec.js \
-        tests/e2e/theme.spec.js tests/e2e/accessibility.spec.js
+        tests/e2e/theme.spec.js tests/e2e/accessibility.spec.js tests/e2e/token-presets.spec.js
 
 # Rust by rustfmt (rustfmt.toml), Python by ruff (python/pyproject.toml; tools/checks/pyproject.toml,
 # tools/codegen/pyproject.toml, tools/fixtures/pyproject.toml, tools/github/pyproject.toml,

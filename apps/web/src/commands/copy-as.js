@@ -116,7 +116,13 @@ function cliFlags(field, value) {
  * @returns {string}
  */
 function cliText(value) {
-  return typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value) : String(value);
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 /**

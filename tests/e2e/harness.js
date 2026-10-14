@@ -33,6 +33,11 @@ const SHUTDOWN_LIMIT_MS = 30_000;
 const CLI_LIMIT_MS = 60_000;
 const VIEWPORT = { width: 1024, height: 768 };
 const LOGIN_CODE_PREFIX = "#login=";
+// How many times Ctrl K is pressed before the palette is taken to be stuck. The window's key listener is attached after its
+// first render, so under load a key pressed as soon as the frame shows can come too early; a press that finds the palette
+// already open does nothing but clear its query.
+const PALETTE_OPEN_ATTEMPTS = 5;
+const PALETTE_OPEN_WAIT_MS = 2000;
 
 /** The engines every spec runs in (ui-design, plan M1-54: Chromium and WebKit). */
 export const ENGINES = /** @type {const} */ (["chromium", "webkit"]);
@@ -42,6 +47,7 @@ const LAUNCHERS = { chromium, webkit };
  * @typedef {object} RunningDaemon
  * @property {string} baseUrl       http://127.0.0.1:<port>
  * @property {() => Promise<string>} signInUrl   a fresh sign-in link; each code works once, for a minute
+ * @property {(args: string[]) => Promise<string>} cli   runs `rastai <args> --no-start` against this daemon; the stdout
  * @property {() => Promise<void>} stop
  */
 
@@ -64,6 +70,7 @@ export async function startDaemon() {
   return {
     baseUrl,
     signInUrl: () => freshSignInUrl(environment),
+    cli: (args) => runCli(environment, args),
     stop: () => stopDaemon(home, child, environment),
   };
 }
@@ -170,6 +177,32 @@ async function freshSignInUrl(environment) {
 }
 
 /**
+ * Runs the CLI against the running daemon. The daemon is already up, so the CLI does not start one.
+ * @param {NodeJS.ProcessEnv} environment
+ * @param {string[]} args
+ * @returns {Promise<string>} the command's stdout
+ */
+async function runCli(environment, args) {
+  const { stdout } = await execFileAsync(RASTAI_BINARY, [...args, "--no-start"], {
+    env: environment,
+    timeout: CLI_LIMIT_MS,
+  });
+  return stdout;
+}
+
+/**
+ * The JSON objects a `--json` command printed, one per line (the last line is the command's exit record).
+ * @param {string} stdout
+ * @returns {any[]}
+ */
+export function jsonLines(stdout) {
+  return stdout
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line));
+}
+
+/**
  * Lets the page read and write the clipboard. Chromium grants it by name; WebKit has no such permission, so its tests
  * check the text on the page instead.
  * @param {import("playwright").BrowserContext} context
@@ -255,30 +288,74 @@ export async function setMode(page, label) {
 }
 
 /**
- * The interactive elements of the page's main region, in order, as "role: name". The Basic/Advanced rule compares two of
- * these lists (layout 2.4): what Basic shows must appear, in the same order, in what Advanced shows.
+ * The interactive elements of the page's main region, in order, as "role: accessible name". The Basic/Advanced rule
+ * compares two of these lists (layout 2.4): what Basic shows must appear, in the same order, in what Advanced shows.
+ * The role is the ARIA role a control has (its role attribute, else the role its tag and type give it), and the name
+ * is what a screen reader would say: aria-label, then aria-labelledby, then the label element, then the text.
  * @param {import("playwright").Page} page
  * @returns {Promise<string[]>}
  */
 export async function interactiveElements(page) {
   return page.locator("main#main").evaluate((main) => {
+    const INPUT_ROLES = {
+      checkbox: "checkbox",
+      radio: "radio",
+      range: "slider",
+      button: "button",
+      submit: "button",
+      reset: "button",
+      image: "button",
+    };
+    /** @param {Element} element */
+    const roleOf = (element) => {
+      const explicit = element.getAttribute("role");
+      if (explicit) {
+        return explicit;
+      }
+      if (element.tagName === "A") {
+        return "link";
+      }
+      if (element.tagName === "BUTTON") {
+        return "button";
+      }
+      if (element.tagName === "SELECT") {
+        return "combobox";
+      }
+      if (element.tagName === "TEXTAREA") {
+        return "textbox";
+      }
+      const type = (element.getAttribute("type") ?? "text").toLowerCase();
+      return INPUT_ROLES[type] ?? "textbox";
+    };
+    /** @param {Element} element */
+    const nameOf = (element) => {
+      const ariaLabel = (element.getAttribute("aria-label") ?? "").trim();
+      if (ariaLabel !== "") {
+        return ariaLabel;
+      }
+      const labelledBy = (element.getAttribute("aria-labelledby") ?? "").trim();
+      if (labelledBy !== "") {
+        return labelledBy
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent?.trim() ?? "")
+          .join(" ")
+          .trim();
+      }
+      const labels = [...(element.labels ?? [])]
+        .map((label) => label.textContent?.trim() ?? "")
+        .join(" ")
+        .trim();
+      if (labels !== "") {
+        return labels;
+      }
+      return (element.textContent ?? "").trim() || element.getAttribute("title") || "";
+    };
     const elements = [...main.querySelectorAll("a[href], button, input, select, textarea")];
     return elements
       .filter((element) => element.getClientRects().length > 0)
-      .map((element) => {
-        const labelled = element.labels?.[0]?.textContent?.trim() ?? "";
-        const name = element.getAttribute("aria-label") ?? labelled ?? element.textContent?.trim() ?? "";
-        const role = element.getAttribute("role") ?? element.tagName.toLowerCase();
-        return `${role}: ${name}`;
-      });
+      .map((element) => `${roleOf(element)}: ${nameOf(element)}`);
   });
 }
-
-// How many times Ctrl K is pressed before the palette is taken to be stuck. The window's key listener is attached after its
-// first render, so under load a key pressed as soon as the frame shows can come too early; a press that finds the palette
-// already open does nothing but clear its query.
-const PALETTE_OPEN_ATTEMPTS = 5;
-const PALETTE_OPEN_WAIT_MS = 2000;
 
 /**
  * Opens the command palette with Ctrl K, and waits until its search box shows.

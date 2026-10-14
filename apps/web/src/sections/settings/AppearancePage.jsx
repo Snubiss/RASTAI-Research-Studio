@@ -2,13 +2,15 @@
 // shows before it is made. A change is applied at once through the shell (settings.set). The setting keys show in
 // Advanced only; Basic says what each control does.
 
+import { useEffect, useState } from "react";
+
 import { AdvancedOnly, Checkbox, SegmentedControl, builtInTheme } from "@rastai/ui";
 import { useStore } from "@rastai/plugin";
 
 import { useShell } from "../../app/shell-context.js";
 import { globalMode } from "../../state/mode.js";
 import { readSetting } from "../../state/settings.js";
-import { themeNameFor } from "../../state/theme.js";
+import { themeNameFor, watchMediaQuery } from "../../state/theme.js";
 
 const THEME_CHOICES = [
   { value: "system", label: "System", note: "Light or dark, as your computer is set." },
@@ -37,7 +39,9 @@ export function AppearancePage() {
   const reducedMotion = readSetting(settings, "ui.reduced_motion", false) === true;
   const colorblind = readSetting(settings, "ui.colorblind_palette", false) === true;
   const mode = globalMode(settings);
-  const prefersDark = window.matchMedia(DARK_SCHEME_QUERY).matches;
+  // The preview follows the OS scheme as it changes, not only when something else re-renders the page.
+  const [prefersDark, setPrefersDark] = useState(() => window.matchMedia(DARK_SCHEME_QUERY).matches);
+  useEffect(() => watchMediaQuery(window.matchMedia(DARK_SCHEME_QUERY), setPrefersDark), []);
   const previewTokens = builtInTheme(themeNameFor(themeSetting, prefersDark), {
     density: density === "compact" ? "compact" : "comfortable",
     reducedMotion: reducedMotion,

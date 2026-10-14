@@ -5,13 +5,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
+import { themeVariables } from "../../packages/ui/src/tokens/apply-theme.js";
+import { builtInTheme } from "../../packages/ui/src/tokens/resolve-tokens.js";
 import { LOCKED_PREFIX, LOCKED_TOKENS } from "../../packages/ui/src/tokens/locked.js";
 import { ENGINES, goToSection, openApp, startDaemon } from "./harness.js";
 
 const BACKGROUND_VARIABLE = "--rr-color-background";
 const SPACING_VARIABLE = "--rr-space-3";
-// The radio values of ui.theme's cards (ui-design 6.8); the card's own label text is not a stable name to match.
-const THEME_VALUES = ["system", "light", "dark", "high_contrast"];
+// The options every built-in theme is resolved with here: the page's default density and motion (ui-design 6.8).
+const RESOLVE_OPTIONS = { density: "comfortable", reducedMotion: false, colorblind: false };
 
 for (const engine of ENGINES) {
   describe(`themes in ${engine}`, () => {
@@ -43,21 +45,26 @@ for (const engine of ENGINES) {
         await goToSection(app.page, "Settings");
         // The light base has one locked set and the dark base another. Light, and system with a light OS, show the
         // light set; dark, high contrast (dark base) and system with a dark OS show the dark set. No choice changes a set.
+        // Each choice also checks the shell's own background, so a theme that never applied can't pass on the locked set.
         await themeRadio(app.page, "light").check();
         await waitForLockedBase(app.page, "light");
         assert.deepEqual(await lockedVariables(app.page), lockedFor("light"));
+        await assertShellTheme(app.page, "light", "light");
         for (const value of ["dark", "high_contrast"]) {
           await themeRadio(app.page, value).check();
           await waitForLockedBase(app.page, "dark");
           assert.deepEqual(await lockedVariables(app.page), lockedFor("dark"), `${value} shows the dark locked set`);
+          await assertShellTheme(app.page, value, "dark");
         }
         await themeRadio(app.page, "system").check();
         await app.page.emulateMedia({ colorScheme: "dark" });
         await waitForLockedBase(app.page, "dark");
         assert.deepEqual(await lockedVariables(app.page), lockedFor("dark"), "system with a dark OS");
+        await assertShellTheme(app.page, "system", "dark");
         await app.page.emulateMedia({ colorScheme: "light" });
         await waitForLockedBase(app.page, "light");
         assert.deepEqual(await lockedVariables(app.page), lockedFor("light"), "system with a light OS");
+        await assertShellTheme(app.page, "system", "light");
       } finally {
         await app.close();
         await daemon.stop();
@@ -83,6 +90,35 @@ for (const engine of ENGINES) {
       }
     });
   });
+}
+
+/**
+ * Waits until the shell shows the theme's own colors, then checks the background variable is that theme's. The theme is
+ * named as the card's value; a system choice is shown as the OS scheme it follows.
+ * @param {import("playwright").Page} page
+ * @param {string} value   a ui.theme value: system, light, dark or high_contrast
+ * @param {"light" | "dark"} scheme   the scheme the shell should show (for system, the OS's)
+ */
+async function assertShellTheme(page, value, scheme) {
+  const themeName = value === "system" ? scheme : value;
+  const expected = backgroundOf(themeName);
+  await page.waitForFunction(
+    ([variable, wanted]) => getComputedStyle(document.documentElement).getPropertyValue(variable).trim() === wanted,
+    [BACKGROUND_VARIABLE, expected],
+  );
+  assert.equal(await cssVariable(page, BACKGROUND_VARIABLE), expected, `${value} shows its own background`);
+}
+
+/**
+ * The background variable a built-in theme writes, as the page shows it.
+ * @param {string} themeName   light, dark or high_contrast
+ * @returns {string}
+ */
+function backgroundOf(themeName) {
+  const variables = themeVariables(builtInTheme(themeName, RESOLVE_OPTIONS));
+  const found = variables.find(([name]) => name === BACKGROUND_VARIABLE);
+  assert.ok(found, `${themeName} has a background variable`);
+  return found[1].trim();
 }
 
 /**
