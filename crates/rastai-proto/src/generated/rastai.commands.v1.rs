@@ -20,8 +20,9 @@ pub struct ExecuteRequest {
     /// Check the arguments and permissions and report what would happen, without doing it.
     #[prost(bool, tag="5")]
     pub dry_run: bool,
-    /// Set only by a UI plugin host. It narrows the caller's rights to that plugin's grant and is journaled as
-    /// plugin:<plugin_id>; it can only remove rights, never add them.
+    /// Only the owner may set it (a UI plugin host acting for the owner); any other principal is refused with
+    /// RRS-C1005. It narrows the caller's rights to that plugin's grant and is journaled as plugin:<plugin_id>; it can
+    /// only remove rights, never add them.
     #[prost(string, tag="6")]
     pub acting_plugin_id: ::prost::alloc::string::String,
 }
