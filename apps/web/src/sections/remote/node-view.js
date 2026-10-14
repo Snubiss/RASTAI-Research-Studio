@@ -16,6 +16,15 @@ export function nodeWhere(node) {
 }
 
 /**
+ * Whether the daemon cannot reach a node; the Remote list then shows the RRS-N2001 diagnostic.
+ * @param {string} state
+ * @returns {boolean}
+ */
+export function isUnreachable(state) {
+  return state === UNREACHABLE_STATE;
+}
+
+/**
  * The state pill's tone: connected is ok, unreachable an error, anything else neutral.
  * @param {string} state
  * @returns {"ok" | "error" | "neutral"}
@@ -24,7 +33,7 @@ export function nodeTone(state) {
   if (state === CONNECTED_STATE) {
     return "ok";
   }
-  return state === UNREACHABLE_STATE ? "error" : "neutral";
+  return isUnreachable(state) ? "error" : "neutral";
 }
 
 /**

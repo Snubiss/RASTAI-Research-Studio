@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import { ENGINES, goToSection, highlightEntry, openApp, openPalette, setMode, startDaemon } from "./harness.js";
 
@@ -14,10 +15,12 @@ const SKELETON_TITLES = ["Show status", "List jobs", "Show settings", "Stop the 
 const CREATE_TOKEN_TITLE = "Create an API token";
 const TOKEN_NAME = "ci bot's token";
 const TOKEN_SCOPES_TEXT = '["training", "eval"]';
-// The status lines the palette says after a copy (frame/CommandPalette.jsx).
-const COPIED_TEXT = "Copied.";
+// The status line the palette says after a CLI copy (frame/PaletteDetail.jsx).
 const COPIED_CLI_TEXT = "Copied the CLI line.";
 const SHOW_STATUS_CLI_LINE = "rastai system status";
+// How long a Copy may take to show in the clipboard (Chromium), and how often the clipboard is read meanwhile.
+const CLIPBOARD_WAIT_MS = 5000;
+const CLIPBOARD_POLL_MS = 100;
 
 for (const engine of ENGINES) {
   describe(`the palette in ${engine}`, () => {
@@ -82,13 +85,23 @@ for (const engine of ENGINES) {
         await app.page.getByLabel("Scopes", { exact: true }).fill(TOKEN_SCOPES_TEXT);
         const copyAs = app.page.getByRole("group", { name: "Copy as" });
         await copyAs.getByRole("button", { name: "CLI", exact: true }).click();
-        assert.equal(await copyAndRead(app.page, engine), TOKEN_CREATE_GOLDEN.cli);
+        assert.equal(
+          await copyAndRead(app.page, engine, (text) => text === TOKEN_CREATE_GOLDEN.cli),
+          TOKEN_CREATE_GOLDEN.cli,
+        );
         await copyAs.getByRole("button", { name: "Python", exact: true }).click();
-        assert.equal(await copyAndRead(app.page, engine), TOKEN_CREATE_GOLDEN.python);
+        assert.equal(
+          await copyAndRead(app.page, engine, (text) => text === TOKEN_CREATE_GOLDEN.python),
+          TOKEN_CREATE_GOLDEN.python,
+        );
         await copyAs.getByRole("button", { name: "JavaScript", exact: true }).click();
-        assert.equal(await copyAndRead(app.page, engine), TOKEN_CREATE_GOLDEN.javascript);
+        assert.equal(
+          await copyAndRead(app.page, engine, (text) => text === TOKEN_CREATE_GOLDEN.javascript),
+          TOKEN_CREATE_GOLDEN.javascript,
+        );
         await copyAs.getByRole("button", { name: "MCP", exact: true }).click();
-        assert.deepEqual(JSON.parse(await copyAndRead(app.page, engine)), TOKEN_CREATE_GOLDEN.mcp);
+        const mcpText = await copyAndRead(app.page, engine, (text) => sameJson(text, TOKEN_CREATE_GOLDEN.mcp));
+        assert.deepEqual(JSON.parse(mcpText), TOKEN_CREATE_GOLDEN.mcp);
       } finally {
         await app.close();
         await daemon.stop();
@@ -155,18 +168,40 @@ async function clipboardText(page) {
 }
 
 /**
- * Presses the palette's Copy button and returns what was copied. In Chromium that is the clipboard, and the test waits for
- * the palette to say it copied, so a failed write fails the test. WebKit has no clipboard permission here, so there the
- * text the Copy as block shows (the format's line) stands for what Copy writes.
+ * Presses the palette's Copy button and returns what was copied. In Chromium that is the clipboard: the test waits until
+ * the clipboard holds the text Copy should write, since the palette's "Copied." status from an earlier copy is already
+ * showing and says nothing about this one. A clipboard that never matches returns what it holds, so the assertion shows
+ * it. WebKit has no clipboard permission here, so there the text the Copy as block shows (the format's line) stands for
+ * what Copy writes.
  * @param {import("playwright").Page} page
  * @param {string} engine   "chromium" or "webkit"
+ * @param {(text: string) => boolean} isExpected   true when the text is what Copy should have written
  * @returns {Promise<string>}
  */
-async function copyAndRead(page, engine) {
+async function copyAndRead(page, engine, isExpected) {
   await page.locator(".rr-palette-detail").getByRole("button", { name: "Copy", exact: true }).click();
-  if (engine === "chromium") {
-    await page.locator(".rr-palette-detail__status", { hasText: COPIED_TEXT }).waitFor();
-    return clipboardText(page);
+  if (engine !== "chromium") {
+    return codeText(page);
   }
-  return codeText(page);
+  const deadline = Date.now() + CLIPBOARD_WAIT_MS;
+  let text = await clipboardText(page);
+  while (!isExpected(text) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, CLIPBOARD_POLL_MS));
+    text = await clipboardText(page);
+  }
+  return text;
+}
+
+/**
+ * Whether a text is the same JSON value as the expected one (the MCP format is JSON, so its spacing is not compared).
+ * @param {string} text
+ * @param {unknown} expected
+ * @returns {boolean}
+ */
+function sameJson(text, expected) {
+  try {
+    return isDeepStrictEqual(JSON.parse(text), expected);
+  } catch {
+    return false;
+  }
 }

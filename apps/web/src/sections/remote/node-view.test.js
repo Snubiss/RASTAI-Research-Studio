@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { heartbeatWord, nodeTone, nodeWhere } from "./node-view.js";
+import { heartbeatWord, isUnreachable, nodeTone, nodeWhere } from "./node-view.js";
 
 describe("node words", () => {
   test("the local node is this computer, and an SSH node names its address", () => {
@@ -14,6 +14,12 @@ describe("node words", () => {
     expect(nodeTone("connected")).toBe("ok");
     expect(nodeTone("unreachable")).toBe("error");
     expect(nodeTone("starting")).toBe("neutral");
+  });
+
+  test("only the unreachable state counts as unreachable", () => {
+    expect(isUnreachable("unreachable")).toBe(true);
+    expect(isUnreachable("connected")).toBe(false);
+    expect(isUnreachable("starting")).toBe(false);
   });
 
   test("the heartbeat says how many seconds ago it came, or that none has", () => {

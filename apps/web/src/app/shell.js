@@ -13,7 +13,7 @@ import { watchRoute } from "../routing/navigate.js";
 import { createAppStores } from "../state/app-stores.js";
 import { globalMode } from "../state/mode.js";
 import { withJobProgress, withOnlyListedJobs, withoutEndedJob } from "../state/job-progress.js";
-import { emptySettings, withSetting } from "../state/settings.js";
+import { emptySettings, readSetting, withSetting } from "../state/settings.js";
 import { applyTheme, themeTokensFor, watchMediaQuery } from "../state/theme.js";
 import { pluginDiagnostic } from "@rastai/plugin";
 
@@ -66,6 +66,9 @@ export function createShell(client, options = {}) {
       resyncShell(shell);
     },
   });
+  // The newest setSetting started for each key, and the settings the daemon last confirmed. A refusal puts a key back to
+  // its confirmed value, never to an optimistic one from an earlier write that the daemon also refused.
+  const settingWrites = { latestByKey: new Map(), confirmed: emptySettings() };
   /** @type {Shell} */
   const shell = {
     client,
@@ -75,7 +78,10 @@ export function createShell(client, options = {}) {
     loadedPluginIds: ["core"],
     start: () => startShell(shell),
     stop: () => hub.stop(),
-    applySettings: (result) => applySettings(shell, result),
+    applySettings: (result) => {
+      settingWrites.confirmed = result;
+      showSettings(shell, result);
+    },
     refreshSettings: () => refreshSettings(shell),
     refreshCommands: () => refreshCommands(shell),
     refreshJobs: () => refreshJobs(shell),
@@ -83,10 +89,10 @@ export function createShell(client, options = {}) {
     refreshPlugins: () => refreshPlugins(shell),
     notify: (diagnostic) => notify(shell, diagnostic),
     setMode: (mode) => setMode(shell, mode),
-    setSetting: (key, value) => setSetting(shell, key, value),
+    setSetting: (key, value) => setSetting(shell, settingWrites, key, value),
   };
   shell.coreHost = coreHostOf(shell);
-  applySettings(shell, emptySettings());
+  showSettings(shell, emptySettings());
   return shell;
 }
 
@@ -99,7 +105,7 @@ function startShell(shell) {
   watchRoute(shell.stores.route);
   subscribeShellEvents(shell);
   // The OS scheme and reduced motion both feed the display: a change re-resolves it with the stored settings.
-  const reapply = () => applySettings(shell, shell.stores.settings.get());
+  const reapply = () => showSettings(shell, shell.stores.settings.get());
   watchMediaQuery(window.matchMedia(DARK_SCHEME_QUERY), reapply);
   watchMediaQuery(window.matchMedia(REDUCED_MOTION_QUERY), reapply);
   document.addEventListener("visibilitychange", () => shell.hub.setHidden(document.hidden));
@@ -133,12 +139,13 @@ function subscribeShellEvents(shell) {
 }
 
 /**
- * Stores settings.get's result and resolves the display from it: the mode, and the theme for this OS (system follows
- * the OS scheme, with no command). The theme's variables are written to the page.
+ * Resolves the display from a settings result: the mode, and the theme for this OS (system follows the OS scheme, with
+ * no command). The theme's variables are written to the page. The result is not the daemon's confirmed state unless the
+ * caller says so: shell.applySettings does that, an optimistic change does not.
  * @param {Shell} shell
  * @param {{ values: any, sources: any[] }} result
  */
-function applySettings(shell, result) {
+function showSettings(shell, result) {
   const values = result.values ?? {};
   const theme = themeTokensFor(values, osNow());
   shell.stores.settings.set(result);
@@ -183,19 +190,28 @@ async function setMode(shell, mode) {
 
 /**
  * Any setting: the display follows the new value at once, settings.set writes it, and the answer's settings replace the
- * shown ones. A refusal restores the stored settings and shows the daemon's diagnostic.
+ * shown ones. A refusal puts back the value the daemon last confirmed for this key, so a change to another key that
+ * landed meanwhile stays. It does nothing when a later change to this key has started, which then decides the key.
+ * The daemon's diagnostic is shown.
  * @param {Shell} shell
+ * @param {{ latestByKey: Map<string, number>, confirmed: { values: any, sources: any[] } }} settingWrites
+ *   the newest write started for each key, and the settings the daemon last confirmed
  * @param {string} key   a dotted key, such as "ui.density"
  * @param {any} value
  */
-async function setSetting(shell, key, value) {
-  const stored = shell.stores.settings.get();
-  shell.applySettings(withSetting(stored, key, value));
+async function setSetting(shell, settingWrites, key, value) {
+  const sequence = (settingWrites.latestByKey.get(key) ?? 0) + 1;
+  settingWrites.latestByKey.set(key, sequence);
+  showSettings(shell, withSetting(shell.stores.settings.get(), key, value));
   const outcome = await settingsSet(shell.client, { key, value });
   if (outcome.ok) {
+    settingWrites.confirmed = withSetting(settingWrites.confirmed, key, value);
     await refreshSettings(shell);
   } else {
-    shell.applySettings(stored);
+    if (settingWrites.latestByKey.get(key) === sequence) {
+      const confirmedValue = readSetting(settingWrites.confirmed.values, key, undefined);
+      showSettings(shell, withSetting(shell.stores.settings.get(), key, confirmedValue));
+    }
     outcome.diagnostics.forEach((diagnostic) => notify(shell, diagnostic));
   }
 }

@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 
-import { ENGINES, goToSection, openApp, setMode, startDaemon } from "./harness.js";
+import { ENGINES, goToSection, openApp, openPalette, setMode, startDaemon } from "./harness.js";
 
 // axe-core is the web app's dev dependency (apps/web/package.json); its own script is the one the page loads.
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -32,6 +32,10 @@ const SECTIONS = [
 ];
 const COLOR_SCHEMES = ["light", "dark"];
 const MODES = ["Basic", "Advanced"];
+// The built-in high contrast theme is chosen on the Settings page, as theme.spec.js chooses it.
+const HIGH_CONTRAST_THEME = "high_contrast";
+// The name typed before Create token, so the locked prompt opens (it needs a name).
+const PROMPT_TOKEN_NAME = "axe check";
 
 for (const engine of ENGINES) {
   describe(`accessibility in ${engine}`, () => {
@@ -53,6 +57,62 @@ for (const engine of ENGINES) {
           } finally {
             await app.close();
           }
+        }
+      } finally {
+        await daemon.stop();
+      }
+    });
+
+    test("no WCAG 2.2 AA violation in the high contrast theme on any section", async () => {
+      const daemon = await startDaemon();
+      try {
+        const app = await openApp(engine, daemon);
+        try {
+          await app.page.evaluate(AXE_SOURCE);
+          await goToSection(app.page, "Settings");
+          await app.page.locator(`input[name="theme"][value="${HIGH_CONTRAST_THEME}"]`).check();
+          for (const section of SECTIONS) {
+            await goToSection(app.page, section);
+            const violations = await axeViolations(app.page);
+            assert.deepEqual(violations, [], `${section} in the ${HIGH_CONTRAST_THEME} theme`);
+          }
+        } finally {
+          await app.close();
+        }
+      } finally {
+        await daemon.stop();
+      }
+    });
+
+    test("no WCAG 2.2 AA violation with the command palette open", async () => {
+      const daemon = await startDaemon();
+      try {
+        const app = await openApp(engine, daemon);
+        try {
+          await app.page.evaluate(AXE_SOURCE);
+          await openPalette(app.page);
+          assert.deepEqual(await axeViolations(app.page), [], "the command palette is open");
+        } finally {
+          await app.close();
+        }
+      } finally {
+        await daemon.stop();
+      }
+    });
+
+    test("no WCAG 2.2 AA violation with the locked token prompt open", async () => {
+      const daemon = await startDaemon();
+      try {
+        const app = await openApp(engine, daemon);
+        try {
+          await app.page.evaluate(AXE_SOURCE);
+          await goToSection(app.page, "Settings");
+          await app.page.getByLabel("Token name", { exact: true }).fill(PROMPT_TOKEN_NAME);
+          await app.page.getByRole("button", { name: "Create token", exact: true }).click();
+          await app.page.getByRole("dialog").waitFor();
+          assert.deepEqual(await axeViolations(app.page), [], "the token prompt is open");
+        } finally {
+          await app.close();
         }
       } finally {
         await daemon.stop();

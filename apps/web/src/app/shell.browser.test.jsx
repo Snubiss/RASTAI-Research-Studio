@@ -4,7 +4,7 @@
 
 import { describe, expect, test, vi } from "vitest";
 
-import { answered, busEvent, testShell } from "../testing/fake-shell.js";
+import { answered, busEvent, refused, testShell } from "../testing/fake-shell.js";
 import { inAct } from "../testing/render.js";
 
 /**
@@ -70,5 +70,95 @@ describe("the lists follow their events", () => {
       stream.emit(busEvent("node.state_changed", "node_local", { payload: { case: "nodeStateChanged", value } })),
     );
     await vi.waitFor(() => expect(shell.stores.nodes.get()).toEqual([{ node_id: "node_local", name: "local" }]));
+  });
+});
+
+describe("a refused setting puts back only its own key", () => {
+  /**
+   * A settings.set the test answers by hand: each write waits in `pending` until the test resolves it.
+   * @returns {{ pending: { args: any, resolve: (outcome: any) => void }[], answer: (args: any) => Promise<any> }}
+   */
+  function heldWrites() {
+    /** @type {{ args: any, resolve: (outcome: any) => void }[]} */
+    const pending = [];
+    return {
+      pending,
+      answer: (args) => new Promise((resolve) => pending.push({ args, resolve })),
+    };
+  }
+
+  /** @param {any[]} pending @param {string} key */
+  function writeFor(pending, key) {
+    return pending.find((write) => write.args.key === key);
+  }
+
+  /** @param {any[]} pending @param {any} value */
+  function writeWithValue(pending, value) {
+    return pending.find((write) => write.args.value === value);
+  }
+
+  test("a refusal of one key keeps a later change to another key", async () => {
+    const daemon = { ui: { density: "comfortable", reduced_motion: false } };
+    const writes = heldWrites();
+    const { shell } = await testShell({
+      answers: {
+        "settings.get": () => answered({ values: structuredClone(daemon), sources: [] }),
+        "settings.set": writes.answer,
+      },
+    });
+    // The window reads the settings at boot, before any change; the writes start from those stored values.
+    shell.applySettings({ values: structuredClone(daemon), sources: [] });
+    const first = shell.setSetting("ui.density", "compact");
+    const second = shell.setSetting("ui.reduced_motion", true);
+    daemon.ui.reduced_motion = true;
+    writeFor(writes.pending, "ui.reduced_motion").resolve(answered({}));
+    await second;
+    writeFor(writes.pending, "ui.density").resolve(refused("RRS-C1005", "settings.set"));
+    await first;
+    const values = shell.stores.settings.get().values;
+    expect(values.ui.reduced_motion).toBe(true);
+    expect(values.ui.density).toBe("comfortable");
+  });
+
+  test("a refusal does not undo a later change to the same key", async () => {
+    const daemon = { ui: { density: "comfortable", reduced_motion: false } };
+    const writes = heldWrites();
+    const { shell } = await testShell({
+      answers: {
+        "settings.get": () => answered({ values: structuredClone(daemon), sources: [] }),
+        "settings.set": writes.answer,
+      },
+    });
+    // The window reads the settings at boot, before any change; the writes start from those stored values.
+    shell.applySettings({ values: structuredClone(daemon), sources: [] });
+    const first = shell.setSetting("ui.density", "compact");
+    const second = shell.setSetting("ui.density", "dense");
+    daemon.ui.density = "dense";
+    writeWithValue(writes.pending, "dense").resolve(answered({}));
+    await second;
+    writeWithValue(writes.pending, "compact").resolve(refused("RRS-C1005", "settings.set"));
+    await first;
+    expect(shell.stores.settings.get().values.ui.density).toBe("dense");
+  });
+
+  test("two refused writes to one key show the value the daemon kept", async () => {
+    const daemon = { ui: { density: "comfortable", reduced_motion: false } };
+    const writes = heldWrites();
+    const { shell } = await testShell({
+      answers: {
+        "settings.get": () => answered({ values: structuredClone(daemon), sources: [] }),
+        "settings.set": writes.answer,
+      },
+    });
+    // The window reads the settings at boot, before any change; the writes start from those stored values.
+    shell.applySettings({ values: structuredClone(daemon), sources: [] });
+    const first = shell.setSetting("ui.density", "compact");
+    const second = shell.setSetting("ui.density", "dense");
+    // Both are refused, so the second must not restore the first one's unconfirmed "compact".
+    writeWithValue(writes.pending, "compact").resolve(refused("RRS-C1005", "settings.set"));
+    await first;
+    writeWithValue(writes.pending, "dense").resolve(refused("RRS-C1005", "settings.set"));
+    await second;
+    expect(shell.stores.settings.get().values.ui.density).toBe("comfortable");
   });
 });
