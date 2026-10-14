@@ -27,7 +27,7 @@ from rastai_proto.common.v1 import hardware_pb2 as rastai_dot_common_dot_v1_dot_
 from rastai_proto.common.v1 import states_pb2 as rastai_dot_common_dot_v1_dot_states__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1frastai/events/v1/payloads.proto\x12\x10rastai.events.v1\x1a!rastai/common/v1/diagnostic.proto\x1a\x1frastai/common/v1/hardware.proto\x1a\x1drastai/common/v1/states.proto\"\xed\t\n\x0c\x45ventPayload\x12O\n\x11job_state_changed\x18\x01 \x01(\x0b\x32!.rastai.events.v1.JobStateChangedH\x00R\x0fjobStateChanged\x12\x42\n\x0cjob_progress\x18\x02 \x01(\x0b\x32\x1d.rastai.events.v1.JobProgressH\x00R\x0bjobProgress\x12@\n\x0cjob_log_line\x18\x03 \x01(\x0b\x32\x1c.rastai.events.v1.JobLogLineH\x00R\njobLogLine\x12O\n\x11run_state_changed\x18\x04 \x01(\x0b\x32!.rastai.events.v1.RunStateChangedH\x00R\x0frunStateChanged\x12?\n\x0brun_metrics\x18\x05 \x01(\x0b\x32\x1c.rastai.events.v1.RunMetricsH\x00R\nrunMetrics\x12L\n\x10run_tags_changed\x18\x06 \x01(\x0b\x32 .rastai.events.v1.RunTagsChangedH\x00R\x0erunTagsChanged\x12N\n\x10\x63heckpoint_saved\x18\x07 \x01(\x0b\x32!.rastai.events.v1.CheckpointSavedH\x00R\x0f\x63heckpointSaved\x12N\n\x10\x61rtifact_created\x18\x08 \x01(\x0b\x32!.rastai.events.v1.ArtifactCreatedH\x00R\x0f\x61rtifactCreated\x12?\n\x0bpin_changed\x18\t \x01(\x0b\x32\x1c.rastai.events.v1.PinChangedH\x00R\npinChanged\x12H\n\x0enode_heartbeat\x18\n \x01(\x0b\x32\x1f.rastai.common.v1.NodeTelemetryH\x00R\rnodeHeartbeat\x12R\n\x12node_state_changed\x18\x0b \x01(\x0b\x32\".rastai.events.v1.NodeStateChangedH\x00R\x10nodeStateChanged\x12N\n\x10\x64ocument_changed\x18\x0c \x01(\x0b\x32!.rastai.events.v1.DocumentChangedH\x00R\x0f\x64ocumentChanged\x12N\n\x10\x63ommand_finished\x18\r \x01(\x0b\x32!.rastai.events.v1.CommandFinishedH\x00R\x0f\x63ommandFinished\x12X\n\x14plugin_state_changed\x18\x0e \x01(\x0b\x32$.rastai.events.v1.PluginStateChangedH\x00R\x12pluginStateChanged\x12W\n\x13\x64iagnostic_reported\x18\x0f \x01(\x0b\x32$.rastai.events.v1.DiagnosticReportedH\x00R\x12\x64iagnosticReported\x12I\n\x0cplugin_event\x18\x10 \x01(\x0b\x32$.rastai.events.v1.PluginEventPayloadH\x00R\x0bpluginEventB\t\n\x07payload\"\xa0\x02\n\x0fJobStateChanged\x12\x15\n\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x39\n\nfrom_state\x18\x02 \x01(\x0e\x32\x1a.rastai.common.v1.JobStateR\tfromState\x12\x35\n\x08to_state\x18\x03 \x01(\x0e\x32\x1a.rastai.common.v1.JobStateR\x07toState\x12\x16\n\x06reason\x18\x04 \x01(\tR\x06reason\x12 \n\texit_code\x18\x05 \x01(\x05H\x00R\x08\x65xitCode\x88\x01\x01\x12<\n\ndiagnostic\x18\x06 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnosticB\x0c\n\n_exit_code\"C\n\x0bJobProgress\x12\x1a\n\x08\x66raction\x18\x01 \x01(\x02R\x08\x66raction\x12\x18\n\x07message\x18\x02 \x01(\tR\x07message\"U\n\nJobLogLine\x12\x33\n\x06stream\x18\x01 \x01(\x0e\x32\x1b.rastai.events.v1.LogStreamR\x06stream\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\"\xb5\x01\n\x0fRunStateChanged\x12\x16\n\x06reason\x18\x01 \x01(\tR\x06reason\x12\x39\n\trun_state\x18\x02 \x01(\x0e\x32\x1a.rastai.common.v1.RunStateH\x00R\x08runState\x12\x46\n\x0e\x65val_run_state\x18\x03 \x01(\x0e\x32\x1e.rastai.common.v1.EvalRunStateH\x00R\x0c\x65valRunStateB\x07\n\x05state\"\x9d\x01\n\nRunMetrics\x12\x12\n\x04step\x18\x01 \x01(\x04R\x04step\x12@\n\x06values\x18\x02 \x03(\x0b\x32(.rastai.events.v1.RunMetrics.ValuesEntryR\x06values\x1a\x39\n\x0bValuesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x01R\x05value:\x02\x38\x01\";\n\x0eRunTagsChanged\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x12\n\x04tags\x18\x02 \x03(\tR\x04tags\"\x8e\x02\n\x0f\x43heckpointSaved\x12#\n\rcheckpoint_id\x18\x01 \x01(\tR\x0c\x63heckpointId\x12\x12\n\x04step\x18\x02 \x01(\x04R\x04step\x12\x16\n\x06\x66older\x18\x03 \x01(\tR\x06\x66older\x12R\n\x0b\x66ile_hashes\x18\x04 \x03(\x0b\x32\x31.rastai.events.v1.CheckpointSaved.FileHashesEntryR\nfileHashes\x12\x17\n\x07is_best\x18\x05 \x01(\x08R\x06isBest\x1a=\n\x0f\x46ileHashesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x02\x38\x01\"\xe6\x01\n\x0f\x41rtifactCreated\x12\x1f\n\x0b\x61rtifact_id\x18\x01 \x01(\tR\nartifactId\x12\x12\n\x04kind\x18\x02 \x01(\tR\x04kind\x12!\n\x0c\x63ontent_hash\x18\x03 \x01(\tR\x0b\x63ontentHash\x12\x1d\n\nsize_bytes\x18\x04 \x01(\x04R\tsizeBytes\x12 \n\x0chome_node_id\x18\x05 \x01(\tR\nhomeNodeId\x12:\n\x07parents\x18\x06 \x03(\x0b\x32 .rastai.events.v1.ArtifactParentR\x07parents\"<\n\x0e\x41rtifactParent\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n\x08relation\x18\x02 \x01(\tR\x08relation\"f\n\nPinChanged\x12!\n\x0csubject_kind\x18\x01 \x01(\tR\x0bsubjectKind\x12\x1d\n\nsubject_id\x18\x02 \x01(\tR\tsubjectId\x12\x16\n\x06pinned\x18\x03 \x01(\x08R\x06pinned\"\x9f\x01\n\x10NodeStateChanged\x12\x17\n\x07node_id\x18\x01 \x01(\tR\x06nodeId\x12:\n\nfrom_state\x18\x02 \x01(\x0e\x32\x1b.rastai.common.v1.NodeStateR\tfromState\x12\x36\n\x08to_state\x18\x03 \x01(\x0e\x32\x1b.rastai.common.v1.NodeStateR\x07toState\"z\n\x0f\x44ocumentChanged\x12\x1f\n\x0b\x64ocument_id\x18\x01 \x01(\tR\ndocumentId\x12!\n\x0c\x63ontent_hash\x18\x02 \x01(\tR\x0b\x63ontentHash\x12#\n\rundo_position\x18\x03 \x01(\x04R\x0cundoPosition\"\x91\x01\n\x0f\x43ommandFinished\x12\x1d\n\njournal_id\x18\x01 \x01(\tR\tjournalId\x12\x1d\n\ncommand_id\x18\x02 \x01(\tR\tcommandId\x12\x1c\n\tprincipal\x18\x03 \x01(\tR\tprincipal\x12\x0e\n\x02ok\x18\x04 \x01(\x08R\x02ok\x12\x12\n\x04\x63ode\x18\x05 \x01(\tR\x04\x63ode\"\xe7\x01\n\x12PluginStateChanged\x12\x1b\n\tplugin_id\x18\x01 \x01(\tR\x08pluginId\x12<\n\nfrom_state\x18\x02 \x01(\x0e\x32\x1d.rastai.common.v1.PluginStateR\tfromState\x12\x38\n\x08to_state\x18\x03 \x01(\x0e\x32\x1d.rastai.common.v1.PluginStateR\x07toState\x12<\n\ndiagnostic\x18\x04 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\"q\n\x12\x44iagnosticReported\x12<\n\ndiagnostic\x18\x01 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\x12\x1d\n\nsubject_id\x18\x02 \x01(\tR\tsubjectId\"l\n\x12PluginEventPayload\x12\x1b\n\tplugin_id\x18\x01 \x01(\tR\x08pluginId\x12\x16\n\x06schema\x18\x02 \x01(\tR\x06schema\x12!\n\x0cpayload_json\x18\x03 \x01(\tR\x0bpayloadJson*U\n\tLogStream\x12\x1a\n\x16LOG_STREAM_UNSPECIFIED\x10\x00\x12\x15\n\x11LOG_STREAM_STDOUT\x10\x01\x12\x15\n\x11LOG_STREAM_STDERR\x10\x02\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1frastai/events/v1/payloads.proto\x12\x10rastai.events.v1\x1a!rastai/common/v1/diagnostic.proto\x1a\x1frastai/common/v1/hardware.proto\x1a\x1drastai/common/v1/states.proto\"\xda\x0b\n\x0c\x45ventPayload\x12O\n\x11job_state_changed\x18\x01 \x01(\x0b\x32!.rastai.events.v1.JobStateChangedH\x00R\x0fjobStateChanged\x12\x42\n\x0cjob_progress\x18\x02 \x01(\x0b\x32\x1d.rastai.events.v1.JobProgressH\x00R\x0bjobProgress\x12@\n\x0cjob_log_line\x18\x03 \x01(\x0b\x32\x1c.rastai.events.v1.JobLogLineH\x00R\njobLogLine\x12O\n\x11run_state_changed\x18\x04 \x01(\x0b\x32!.rastai.events.v1.RunStateChangedH\x00R\x0frunStateChanged\x12?\n\x0brun_metrics\x18\x05 \x01(\x0b\x32\x1c.rastai.events.v1.RunMetricsH\x00R\nrunMetrics\x12L\n\x10run_tags_changed\x18\x06 \x01(\x0b\x32 .rastai.events.v1.RunTagsChangedH\x00R\x0erunTagsChanged\x12N\n\x10\x63heckpoint_saved\x18\x07 \x01(\x0b\x32!.rastai.events.v1.CheckpointSavedH\x00R\x0f\x63heckpointSaved\x12N\n\x10\x61rtifact_created\x18\x08 \x01(\x0b\x32!.rastai.events.v1.ArtifactCreatedH\x00R\x0f\x61rtifactCreated\x12?\n\x0bpin_changed\x18\t \x01(\x0b\x32\x1c.rastai.events.v1.PinChangedH\x00R\npinChanged\x12H\n\x0enode_heartbeat\x18\n \x01(\x0b\x32\x1f.rastai.common.v1.NodeTelemetryH\x00R\rnodeHeartbeat\x12R\n\x12node_state_changed\x18\x0b \x01(\x0b\x32\".rastai.events.v1.NodeStateChangedH\x00R\x10nodeStateChanged\x12N\n\x10\x64ocument_changed\x18\x0c \x01(\x0b\x32!.rastai.events.v1.DocumentChangedH\x00R\x0f\x64ocumentChanged\x12N\n\x10\x63ommand_finished\x18\r \x01(\x0b\x32!.rastai.events.v1.CommandFinishedH\x00R\x0f\x63ommandFinished\x12X\n\x14plugin_state_changed\x18\x0e \x01(\x0b\x32$.rastai.events.v1.PluginStateChangedH\x00R\x12pluginStateChanged\x12W\n\x13\x64iagnostic_reported\x18\x0f \x01(\x0b\x32$.rastai.events.v1.DiagnosticReportedH\x00R\x12\x64iagnosticReported\x12I\n\x0cplugin_event\x18\x10 \x01(\x0b\x32$.rastai.events.v1.PluginEventPayloadH\x00R\x0bpluginEvent\x12Q\n\x11\x64ownload_progress\x18\x11 \x01(\x0b\x32\".rastai.events.v1.DownloadProgressH\x00R\x10\x64ownloadProgress\x12Q\n\x11\x64ownload_finished\x18\x12 \x01(\x0b\x32\".rastai.events.v1.DownloadFinishedH\x00R\x10\x64ownloadFinished\x12\x45\n\regress_active\x18\x13 \x01(\x0b\x32\x1e.rastai.events.v1.EgressActiveH\x00R\x0c\x65gressActiveB\t\n\x07payload\"\xa0\x02\n\x0fJobStateChanged\x12\x15\n\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x39\n\nfrom_state\x18\x02 \x01(\x0e\x32\x1a.rastai.common.v1.JobStateR\tfromState\x12\x35\n\x08to_state\x18\x03 \x01(\x0e\x32\x1a.rastai.common.v1.JobStateR\x07toState\x12\x16\n\x06reason\x18\x04 \x01(\tR\x06reason\x12 \n\texit_code\x18\x05 \x01(\x05H\x00R\x08\x65xitCode\x88\x01\x01\x12<\n\ndiagnostic\x18\x06 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnosticB\x0c\n\n_exit_code\"C\n\x0bJobProgress\x12\x1a\n\x08\x66raction\x18\x01 \x01(\x02R\x08\x66raction\x12\x18\n\x07message\x18\x02 \x01(\tR\x07message\"U\n\nJobLogLine\x12\x33\n\x06stream\x18\x01 \x01(\x0e\x32\x1b.rastai.events.v1.LogStreamR\x06stream\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\"\xb5\x01\n\x0fRunStateChanged\x12\x16\n\x06reason\x18\x01 \x01(\tR\x06reason\x12\x39\n\trun_state\x18\x02 \x01(\x0e\x32\x1a.rastai.common.v1.RunStateH\x00R\x08runState\x12\x46\n\x0e\x65val_run_state\x18\x03 \x01(\x0e\x32\x1e.rastai.common.v1.EvalRunStateH\x00R\x0c\x65valRunStateB\x07\n\x05state\"\x9d\x01\n\nRunMetrics\x12\x12\n\x04step\x18\x01 \x01(\x04R\x04step\x12@\n\x06values\x18\x02 \x03(\x0b\x32(.rastai.events.v1.RunMetrics.ValuesEntryR\x06values\x1a\x39\n\x0bValuesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x01R\x05value:\x02\x38\x01\";\n\x0eRunTagsChanged\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x12\n\x04tags\x18\x02 \x03(\tR\x04tags\"\x8e\x02\n\x0f\x43heckpointSaved\x12#\n\rcheckpoint_id\x18\x01 \x01(\tR\x0c\x63heckpointId\x12\x12\n\x04step\x18\x02 \x01(\x04R\x04step\x12\x16\n\x06\x66older\x18\x03 \x01(\tR\x06\x66older\x12R\n\x0b\x66ile_hashes\x18\x04 \x03(\x0b\x32\x31.rastai.events.v1.CheckpointSaved.FileHashesEntryR\nfileHashes\x12\x17\n\x07is_best\x18\x05 \x01(\x08R\x06isBest\x1a=\n\x0f\x46ileHashesEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x02\x38\x01\"\xe6\x01\n\x0f\x41rtifactCreated\x12\x1f\n\x0b\x61rtifact_id\x18\x01 \x01(\tR\nartifactId\x12\x12\n\x04kind\x18\x02 \x01(\tR\x04kind\x12!\n\x0c\x63ontent_hash\x18\x03 \x01(\tR\x0b\x63ontentHash\x12\x1d\n\nsize_bytes\x18\x04 \x01(\x04R\tsizeBytes\x12 \n\x0chome_node_id\x18\x05 \x01(\tR\nhomeNodeId\x12:\n\x07parents\x18\x06 \x03(\x0b\x32 .rastai.events.v1.ArtifactParentR\x07parents\"<\n\x0e\x41rtifactParent\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n\x08relation\x18\x02 \x01(\tR\x08relation\"f\n\nPinChanged\x12!\n\x0csubject_kind\x18\x01 \x01(\tR\x0bsubjectKind\x12\x1d\n\nsubject_id\x18\x02 \x01(\tR\tsubjectId\x12\x16\n\x06pinned\x18\x03 \x01(\x08R\x06pinned\"\x9f\x01\n\x10NodeStateChanged\x12\x17\n\x07node_id\x18\x01 \x01(\tR\x06nodeId\x12:\n\nfrom_state\x18\x02 \x01(\x0e\x32\x1b.rastai.common.v1.NodeStateR\tfromState\x12\x36\n\x08to_state\x18\x03 \x01(\x0e\x32\x1b.rastai.common.v1.NodeStateR\x07toState\"z\n\x0f\x44ocumentChanged\x12\x1f\n\x0b\x64ocument_id\x18\x01 \x01(\tR\ndocumentId\x12!\n\x0c\x63ontent_hash\x18\x02 \x01(\tR\x0b\x63ontentHash\x12#\n\rundo_position\x18\x03 \x01(\x04R\x0cundoPosition\"\x91\x01\n\x0f\x43ommandFinished\x12\x1d\n\njournal_id\x18\x01 \x01(\tR\tjournalId\x12\x1d\n\ncommand_id\x18\x02 \x01(\tR\tcommandId\x12\x1c\n\tprincipal\x18\x03 \x01(\tR\tprincipal\x12\x0e\n\x02ok\x18\x04 \x01(\x08R\x02ok\x12\x12\n\x04\x63ode\x18\x05 \x01(\tR\x04\x63ode\"\xe7\x01\n\x12PluginStateChanged\x12\x1b\n\tplugin_id\x18\x01 \x01(\tR\x08pluginId\x12<\n\nfrom_state\x18\x02 \x01(\x0e\x32\x1d.rastai.common.v1.PluginStateR\tfromState\x12\x38\n\x08to_state\x18\x03 \x01(\x0e\x32\x1d.rastai.common.v1.PluginStateR\x07toState\x12<\n\ndiagnostic\x18\x04 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\"q\n\x12\x44iagnosticReported\x12<\n\ndiagnostic\x18\x01 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\x12\x1d\n\nsubject_id\x18\x02 \x01(\tR\tsubjectId\"l\n\x12PluginEventPayload\x12\x1b\n\tplugin_id\x18\x01 \x01(\tR\x08pluginId\x12\x16\n\x06schema\x18\x02 \x01(\tR\x06schema\x12!\n\x0cpayload_json\x18\x03 \x01(\tR\x0bpayloadJson\"o\n\x10\x44ownloadProgress\x12\x1b\n\tmodel_ref\x18\x01 \x01(\tR\x08modelRef\x12\x1d\n\nbytes_done\x18\x02 \x01(\x04R\tbytesDone\x12\x1f\n\x0b\x62ytes_total\x18\x03 \x01(\x04R\nbytesTotal\"\xd7\x01\n\x10\x44ownloadFinished\x12\x1b\n\tmodel_ref\x18\x01 \x01(\tR\x08modelRef\x12\x1a\n\x08revision\x18\x02 \x01(\tR\x08revision\x12\x0e\n\x02ok\x18\x03 \x01(\x08R\x02ok\x12\x1d\n\nmodel_hash\x18\x04 \x01(\tR\tmodelHash\x12\x1d\n\nsize_bytes\x18\x05 \x01(\x04R\tsizeBytes\x12<\n\ndiagnostic\x18\x06 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\"[\n\x0c\x45gressActive\x12\x18\n\x07purpose\x18\x01 \x01(\tR\x07purpose\x12\x12\n\x04host\x18\x02 \x01(\tR\x04host\x12\x1d\n\nsubject_id\x18\x03 \x01(\tR\tsubjectId*U\n\tLogStream\x12\x1a\n\x16LOG_STREAM_UNSPECIFIED\x10\x00\x12\x15\n\x11LOG_STREAM_STDOUT\x10\x01\x12\x15\n\x11LOG_STREAM_STDERR\x10\x02\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -38,44 +38,50 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_RUNMETRICS_VALUESENTRY']._serialized_options = b'8\001'
   _globals['_CHECKPOINTSAVED_FILEHASHESENTRY']._loaded_options = None
   _globals['_CHECKPOINTSAVED_FILEHASHESENTRY']._serialized_options = b'8\001'
-  _globals['_LOGSTREAM']._serialized_start=3833
-  _globals['_LOGSTREAM']._serialized_end=3918
+  _globals['_LOGSTREAM']._serialized_start=4494
+  _globals['_LOGSTREAM']._serialized_end=4579
   _globals['_EVENTPAYLOAD']._serialized_start=153
-  _globals['_EVENTPAYLOAD']._serialized_end=1414
-  _globals['_JOBSTATECHANGED']._serialized_start=1417
-  _globals['_JOBSTATECHANGED']._serialized_end=1705
-  _globals['_JOBPROGRESS']._serialized_start=1707
-  _globals['_JOBPROGRESS']._serialized_end=1774
-  _globals['_JOBLOGLINE']._serialized_start=1776
-  _globals['_JOBLOGLINE']._serialized_end=1861
-  _globals['_RUNSTATECHANGED']._serialized_start=1864
-  _globals['_RUNSTATECHANGED']._serialized_end=2045
-  _globals['_RUNMETRICS']._serialized_start=2048
-  _globals['_RUNMETRICS']._serialized_end=2205
-  _globals['_RUNMETRICS_VALUESENTRY']._serialized_start=2148
-  _globals['_RUNMETRICS_VALUESENTRY']._serialized_end=2205
-  _globals['_RUNTAGSCHANGED']._serialized_start=2207
-  _globals['_RUNTAGSCHANGED']._serialized_end=2266
-  _globals['_CHECKPOINTSAVED']._serialized_start=2269
-  _globals['_CHECKPOINTSAVED']._serialized_end=2539
-  _globals['_CHECKPOINTSAVED_FILEHASHESENTRY']._serialized_start=2478
-  _globals['_CHECKPOINTSAVED_FILEHASHESENTRY']._serialized_end=2539
-  _globals['_ARTIFACTCREATED']._serialized_start=2542
-  _globals['_ARTIFACTCREATED']._serialized_end=2772
-  _globals['_ARTIFACTPARENT']._serialized_start=2774
-  _globals['_ARTIFACTPARENT']._serialized_end=2834
-  _globals['_PINCHANGED']._serialized_start=2836
-  _globals['_PINCHANGED']._serialized_end=2938
-  _globals['_NODESTATECHANGED']._serialized_start=2941
-  _globals['_NODESTATECHANGED']._serialized_end=3100
-  _globals['_DOCUMENTCHANGED']._serialized_start=3102
-  _globals['_DOCUMENTCHANGED']._serialized_end=3224
-  _globals['_COMMANDFINISHED']._serialized_start=3227
-  _globals['_COMMANDFINISHED']._serialized_end=3372
-  _globals['_PLUGINSTATECHANGED']._serialized_start=3375
-  _globals['_PLUGINSTATECHANGED']._serialized_end=3606
-  _globals['_DIAGNOSTICREPORTED']._serialized_start=3608
-  _globals['_DIAGNOSTICREPORTED']._serialized_end=3721
-  _globals['_PLUGINEVENTPAYLOAD']._serialized_start=3723
-  _globals['_PLUGINEVENTPAYLOAD']._serialized_end=3831
+  _globals['_EVENTPAYLOAD']._serialized_end=1651
+  _globals['_JOBSTATECHANGED']._serialized_start=1654
+  _globals['_JOBSTATECHANGED']._serialized_end=1942
+  _globals['_JOBPROGRESS']._serialized_start=1944
+  _globals['_JOBPROGRESS']._serialized_end=2011
+  _globals['_JOBLOGLINE']._serialized_start=2013
+  _globals['_JOBLOGLINE']._serialized_end=2098
+  _globals['_RUNSTATECHANGED']._serialized_start=2101
+  _globals['_RUNSTATECHANGED']._serialized_end=2282
+  _globals['_RUNMETRICS']._serialized_start=2285
+  _globals['_RUNMETRICS']._serialized_end=2442
+  _globals['_RUNMETRICS_VALUESENTRY']._serialized_start=2385
+  _globals['_RUNMETRICS_VALUESENTRY']._serialized_end=2442
+  _globals['_RUNTAGSCHANGED']._serialized_start=2444
+  _globals['_RUNTAGSCHANGED']._serialized_end=2503
+  _globals['_CHECKPOINTSAVED']._serialized_start=2506
+  _globals['_CHECKPOINTSAVED']._serialized_end=2776
+  _globals['_CHECKPOINTSAVED_FILEHASHESENTRY']._serialized_start=2715
+  _globals['_CHECKPOINTSAVED_FILEHASHESENTRY']._serialized_end=2776
+  _globals['_ARTIFACTCREATED']._serialized_start=2779
+  _globals['_ARTIFACTCREATED']._serialized_end=3009
+  _globals['_ARTIFACTPARENT']._serialized_start=3011
+  _globals['_ARTIFACTPARENT']._serialized_end=3071
+  _globals['_PINCHANGED']._serialized_start=3073
+  _globals['_PINCHANGED']._serialized_end=3175
+  _globals['_NODESTATECHANGED']._serialized_start=3178
+  _globals['_NODESTATECHANGED']._serialized_end=3337
+  _globals['_DOCUMENTCHANGED']._serialized_start=3339
+  _globals['_DOCUMENTCHANGED']._serialized_end=3461
+  _globals['_COMMANDFINISHED']._serialized_start=3464
+  _globals['_COMMANDFINISHED']._serialized_end=3609
+  _globals['_PLUGINSTATECHANGED']._serialized_start=3612
+  _globals['_PLUGINSTATECHANGED']._serialized_end=3843
+  _globals['_DIAGNOSTICREPORTED']._serialized_start=3845
+  _globals['_DIAGNOSTICREPORTED']._serialized_end=3958
+  _globals['_PLUGINEVENTPAYLOAD']._serialized_start=3960
+  _globals['_PLUGINEVENTPAYLOAD']._serialized_end=4068
+  _globals['_DOWNLOADPROGRESS']._serialized_start=4070
+  _globals['_DOWNLOADPROGRESS']._serialized_end=4181
+  _globals['_DOWNLOADFINISHED']._serialized_start=4184
+  _globals['_DOWNLOADFINISHED']._serialized_end=4399
+  _globals['_EGRESSACTIVE']._serialized_start=4401
+  _globals['_EGRESSACTIVE']._serialized_end=4492
 # @@protoc_insertion_point(module_scope)

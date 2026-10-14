@@ -12,7 +12,8 @@ use std::path::Path;
 
 use rastai_core::proto_json::{hardware_profile_to_json, job_spec_from_json, job_spec_to_json, node_telemetry_to_json};
 use rastai_proto::common::v1::{
-    GpuInfo, GpuTelemetry, HardwareProfile, LeaseClass, NodeTelemetry, ProcessVram, ResourceRequest,
+    Diagnostic, GpuInfo, GpuTelemetry, HardwareProfile, LeaseClass, NodeTelemetry, ProcessVram, ResourceRequest,
+    SelfTestVerdict, Severity,
 };
 use rastai_proto::node::v1::{JobKind, JobSpec};
 use serde_json::{Value, json};
@@ -77,6 +78,35 @@ fn golden_hardware_profile() -> HardwareProfile {
         ],
         driver_version: DRIVER.to_string(),
         backend: "cuda13".to_string(),
+        self_test_unix_ms: 1_791_700_123_456,
+        self_tests: vec![
+            SelfTestVerdict {
+                gpu_index: 1,
+                usable: true,
+                diagnostic: Some(Diagnostic {
+                    code: "RRS-H1004".to_string(),
+                    severity: Severity::Warning as i32,
+                    message: "Decode graph capture failed on GPU 1; eager decode is used there.".to_string(),
+                    path: "hardware_profile.json#/self_tests/0".to_string(),
+                    fix_text: "Update the GPU driver, then run the hardware check again.".to_string(),
+                    fix_command_id: "system.doctor".to_string(),
+                    fix_arguments_json: "{\"node_id\":\"\"}".to_string(),
+                }),
+            },
+            SelfTestVerdict {
+                gpu_index: 2,
+                usable: true,
+                diagnostic: Some(Diagnostic {
+                    code: "RRS-H1004".to_string(),
+                    severity: Severity::Warning as i32,
+                    message: "Decode graph capture failed on GPU 2; eager decode is used there.".to_string(),
+                    path: "hardware_profile.json#/self_tests/1".to_string(),
+                    fix_text: "Update the GPU driver, then run the hardware check again.".to_string(),
+                    fix_command_id: "system.doctor".to_string(),
+                    fix_arguments_json: "{\"node_id\":\"\"}".to_string(),
+                }),
+            },
+        ],
     }
 }
 

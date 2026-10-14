@@ -7,14 +7,27 @@ Import them from here: `from rastai_formats.generated import SharedHeader, share
 """
 
 from rastai_formats.generated.command_command_list import CommandListArgs, command_list_args_from_json, command_list_args_to_json, CommandListResult, command_list_result_from_json, command_list_result_to_json
+from rastai_formats.generated.command_hf_license_check import HfLicenseCheckArgs, hf_license_check_args_from_json, hf_license_check_args_to_json, HfLicenseCheckResult, hf_license_check_result_from_json, hf_license_check_result_to_json
+from rastai_formats.generated.command_hf_login import HfLoginArgs, hf_login_args_from_json, hf_login_args_to_json, HfLoginResult, hf_login_result_from_json, hf_login_result_to_json
 from rastai_formats.generated.command_job_cancel import JobCancelArgs, job_cancel_args_from_json, job_cancel_args_to_json, JobCancelResult, job_cancel_result_from_json, job_cancel_result_to_json
 from rastai_formats.generated.command_job_get import JobGetArgs, job_get_args_from_json, job_get_args_to_json, JobGetResult, job_get_result_from_json, job_get_result_to_json
 from rastai_formats.generated.command_job_list import JobListArgs, job_list_args_from_json, job_list_args_to_json, JobListResult, job_list_result_from_json, job_list_result_to_json, JobSummary, job_summary_from_json, job_summary_to_json
+from rastai_formats.generated.command_model_download import ModelDownloadArgs, model_download_args_from_json, model_download_args_to_json, ModelDownloadResult, model_download_result_from_json, model_download_result_to_json, ModelDownloadFile, model_download_file_from_json, model_download_file_to_json, ModelDownloadPlan, model_download_plan_from_json, model_download_plan_to_json
+from rastai_formats.generated.command_model_inspect import ModelInspectArgs, model_inspect_args_from_json, model_inspect_args_to_json, ModelInspectResult, model_inspect_result_from_json, model_inspect_result_to_json, GpuFit, gpu_fit_from_json, gpu_fit_to_json
+from rastai_formats.generated.command_model_list import ModelListArgs, model_list_args_from_json, model_list_args_to_json, ModelListResult, model_list_result_from_json, model_list_result_to_json, ModelSummary, model_summary_from_json, model_summary_to_json
 from rastai_formats.generated.command_node_list import NodeListArgs, node_list_args_from_json, node_list_args_to_json, NodeListResult, node_list_result_from_json, node_list_result_to_json, NodeSummary, node_summary_from_json, node_summary_to_json
 from rastai_formats.generated.command_node_status import NodeStatusArgs, node_status_args_from_json, node_status_args_to_json, NodeStatusResult, node_status_result_from_json, node_status_result_to_json
 from rastai_formats.generated.command_plugin_list import PluginListArgs, plugin_list_args_from_json, plugin_list_args_to_json, PluginListResult, plugin_list_result_from_json, plugin_list_result_to_json, PluginSummary, plugin_summary_from_json, plugin_summary_to_json
+from rastai_formats.generated.command_secret_delete import SecretDeleteArgs, secret_delete_args_from_json, secret_delete_args_to_json, SecretDeleteResult, secret_delete_result_from_json, secret_delete_result_to_json
+from rastai_formats.generated.command_secret_list import SecretListArgs, secret_list_args_from_json, secret_list_args_to_json, SecretListResult, secret_list_result_from_json, secret_list_result_to_json
+from rastai_formats.generated.command_secret_set import SecretSetArgs, secret_set_args_from_json, secret_set_args_to_json, SecretSetResult, secret_set_result_from_json, secret_set_result_to_json
 from rastai_formats.generated.command_settings_get import SettingsGetArgs, settings_get_args_from_json, settings_get_args_to_json, SettingsGetResult, settings_get_result_from_json, settings_get_result_to_json, SettingKeySource, setting_key_source_from_json, setting_key_source_to_json
 from rastai_formats.generated.command_settings_set import SettingsSetArgs, settings_set_args_from_json, settings_set_args_to_json, SettingsSetResult, settings_set_result_from_json, settings_set_result_to_json
+from rastai_formats.generated.command_system_bundle import SystemBundleArgs, system_bundle_args_from_json, system_bundle_args_to_json, SystemBundleResult, system_bundle_result_from_json, system_bundle_result_to_json
+from rastai_formats.generated.command_system_doctor import SystemDoctorArgs, system_doctor_args_from_json, system_doctor_args_to_json, SystemDoctorResult, system_doctor_result_from_json, system_doctor_result_to_json
+from rastai_formats.generated.command_system_env_install import SystemEnvInstallArgs, system_env_install_args_from_json, system_env_install_args_to_json, SystemEnvInstallResult, system_env_install_result_from_json, system_env_install_result_to_json, EnvironmentInstallPlan, environment_install_plan_from_json, environment_install_plan_to_json
+from rastai_formats.generated.command_system_env_list import SystemEnvListArgs, system_env_list_args_from_json, system_env_list_args_to_json, SystemEnvListResult, system_env_list_result_from_json, system_env_list_result_to_json
+from rastai_formats.generated.command_system_hardware import SystemHardwareArgs, system_hardware_args_from_json, system_hardware_args_to_json, SystemHardwareResult, system_hardware_result_from_json, system_hardware_result_to_json
 from rastai_formats.generated.command_system_shutdown import SystemShutdownArgs, system_shutdown_args_from_json, system_shutdown_args_to_json, SystemShutdownResult, system_shutdown_result_from_json, system_shutdown_result_to_json
 from rastai_formats.generated.command_system_status import SystemStatusArgs, system_status_args_from_json, system_status_args_to_json, SystemStatusResult, system_status_result_from_json, system_status_result_to_json
 from rastai_formats.generated.command_token_create import TokenCreateArgs, token_create_args_from_json, token_create_args_to_json, TokenCreateResult, token_create_result_from_json, token_create_result_to_json
@@ -39,6 +52,18 @@ __all__ = [
     "CommandListResult",
     "command_list_result_from_json",
     "command_list_result_to_json",
+    "HfLicenseCheckArgs",
+    "hf_license_check_args_from_json",
+    "hf_license_check_args_to_json",
+    "HfLicenseCheckResult",
+    "hf_license_check_result_from_json",
+    "hf_license_check_result_to_json",
+    "HfLoginArgs",
+    "hf_login_args_from_json",
+    "hf_login_args_to_json",
+    "HfLoginResult",
+    "hf_login_result_from_json",
+    "hf_login_result_to_json",
     "JobCancelArgs",
     "job_cancel_args_from_json",
     "job_cancel_args_to_json",
@@ -60,6 +85,36 @@ __all__ = [
     "JobSummary",
     "job_summary_from_json",
     "job_summary_to_json",
+    "ModelDownloadArgs",
+    "model_download_args_from_json",
+    "model_download_args_to_json",
+    "ModelDownloadResult",
+    "model_download_result_from_json",
+    "model_download_result_to_json",
+    "ModelDownloadFile",
+    "model_download_file_from_json",
+    "model_download_file_to_json",
+    "ModelDownloadPlan",
+    "model_download_plan_from_json",
+    "model_download_plan_to_json",
+    "ModelInspectArgs",
+    "model_inspect_args_from_json",
+    "model_inspect_args_to_json",
+    "ModelInspectResult",
+    "model_inspect_result_from_json",
+    "model_inspect_result_to_json",
+    "GpuFit",
+    "gpu_fit_from_json",
+    "gpu_fit_to_json",
+    "ModelListArgs",
+    "model_list_args_from_json",
+    "model_list_args_to_json",
+    "ModelListResult",
+    "model_list_result_from_json",
+    "model_list_result_to_json",
+    "ModelSummary",
+    "model_summary_from_json",
+    "model_summary_to_json",
     "NodeListArgs",
     "node_list_args_from_json",
     "node_list_args_to_json",
@@ -84,6 +139,24 @@ __all__ = [
     "PluginSummary",
     "plugin_summary_from_json",
     "plugin_summary_to_json",
+    "SecretDeleteArgs",
+    "secret_delete_args_from_json",
+    "secret_delete_args_to_json",
+    "SecretDeleteResult",
+    "secret_delete_result_from_json",
+    "secret_delete_result_to_json",
+    "SecretListArgs",
+    "secret_list_args_from_json",
+    "secret_list_args_to_json",
+    "SecretListResult",
+    "secret_list_result_from_json",
+    "secret_list_result_to_json",
+    "SecretSetArgs",
+    "secret_set_args_from_json",
+    "secret_set_args_to_json",
+    "SecretSetResult",
+    "secret_set_result_from_json",
+    "secret_set_result_to_json",
     "SettingsGetArgs",
     "settings_get_args_from_json",
     "settings_get_args_to_json",
@@ -99,6 +172,39 @@ __all__ = [
     "SettingsSetResult",
     "settings_set_result_from_json",
     "settings_set_result_to_json",
+    "SystemBundleArgs",
+    "system_bundle_args_from_json",
+    "system_bundle_args_to_json",
+    "SystemBundleResult",
+    "system_bundle_result_from_json",
+    "system_bundle_result_to_json",
+    "SystemDoctorArgs",
+    "system_doctor_args_from_json",
+    "system_doctor_args_to_json",
+    "SystemDoctorResult",
+    "system_doctor_result_from_json",
+    "system_doctor_result_to_json",
+    "SystemEnvInstallArgs",
+    "system_env_install_args_from_json",
+    "system_env_install_args_to_json",
+    "SystemEnvInstallResult",
+    "system_env_install_result_from_json",
+    "system_env_install_result_to_json",
+    "EnvironmentInstallPlan",
+    "environment_install_plan_from_json",
+    "environment_install_plan_to_json",
+    "SystemEnvListArgs",
+    "system_env_list_args_from_json",
+    "system_env_list_args_to_json",
+    "SystemEnvListResult",
+    "system_env_list_result_from_json",
+    "system_env_list_result_to_json",
+    "SystemHardwareArgs",
+    "system_hardware_args_from_json",
+    "system_hardware_args_to_json",
+    "SystemHardwareResult",
+    "system_hardware_result_from_json",
+    "system_hardware_result_to_json",
     "SystemShutdownArgs",
     "system_shutdown_args_from_json",
     "system_shutdown_args_to_json",

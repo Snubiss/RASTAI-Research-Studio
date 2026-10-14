@@ -45,6 +45,11 @@ class NodeHubServiceStub:
                 request_serializer=rastai_dot_commands_dot_v1_dot_command__service__pb2.ExecuteRequest.SerializeToString,
                 response_deserializer=rastai_dot_commands_dot_v1_dot_command__service__pb2.ExecuteResponse.FromString,
                 _registered_method=True)
+        self.GetSecret = channel.unary_unary(
+                '/rastai.node.v1.NodeHubService/GetSecret',
+                request_serializer=rastai_dot_node_dot_v1_dot_node__hub__service__pb2.GetSecretRequest.SerializeToString,
+                response_deserializer=rastai_dot_node_dot_v1_dot_node__hub__service__pb2.GetSecretResponse.FromString,
+                _registered_method=True)
 
 
 class NodeHubServiceServicer:
@@ -65,6 +70,14 @@ class NodeHubServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetSecret(self, request, context):
+        """A short-lived secret for one purpose, for a job the daemon started. The daemon answers only for a purpose the
+        job's JobSpec allows; cloud and archive credentials never leave the daemon (contracts 8.5).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_NodeHubServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -77,6 +90,11 @@ def add_NodeHubServiceServicer_to_server(servicer, server):
                     servicer.ExecuteCommand,
                     request_deserializer=rastai_dot_commands_dot_v1_dot_command__service__pb2.ExecuteRequest.FromString,
                     response_serializer=rastai_dot_commands_dot_v1_dot_command__service__pb2.ExecuteResponse.SerializeToString,
+            ),
+            'GetSecret': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSecret,
+                    request_deserializer=rastai_dot_node_dot_v1_dot_node__hub__service__pb2.GetSecretRequest.FromString,
+                    response_serializer=rastai_dot_node_dot_v1_dot_node__hub__service__pb2.GetSecretResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -133,6 +151,33 @@ class NodeHubService:
             '/rastai.node.v1.NodeHubService/ExecuteCommand',
             rastai_dot_commands_dot_v1_dot_command__service__pb2.ExecuteRequest.SerializeToString,
             rastai_dot_commands_dot_v1_dot_command__service__pb2.ExecuteResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSecret(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/rastai.node.v1.NodeHubService/GetSecret',
+            rastai_dot_node_dot_v1_dot_node__hub__service__pb2.GetSecretRequest.SerializeToString,
+            rastai_dot_node_dot_v1_dot_node__hub__service__pb2.GetSecretResponse.FromString,
             options,
             channel_credentials,
             insecure,

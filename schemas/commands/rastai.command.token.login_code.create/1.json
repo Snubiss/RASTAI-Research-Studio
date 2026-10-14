@@ -14,7 +14,8 @@
       "properties": {
         "code": {
           "description": "The single-use login code, for the #login=<code> fragment.",
-          "type": "string"
+          "type": "string",
+          "x-rastai-secret": true
         },
         "expires_unix_ms": {
           "description": "When the code stops working, 60 seconds after it was made.",

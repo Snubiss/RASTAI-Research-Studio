@@ -1,2 +1,4 @@
 
-#AMD Ryzen 9 7950X 16-Core Processor €€€€€ €€€€€ *<NVIDIA GeForce RTX 5080sm_120 €€À×?*nvidia2	580.82.09*;NVIDIA GeForce RTX 3090sm_86 €€€€`*nvidia2	580.82.092	580.82.09:cuda13
+#AMD Ryzen 9 7950X 16-Core Processor €€€€€ €€€€€ *<NVIDIA GeForce RTX 5080sm_120 €€À×?*nvidia2	580.82.09*;NVIDIA GeForce RTX 3090sm_86 €€€€`*nvidia2	580.82.092	580.82.09:cuda13@Àþ˜Í’4JÖÏ
+	RRS-H1004ADecode graph capture failed on GPU 1; eager decode is used there."#hardware_profile.json#/self_tests/0*9Update the GPU driver, then run the hardware check again.2system.doctor:{"node_id":""}JÖÏ
+	RRS-H1004ADecode graph capture failed on GPU 2; eager decode is used there."#hardware_profile.json#/self_tests/1*9Update the GPU driver, then run the hardware check again.2system.doctor:{"node_id":""}

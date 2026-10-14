@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "The node to check; empty for the embedded node.",
+      "properties": {
+        "node_id": {
+          "description": "The node to check; empty for the embedded node.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SystemDoctorArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "What the doctor job started on.",
+      "properties": {
+        "backend": {
+          "description": "The backend the self-test runs on; the verdicts arrive as events and in system.hardware.",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "The node the self-test runs on.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "backend"
+      ],
+      "title": "SystemDoctorResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.doctor/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Check hardware",
+  "title": "system.doctor",
+  "x-rastai-kind": "job",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

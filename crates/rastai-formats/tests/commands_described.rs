@@ -15,6 +15,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rastai_core::commands::table::COMMANDS;
+use rastai_formats::commands::model::describe_model_download_file;
+use rastai_formats::commands::system::describe_system_bundle_args;
 use rastai_formats::commands::token::{
     describe_token_create_result, describe_token_login_code_create_result, describe_token_summary,
 };
@@ -25,6 +27,17 @@ use rastai_formats::describe::types::{FieldKind, TypeDescription};
 use rastai_formats::json::reader::read_json;
 use rastai_formats::limits::ImportLimits;
 use serde_json::Value;
+
+/// The secret fields of commands, which copy-as leaves out or shows as a placeholder (contracts 5.1): the command, the
+/// one of its two types that holds the field (`arguments` or `result`) and the field. The marking has to reach the
+/// checked-in schema file, because the editors and the palette read only that file.
+const SECRET_SCHEMA_KEYWORD: &str = "x-rastai-secret";
+const SECRET_FIELDS: &[(&str, &str, &str)] = &[
+    ("secret.set", "arguments", "value"),
+    ("hf.login", "arguments", "token"),
+    ("token.create", "result", "token"),
+    ("token.login_code.create", "result", "code"),
+];
 
 const SCHEMAS_FOLDER: &str = "schemas";
 const COMMANDS_FOLDER: &str = "commands";
@@ -136,6 +149,22 @@ fn has_credential_word(field_name: &str) -> bool {
 }
 
 #[test]
+fn secret_fields_are_marked_in_their_schema() {
+    for (command_id, type_key, field_name) in SECRET_FIELDS {
+        let schema = read_command_schema(command_id);
+        let properties = &schema["$defs"][*type_key]["properties"];
+        let marked = properties
+            .get(*field_name)
+            .and_then(|field| field.get(SECRET_SCHEMA_KEYWORD));
+        assert_eq!(
+            marked,
+            Some(&Value::Bool(true)),
+            "{command_id} {type_key}.{field_name} is not marked secret"
+        );
+    }
+}
+
+#[test]
 fn shown_once_credentials_are_secret() {
     assert!(field_is_secret(&describe_token_create_result(), "token"));
     assert!(field_is_secret(&describe_token_login_code_create_result(), "code"));
@@ -192,5 +221,32 @@ fn a_token_summary_always_names_its_creator() {
     assert!(
         required_names.contains(&TOKEN_CREATOR_FIELD),
         "the checked-in token.list schema requires created_by; run `just codegen`"
+    );
+}
+
+/// The rules a handler checks but the schema must state: a download file's `hash` is required with a `url` (contracts
+/// 6.5), and `system.bundle` refuses a path that already holds a file, so it never overwrites one (contracts 6.4).
+#[test]
+fn the_url_hash_and_bundle_path_rules_are_stated() {
+    let download_file = describe_model_download_file();
+    let hash = download_file
+        .fields
+        .iter()
+        .find(|field| field.name == "hash")
+        .expect("ModelDownloadFile.hash is described");
+    assert!(
+        hash.doc.contains("Required whenever `url` is set"),
+        "ModelDownloadFile.hash must say it is required with a url"
+    );
+
+    let bundle = describe_system_bundle_args();
+    let path = bundle
+        .fields
+        .iter()
+        .find(|field| field.name == "path")
+        .expect("SystemBundleArgs.path is described");
+    assert!(
+        path.doc.contains("a file already there is refused"),
+        "SystemBundleArgs.path must say an existing file is refused"
     );
 }

@@ -1,0 +1,31 @@
+{
+  "emitter": "node",
+  "event_class": "ephemeral",
+  "event_type": "download.progress",
+  "fields": [
+    {
+      "name": "model_ref",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "bytes_done",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    },
+    {
+      "name": "bytes_total",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "uint64"
+    }
+  ],
+  "payload_type": "rastai.events.v1.DownloadProgress",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

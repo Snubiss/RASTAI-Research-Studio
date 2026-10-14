@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "The node to read; empty for the embedded node.",
+      "properties": {
+        "node_id": {
+          "description": "The node to read; empty for the embedded node.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SystemHardwareArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "A node's hardware profile.",
+      "properties": {
+        "hardware": {
+          "description": "The hardware profile, with the last self-test verdicts. Protobuf JSON of rastai.common.v1.HardwareProfile.",
+          "type": "object"
+        },
+        "node_id": {
+          "description": "The node the profile is of.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "hardware"
+      ],
+      "title": "SystemHardwareResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.hardware/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Show hardware",
+  "title": "system.hardware",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

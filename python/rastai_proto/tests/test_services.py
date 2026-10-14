@@ -1,6 +1,6 @@
 """The gRPC services of rastai.node.v1 and rastai.worker.v1 (layout: rust-node-gateway-proto.md sections 3.4 and 3.6).
 
-Each service has exactly the RPCs of the M1 skeleton, every generated servicer registers on a grpcio server, and
+Each service has exactly the RPCs of its table below, every generated servicer registers on a grpcio server, and
 WorkerService, the one service Python serves (rastai_worker), answers a real call over a Unix socket. The Rust test
 crates/rastai-proto/tests/services.rs builds the tonic side of the same services.
 """
@@ -29,8 +29,9 @@ from rastai_proto.worker.v1 import (
 from rastai_proto.worker.v1.worker_service_pb2 import HelloRequest, WorkerInfo
 
 # Service full name -> its RPCs as (name, request type, response type, server streaming). Contracts 4.4 and 4.5
-# list every RPC each service will have; the M1 skeleton has only these, and the rest arrive with the milestone
-# that uses them (node layout 3.6), each in its own contract PR that updates this table.
+# list every RPC each service will have; the table has the RPCs built so far (the M1 skeleton and M2's environments
+# and GetSecret), and the rest arrive with the milestone that uses them (node layout 3.6), each in its own contract PR
+# that updates this table.
 SKELETON_RPCS = {
     "rastai.node.v1.NodeService": [
         ("Handshake", "rastai.node.v1.HandshakeRequest", "rastai.node.v1.HandshakeResponse", False),
@@ -40,10 +41,17 @@ SKELETON_RPCS = {
         ("ListJobs", "rastai.node.v1.ListJobsRequest", "rastai.node.v1.ListJobsResponse", False),
         ("WatchRunEvents", "rastai.node.v1.WatchRunEventsRequest", "rastai.events.v1.EventRecord", True),
         ("WatchLive", "rastai.node.v1.WatchLiveRequest", "rastai.node.v1.LiveEvent", True),
+        (
+            "EnsureEnvironment",
+            "rastai.node.v1.EnsureEnvironmentRequest",
+            "rastai.node.v1.EnsureEnvironmentEvent",
+            True,
+        ),
     ],
     "rastai.node.v1.NodeHubService": [
         ("Heartbeat", "rastai.node.v1.HeartbeatRequest", "rastai.node.v1.HeartbeatResponse", False),
         ("ExecuteCommand", "rastai.commands.v1.ExecuteRequest", "rastai.commands.v1.ExecuteResponse", False),
+        ("GetSecret", "rastai.node.v1.GetSecretRequest", "rastai.node.v1.GetSecretResponse", False),
     ],
     "rastai.worker.v1.WorkerService": [
         ("Hello", "rastai.worker.v1.HelloRequest", "rastai.worker.v1.WorkerInfo", False),

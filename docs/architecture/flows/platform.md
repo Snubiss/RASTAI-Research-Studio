@@ -161,7 +161,7 @@ sequenceDiagram
   SRV->>ND: EnsureEnvironment cuda13 with the lock hash
   ND->>ND: free-space check, take the per-environment lock
   alt folder has .rastai-ready with this lock hash
-    ND-->>SRV: EnvironmentProgress done, already ready
+    ND-->>SRV: EnvironmentProgress ready, already ready
   else missing or incomplete
     ND->>ND: delete the incomplete folder
     ND->>UV: uv sync --frozen --no-dev, UV_PYTHON 3.12
@@ -172,7 +172,7 @@ sequenceDiagram
     ND->>WK: python -I -m rastai_worker check
     WK-->>ND: torch version, backend, visible devices
     ND->>ND: write .rastai-ready with the lock hash, fsync
-    ND-->>SRV: EnvironmentProgress done
+    ND-->>SRV: EnvironmentProgress ready
   end
   SRV-->>WEB: job.state_changed succeeded
 ```

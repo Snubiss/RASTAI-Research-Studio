@@ -1,0 +1,56 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Check whether a gated model's license is accepted.",
+      "properties": {
+        "repo_id": {
+          "description": "The repository id, such as meta-llama/Llama-3.1-8B.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo_id"
+      ],
+      "title": "HfLicenseCheckArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "Whether the license of a gated model is accepted.",
+      "properties": {
+        "accepted": {
+          "description": "True when the signed-in account has access.",
+          "type": "boolean"
+        },
+        "license": {
+          "description": "The license the repository names.",
+          "type": "string"
+        },
+        "license_url": {
+          "description": "The license page, or empty when there is none.",
+          "type": "string"
+        },
+        "repo_id": {
+          "description": "The repository checked.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo_id",
+        "accepted",
+        "license",
+        "license_url"
+      ],
+      "title": "HfLicenseCheckResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.hf.license.check/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Check model license",
+  "title": "hf.license.check",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

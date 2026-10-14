@@ -1,0 +1,46 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "Remove a secret.",
+      "properties": {
+        "name": {
+          "description": "The keychain account name to remove.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SecretDeleteArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The outcome of the removal.",
+      "properties": {
+        "name": {
+          "description": "The account name.",
+          "type": "string"
+        },
+        "removed": {
+          "description": "True when the account existed and was removed.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "removed"
+      ],
+      "title": "SecretDeleteResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.secret.delete/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Delete secret",
+  "title": "secret.delete",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

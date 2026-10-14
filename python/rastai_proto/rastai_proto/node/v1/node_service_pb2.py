@@ -25,25 +25,26 @@ _sym_db = _symbol_database.Default()
 from rastai_proto.common.v1 import diagnostic_pb2 as rastai_dot_common_dot_v1_dot_diagnostic__pb2
 from rastai_proto.common.v1 import hardware_pb2 as rastai_dot_common_dot_v1_dot_hardware__pb2
 from rastai_proto.events.v1 import event_record_pb2 as rastai_dot_events_dot_v1_dot_event__record__pb2
+from rastai_proto.node.v1 import environments_pb2 as rastai_dot_node_dot_v1_dot_environments__pb2
 from rastai_proto.node.v1 import jobs_pb2 as rastai_dot_node_dot_v1_dot_jobs__pb2
 from rastai_proto.node.v1 import live_pb2 as rastai_dot_node_dot_v1_dot_live__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n!rastai/node/v1/node_service.proto\x12\x0erastai.node.v1\x1a!rastai/common/v1/diagnostic.proto\x1a\x1frastai/common/v1/hardware.proto\x1a#rastai/events/v1/event_record.proto\x1a\x19rastai/node/v1/jobs.proto\x1a\x19rastai/node/v1/live.proto\"\xb7\x02\n\x10HandshakeRequest\x12)\n\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12\"\n\x0c\x63\x61pabilities\x18\x02 \x03(\tR\x0c\x63\x61pabilities\x12\x1f\n\x0b\x61pp_version\x18\x03 \x01(\tR\nappVersion\x12\x1b\n\tdaemon_id\x18\x04 \x01(\tR\x08\x64\x61\x65monId\x12!\n\x0c\x64\x61\x65mon_nonce\x18\x05 \x01(\x0cR\x0b\x64\x61\x65monNonce\x12 \n\x0csent_unix_ms\x18\x06 \x01(\x03R\nsentUnixMs\x12)\n\x10\x64\x61\x65mon_signature\x18\x07 \x01(\x0cR\x0f\x64\x61\x65monSignature\x12&\n\x0fhub_socket_path\x18\x08 \x01(\tR\rhubSocketPath\"\xe5\x02\n\x11HandshakeResponse\x12\x17\n\x07node_id\x18\x01 \x01(\tR\x06nodeId\x12)\n\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12\x1f\n\x0b\x61pp_version\x18\x03 \x01(\tR\nappVersion\x12\"\n\x0c\x63\x61pabilities\x18\x04 \x03(\tR\x0c\x63\x61pabilities\x12=\n\x08hardware\x18\x05 \x01(\x0b\x32!.rastai.common.v1.HardwareProfileR\x08hardware\x12#\n\rsession_token\x18\x06 \x01(\tR\x0csessionToken\x12%\n\x0enode_signature\x18\x07 \x01(\x0cR\rnodeSignature\x12<\n\ndiagnostic\x18\x08 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\"\x14\n\x12GetHardwareRequest\"\x93\x01\n\x13GetHardwareResponse\x12=\n\x08hardware\x18\x01 \x01(\x0b\x32!.rastai.common.v1.HardwareProfileR\x08hardware\x12=\n\ttelemetry\x18\x02 \x01(\x0b\x32\x1f.rastai.common.v1.NodeTelemetryR\ttelemetry2\xbc\x04\n\x0bNodeService\x12P\n\tHandshake\x12 .rastai.node.v1.HandshakeRequest\x1a!.rastai.node.v1.HandshakeResponse\x12V\n\x0bGetHardware\x12\".rastai.node.v1.GetHardwareRequest\x1a#.rastai.node.v1.GetHardwareResponse\x12<\n\x08StartJob\x12\x17.rastai.node.v1.JobSpec\x1a\x17.rastai.node.v1.JobInfo\x12P\n\tSignalJob\x12 .rastai.node.v1.SignalJobRequest\x1a!.rastai.node.v1.SignalJobResponse\x12M\n\x08ListJobs\x12\x1f.rastai.node.v1.ListJobsRequest\x1a .rastai.node.v1.ListJobsResponse\x12X\n\x0eWatchRunEvents\x12%.rastai.node.v1.WatchRunEventsRequest\x1a\x1d.rastai.events.v1.EventRecord0\x01\x12J\n\tWatchLive\x12 .rastai.node.v1.WatchLiveRequest\x1a\x19.rastai.node.v1.LiveEvent0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n!rastai/node/v1/node_service.proto\x12\x0erastai.node.v1\x1a!rastai/common/v1/diagnostic.proto\x1a\x1frastai/common/v1/hardware.proto\x1a#rastai/events/v1/event_record.proto\x1a!rastai/node/v1/environments.proto\x1a\x19rastai/node/v1/jobs.proto\x1a\x19rastai/node/v1/live.proto\"\xb7\x02\n\x10HandshakeRequest\x12)\n\x10protocol_version\x18\x01 \x01(\rR\x0fprotocolVersion\x12\"\n\x0c\x63\x61pabilities\x18\x02 \x03(\tR\x0c\x63\x61pabilities\x12\x1f\n\x0b\x61pp_version\x18\x03 \x01(\tR\nappVersion\x12\x1b\n\tdaemon_id\x18\x04 \x01(\tR\x08\x64\x61\x65monId\x12!\n\x0c\x64\x61\x65mon_nonce\x18\x05 \x01(\x0cR\x0b\x64\x61\x65monNonce\x12 \n\x0csent_unix_ms\x18\x06 \x01(\x03R\nsentUnixMs\x12)\n\x10\x64\x61\x65mon_signature\x18\x07 \x01(\x0cR\x0f\x64\x61\x65monSignature\x12&\n\x0fhub_socket_path\x18\x08 \x01(\tR\rhubSocketPath\"\xe5\x02\n\x11HandshakeResponse\x12\x17\n\x07node_id\x18\x01 \x01(\tR\x06nodeId\x12)\n\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12\x1f\n\x0b\x61pp_version\x18\x03 \x01(\tR\nappVersion\x12\"\n\x0c\x63\x61pabilities\x18\x04 \x03(\tR\x0c\x63\x61pabilities\x12=\n\x08hardware\x18\x05 \x01(\x0b\x32!.rastai.common.v1.HardwareProfileR\x08hardware\x12#\n\rsession_token\x18\x06 \x01(\tR\x0csessionToken\x12%\n\x0enode_signature\x18\x07 \x01(\x0cR\rnodeSignature\x12<\n\ndiagnostic\x18\x08 \x01(\x0b\x32\x1c.rastai.common.v1.DiagnosticR\ndiagnostic\"\x14\n\x12GetHardwareRequest\"\x93\x01\n\x13GetHardwareResponse\x12=\n\x08hardware\x18\x01 \x01(\x0b\x32!.rastai.common.v1.HardwareProfileR\x08hardware\x12=\n\ttelemetry\x18\x02 \x01(\x0b\x32\x1f.rastai.common.v1.NodeTelemetryR\ttelemetry2\xa5\x05\n\x0bNodeService\x12P\n\tHandshake\x12 .rastai.node.v1.HandshakeRequest\x1a!.rastai.node.v1.HandshakeResponse\x12V\n\x0bGetHardware\x12\".rastai.node.v1.GetHardwareRequest\x1a#.rastai.node.v1.GetHardwareResponse\x12<\n\x08StartJob\x12\x17.rastai.node.v1.JobSpec\x1a\x17.rastai.node.v1.JobInfo\x12P\n\tSignalJob\x12 .rastai.node.v1.SignalJobRequest\x1a!.rastai.node.v1.SignalJobResponse\x12M\n\x08ListJobs\x12\x1f.rastai.node.v1.ListJobsRequest\x1a .rastai.node.v1.ListJobsResponse\x12X\n\x0eWatchRunEvents\x12%.rastai.node.v1.WatchRunEventsRequest\x1a\x1d.rastai.events.v1.EventRecord0\x01\x12J\n\tWatchLive\x12 .rastai.node.v1.WatchLiveRequest\x1a\x19.rastai.node.v1.LiveEvent0\x01\x12g\n\x11\x45nsureEnvironment\x12(.rastai.node.v1.EnsureEnvironmentRequest\x1a&.rastai.node.v1.EnsureEnvironmentEvent0\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'rastai_proto.node.v1.node_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_HANDSHAKEREQUEST']._serialized_start=213
-  _globals['_HANDSHAKEREQUEST']._serialized_end=524
-  _globals['_HANDSHAKERESPONSE']._serialized_start=527
-  _globals['_HANDSHAKERESPONSE']._serialized_end=884
-  _globals['_GETHARDWAREREQUEST']._serialized_start=886
-  _globals['_GETHARDWAREREQUEST']._serialized_end=906
-  _globals['_GETHARDWARERESPONSE']._serialized_start=909
-  _globals['_GETHARDWARERESPONSE']._serialized_end=1056
-  _globals['_NODESERVICE']._serialized_start=1059
-  _globals['_NODESERVICE']._serialized_end=1631
+  _globals['_HANDSHAKEREQUEST']._serialized_start=248
+  _globals['_HANDSHAKEREQUEST']._serialized_end=559
+  _globals['_HANDSHAKERESPONSE']._serialized_start=562
+  _globals['_HANDSHAKERESPONSE']._serialized_end=919
+  _globals['_GETHARDWAREREQUEST']._serialized_start=921
+  _globals['_GETHARDWAREREQUEST']._serialized_end=941
+  _globals['_GETHARDWARERESPONSE']._serialized_start=944
+  _globals['_GETHARDWARERESPONSE']._serialized_end=1091
+  _globals['_NODESERVICE']._serialized_start=1094
+  _globals['_NODESERVICE']._serialized_end=1771
 # @@protoc_insertion_point(module_scope)

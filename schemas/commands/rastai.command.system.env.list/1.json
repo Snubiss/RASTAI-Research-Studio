@@ -1,0 +1,43 @@
+{
+  "$defs": {
+    "arguments": {
+      "additionalProperties": false,
+      "description": "The node whose environments to list; empty for the embedded node.",
+      "properties": {
+        "node_id": {
+          "description": "The node whose environments to list; empty for the embedded node.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "title": "SystemEnvListArgs",
+      "type": "object"
+    },
+    "result": {
+      "additionalProperties": false,
+      "description": "The node's uv environments.",
+      "properties": {
+        "environments": {
+          "description": "Every environment on the node, with its lock hash.",
+          "items": {
+            "description": "Protobuf JSON of rastai.node.v1.EnvironmentInfo.",
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "environments"
+      ],
+      "title": "SystemEnvListResult",
+      "type": "object"
+    }
+  },
+  "$id": "https://schemas.rastai.dev/commands/rastai.command.system.env.list/1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "List environments",
+  "title": "system.env.list",
+  "x-rastai-kind": "sync",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

@@ -13,14 +13,27 @@ is `stable`, `check-schema-diff` fails a breaking change to its schema (contract
 | Command | Title | Kind | Stability | Since | Arguments | Result |
 |---|---|---|---|---|---|---|
 | `command.list` | List commands | sync | preview | 0.1.0 | `CommandListArgs` | `CommandListResult` |
+| `hf.license.check` | Check model license | sync | preview | 0.1.0 | `HfLicenseCheckArgs` | `HfLicenseCheckResult` |
+| `hf.login` | Sign in to Hugging Face | sync | preview | 0.1.0 | `HfLoginArgs` | `HfLoginResult` |
 | `job.cancel` | Cancel job | sync | preview | 0.1.0 | `JobCancelArgs` | `JobCancelResult` |
 | `job.get` | Show job | sync | preview | 0.1.0 | `JobGetArgs` | `JobGetResult` |
 | `job.list` | List jobs | sync | preview | 0.1.0 | `JobListArgs` | `JobListResult` |
+| `model.download` | Download model | job | preview | 0.1.0 | `ModelDownloadArgs` | `ModelDownloadResult` |
+| `model.inspect` | Inspect model | sync | preview | 0.1.0 | `ModelInspectArgs` | `ModelInspectResult` |
+| `model.list` | List models | sync | preview | 0.1.0 | `ModelListArgs` | `ModelListResult` |
 | `node.list` | List nodes | sync | preview | 0.1.0 | `NodeListArgs` | `NodeListResult` |
 | `node.status` | Show node | sync | preview | 0.1.0 | `NodeStatusArgs` | `NodeStatusResult` |
 | `plugin.list` | List plugins | sync | preview | 0.1.0 | `PluginListArgs` | `PluginListResult` |
+| `secret.delete` | Delete secret | sync | preview | 0.1.0 | `SecretDeleteArgs` | `SecretDeleteResult` |
+| `secret.list` | List secrets | sync | preview | 0.1.0 | `SecretListArgs` | `SecretListResult` |
+| `secret.set` | Store secret | sync | preview | 0.1.0 | `SecretSetArgs` | `SecretSetResult` |
 | `settings.get` | Show settings | sync | preview | 0.1.0 | `SettingsGetArgs` | `SettingsGetResult` |
 | `settings.set` | Change a setting | sync | preview | 0.1.0 | `SettingsSetArgs` | `SettingsSetResult` |
+| `system.bundle` | Make support bundle | job | preview | 0.1.0 | `SystemBundleArgs` | `SystemBundleResult` |
+| `system.doctor` | Check hardware | job | preview | 0.1.0 | `SystemDoctorArgs` | `SystemDoctorResult` |
+| `system.env.install` | Install environment | job | preview | 0.1.0 | `SystemEnvInstallArgs` | `SystemEnvInstallResult` |
+| `system.env.list` | List environments | sync | preview | 0.1.0 | `SystemEnvListArgs` | `SystemEnvListResult` |
+| `system.hardware` | Show hardware | sync | preview | 0.1.0 | `SystemHardwareArgs` | `SystemHardwareResult` |
 | `system.shutdown` | Stop the daemon | sync | preview | 0.1.0 | `SystemShutdownArgs` | `SystemShutdownResult` |
 | `system.status` | Show status | sync | preview | 0.1.0 | `SystemStatusArgs` | `SystemStatusResult` |
 | `token.create` | Create an API token | sync | preview | 0.1.0 | `TokenCreateArgs` | `TokenCreateResult` |

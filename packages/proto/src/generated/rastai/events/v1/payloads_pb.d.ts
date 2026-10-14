@@ -132,6 +132,24 @@ export declare type EventPayload = Message<"rastai.events.v1.EventPayload"> & {
      */
     value: PluginEventPayload;
     case: "pluginEvent";
+  } | {
+    /**
+     * @generated from field: rastai.events.v1.DownloadProgress download_progress = 17;
+     */
+    value: DownloadProgress;
+    case: "downloadProgress";
+  } | {
+    /**
+     * @generated from field: rastai.events.v1.DownloadFinished download_finished = 18;
+     */
+    value: DownloadFinished;
+    case: "downloadFinished";
+  } | {
+    /**
+     * @generated from field: rastai.events.v1.EgressActive egress_active = 19;
+     */
+    value: EgressActive;
+    case: "egressActive";
   } | { case: undefined; value?: undefined };
 };
 
@@ -681,6 +699,114 @@ export declare type PluginEventPayload = Message<"rastai.events.v1.PluginEventPa
  * Use `create(PluginEventPayloadSchema)` to create a new message.
  */
 export declare const PluginEventPayloadSchema: GenMessage<PluginEventPayload>;
+
+/**
+ * download.progress (ephemeral, from the node): bytes of one model download so far (M2-17).
+ *
+ * @generated from message rastai.events.v1.DownloadProgress
+ */
+export declare type DownloadProgress = Message<"rastai.events.v1.DownloadProgress"> & {
+  /**
+   * @generated from field: string model_ref = 1;
+   */
+  modelRef: string;
+
+  /**
+   * @generated from field: uint64 bytes_done = 2;
+   */
+  bytesDone: bigint;
+
+  /**
+   * @generated from field: uint64 bytes_total = 3;
+   */
+  bytesTotal: bigint;
+};
+
+/**
+ * Describes the message rastai.events.v1.DownloadProgress.
+ * Use `create(DownloadProgressSchema)` to create a new message.
+ */
+export declare const DownloadProgressSchema: GenMessage<DownloadProgress>;
+
+/**
+ * download.finished (durable, from the node). ok is false when the download failed; the Diagnostic then says why, and it
+ * can also carry a note on a success, such as RRS-N3010 when the download waited on another program.
+ *
+ * @generated from message rastai.events.v1.DownloadFinished
+ */
+export declare type DownloadFinished = Message<"rastai.events.v1.DownloadFinished"> & {
+  /**
+   * @generated from field: string model_ref = 1;
+   */
+  modelRef: string;
+
+  /**
+   * @generated from field: string revision = 2;
+   */
+  revision: string;
+
+  /**
+   * @generated from field: bool ok = 3;
+   */
+  ok: boolean;
+
+  /**
+   * @generated from field: string model_hash = 4;
+   */
+  modelHash: string;
+
+  /**
+   * @generated from field: uint64 size_bytes = 5;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * Why the download failed, for example RRS-N3009 (download interrupted, retries used up); or a note, when it
+   * succeeded. Unset when the download was clean.
+   *
+   * @generated from field: rastai.common.v1.Diagnostic diagnostic = 6;
+   */
+  diagnostic?: Diagnostic | undefined;
+};
+
+/**
+ * Describes the message rastai.events.v1.DownloadFinished.
+ * Use `create(DownloadFinishedSchema)` to create a new message.
+ */
+export declare const DownloadFinishedSchema: GenMessage<DownloadFinished>;
+
+/**
+ * egress.active (ephemeral, from the daemon or a node's EgressReport): one outbound connection that carries data.
+ * The egress badge reads these three fields and nothing else.
+ *
+ * @generated from message rastai.events.v1.EgressActive
+ */
+export declare type EgressActive = Message<"rastai.events.v1.EgressActive"> & {
+  /**
+   * One of the purposes of contracts 7.3, for example hf_download.
+   *
+   * @generated from field: string purpose = 1;
+   */
+  purpose: string;
+
+  /**
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * The job, download or conversation the connection belongs to, when there is one.
+   *
+   * @generated from field: string subject_id = 3;
+   */
+  subjectId: string;
+};
+
+/**
+ * Describes the message rastai.events.v1.EgressActive.
+ * Use `create(EgressActiveSchema)` to create a new message.
+ */
+export declare const EgressActiveSchema: GenMessage<EgressActive>;
 
 /**
  * Which output stream of a job's process a log line came from.

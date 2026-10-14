@@ -1,0 +1,6 @@
+{
+  "environment_id": "cuda13",
+  "lock_hash": "blake3:a76c73298caa55e868782537caf9ea82e9b405937d255601e006956bb886b133",
+  "plugin_id": "psychology",
+  "plugin_version": "0.1.0"
+}

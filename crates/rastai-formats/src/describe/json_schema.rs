@@ -15,6 +15,11 @@ const SCHEMA_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 const DEFINITIONS_POINTER: &str = "#/$defs/";
 /// The positional CLI argument a field fills (contracts 15.1, beside `x-rastai-stability`).
 const CLI_POSITION_KEYWORD: &str = "x-rastai-cli-position";
+/// A credential passed or shown once. The journal writes it as "<redacted>", and copy-as leaves it out or shows a
+/// placeholder (contracts 5.1). Written only on the fields that are secret, so every other schema is unchanged.
+const SECRET_KEYWORD: &str = "x-rastai-secret";
+/// Conversation or user-written text, redacted from the journal the same way (contracts 5.1).
+const CONTENT_KEYWORD: &str = "x-rastai-content";
 
 /// The JSON Schema of one described type, with every type it refers to (directly or not) under `$defs`.
 pub fn json_schema_for(description: &TypeDescription, all_types: &[TypeDescription]) -> Value {
@@ -58,6 +63,12 @@ fn field_schema(field: &FieldDescription) -> Value {
     schema.insert("description".to_string(), json!(description));
     if let Some(position) = field.cli_position {
         schema.insert(CLI_POSITION_KEYWORD.to_string(), json!(position));
+    }
+    if field.secret {
+        schema.insert(SECRET_KEYWORD.to_string(), json!(true));
+    }
+    if field.content {
+        schema.insert(CONTENT_KEYWORD.to_string(), json!(true));
     }
     Value::Object(schema)
 }
@@ -188,6 +199,35 @@ mod tests {
         assert_eq!(node["properties"]["children"]["items"]["$ref"], "#/$defs/Node");
         assert_eq!(node["properties"]["kind"]["enum"], json!(["split", "panel"]));
         assert_eq!(schema["$defs"].as_object().map(Map::len), Some(1));
+    }
+
+    // A secret or content field says so in its schema, so copy-as and the journal's rules read the same file the
+    // editors read. Any other field has no such keyword at all.
+    #[test]
+    fn secret_and_content_fields_are_marked_in_their_schema() {
+        let secret_type = TypeDescription {
+            name: "Login".to_string(),
+            schema_id: "test.login/1".to_string(),
+            doc: "A login.".to_string(),
+            fields: vec![
+                FieldDescription {
+                    secret: true,
+                    ..field("token", FieldKind::String, REQUIRED, "The token.")
+                },
+                FieldDescription {
+                    content: true,
+                    ..field("note", FieldKind::String, OPTIONAL, "A note.")
+                },
+                field("name", FieldKind::String, REQUIRED, "A name."),
+            ],
+        };
+        let schema = json_schema_for(&secret_type, std::slice::from_ref(&secret_type));
+        assert_eq!(schema["properties"]["token"][SECRET_KEYWORD], true);
+        assert!(schema["properties"]["token"].get(CONTENT_KEYWORD).is_none());
+        assert_eq!(schema["properties"]["note"][CONTENT_KEYWORD], true);
+        assert!(schema["properties"]["note"].get(SECRET_KEYWORD).is_none());
+        assert!(schema["properties"]["name"].get(SECRET_KEYWORD).is_none());
+        assert!(schema["properties"]["name"].get(CONTENT_KEYWORD).is_none());
     }
 
     #[test]

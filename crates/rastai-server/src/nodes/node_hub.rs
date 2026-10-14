@@ -33,7 +33,7 @@ use rastai_proto::common::v1::{EventClass, NodeState, NodeTelemetry};
 use rastai_proto::events::v1::event_payload::Payload;
 use rastai_proto::events::v1::{BusEvent, EventPayload};
 use rastai_proto::node::v1::node_hub_service_server::{NodeHubService, NodeHubServiceServer};
-use rastai_proto::node::v1::{HeartbeatRequest, HeartbeatResponse};
+use rastai_proto::node::v1::{GetSecretRequest, GetSecretResponse, HeartbeatRequest, HeartbeatResponse};
 use rastai_transport::grpc_channel::serve_grpc_on_socket;
 use rastai_transport::local_socket::bind_local_socket;
 use tokio::task::JoinHandle;
@@ -51,6 +51,11 @@ const CODE_SESSION_TOKEN_REFUSED: &str = "RRS-N0009";
 const HANDSHAKE_SETTLE_MS: u64 = 2000;
 const HANDSHAKE_SETTLE_POLL_MS: u64 = 10;
 const CODE_PLUGIN_COMMAND_NOT_AVAILABLE: &str = "RRS-P1004";
+/// The secret area's "not available yet" code (catalog/README.md): `GetSecret` answers with it until M2-18 builds the
+/// purposes, and as a Diagnostic in the response, not a gRPC error (contracts 4).
+const CODE_SECRET_NOT_AVAILABLE: &str = "RRS-S3006";
+/// The call the refusal's "not available yet" message names.
+const GET_SECRET_CALL: &str = "GetSecret";
 const HEARTBEAT_CALL: &str = "NodeHubService.Heartbeat";
 const EXECUTE_COMMAND_CALL: &str = "NodeHubService.ExecuteCommand";
 const NODE_HEARTBEAT_EVENT: &str = "node.heartbeat";
@@ -99,6 +104,15 @@ impl NodeHubService for NodeHubHandler {
             log_warn("a heartbeat's effects stopped halfway", &[("node_id", &node_id)]);
         }
         Ok(Response::new(HeartbeatResponse {}))
+    }
+
+    async fn get_secret(&self, _request: Request<GetSecretRequest>) -> Result<Response<GetSecretResponse>, Status> {
+        let refusal = diagnostic(CODE_SECRET_NOT_AVAILABLE, &[("command_id", GET_SECRET_CALL)]);
+        Ok(Response::new(GetSecretResponse {
+            value: String::new(),
+            expires_unix_ms: 0,
+            diagnostic: Some(diagnostic_to_proto(&refusal)),
+        }))
     }
 
     async fn execute_command(&self, request: Request<ExecuteRequest>) -> Result<Response<ExecuteResponse>, Status> {

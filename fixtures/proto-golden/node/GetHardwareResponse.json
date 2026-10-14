@@ -23,7 +23,36 @@
       }
     ],
     "driver_version": "580.82.09",
-    "backend": "cuda13"
+    "backend": "cuda13",
+    "self_test_unix_ms": "1791700123456",
+    "self_tests": [
+      {
+        "gpu_index": 1,
+        "usable": true,
+        "diagnostic": {
+          "code": "RRS-H1004",
+          "severity": "SEVERITY_WARNING",
+          "message": "Decode graph capture failed on GPU 1; eager decode is used there.",
+          "path": "hardware_profile.json#/self_tests/0",
+          "fix_text": "Update the GPU driver, then run the hardware check again.",
+          "fix_command_id": "system.doctor",
+          "fix_arguments_json": "{\"node_id\":\"\"}"
+        }
+      },
+      {
+        "gpu_index": 2,
+        "usable": true,
+        "diagnostic": {
+          "code": "RRS-H1004",
+          "severity": "SEVERITY_WARNING",
+          "message": "Decode graph capture failed on GPU 2; eager decode is used there.",
+          "path": "hardware_profile.json#/self_tests/1",
+          "fix_text": "Update the GPU driver, then run the hardware check again.",
+          "fix_command_id": "system.doctor",
+          "fix_arguments_json": "{\"node_id\":\"\"}"
+        }
+      }
+    ]
   },
   "telemetry": {
     "sampled_unix_ms": "1791700000123",

@@ -52,6 +52,12 @@ M1_EVENT_TYPES = [
     "plugin.state_changed",
     "diagnostic.reported",
 ]
+# The M2 event types (contracts 7.3, plan M2-12), each one file in schemas/events/ like the M1 ones.
+M2_EVENT_TYPES = [
+    "download.progress",
+    "download.finished",
+    "egress.active",
+]
 
 
 def isolated_environment(base_ref: str = "main") -> dict[str, str]:
@@ -620,12 +626,13 @@ def test_the_checked_in_protobuf_json_fields_name_their_message(load_check):
     assert '"object" of protobuf message rastai.common.v1.NodeTelemetry' in type_texts
 
 
-def test_schemas_events_holds_one_file_per_m1_event_type(load_check):
+def test_schemas_events_holds_one_file_per_core_event_type(load_check):
     check = load_check(CHECK)
     events_folder = REPO_ROOT / "schemas/events"
+    core_event_types = M1_EVENT_TYPES + M2_EVENT_TYPES
     file_names = sorted(path.name for path in events_folder.glob("*.json"))
-    assert file_names == sorted(f"{event_type}.json" for event_type in M1_EVENT_TYPES)
-    for event_type in M1_EVENT_TYPES:
+    assert file_names == sorted(f"{event_type}.json" for event_type in core_event_types)
+    for event_type in core_event_types:
         path = events_folder / f"{event_type}.json"
         content = json.loads(path.read_text())
         assert content["event_type"] == event_type

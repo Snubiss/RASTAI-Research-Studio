@@ -6,6 +6,8 @@ syntax = "proto3";
 
 package rastai.common.v1;
 
+import "rastai/common/v1/diagnostic.proto";
+
 // One GPU as detected by nvidia-smi or rocm-smi.
 message GpuInfo {
   // The physical index the driver reports; jobs see GPUs in ascending physical order.
@@ -19,7 +21,17 @@ message GpuInfo {
   string driver_version = 6;
 }
 
-// The node's hardware as detected at start. The numerical self-test result joins it in M2 (plan M2 contract task).
+// One GPU's numerical self-test verdict (platform flow 1.6; contracts 10.3, RRS-H1xxx). A GPU whose verdict is not
+// usable gets no leases; the node writes the verdicts to hardware_profile.json and sends them in HardwareProfile.
+message SelfTestVerdict {
+  uint32 gpu_index = 1;
+  // True when the GPU passed every check the self-test ran, warnings included.
+  bool usable = 2;
+  // The error or warning that decided the verdict; unset when the GPU passed cleanly.
+  rastai.common.v1.Diagnostic diagnostic = 3;
+}
+
+// The node's hardware as detected at start. The self-test fields hold the last numerical self-test (M2-20).
 message HardwareProfile {
   string cpu_model = 1;
   uint32 cpu_count = 2;
@@ -30,6 +42,10 @@ message HardwareProfile {
   string driver_version = 6;
   // The environment the node picked for this hardware: "cuda13", "cuda126", "rocm" or "cpu" (node layout 7.6).
   string backend = 7;
+  // When the last self-test finished, in Unix milliseconds; 0 when none has run on this hardware.
+  int64 self_test_unix_ms = 8;
+  // One verdict per visible GPU from the last self-test; empty on a CPU-only node or before any self-test.
+  repeated SelfTestVerdict self_tests = 9;
 }
 
 // Everything that can change a run's numbers. Stored in run records and replays as protobuf JSON (contracts 4).

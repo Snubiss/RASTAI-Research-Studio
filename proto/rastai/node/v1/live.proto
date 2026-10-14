@@ -10,8 +10,8 @@ import "rastai/events/v1/payloads.proto";
 // WatchLive takes no arguments yet; the empty request lets fields be added without a breaking change.
 message WatchLiveRequest {}
 
-// One ephemeral event. The payloads of later milestones (LivePacket, GymPeekStep, TransferProgress,
-// DownloadProgress, EgressActive) join the oneof with the next free numbers, so it stays last (contracts 4.3).
+// One ephemeral event. The payloads of later milestones (LivePacket, GymPeekStep, TransferProgress) join the oneof
+// with the next free numbers, so it stays last (contracts 4.3).
 message LiveEvent {
   string job_id = 1;
   // The generation session the event belongs to; empty for an event that isn't part of one.
@@ -22,5 +22,7 @@ message LiveEvent {
   oneof payload {
     rastai.events.v1.JobProgress job_progress = 4;
     rastai.events.v1.JobLogLine job_log_line = 5;
+    rastai.events.v1.DownloadProgress download_progress = 6;
+    rastai.events.v1.EgressActive egress_active = 7;
   }
 }

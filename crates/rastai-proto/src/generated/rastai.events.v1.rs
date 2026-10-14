@@ -4,7 +4,7 @@
 /// Numbers are never reused (layout rust-node-gateway-proto.md 3.3): a new payload takes the next free number.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct EventPayload {
-    #[prost(oneof="event_payload::Payload", tags="1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16")]
+    #[prost(oneof="event_payload::Payload", tags="1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19")]
     pub payload: ::core::option::Option<event_payload::Payload>,
 }
 /// Nested message and enum types in `EventPayload`.
@@ -45,6 +45,12 @@ pub mod event_payload {
         /// Any event type a plugin declares in its manifest.
         #[prost(message, tag="16")]
         PluginEvent(super::PluginEventPayload),
+        #[prost(message, tag="17")]
+        DownloadProgress(super::DownloadProgress),
+        #[prost(message, tag="18")]
+        DownloadFinished(super::DownloadFinished),
+        #[prost(message, tag="19")]
+        EgressActive(super::EgressActive),
     }
 }
 /// job.state_changed (durable, from the node). The transitions are contracts 9.1.
@@ -258,6 +264,48 @@ pub struct PluginEventPayload {
     pub schema: ::prost::alloc::string::String,
     #[prost(string, tag="3")]
     pub payload_json: ::prost::alloc::string::String,
+}
+/// download.progress (ephemeral, from the node): bytes of one model download so far (M2-17).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DownloadProgress {
+    #[prost(string, tag="1")]
+    pub model_ref: ::prost::alloc::string::String,
+    #[prost(uint64, tag="2")]
+    pub bytes_done: u64,
+    #[prost(uint64, tag="3")]
+    pub bytes_total: u64,
+}
+/// download.finished (durable, from the node). ok is false when the download failed; the Diagnostic then says why, and it
+/// can also carry a note on a success, such as RRS-N3010 when the download waited on another program.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DownloadFinished {
+    #[prost(string, tag="1")]
+    pub model_ref: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub revision: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub ok: bool,
+    #[prost(string, tag="4")]
+    pub model_hash: ::prost::alloc::string::String,
+    #[prost(uint64, tag="5")]
+    pub size_bytes: u64,
+    /// Why the download failed, for example RRS-N3009 (download interrupted, retries used up); or a note, when it
+    /// succeeded. Unset when the download was clean.
+    #[prost(message, optional, tag="6")]
+    pub diagnostic: ::core::option::Option<super::super::common::v1::Diagnostic>,
+}
+/// egress.active (ephemeral, from the daemon or a node's EgressReport): one outbound connection that carries data.
+/// The egress badge reads these three fields and nothing else.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct EgressActive {
+    /// One of the purposes of contracts 7.3, for example hf_download.
+    #[prost(string, tag="1")]
+    pub purpose: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub host: ::prost::alloc::string::String,
+    /// The job, download or conversation the connection belongs to, when there is one.
+    #[prost(string, tag="3")]
+    pub subject_id: ::prost::alloc::string::String,
 }
 /// Which output stream of a job's process a log line came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

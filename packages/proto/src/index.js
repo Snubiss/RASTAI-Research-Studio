@@ -12,6 +12,7 @@ export * from "./generated/rastai/commands/v1/command_service_pb.js";
 export * from "./generated/rastai/events/v1/event_record_pb.js";
 export * from "./generated/rastai/events/v1/event_service_pb.js";
 export * from "./generated/rastai/events/v1/payloads_pb.js";
+export * from "./generated/rastai/node/v1/environments_pb.js";
 export * from "./generated/rastai/node/v1/jobs_pb.js";
 export * from "./generated/rastai/node/v1/live_pb.js";
 export * from "./generated/rastai/node/v1/node_hub_service_pb.js";

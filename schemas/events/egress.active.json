@@ -1,0 +1,31 @@
+{
+  "emitter": "daemon, node (from an `EgressReport`)",
+  "event_class": "ephemeral",
+  "event_type": "egress.active",
+  "fields": [
+    {
+      "name": "purpose",
+      "number": 1,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "host",
+      "number": 2,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    },
+    {
+      "name": "subject_id",
+      "number": 3,
+      "optional": false,
+      "repeated": false,
+      "type": "string"
+    }
+  ],
+  "payload_type": "rastai.events.v1.EgressActive",
+  "x-rastai-since-version": "0.1.0",
+  "x-rastai-stability": "preview"
+}

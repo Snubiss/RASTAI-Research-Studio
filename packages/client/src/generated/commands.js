@@ -4,14 +4,27 @@
 /** @typedef {import("../command-executor.js").CommandExecutor} CommandExecutor */
 /** @typedef {import("../types.js").ExecuteOutcome} ExecuteOutcome */
 /** @typedef {import("@rastai/formats").CommandListArgs} CommandListArgs */
+/** @typedef {import("@rastai/formats").HfLicenseCheckArgs} HfLicenseCheckArgs */
+/** @typedef {import("@rastai/formats").HfLoginArgs} HfLoginArgs */
 /** @typedef {import("@rastai/formats").JobCancelArgs} JobCancelArgs */
 /** @typedef {import("@rastai/formats").JobGetArgs} JobGetArgs */
 /** @typedef {import("@rastai/formats").JobListArgs} JobListArgs */
+/** @typedef {import("@rastai/formats").ModelDownloadArgs} ModelDownloadArgs */
+/** @typedef {import("@rastai/formats").ModelInspectArgs} ModelInspectArgs */
+/** @typedef {import("@rastai/formats").ModelListArgs} ModelListArgs */
 /** @typedef {import("@rastai/formats").NodeListArgs} NodeListArgs */
 /** @typedef {import("@rastai/formats").NodeStatusArgs} NodeStatusArgs */
 /** @typedef {import("@rastai/formats").PluginListArgs} PluginListArgs */
+/** @typedef {import("@rastai/formats").SecretDeleteArgs} SecretDeleteArgs */
+/** @typedef {import("@rastai/formats").SecretListArgs} SecretListArgs */
+/** @typedef {import("@rastai/formats").SecretSetArgs} SecretSetArgs */
 /** @typedef {import("@rastai/formats").SettingsGetArgs} SettingsGetArgs */
 /** @typedef {import("@rastai/formats").SettingsSetArgs} SettingsSetArgs */
+/** @typedef {import("@rastai/formats").SystemBundleArgs} SystemBundleArgs */
+/** @typedef {import("@rastai/formats").SystemDoctorArgs} SystemDoctorArgs */
+/** @typedef {import("@rastai/formats").SystemEnvInstallArgs} SystemEnvInstallArgs */
+/** @typedef {import("@rastai/formats").SystemEnvListArgs} SystemEnvListArgs */
+/** @typedef {import("@rastai/formats").SystemHardwareArgs} SystemHardwareArgs */
 /** @typedef {import("@rastai/formats").SystemShutdownArgs} SystemShutdownArgs */
 /** @typedef {import("@rastai/formats").SystemStatusArgs} SystemStatusArgs */
 /** @typedef {import("@rastai/formats").TokenCreateArgs} TokenCreateArgs */
@@ -28,6 +41,26 @@
  */
 export function commandList(executor, args) {
   return executor.execute("command.list", args);
+}
+
+/**
+ * Check model license. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {HfLicenseCheckArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function hfLicenseCheck(executor, args) {
+  return executor.execute("hf.license.check", args);
+}
+
+/**
+ * Sign in to Hugging Face. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {HfLoginArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function hfLogin(executor, args) {
+  return executor.execute("hf.login", args);
 }
 
 /**
@@ -61,6 +94,36 @@ export function jobList(executor, args) {
 }
 
 /**
+ * Download model. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {ModelDownloadArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function modelDownload(executor, args) {
+  return executor.execute("model.download", args);
+}
+
+/**
+ * Inspect model. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {ModelInspectArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function modelInspect(executor, args) {
+  return executor.execute("model.inspect", args);
+}
+
+/**
+ * List models. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {ModelListArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function modelList(executor, args) {
+  return executor.execute("model.list", args);
+}
+
+/**
  * List nodes. Stability: preview.
  * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
  * @param {NodeListArgs} args
@@ -91,6 +154,36 @@ export function pluginList(executor, args) {
 }
 
 /**
+ * Delete secret. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SecretDeleteArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function secretDelete(executor, args) {
+  return executor.execute("secret.delete", args);
+}
+
+/**
+ * List secrets. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SecretListArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function secretList(executor, args) {
+  return executor.execute("secret.list", args);
+}
+
+/**
+ * Store secret. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SecretSetArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function secretSet(executor, args) {
+  return executor.execute("secret.set", args);
+}
+
+/**
  * Show settings. Stability: preview.
  * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
  * @param {SettingsGetArgs} args
@@ -108,6 +201,56 @@ export function settingsGet(executor, args) {
  */
 export function settingsSet(executor, args) {
   return executor.execute("settings.set", args);
+}
+
+/**
+ * Make support bundle. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SystemBundleArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function systemBundle(executor, args) {
+  return executor.execute("system.bundle", args);
+}
+
+/**
+ * Check hardware. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SystemDoctorArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function systemDoctor(executor, args) {
+  return executor.execute("system.doctor", args);
+}
+
+/**
+ * Install environment. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SystemEnvInstallArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function systemEnvInstall(executor, args) {
+  return executor.execute("system.env.install", args);
+}
+
+/**
+ * List environments. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SystemEnvListArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function systemEnvList(executor, args) {
+  return executor.execute("system.env.list", args);
+}
+
+/**
+ * Show hardware. Stability: preview.
+ * @param {CommandExecutor} executor DaemonClient, PluginHost or any other CommandExecutor
+ * @param {SystemHardwareArgs} args
+ * @returns {Promise<ExecuteOutcome>}
+ */
+export function systemHardware(executor, args) {
+  return executor.execute("system.hardware", args);
 }
 
 /**

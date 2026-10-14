@@ -9,6 +9,7 @@
 pub mod lock;
 pub mod model;
 pub mod model_ops;
+pub mod plans;
 pub mod plugin_manifest;
 pub mod project;
 pub mod resume;
