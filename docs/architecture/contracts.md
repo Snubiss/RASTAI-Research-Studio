@@ -1508,7 +1508,7 @@ Names are `<area>.<what_happened>` in past tense or noun form. Every event type 
 | `transfer.finished` (M9) | durable | node | transfer_id, hash, ok, Diagnostic |
 | `download.progress` | ephemeral | node | model_ref, bytes_done, bytes_total |
 | `download.finished` | durable | node | model_ref, revision, ok, model_hash, size_bytes, Diagnostic (the reason when ok is false; a note on a success) |
-| `egress.active` | ephemeral | daemon, node (from an `EgressReport`) | `EgressActive{purpose, host, subject_id}`; the egress badge reads nothing else. Purposes include `api_adapter`, `hf_download`, `hf_upload`, `remote_node` (an SSH node's link while it carries data) and `archive` (during sync). |
+| `egress.active` | ephemeral | daemon, node (from an `EgressReport`) | `EgressActive{purpose, host, subject_id}`; the egress badge reads nothing else. Purposes include `api_adapter`, `hf_download`, `hf_cdn_download` (a Hub file's redirect to its CDN host, which never gets the token), `hf_upload`, `remote_node` (an SSH node's link while it carries data) and `archive` (during sync). |
 | `chat.token` (M3) | ephemeral | gateway (daemon) | conversation_id, message_id, token_id, text, logprob |
 | `conversation.changed` (M3) | durable | daemon | conversation_id, message_ids added, flags changed |
 | `conversation.deleted` (M3) | durable | daemon | conversation_id, node_id, run_ids[], blob_hashes[] (ids and hashes only): a removal that waits for an unreachable node |
@@ -2720,7 +2720,7 @@ export function modelLoad(executor, args) {
 | `rastai-server` | `request_gate` (header parsing), `connect_json` (the six Connect JSON decoders) |
 | `rastai-transport` | `sse_reader` |
 | `rastai-mcp` | `jsonrpc_decode` |
-| `rastai-node` | `handshake` (M9-E02) |
+| `rastai-node` | `handshake` (M9-E02), `hub_answer` (the Hub's and the CDN's answers: the file list whose names become cache paths, a Content-Range, a redirect's Location, M2-17) |
 | `rastai-archive` | `archived_frame` (frames read back from the archive on restore) |
 | `rastai-sandbox` | `connect_request` (the egress proxy's HTTP CONNECT parsing; the bytes come from sandboxed code), `exec_stream` (Docker multiplexed exec frames) |
 | `rastai-gateway` | `tool_call_parse` (tool calls parsed from model output) |
