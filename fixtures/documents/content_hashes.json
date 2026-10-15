@@ -3,6 +3,7 @@
   "hashes": {
     "rastai.lock/valid/environment_only.lock": "blake3:15bc7177adb0fec30bb729bfcf8f4cfb7dafd2fae8380203f8f0fd549bcc1871",
     "rastai.lock/valid/rastai.lock": "blake3:7a24a4045cc59fd42262778146cdd98565f60f0d11d95ef71ffe9a27b3447ba5",
+    "rastai.model/valid/block_body_op_without_shapes.rrsmodel": "blake3:01e2406a93665ff5efdfc5841c262a250f46f8ccf878ee59819141b8d401fc92",
     "rastai.model/valid/block_repeat.rrsmodel": "blake3:7b2f54727c732925cb1f6817e5a42bae0ddfb40f0be3d6d9b2e7af6126a025a6",
     "rastai.model/valid/block_residual.rrsmodel": "blake3:18193f6f829d6fe2845d437d001364031f0ce63322906d5318fbccdde73b0d18",
     "rastai.model/valid/tiny_gemma3.rrsmodel": "blake3:2b8b896ffcbd354e2d2c72e37400fd839a196dc9c7a7fdb4606d4543401c7c70",
