@@ -1850,7 +1850,7 @@ Numbers only; titles are in contracts 10.3. A file may raise a code only if it i
 | `rastai-transport` `transfer.rs`, `http_client.rs` | `RRS-N3002`, `RRS-N3003`, `RRS-N3008`, `RRS-N3012` |
 | `rastai-sandbox` | `RRS-R1001` to `RRS-R1013` (cap, engine, API version, pull, start, time cap, pause, RAM, over-cap request, egress network, socket permission, memory cap, engine failure) |
 | `rastai-gateway` | `RRS-G0001`, `G0002`, `G0004` to `G0007`, `G0009`, `G0010`, `G1001` to `G1007`, `G2001` to `G2004`, `G3004`, `G3006`, `G4001` |
-| `rastai-node` identity, handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N0006`, `N0007`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `RRS-H0001`, `H0002`, `RRS-S3001` |
+| `rastai-node` identity, handshake, hardware, downloads, transfers | `RRS-N0001` to `N0004`, `N0006`, `N0007`, `N3001`, `N3004` to `N3007`, `N3009` to `N3011`, `N3013`, `RRS-H0001`, `H0002`, `RRS-S3001` |
 | `rastai-node` environments, leases | `RRS-H2001` to `H2006`, `RRS-H3001`, `H3004` to `H3007`, `RRS-H4002` |
 | `rastai-node` jobs and reattach | `RRS-J0001`, `J0002`, `J0004`, `J1001` to `J1004`, `J2001` to `J2003`, `J3002`, `J3003`, `J3006`, `RRS-S2002`, `RRS-S3002`, `RRS-N0004` (a job kind or environment the node can't provide, 7.4 step 1) |
 | `rastai-node` `run_events.rs` (the node's report at the end of a damaged or refused stream, 7.5) | `RRS-C0002` (a `run_id` that isn't one), `RRS-S0006`, `RRS-S2001` (logged only), `RRS-S2002`, `RRS-S2003` |

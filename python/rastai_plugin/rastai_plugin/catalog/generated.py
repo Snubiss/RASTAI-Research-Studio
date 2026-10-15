@@ -272,6 +272,7 @@ RRS_N3009 = "RRS-N3009"
 RRS_N3010 = "RRS-N3010"
 RRS_N3011 = "RRS-N3011"
 RRS_N3012 = "RRS-N3012"
+RRS_N3013 = "RRS-N3013"
 RRS_N4001 = "RRS-N4001"
 RRS_N4002 = "RRS-N4002"
 RRS_N4003 = "RRS-N4003"
@@ -3037,6 +3038,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="",
         fix_command_id="",
         docs_anchor="rrs-n3012",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_N3013,
+        severity="error",
+        title="Redirect refused: no target, or more than 5 hops",
+        message="The download of {file_name} was refused a redirect: {reason}.",
+        basic_text="The server sent the file to an address Rastai won't follow. Trying again gets the same answer, so the download stopped at once.",
+        fix_text="",
+        fix_command_id="",
+        docs_anchor="rrs-n3013",
         retired=False,
     ),
     CatalogEntry(
