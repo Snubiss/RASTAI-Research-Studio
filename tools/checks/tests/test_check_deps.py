@@ -247,6 +247,40 @@ def test_python_lock_problems_fail(write_tree, run_check, lock_change, expected)
     assert expected in result.stdout
 
 
+def cuda_lock_with_filelock(version: str) -> str:
+    return UV_LOCK.replace('version = "4.0.4"', f'version = "{version}"')
+
+
+def allowlist_with_cuda_lock(versions_by_lock: dict) -> str:
+    allowlist = json.loads(json.dumps(PYTHON_ALLOWLIST))
+    allowlist["locks"].append("python/envs/cuda126/uv.lock")
+    allowlist["packages"]["filelock"]["versions_by_lock"] = versions_by_lock
+    return json.dumps(allowlist)
+
+
+def test_a_package_a_lock_pins_at_its_own_version_passes(write_tree, run_check):
+    """cuda-bindings is 13 in one lock and 12 in another; `versions_by_lock` names the version for the other lock."""
+    files = passing_files() | {
+        "deps/allowlist-python.json": allowlist_with_cuda_lock({"python/envs/cuda126/uv.lock": "4.1.0"}),
+        "python/envs/cuda126/uv.lock": cuda_lock_with_filelock("4.1.0"),
+    }
+    result = run_deps(run_check, write_tree(files))
+    assert result.returncode == 0, result.stdout
+
+
+def test_a_versions_by_lock_entry_still_checks_its_own_lock(write_tree, run_check):
+    files = passing_files() | {
+        "deps/allowlist-python.json": allowlist_with_cuda_lock({"python/envs/cuda126/uv.lock": "4.1.0"}),
+        "python/envs/cuda126/uv.lock": cuda_lock_with_filelock("4.0.4"),
+    }
+    result = run_deps(run_check, write_tree(files))
+    assert result.returncode == 1
+    assert (
+        "python/envs/cuda126/uv.lock: `filelock` is 4.0.4, but deps/allowlist-python.json lists 4.1.0" in result.stdout
+    )
+    assert "python/envs/cpu/uv.lock" not in result.stdout
+
+
 def test_a_python_license_outside_the_list_fails(write_tree, run_check):
     allowlist = json.loads(json.dumps(PYTHON_ALLOWLIST))
     allowlist["packages"]["filelock"]["license"] = "GPL-3.0-only"

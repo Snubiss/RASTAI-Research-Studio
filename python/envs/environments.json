@@ -10,14 +10,14 @@
       "expected_download_gib": 0.74
     },
     "cuda13": {
-      "lock": null,
+      "lock": "python/envs/cuda13/uv.lock",
       "pytorch_build": "2.14.1+cu130",
       "selection_rule": "NVIDIA GPU with driver 580 or newer. The default for NVIDIA.",
       "supported_amd_gfx_targets": [],
       "expected_download_gib": 5.15
     },
     "cuda126": {
-      "lock": null,
+      "lock": "python/envs/cuda126/uv.lock",
       "pytorch_build": "2.14.1+cu126",
       "selection_rule": "NVIDIA Maxwell, Pascal and Volta GPUs, which cuda13 doesn't support.",
       "supported_amd_gfx_targets": [],

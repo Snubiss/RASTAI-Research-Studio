@@ -218,8 +218,11 @@ def check_listed_version(allowlist_path: str, lock_path: str, name: str, version
     entry = listed.get(name)
     if entry is None:
         return [f"{lock_path}: `{name}` {version} isn't in {allowlist_path} (spec §27)"]
-    if entry["version"] != version:
-        return [f"{lock_path}: `{name}` is {version}, but {allowlist_path} lists {entry['version']}"]
+    # A package one backend pins at another version (cuda-bindings 12 for CUDA 12.6, 13 for CUDA 13) names that
+    # version for its lock in `versions_by_lock`; `version` is the one every other lock holds.
+    expected = entry.get("versions_by_lock", {}).get(lock_path, entry["version"])
+    if expected != version:
+        return [f"{lock_path}: `{name}` is {version}, but {allowlist_path} lists {expected}"]
     return []
 
 

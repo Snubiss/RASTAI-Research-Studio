@@ -27,6 +27,13 @@ TORCHVISION_FOR_TORCH = {"2.14.1": "0.29.1"}
 LOCAL_TAG_SEPARATOR = "+"
 # A gfx target as ROCm names it: gfx1100, gfx90a.
 GFX_TARGET_PATTERN = r"gfx[0-9a-f]+"
+# The Python allowlist (check-deps reads it) and the NVIDIA packages it names: each nvidia-* and cuda-* package under
+# NVIDIA's proprietary license needs a named entry that cites the spec §27 NVIDIA row and its condition (owner approval
+# of 2026-10-14, M2-15).
+ALLOWLIST_FILE = "deps/allowlist-python.json"
+NVIDIA_PACKAGE_PREFIXES = ("nvidia-", "cuda-")
+NVIDIA_LICENSE = "LicenseRef-NVIDIA-Proprietary"
+NVIDIA_REASON_MARKERS = ("spec §27", "never vendors")
 
 
 def read_environments(repo_root: Path) -> dict:
@@ -113,3 +120,33 @@ def test_env_locks_recipe_resolves_each_folder_with_directory_and_refresh(repo_r
         f"found {len(loop_lines)}; keep that loop's first words when the recipe is edited"
     )
     assert "uv lock --locked --refresh --directory" in loop_lines[0], loop_lines[0]
+
+
+def read_allowlist(repo_root: Path) -> dict:
+    return json.loads((repo_root / ALLOWLIST_FILE).read_text(encoding="utf-8"))
+
+
+def test_each_nvidia_proprietary_package_has_a_named_entry_citing_its_condition(repo_root: Path) -> None:
+    """A proprietary NVIDIA package is listed with the proprietary license, and its named entry names that license and
+    cites the spec §27 row and the condition (downloaded by an explicit install, never bundled)."""
+    allowlist = read_allowlist(repo_root)
+    named_entries = allowlist["licenses"]["named_entries"]
+    proprietary = [
+        name
+        for name, entry in allowlist["packages"].items()
+        if name.startswith(NVIDIA_PACKAGE_PREFIXES) and entry["license"] == NVIDIA_LICENSE
+    ]
+    assert proprietary, "no NVIDIA proprietary package is listed; the CUDA locks need them"
+    for name in proprietary:
+        assert name in named_entries, f"{name}: no named license entry"
+        assert named_entries[name]["license"] == NVIDIA_LICENSE, name
+        for marker in NVIDIA_REASON_MARKERS:
+            assert marker in named_entries[name]["reason"], f"{name}: its reason doesn't contain {marker!r}"
+
+
+def test_versions_by_lock_names_only_locks_the_allowlist_lists(repo_root: Path) -> None:
+    """A per-lock version is read only for a lock check-deps reads, so it can't sit under a lock nobody checks."""
+    allowlist = read_allowlist(repo_root)
+    for name, entry in allowlist["packages"].items():
+        for lock_path in entry.get("versions_by_lock", {}):
+            assert lock_path in allowlist["locks"], f"{name}: versions_by_lock names {lock_path}, which isn't a lock"
