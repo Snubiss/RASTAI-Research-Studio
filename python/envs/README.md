@@ -17,8 +17,8 @@ pending.
 
 ## Pending lock: rocm (M2-15)
 
-The rocm lock is not in the repository yet. Its pyproject and lock resolve (`uv lock` works), but two things need a decision,
-not a change to this folder:
+The rocm environment has no folder yet, and `environments.json` holds `lock: null` for it. Two things need an owner decision
+first. The draft rocm pyproject that the plan below describes is not in the repository.
 
 - **The AMD ROCm SDK licenses.** `rocm-sdk-core`, `rocm-sdk-libraries` and the `rocm-sdk-device-gfx*` packages come from the
   rocm7.14 index, which publishes no upload times and no license field in their METADATA (the core wheel bundles components
@@ -28,9 +28,9 @@ not a change to this folder:
   `environments.json` with its lock.
 - **The ROCm meta package.** PyTorch's ROCm build requires `rocm[device-all]==7.14.*`, and the index serves that package only
   as an sdist (`rocm-7.14.1.tar.gz`). Its `setup.py` builds its own dependency list on the machine it is built on, so uv
-  can't lock it with hashes. The rocm pyproject pins the device packages for the gfx targets `environments.json` lists
-  directly and drops the sdist with `exclude-dependencies`, so the lock holds only wheels with hashes. The owner approved
-  this approach on 2026-10-14.
+  can't lock it with hashes. The plan: the rocm pyproject pins the device packages for the gfx targets `environments.json`
+  lists directly and drops the sdist with `exclude-dependencies`, so the lock holds only wheels with hashes. Issue #71 calls
+  this an engineering choice, which the owner accepted on 2026-10-14; it is not a license approval.
 
 ## The cpu environment
 
@@ -51,8 +51,11 @@ not a change to this folder:
   (`system.env.install`), and never vendored, bundled or redistributed in Rastai's own packages. Each one has a named entry in
   `deps/allowlist-python.json` that cites that row. `nvidia-nvtx` is Apache-2.0 on PyPI and has no named entry.
 - `cuda-toolkit` is left out of the graph (`exclude-dependencies`): it is a meta package with no code, and PyPI declares no
-  license for it. The `nvidia-*` packages its extras brought are pinned in the pyproject instead, so the set of runtime packages
-  is the same.
+  license for it. The `nvidia-*` packages its extras brought are pinned in the pyproject instead.
+- **Platforms.** Each `nvidia-*` pin carries `sys_platform == 'linux'`: torch's own metadata gates its CUDA runtime behind Linux,
+  and its Windows wheel declares none. So on Windows the environment installs torch and torchvision without the `nvidia-*`
+  packages (36 packages, against 53 on Linux; `uv sync --dry-run --python-platform`). `required-environments` in each pyproject
+  names Linux x86_64 and aarch64 and Windows x86_64, so a pin with no wheel for one of them fails `uv lock`.
 - `cuda-bindings` is 13.4.3 in the cuda13 lock and 12.9.9 in the cuda126 lock. One allowlist entry holds one version, so its
   `versions_by_lock` names the cuda126 lock's version (check-deps reads it).
 
