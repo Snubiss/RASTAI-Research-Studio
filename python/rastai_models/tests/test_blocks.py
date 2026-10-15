@@ -10,13 +10,15 @@ import math
 import pytest
 import torch
 from rastai_formats.generated.model import RopeSettings
-from rastai_models.blocks.attention import Attention
+from rastai_models.attention_kernel import KERNEL_EAGER, KERNEL_MATH, KERNEL_SDPA, eager_attention
+from rastai_models.blocks.attention import Attention, attention_mask
 from rastai_models.blocks.embedding import Embedding
 from rastai_models.blocks.feed_forward import FeedForward
 from rastai_models.blocks.norms import LayerNorm, RmsNorm
 from rastai_models.blocks.residual import ResidualAdd
 from rastai_models.blocks.rope import apply_rope, rope_frequencies, rotary_angles
 from rastai_models.blocks.unembed import Unembed
+from rastai_models.errors import ModelError
 from rastai_models.forward_context import ForwardContext
 from rastai_models.observation import (
     ATTENTION_PATTERN_OUTPUT,
@@ -27,6 +29,8 @@ from rastai_models.observation import (
     PointHook,
 )
 from torch.nn import functional
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_flatten
 
 SEED = 7
 # float32 math on small tensors: the implementations differ only in the order of rounding.
@@ -38,6 +42,13 @@ HIDDEN_SIZE = 16
 HEAD_COUNT = 4
 KV_HEAD_COUNT = 2
 HEAD_DIM = 8
+# Llama 3's base frequency: a base other than the default, so the rope test can tell the two apart.
+ROPE_BASE = 500000.0
+# The epsilon of the RMS norm the reference uses: the rms_norm op's default.
+RMS_EPSILON = 1e-6
+# Matrix products read their operands and write a new result; they are the one kind of op allowed to do that to a
+# key or value head.
+MATRIX_PRODUCT_NAMES = ("bmm", "mm")
 
 
 class CapturingHook(PointHook):
@@ -77,14 +88,46 @@ def built_attention(attributes: dict) -> Attention:
     return module
 
 
-def reference_attention(module: Attention, hidden: torch.Tensor, window: int | None = None) -> torch.Tensor:
+def reference_rotate(values: torch.Tensor, base: float) -> torch.Tensor:
+    """Rotary embedding written out: each head vector's pair (i, i + head_dim / 2) turns by position times
+    base^(-2i / head_dim) radians, one pair at a time. `values` is [..., length, head_dim]."""
+    length, width = values.shape[-2], values.shape[-1]
+    half = width // 2
+    rotated = torch.zeros_like(values)
+    for position in range(length):
+        for pair in range(half):
+            angle = position * base ** (-2.0 * pair / width)
+            cosine = math.cos(angle)
+            sine = math.sin(angle)
+            first = values[..., position, pair]
+            second = values[..., position, pair + half]
+            rotated[..., position, pair] = first * cosine - second * sine
+            rotated[..., position, pair + half] = second * cosine + first * sine
+    return rotated
+
+
+def reference_head_norm(values: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """An RMS norm over each head vector, then the scale `weight`; `values` is [..., head_dim]."""
+    return values / torch.sqrt(values.pow(2).mean(-1, keepdim=True) + RMS_EPSILON) * weight
+
+
+def reference_attention(
+    module: Attention, hidden: torch.Tensor, window: int | None = None, rope_base: float | None = None
+) -> torch.Tensor:
     """Attention written out per query position and per head, in plain loops: no grouped reshapes and no repeats. A
-    query sees the positions up to itself, and from `window` back when the layer slides."""
+    query sees the positions up to itself, and from `window` back when the layer slides. With a module that has
+    qk_norm, each query and key head is normalized first; with `rope_base`, each is rotated by position."""
     batch_size, length, _ = hidden.shape
     group_size = module.head_count // module.kv_head_count
     queries = (hidden @ module.query_weight.T).reshape(batch_size, length, module.head_count, HEAD_DIM)
     keys = (hidden @ module.key_weight.T).reshape(batch_size, length, module.kv_head_count, HEAD_DIM)
     values = (hidden @ module.value_weight.T).reshape(batch_size, length, module.kv_head_count, HEAD_DIM)
+    if module.query_norm is not None:
+        queries = reference_head_norm(queries, module.query_norm.weight)
+        keys = reference_head_norm(keys, module.key_norm.weight)
+    if rope_base is not None:
+        queries = reference_rotate(queries.transpose(1, 2), rope_base).transpose(1, 2)
+        keys = reference_rotate(keys.transpose(1, 2), rope_base).transpose(1, 2)
     heads = torch.zeros(batch_size, length, module.head_count, HEAD_DIM)
     for head in range(module.head_count):
         key_head = head // group_size
@@ -137,6 +180,24 @@ def test_qk_norm_adds_two_head_norms_with_unit_scale_at_the_start() -> None:
     assert module.query_norm is not None and module.key_norm is not None
     assert torch.equal(module.query_norm.weight, torch.ones(HEAD_DIM))
     assert torch.equal(module.key_norm.weight, torch.ones(HEAD_DIM))
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        gqa_attributes(qk_norm=True, rope={"base": ROPE_BASE}),
+        gqa_attributes(variant="sliding", window=3, qk_norm=True, rope={"base": ROPE_BASE}),
+    ],
+    ids=["qk_norm_and_rope", "sliding_qk_norm_and_rope"],
+)
+def test_qk_norm_and_rope_equal_the_written_out_reference(attributes: dict) -> None:
+    module = built_attention(attributes)
+    # Random norm scales, so a norm that ignores its scale can't match the reference.
+    module.query_norm.weight.data = random_tensor((HEAD_DIM,), SEED + 3)
+    module.key_norm.weight.data = random_tensor((HEAD_DIM,), SEED + 4)
+    expected = reference_attention(module, sample_hidden(), window=attributes.get("window"), rope_base=ROPE_BASE)
+    assert torch.allclose(module(sample_hidden()), expected, atol=TOLERANCE)
+    assert torch.allclose(module(sample_hidden(), context=ForwardContext()), expected, atol=TOLERANCE)
 
 
 # ---- masks ----
@@ -194,6 +255,24 @@ def test_last_token_capture_equals_the_last_row_of_the_full_pattern() -> None:
     assert torch.allclose(last_pattern, full_pattern[:, :, -1:, :], atol=TOLERANCE)
 
 
+@pytest.mark.parametrize("kernel", [KERNEL_SDPA, KERNEL_MATH, KERNEL_EAGER])
+def test_last_token_capture_is_observed_on_every_kernel(kernel: str) -> None:
+    """A pinned kernel still gets the live panel's pattern: eager slices its own, math and SDPA compute the row."""
+    module = built_attention(gqa_attributes())
+    hidden = sample_hidden()
+    full_hook = CapturingHook()
+    module(hidden, context=ForwardContext(attention_capture=CAPTURE_FULL_ATTENTION, hook=full_hook))
+    last_hook = CapturingHook()
+    output = module(
+        hidden,
+        context=ForwardContext(attention_kernel=kernel, attention_capture=CAPTURE_LAST_TOKEN_ATTENTION, hook=last_hook),
+    )
+    last_pattern = last_hook.tensors[f"{NODE_PATH}.{LAST_TOKEN_ATTENTION_OUTPUT}"]
+    full_pattern = full_hook.tensors[f"{NODE_PATH}.{ATTENTION_PATTERN_OUTPUT}"]
+    assert torch.allclose(last_pattern, full_pattern[:, :, -1:, :], atol=TOLERANCE)
+    assert torch.allclose(output, module(hidden), atol=TOLERANCE)
+
+
 def test_head_outputs_edit_reaches_the_output_projection() -> None:
     module = built_attention(gqa_attributes())
 
@@ -206,18 +285,46 @@ def test_head_outputs_edit_reaches_the_output_projection() -> None:
     assert torch.equal(ablated, torch.zeros_like(ablated))
 
 
-def test_gqa_attention_copies_no_key_or_value_head(monkeypatch: pytest.MonkeyPatch) -> None:
+class CopyRecorder(TorchDispatchMode):
+    """Records each operation that reads a watched tensor's storage and writes a fresh storage, unless it is a matrix
+    product. A copy of a key or value head is such an operation (repeat, cat, clone, a copying reshape); a view and a
+    product are not."""
+
+    def __init__(self, watched: list[torch.Tensor]) -> None:
+        super().__init__()
+        self.watched_pointers = {tensor.untyped_storage().data_ptr() for tensor in watched}
+        self.copies: list[str] = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        result = func(*args, **(kwargs or {}))
+        read_pointers = set()
+        for item in tree_flatten((args, kwargs or {}))[0]:
+            if isinstance(item, torch.Tensor):
+                read_pointers.add(item.untyped_storage().data_ptr())
+        if read_pointers & self.watched_pointers:
+            written_pointers = set()
+            for item in tree_flatten(result)[0]:
+                if isinstance(item, torch.Tensor):
+                    written_pointers.add(item.untyped_storage().data_ptr())
+            fresh = written_pointers - read_pointers
+            operation_name = str(func).split(".")[1]
+            if fresh and operation_name not in MATRIX_PRODUCT_NAMES:
+                self.copies.append(str(func))
+        return result
+
+
+def test_gqa_attention_copies_no_key_or_value_head() -> None:
     """Grouped-query attention shares each key head among its query heads by reshaping the queries, so the eager kernel
-    never repeats a key or value head."""
-
-    def refuse_repeat(*args: object, **kwargs: object) -> None:
-        raise AssertionError("grouped-query attention must not repeat its key or value heads")
-
-    monkeypatch.setattr(torch, "repeat_interleave", refuse_repeat)
-    monkeypatch.setattr(torch.Tensor, "repeat_interleave", refuse_repeat)
-    module = built_attention(gqa_attributes())
-    output = module(sample_hidden())
-    assert output.shape == (BATCH_SIZE, LENGTH, HIDDEN_SIZE)
+    never copies a key or value head: the only copy is of the queries."""
+    queries = random_tensor((BATCH_SIZE, HEAD_COUNT, LENGTH, HEAD_DIM), SEED)
+    keys = random_tensor((BATCH_SIZE, KV_HEAD_COUNT, LENGTH, HEAD_DIM), SEED + 1)
+    values = random_tensor((BATCH_SIZE, KV_HEAD_COUNT, LENGTH, HEAD_DIM), SEED + 2)
+    mask = attention_mask(LENGTH, None, "cpu", torch.float32)
+    recorder = CopyRecorder([keys, values])
+    with recorder:
+        output = eager_attention(queries, keys, values, mask)
+    assert output.shape == (BATCH_SIZE, HEAD_COUNT, LENGTH, HEAD_DIM)
+    assert recorder.copies == []
 
 
 # ---- rope ----
@@ -280,6 +387,18 @@ def test_rms_norm_keeps_the_dtype_of_its_input() -> None:
     module = RmsNorm({"size": HIDDEN_SIZE}, "cpu", torch.bfloat16)
     values = sample_hidden().to(torch.bfloat16)
     assert module(values).dtype == torch.bfloat16
+
+
+def test_bfloat16_rms_norm_multiplies_by_the_scale_before_it_casts_down() -> None:
+    """The product is rounded once, after the scale is applied in float32. Casting the normalized values first rounds
+    them as well, and the Gemma 3 parity depends on the single rounding (layout python.md 2.8)."""
+    module = RmsNorm({"size": HIDDEN_SIZE, "scale_offset": True}, "cpu", torch.bfloat16)
+    module.weight.data = random_tensor((HIDDEN_SIZE,), SEED).to(torch.bfloat16)
+    values = (sample_hidden() * 3.0).to(torch.bfloat16)
+    values_32 = values.float()
+    normalized = values_32 * torch.rsqrt(values_32.pow(2).mean(-1, keepdim=True) + RMS_EPSILON)
+    expected = (normalized * (1.0 + module.weight.float())).to(torch.bfloat16)
+    assert torch.equal(module(values), expected)
 
 
 def test_layer_norm_equals_the_reference() -> None:
@@ -356,3 +475,17 @@ def test_binding_a_weight_to_an_untied_unembed_is_refused() -> None:
     module = Unembed({"hidden_size": HIDDEN_SIZE, "vocab_size": 9}, "cpu", torch.float32)
     with pytest.raises(ValueError, match="untied"):
         module.bind_tied_weight(module.weight)
+
+
+def test_tied_unembed_inside_a_pass_without_a_bound_weight_is_refused() -> None:
+    module = Unembed({"hidden_size": HIDDEN_SIZE, "vocab_size": 9, "tied": True}, "cpu", torch.float32)
+    with pytest.raises(ModelError) as refusal:
+        module(sample_hidden(), context=ForwardContext())
+    assert refusal.value.code == "RRS-M0005"
+
+
+def test_tied_unembed_standalone_without_a_bound_weight_gives_zero_logits() -> None:
+    module = Unembed({"hidden_size": HIDDEN_SIZE, "vocab_size": 9, "tied": True}, "cpu", torch.float32)
+    logits = module(sample_hidden())
+    assert logits.shape == (BATCH_SIZE, LENGTH, 9)
+    assert torch.equal(logits, torch.zeros_like(logits))
