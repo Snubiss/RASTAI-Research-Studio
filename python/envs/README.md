@@ -9,16 +9,17 @@ One uv project and one hash-pinned `uv.lock` per backend (ADR-0009; layout `docs
 | `cpu` | CPU | no supported GPU; every CI runner; the M1 embedded node | M1 (this folder) |
 | `cuda13` | CUDA 13.x | NVIDIA, driver 580 or newer (the default for NVIDIA) | Locked (M2-15); its CUDA runtime packages are NVIDIA's (below) |
 | `cuda126` | CUDA 12.6 | NVIDIA Maxwell, Pascal and Volta | Locked (M2-15), the same NVIDIA packages |
-| `rocm` | ROCm | supported AMD GPUs | Pending: the AMD license decision and the ROCm meta package (below); run from M10 |
+| `rocm` | ROCm | supported AMD GPUs | Lands with follow-up #311 (M10), not M2-15: the AMD license decision and the ROCm meta package (below) |
 
 `environments.json` holds the selection rules, the supported AMD gfx targets (RDNA3 and newer, from the device packages
 of the ROCm 7.14 index) and the cold download sizes measured in spike 05. Each entry's `lock` is null while its lock is
 pending.
 
-## Pending lock: rocm (M2-15)
+## Pending lock: rocm (follow-up #311)
 
-The rocm environment has no folder yet, and `environments.json` holds `lock: null` for it. Two things need an owner decision
-first. The draft rocm pyproject that the plan below describes is not in the repository.
+The rocm environment has no folder yet, and `environments.json` holds `lock: null` for it. The owner moved it out of M2-15 on
+2026-10-15: it lands with follow-up #311 in M10, next to the AMD work (M2-11). Two things need an owner decision first, and
+the draft rocm pyproject that the plan describes is not in the repository.
 
 - **The AMD ROCm SDK licenses.** `rocm-sdk-core`, `rocm-sdk-libraries` and the `rocm-sdk-device-gfx*` packages come from the
   rocm7.14 index, which publishes no upload times and no license field in their METADATA (the core wheel bundles components
@@ -56,6 +57,9 @@ first. The draft rocm pyproject that the plan below describes is not in the repo
   and its Windows wheel declares none. So on Windows the environment installs torch and torchvision without the `nvidia-*`
   packages (36 packages, against 53 on Linux; `uv sync --dry-run --python-platform`). `required-environments` in each pyproject
   names Linux x86_64 and aarch64 and Windows x86_64, so a pin with no wheel for one of them fails `uv lock`.
+- `nvidia-nvjitlink-cu12` is 12.9.86 in the cuda126 lock, not a 12.6 build, because the cu126 cuSPARSE, cuFFT and cuSOLVER pins (12.5.4.2, 11.3.0.4, 11.7.1.2) require
+  it without an upper bound, so the resolver takes the newest release in the window (12.9.86, uploaded 2025-06-05). The 12.6 line's
+  newest, 12.6.85, is also on PyPI; the pin is explicit so a later lock can't move it unnoticed.
 - `cuda-bindings` is 13.4.3 in the cuda13 lock and 12.9.9 in the cuda126 lock. One allowlist entry holds one version, so its
   `versions_by_lock` names the cuda126 lock's version (check-deps reads it).
 
