@@ -39,6 +39,10 @@ const WEIGHTS_BYTES: usize = 20_000;
 const SAE_BYTES: usize = 4_000;
 const CONFIG_BYTES: usize = 300;
 const GRANTED_TOKEN: &str = "hf_granted";
+/// The repository folder huggingface_hub names for MODEL, and the cpu environment's Python with the layout reader.
+const REPO_FOLDER: &str = "models--acme--tiny-model";
+const CPU_PYTHON: &str = "../../.dev/envs/cpu/bin/python";
+const LAYOUT_READER: &str = "tests/support/hf_tools_read.py";
 
 /// Records what the downloader reports, so a test can read it after the download.
 #[derive(Default)]
@@ -86,6 +90,15 @@ fn weights_content() -> Vec<u8> {
 /// The blob name of an LFS file is its SHA-256.
 fn weights_blob() -> String {
     sha256_hex(&weights_content())
+}
+
+fn sae_content() -> Vec<u8> {
+    patterned_bytes(SAE_BYTES, 3)
+}
+
+/// The blob name of the nested SAE file, its SHA-256.
+fn sae_blob() -> String {
+    sha256_hex(&sae_content())
 }
 
 fn no_retry_delay() -> RetryPolicy {
@@ -884,28 +897,96 @@ async fn a_full_disk_while_writing_is_rrs_s3002_and_the_partial_file_is_kept() {
 #[tokio::test]
 #[ignore]
 async fn the_cache_the_node_wrote_has_the_huggingface_hub_layout() {
-    const CPU_PYTHON: &str = "../../.dev/envs/cpu/bin/python";
-    const READER: &str = "tests/support/hf_tools_read.py";
     let folder = new_test_folder("hf-layout-read");
-    let cache = cache_in(&folder);
-    let hub = FakeHub::start(vec![tiny_repo(None)]).await;
-    download_all(&hub, &cache).await;
+    let cache = downloaded_tiny_repo(&folder).await;
 
-    let output = std::process::Command::new(CPU_PYTHON)
-        .arg("-I")
-        .arg(READER)
-        .arg(&cache)
-        .arg(MODEL)
-        .arg(COMMIT)
-        .arg(CONFIG_NAME)
-        .output()
-        .unwrap();
+    let output = run_layout_reader(&cache);
 
     assert!(
         output.status.success(),
         "the cache doesn't match the recorded layout: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// The reader checks the link target of a nested file, not only of the required ones. A link one level too shallow
+/// dangles, and the reader refuses it.
+#[tokio::test]
+#[ignore]
+async fn the_reader_refuses_a_nested_link_that_dangles() {
+    let folder = new_test_folder("hf-layout-dangling");
+    let cache = downloaded_tiny_repo(&folder).await;
+    relink(&snapshot_link(&cache, SAE_NAME), &Path::new("../../blobs").join(sae_blob()));
+
+    let output = run_layout_reader(&cache);
+
+    assert!(!output.status.success(), "a nested link one level too shallow was accepted");
+}
+
+/// A link to the blob by its absolute path is not the relative link huggingface_hub writes, so the reader refuses it.
+#[tokio::test]
+#[ignore]
+async fn the_reader_refuses_a_nested_link_with_an_absolute_target() {
+    let folder = new_test_folder("hf-layout-absolute");
+    let cache = downloaded_tiny_repo(&folder).await;
+    let blob = fs::canonicalize(cache.join(REPO_FOLDER).join("blobs").join(sae_blob())).unwrap();
+    relink(&snapshot_link(&cache, SAE_NAME), &blob);
+
+    let output = run_layout_reader(&cache);
+
+    assert!(!output.status.success(), "a nested link with an absolute target was accepted");
+}
+
+/// A file one folder down links three levels up to blobs/, one more than a file in the snapshot's top folder. A reader
+/// that fixed every nested link at the depth of the recorded one would refuse this layout, which huggingface_hub writes.
+#[tokio::test]
+#[ignore]
+async fn a_nested_file_in_one_folder_links_with_its_own_depth() {
+    let folder = new_test_folder("hf-layout-one-folder");
+    let cache = downloaded_tiny_repo(&folder).await;
+    let link = snapshot_link(&cache, "a/b.bin");
+    fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(Path::new("../../../blobs").join(sae_blob()), &link).unwrap();
+
+    let output = run_layout_reader(&cache);
+
+    assert!(
+        output.status.success(),
+        "a one-folder file's link was refused: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Downloads the tiny repository into a fresh cache and returns the cache folder, so a test can change it.
+async fn downloaded_tiny_repo(folder: &TestFolder) -> PathBuf {
+    let cache = cache_in(folder);
+    let hub = FakeHub::start(vec![tiny_repo(None)]).await;
+    download_all(&hub, &cache).await;
+    cache
+}
+
+/// The snapshot link of one file of the tiny repository, under the commit's folder.
+fn snapshot_link(cache: &Path, file_name: &str) -> PathBuf {
+    cache.join(REPO_FOLDER).join("snapshots").join(COMMIT).join(file_name)
+}
+
+/// Replaces a snapshot link with a symbolic link to `target`, the way a tool that rewrote the cache would.
+fn relink(link: &Path, target: &Path) {
+    fs::remove_file(link).unwrap();
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// Runs the layout reader on a cache, with the cpu environment's Python, and returns its exit status and stderr.
+fn run_layout_reader(cache: &Path) -> std::process::Output {
+    std::process::Command::new(CPU_PYTHON)
+        .arg("-I")
+        .arg(LAYOUT_READER)
+        .arg(cache)
+        .arg(MODEL)
+        .arg(COMMIT)
+        .arg(CONFIG_NAME)
+        .output()
+        .unwrap()
 }
 
 /// A Hub that lists one file and answers that file with the redirect the test picks. It counts the file requests, so
