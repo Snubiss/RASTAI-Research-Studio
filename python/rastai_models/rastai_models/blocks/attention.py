@@ -43,7 +43,7 @@ from rastai_models.observation import (
 VARIANT_SLIDING = "sliding"
 # Whether queries and keys are normalized per head when the settings leave it out.
 DEFAULT_QK_NORM = False
-# The scale of an RMS norm over the queries and keys: the rms_norm op's default, with no offset.
+# The attribute of an RMS norm that sets its width: the size of one head vector (head_dim).
 QK_NORM_SIZE_KEY = "size"
 
 
@@ -101,14 +101,17 @@ class Attention(OpModule):
         mask: torch.Tensor,
         context: ForwardContext | None,
     ) -> torch.Tensor:
-        """The per-head attention outputs. The eager kernel gives the patterns, so it runs under full capture and
-        the patterns are observed; SDPA gives the output and, under last-token capture, the newest query's pattern is
-        computed on the side for the observer."""
+        """The per-head attention outputs. Under full capture the eager kernel runs and its patterns are observed. Under
+        last-token capture the newest query's pattern is observed whichever kernel runs: eager slices its own pattern,
+        SDPA computes that row on the side, after its output (which never needed it)."""
         kernel, capture = pass_kernel_and_capture(context)
         if kernel == KERNEL_EAGER:
             weights = eager_attention_weights(queries, keys, mask)
             if capture == CAPTURE_FULL_ATTENTION:
                 weights = self.observe_output(context, ATTENTION_PATTERN_OUTPUT, weights)
+            elif capture == CAPTURE_LAST_TOKEN_ATTENTION:
+                # The eager pattern already has every row, so the newest query's row is a slice, not a second pass.
+                self.observe_output(context, LAST_TOKEN_ATTENTION_OUTPUT, weights[:, :, -1:])
             return apply_attention_weights(weights, values)
         heads = run_attention(queries, keys, values, kernel, mask)
         if capture == CAPTURE_LAST_TOKEN_ATTENTION:
