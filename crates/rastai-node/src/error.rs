@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 use rastai_core::error::CoreError;
 use rastai_diag::diagnostic::{Diagnostic, diagnostic};
+use rastai_store::error::StoreError;
+use rastai_store::error::store_error_diagnostic;
 use rastai_transport::error::TransportError;
 
 const CODE_PROTOCOL_VERSION_UNSUPPORTED: &str = "RRS-N0001";
@@ -16,6 +18,13 @@ const CODE_DAEMON_NOT_PAIRED: &str = "RRS-N0002";
 const CODE_NODE_ALREADY_RUNNING: &str = "RRS-N0003";
 const CODE_IDENTITY_FILE_UNUSABLE: &str = "RRS-N0006";
 const CODE_HANDSHAKE_STALE: &str = "RRS-N0007";
+const CODE_PATH_OUTSIDE_ALLOWED: &str = "RRS-N3001";
+const CODE_DOWNLOAD_HASH_MISMATCH: &str = "RRS-N3003";
+const CODE_MODEL_NOT_FOUND: &str = "RRS-N3004";
+const CODE_MODEL_GATED: &str = "RRS-N3005";
+const CODE_MODEL_OFFLINE: &str = "RRS-N3006";
+const CODE_DOWNLOAD_INTERRUPTED: &str = "RRS-N3009";
+const CODE_DOWNLOAD_LOCK_TIMEOUT: &str = "RRS-N3011";
 /// What N0003's message shows when the running node's process id can't be read.
 const UNKNOWN_PROCESS_ID: &str = "unknown";
 /// What N0002's message shows for a signature checked without a node to name (see `SignatureRefused`).
@@ -47,6 +56,25 @@ pub enum NodeError {
     Core(CoreError),
     /// An error from rastai-transport, such as a socket folder another user owns (RRS-N2005).
     Transport(TransportError),
+    /// An error from rastai-store: a download that needs more disk than the cache's volume has (RRS-S3001), or a
+    /// cache folder that can't be written.
+    Store(StoreError),
+    /// The Hub has no such repository, or the repository has no such file (RRS-N3004). `file_name` is empty when the
+    /// repository itself is missing.
+    ModelNotFound { repository: String, file_name: String },
+    /// The repository is gated and this account has no access, or its license isn't accepted (RRS-N3005).
+    ModelGated { repository: String },
+    /// Offline mode is on, so nothing was fetched (RRS-N3006).
+    ModelOffline { repository: String },
+    /// A file's connection kept failing until its retries ran out. What was downloaded is kept (RRS-N3009). `reason`
+    /// is the last failure's words, for the log.
+    DownloadInterrupted { file_name: String, reason: String },
+    /// Another program held a file's download lock for the whole wait (RRS-N3011).
+    DownloadLockTimeout { file_name: String },
+    /// A downloaded file's SHA-256 isn't the one the Hub lists. The partial file was removed (RRS-N3003).
+    DownloadHashMismatch { path: PathBuf },
+    /// The Hub listed a file name or revision that would leave the cache folder (RRS-N3001).
+    UnsafeHubPath { path: String },
 }
 
 impl NodeError {
@@ -61,6 +89,14 @@ impl NodeError {
             NodeError::IdentityFileUnusable { .. } => CODE_IDENTITY_FILE_UNUSABLE,
             NodeError::Core(error) => error.code(),
             NodeError::Transport(error) => error.code(),
+            NodeError::Store(error) => error.code(),
+            NodeError::ModelNotFound { .. } => CODE_MODEL_NOT_FOUND,
+            NodeError::ModelGated { .. } => CODE_MODEL_GATED,
+            NodeError::ModelOffline { .. } => CODE_MODEL_OFFLINE,
+            NodeError::DownloadInterrupted { .. } => CODE_DOWNLOAD_INTERRUPTED,
+            NodeError::DownloadLockTimeout { .. } => CODE_DOWNLOAD_LOCK_TIMEOUT,
+            NodeError::DownloadHashMismatch { .. } => CODE_DOWNLOAD_HASH_MISMATCH,
+            NodeError::UnsafeHubPath { .. } => CODE_PATH_OUTSIDE_ALLOWED,
         }
     }
 }
@@ -111,6 +147,39 @@ pub fn node_error_diagnostic(error: &NodeError) -> Diagnostic {
         }
         NodeError::Core(core_error) => core_error_diagnostic(core_error),
         NodeError::Transport(transport_error) => transport_error_diagnostic(transport_error),
+        NodeError::Store(store_error) => store_error_diagnostic(store_error),
+        _ => download_error_diagnostic(error),
+    }
+}
+
+/// The Hugging Face download errors. Each message names the repository or file it is about, as its catalog entry does.
+fn download_error_diagnostic(error: &NodeError) -> Diagnostic {
+    match error {
+        NodeError::ModelNotFound { repository, file_name } => diagnostic(
+            CODE_MODEL_NOT_FOUND,
+            &[("repository", repository), ("file_name", file_name)],
+        ),
+        NodeError::ModelGated { repository } => diagnostic(CODE_MODEL_GATED, &[("repository", repository)]),
+        NodeError::ModelOffline { repository } => diagnostic(CODE_MODEL_OFFLINE, &[("repository", repository)]),
+        NodeError::DownloadInterrupted { file_name, .. } => {
+            diagnostic(CODE_DOWNLOAD_INTERRUPTED, &[("file_name", file_name)])
+        }
+        NodeError::DownloadLockTimeout { file_name } => {
+            diagnostic(CODE_DOWNLOAD_LOCK_TIMEOUT, &[("file_name", file_name)])
+        }
+        NodeError::DownloadHashMismatch { path } => {
+            let path = path.display().to_string();
+            diagnostic(CODE_DOWNLOAD_HASH_MISMATCH, &[("path", &path)])
+        }
+        NodeError::UnsafeHubPath { path } => diagnostic(CODE_PATH_OUTSIDE_ALLOWED, &[("path", path)]),
+        // Only the variants above reach here; the other arms of node_error_diagnostic answer the rest.
+        _ => diagnostic(error.code(), &[]),
+    }
+}
+
+impl From<StoreError> for NodeError {
+    fn from(error: StoreError) -> NodeError {
+        NodeError::Store(error)
     }
 }
 
