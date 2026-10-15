@@ -19,6 +19,9 @@ use hyper::header::{HOST, HeaderName, HeaderValue};
 use hyper::{Method, Request, Response, Uri};
 use hyper_util::rt::TokioIo;
 use rustls::RootCertStore;
+use rustls::SupportedCipherSuite;
+use rustls::crypto::hash::{Context as HashContext, Hash};
+use rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256;
 use rustls::pki_types::ServerName;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
@@ -252,6 +255,56 @@ fn client_config(roots: RootCertStore) -> Result<rustls::ClientConfig, Transport
 /// The public trust store every production HTTPS request verifies against: Mozilla's roots (webpki-roots).
 fn public_roots() -> RootCertStore {
     RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned())
+}
+
+/// The SHA-256 of the rustls crypto provider (ring), the one hash the node checks Hugging Face LFS files with, so no
+/// hashing crate joins the build (contracts 2.5). The suite is named only to reach its hash; no TLS happens here.
+fn sha256_provider() -> &'static dyn Hash {
+    match TLS13_AES_128_GCM_SHA256 {
+        SupportedCipherSuite::Tls13(suite) => suite.common.hash_provider,
+        // Every suite the ring provider names for TLS 1.3 is a Tls13 variant; a Tls12 answer is a provider change.
+        SupportedCipherSuite::Tls12(_) => unreachable!("the TLS 1.3 suite is a Tls13 suite"),
+    }
+}
+
+/// An incremental SHA-256: `update` with each piece of a file, then `finish_hex` for the lowercase hex digest. A file
+/// is hashed in pieces, so a multi-gigabyte weight file never sits in memory.
+pub struct Sha256 {
+    context: Box<dyn HashContext>,
+}
+
+impl Sha256 {
+    pub fn new() -> Sha256 {
+        Sha256 {
+            context: sha256_provider().start(),
+        }
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        self.context.update(bytes);
+    }
+
+    pub fn finish_hex(self) -> String {
+        let digest = self.context.finish();
+        let mut hex = String::new();
+        for byte in digest.as_ref() {
+            hex.push_str(&format!("{byte:02x}"));
+        }
+        hex
+    }
+}
+
+impl Default for Sha256 {
+    fn default() -> Self {
+        Sha256::new()
+    }
+}
+
+/// The lowercase hex SHA-256 of bytes that are all in memory; a file is hashed with `Sha256` in pieces instead.
+pub fn sha256_digest(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finish_hex()
 }
 
 #[cfg(unix)]
@@ -863,5 +916,39 @@ mod tls_tests {
         let reason = format!("{error:?}");
         assert!(reason.contains("TLS handshake"), "{reason}");
         assert!(reason.contains("not valid for name"), "{reason}");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod sha256_tests {
+    //! Known answers from FIPS 180-2 and the empty string, and the incremental form against the one-piece form. The
+    //! downloader's hash check relies on these digests being the real SHA-256.
+    use super::{Sha256, sha256_digest};
+
+    const EMPTY_DIGEST: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const ABC_DIGEST: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    #[test]
+    fn known_answers_match_the_standard() {
+        assert_eq!(Sha256::new().finish_hex(), EMPTY_DIGEST);
+        assert_eq!(sha256_digest(b""), EMPTY_DIGEST);
+        let mut abc = Sha256::new();
+        abc.update(b"abc");
+        assert_eq!(abc.finish_hex(), ABC_DIGEST);
+        assert_eq!(sha256_digest(b"abc"), ABC_DIGEST);
+    }
+
+    #[test]
+    fn pieces_hash_like_one_piece() {
+        let mut pieces = Sha256::default();
+        pieces.update(b"a");
+        pieces.update(b"");
+        pieces.update(b"bc");
+        assert_eq!(
+            pieces.finish_hex(),
+            ABC_DIGEST,
+            "the digest does not depend on how the input is cut"
+        );
     }
 }

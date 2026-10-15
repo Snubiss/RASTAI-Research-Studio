@@ -30,7 +30,8 @@ tokio = { workspace = true, features = ["process", "rt", "time", "sync", "io-uti
 # The NodeService and WorkerHostService servers, and the WorkerService client ("channel"). "codegen" re-exports
 # async_trait, which the generated service traits need.
 tonic = { workspace = true, features = ["server", "router", "codegen", "channel"] }
-# paired_daemons.json, job.json, and the rocm-smi JSON output.
+# paired_daemons.json, job.json, and the rocm-smi JSON output; the Hub's file listing (downloads.rs).
+serde = { workspace = true }
 serde_json = { workspace = true }
 # Only identity.rs imports it (contracts 2.5; deny.toml names this crate its one owner).
 ed25519-dalek = { workspace = true }
