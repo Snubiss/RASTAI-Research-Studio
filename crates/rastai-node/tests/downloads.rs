@@ -11,8 +11,11 @@ mod common;
 mod fake_hub;
 
 use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{TestFolder, new_test_folder};
@@ -95,8 +98,12 @@ fn no_retry_delay() -> RetryPolicy {
 
 /// The options that send a download to the fake Hub on loopback, with no waits.
 fn options_for(hub: &FakeHub, cache_root: &Path) -> DownloadOptions {
+    options_for_port(hub.port(), cache_root)
+}
+
+fn options_for_port(port: u16, cache_root: &Path) -> DownloadOptions {
     DownloadOptions {
-        hub: HttpTarget::LoopbackHttp { port: hub.port() },
+        hub: HttpTarget::LoopbackHttp { port },
         egress: None,
         cache_root: cache_root.to_path_buf(),
         offline: false,
@@ -870,15 +877,16 @@ async fn a_full_disk_while_writing_is_rrs_s3002_and_the_partial_file_is_kept() {
     );
 }
 
-/// huggingface_hub reads what the node wrote: `snapshot_download`, `hf_hub_download` and `scan_cache_dir`, offline,
-/// from the cpu environment's huggingface_hub (python/envs/cpu/uv.lock). It is #[ignore]d, so `just test-node-jobs` runs
-/// it with the cpu environment in place.
+/// The cache the node wrote has the layout huggingface_hub writes: `refs/`, `snapshots/<commit>/` links into `blobs/`,
+/// and the `.locks/` files. The reader checks it against the recording in `hf_cache_recorded.json` (huggingface_hub
+/// 1.33.0) with the standard library only, so no Hugging Face package is needed. It is #[ignore]d because it runs a
+/// Python script; `just test-node-jobs` runs it with the cpu environment in place.
 #[tokio::test]
 #[ignore]
-async fn huggingface_hub_reads_the_snapshot_the_node_wrote() {
+async fn the_cache_the_node_wrote_has_the_huggingface_hub_layout() {
     const CPU_PYTHON: &str = "../../.dev/envs/cpu/bin/python";
     const READER: &str = "tests/support/hf_tools_read.py";
-    let folder = new_test_folder("hf-tools-read");
+    let folder = new_test_folder("hf-layout-read");
     let cache = cache_in(&folder);
     let hub = FakeHub::start(vec![tiny_repo(None)]).await;
     download_all(&hub, &cache).await;
@@ -890,13 +898,136 @@ async fn huggingface_hub_reads_the_snapshot_the_node_wrote() {
         .arg(MODEL)
         .arg(COMMIT)
         .arg(CONFIG_NAME)
-        .env("HF_HUB_OFFLINE", "1")
         .output()
         .unwrap();
 
     assert!(
         output.status.success(),
-        "huggingface_hub read the cache: {}",
+        "the cache doesn't match the recorded layout: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A Hub that lists one file and answers that file with the redirect the test picks. It counts the file requests, so
+/// a test can see how many times the node asked.
+struct RedirectingHub {
+    port: u16,
+    file_requests: Arc<AtomicUsize>,
+}
+
+#[derive(Clone, Copy)]
+enum RedirectAnswer {
+    /// A 302 with no Location header.
+    NoLocation,
+    /// A 302 whose Location is the same address again, so the chain never ends.
+    LoopsToItself,
+}
+
+/// Starts the redirecting Hub on loopback, on a thread of its own. Requests are served one at a time, which is all a
+/// download needs.
+fn start_redirecting_hub(answer: RedirectAnswer) -> RedirectingHub {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let file_requests = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&file_requests);
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            serve_redirect_request(stream, port, answer, &counter);
+        }
+    });
+    RedirectingHub { port, file_requests }
+}
+
+fn serve_redirect_request(mut stream: TcpStream, port: u16, answer: RedirectAnswer, counter: &AtomicUsize) {
+    let Some(head) = read_request_head(&mut stream) else {
+        return;
+    };
+    let path = head.split_whitespace().nth(1).unwrap_or("");
+    let response = if path.starts_with("/api/models/") {
+        listing_response()
+    } else {
+        counter.fetch_add(1, Ordering::SeqCst);
+        redirect_response(answer, port)
+    };
+    let _ = stream.write_all(response.as_bytes());
+}
+
+/// The request line and headers, read byte by byte so the body (none for a GET) is never consumed.
+fn read_request_head(stream: &mut TcpStream) -> Option<String> {
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        match stream.read(&mut byte) {
+            Ok(1) => head.push(byte[0]),
+            _ => return None,
+        }
+    }
+    Some(String::from_utf8_lossy(&head).into_owned())
+}
+
+fn listing_response() -> String {
+    let body = format!(r#"{{"sha":"{COMMIT}","siblings":[{{"rfilename":"{CONFIG_NAME}","blobId":"{COMMIT}"}}]}}"#);
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn redirect_response(answer: RedirectAnswer, port: u16) -> String {
+    let location = match answer {
+        RedirectAnswer::NoLocation => String::new(),
+        RedirectAnswer::LoopsToItself => format!("Location: http://127.0.0.1:{port}/again\r\n"),
+    };
+    format!("HTTP/1.1 302 Found\r\n{location}Content-Length: 0\r\nConnection: close\r\n\r\n")
+}
+
+/// A redirect with no Location is refused at once. The node asks once: a retry would get the same answer, so the code
+/// is RRS-N3013 and not the connection's retries running out.
+#[tokio::test]
+async fn a_redirect_with_no_location_is_refused_at_once() {
+    let folder = new_test_folder("hf-redirect-no-location");
+    let cache = cache_in(&folder);
+    let hub = start_redirecting_hub(RedirectAnswer::NoLocation);
+
+    let error = download_error(
+        download_model(
+            &request_for(MODEL, "", &[CONFIG_NAME]),
+            &options_for_port(hub.port, &cache),
+            &SilentObserver,
+            &NoHfToken,
+        )
+        .await,
+    );
+
+    assert_eq!(error.code(), "RRS-N3013");
+    assert_eq!(
+        hub.file_requests.load(Ordering::SeqCst),
+        1,
+        "a refused redirect is not retried"
+    );
+}
+
+/// Five redirects are followed; the sixth answer is a redirect too, so the chain is refused after six requests, at once.
+#[tokio::test]
+async fn a_redirect_chain_past_five_hops_is_refused_at_once() {
+    let folder = new_test_folder("hf-redirect-loop");
+    let cache = cache_in(&folder);
+    let hub = start_redirecting_hub(RedirectAnswer::LoopsToItself);
+
+    let error = download_error(
+        download_model(
+            &request_for(MODEL, "", &[CONFIG_NAME]),
+            &options_for_port(hub.port, &cache),
+            &SilentObserver,
+            &NoHfToken,
+        )
+        .await,
+    );
+
+    assert_eq!(error.code(), "RRS-N3013");
+    assert_eq!(
+        hub.file_requests.load(Ordering::SeqCst),
+        6,
+        "five hops are followed, then the sixth redirect is refused"
     );
 }

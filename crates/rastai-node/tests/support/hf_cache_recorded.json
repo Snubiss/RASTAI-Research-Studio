@@ -1,0 +1,50 @@
+{
+  "recorded_from": "huggingface_hub 1.33.0 (python/envs/cpu/uv.lock). hf_hub_download and then snapshot_download wrote an empty cache for a three-file repository (config.json, model.safetensors and layers/0/sae.safetensors), served by a local endpoint through HF_ENDPOINT. The paths below are that cache's files with the commit, the blob names and the repository folder replaced by placeholders.",
+  "placeholders": {
+    "<repo>": "the repository folder, models--<org>--<name>",
+    "<commit>": "the commit the revision resolves to",
+    "<blob>": "a blob name: a 40-hex git id, or a 64-hex SHA-256 for an LFS file",
+    "<name>": "a file name in the snapshot",
+    "<nested>": "a file name with folders in it, such as layers/0/sae.safetensors"
+  },
+  "entries": [
+    {
+      "path": "<repo>/refs/main",
+      "kind": "file",
+      "content": "<commit>",
+      "required": true
+    },
+    {
+      "path": "<repo>/snapshots/<commit>/<name>",
+      "kind": "symlink",
+      "target": "../../blobs/<blob>",
+      "required": true
+    },
+    {
+      "path": "<repo>/snapshots/<commit>/<nested>",
+      "kind": "symlink",
+      "target": "../../../../blobs/<blob>",
+      "required": false
+    },
+    {
+      "path": "<repo>/blobs/<blob>",
+      "kind": "file",
+      "required": true
+    },
+    {
+      "path": ".locks/<repo>/<blob>.lock",
+      "kind": "file",
+      "required": true
+    },
+    {
+      "path": "CACHEDIR.TAG",
+      "kind": "file",
+      "required": false
+    },
+    {
+      "path": "<repo>/trees/<commit>.json",
+      "kind": "file",
+      "required": false
+    }
+  ]
+}

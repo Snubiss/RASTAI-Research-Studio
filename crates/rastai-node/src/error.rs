@@ -25,6 +25,7 @@ const CODE_MODEL_GATED: &str = "RRS-N3005";
 const CODE_MODEL_OFFLINE: &str = "RRS-N3006";
 const CODE_DOWNLOAD_INTERRUPTED: &str = "RRS-N3009";
 const CODE_DOWNLOAD_LOCK_TIMEOUT: &str = "RRS-N3011";
+const CODE_REDIRECT_REFUSED: &str = "RRS-N3013";
 /// What N0003's message shows when the running node's process id can't be read.
 const UNKNOWN_PROCESS_ID: &str = "unknown";
 /// What N0002's message shows for a signature checked without a node to name (see `SignatureRefused`).
@@ -73,6 +74,9 @@ pub enum NodeError {
     DownloadLockTimeout { file_name: String },
     /// A downloaded file's SHA-256 isn't the one the Hub lists. The partial file was removed (RRS-N3003).
     DownloadHashMismatch { path: PathBuf },
+    /// A redirect a file answered with can't be followed: it has no Location, or the chain is longer than the limit
+    /// (RRS-N3013). The Hub gives the same answer on a retry, so this is never retried. `reason` is the words for the log.
+    RedirectRefused { file_name: String, reason: String },
     /// The Hub listed a file name or revision that would leave the cache folder (RRS-N3001).
     UnsafeHubPath { path: String },
 }
@@ -95,6 +99,7 @@ impl NodeError {
             NodeError::ModelOffline { .. } => CODE_MODEL_OFFLINE,
             NodeError::DownloadInterrupted { .. } => CODE_DOWNLOAD_INTERRUPTED,
             NodeError::DownloadLockTimeout { .. } => CODE_DOWNLOAD_LOCK_TIMEOUT,
+            NodeError::RedirectRefused { .. } => CODE_REDIRECT_REFUSED,
             NodeError::DownloadHashMismatch { .. } => CODE_DOWNLOAD_HASH_MISMATCH,
             NodeError::UnsafeHubPath { .. } => CODE_PATH_OUTSIDE_ALLOWED,
         }
@@ -170,6 +175,9 @@ fn download_error_diagnostic(error: &NodeError) -> Diagnostic {
         NodeError::DownloadHashMismatch { path } => {
             let path = path.display().to_string();
             diagnostic(CODE_DOWNLOAD_HASH_MISMATCH, &[("path", &path)])
+        }
+        NodeError::RedirectRefused { file_name, reason } => {
+            diagnostic(CODE_REDIRECT_REFUSED, &[("file_name", file_name), ("reason", reason)])
         }
         NodeError::UnsafeHubPath { path } => diagnostic(CODE_PATH_OUTSIDE_ALLOWED, &[("path", path)]),
         // Only the variants above reach here; the other arms of node_error_diagnostic answer the rest.
@@ -261,6 +269,11 @@ mod tests {
         assert_eq!(NodeError::NodeAlreadyRunning { process_id: None }.code(), "RRS-N0003");
         assert_eq!(identity.code(), "RRS-N0006");
         assert_eq!(stale.code(), "RRS-N0007");
+        let refused = NodeError::RedirectRefused {
+            file_name: "config.json".to_string(),
+            reason: "no location".to_string(),
+        };
+        assert_eq!(refused.code(), "RRS-N3013");
     }
 
     // The version refusal is read by the daemon, so it names the node's version and the daemon's.
