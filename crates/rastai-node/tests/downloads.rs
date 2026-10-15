@@ -913,11 +913,17 @@ async fn the_cache_the_node_wrote_has_the_huggingface_hub_layout() {
 async fn the_reader_refuses_a_nested_link_that_dangles() {
     let folder = new_test_folder("hf-layout-dangling");
     let cache = downloaded_tiny_repo(&folder).await;
-    relink(&snapshot_link(&cache, SAE_NAME), &Path::new("../../blobs").join(sae_blob()));
+    relink(
+        &snapshot_link(&cache, SAE_NAME),
+        &Path::new("../../blobs").join(sae_blob()),
+    );
 
     let output = run_layout_reader(&cache);
 
-    assert!(!output.status.success(), "a nested link one level too shallow was accepted");
+    assert!(
+        !output.status.success(),
+        "a nested link one level too shallow was accepted"
+    );
 }
 
 /// A link to the blob by its absolute path is not the relative link huggingface_hub writes, so the reader refuses it.
@@ -931,7 +937,10 @@ async fn the_reader_refuses_a_nested_link_with_an_absolute_target() {
 
     let output = run_layout_reader(&cache);
 
-    assert!(!output.status.success(), "a nested link with an absolute target was accepted");
+    assert!(
+        !output.status.success(),
+        "a nested link with an absolute target was accepted"
+    );
 }
 
 /// A file one folder down links three levels up to blobs/, one more than a file in the snapshot's top folder. A reader
@@ -1005,7 +1014,11 @@ async fn a_redirect_with_no_location_is_refused_at_once() {
     );
 
     assert_eq!(error.code(), "RRS-N3013");
-    assert_eq!(hub.file_requests(CONFIG_NAME).len(), 1, "a refused redirect is not retried");
+    assert_eq!(
+        hub.file_requests(CONFIG_NAME).len(),
+        1,
+        "a refused redirect is not retried"
+    );
 }
 
 /// Five redirects are followed; the sixth answer is a redirect too, so the chain is refused after six requests, at once.
