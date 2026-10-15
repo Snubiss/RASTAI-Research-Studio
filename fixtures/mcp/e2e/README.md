@@ -36,5 +36,5 @@ A change to what MCP shows updates the file in the same PR, with its notes.
 
 | File | Token | What it shows |
 |---|---|---|
-| `three_surfaces.jsonl` | `read` and `training` (an agent allowed to train) | `system.status`; `train.start` answering its job id at once; `job.get` of an unknown job (`RRS-J0005`); an uninstalled recipe (`RRS-T0002`); a missing argument (`RRS-C0002` with `RRS-E1001`); after the jobs end, `job.get` of the jobs HTTP, the CLI and this session started (succeeded) and of one that failed (`RRS-D3001`) |
+| `three_surfaces.jsonl` | `read` and `training` (an agent allowed to train) | `system.status`; `train.start` answering its job id at once, with an `_meta.idempotencyKey`; the same call with the same key answering the same job, and the same key with other arguments refused (`RRS-C0004`); `job.get` of an unknown job (`RRS-J0005`); an uninstalled recipe (`RRS-T0002`); a missing argument (`RRS-C0002` with `RRS-E1001`); after the jobs end, `job.get` of the jobs HTTP, the CLI and this session started (succeeded) and of one that failed (`RRS-D3001`) |
 | `chat_only_token.jsonl` | the `chat-only` preset | no tool listed; `system.status`, `train.start` and `job.get` refused with `RRS-C1005` |

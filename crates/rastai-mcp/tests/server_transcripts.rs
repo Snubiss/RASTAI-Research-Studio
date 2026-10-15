@@ -144,10 +144,16 @@ fn reply_of_step(step: McpStep, exchange: &Value, place: &str) -> Option<JsonRpc
             request_id,
             command_id,
             arguments_json,
+            idempotency_key,
         } => {
             let expected = expected_execute.unwrap_or_else(|| panic!("{place}: unexpected ExecuteTool {command_id}"));
             assert_eq!(command_id, expected["command_id"].as_str().unwrap(), "{place}");
             assert_eq!(arguments_json, expected["arguments_json"].as_str().unwrap(), "{place}");
+            assert_eq!(
+                idempotency_key,
+                expected["idempotency_key"].as_str().unwrap_or(""),
+                "{place}"
+            );
             let outcome = outcome_from(&exchange["outcome"]);
             Some(tool_call_reply(request_id, &outcome))
         }
