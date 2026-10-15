@@ -5,8 +5,8 @@ changes the graph after it.
 The model is the TextCNN template, which every test here compiles through `rastai_formats.load_model_spec`, as a
 worker does.
 
-The decoder standard names (`embedding`, `blocks.<i>.attention_out`, ..., `final_norm_out`) are not checked here: they
-need block expansion and the family graphs, which come with M2-05 and M2-06.
+The decoder standard names (`embedding`, `blocks.<i>.attention_out`, ..., `final_norm_out`) are checked in
+test_decoder_points.py, on a two-block decoder built by hand: the family graphs that give them come with M2-05.
 """
 
 import json

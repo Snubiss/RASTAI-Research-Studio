@@ -9,6 +9,7 @@ from torch.nn import functional
 
 from rastai_models.blocks.linear import DEFAULT_BIAS, add_affine_parameters, init_affine_parameters
 from rastai_models.blocks.op_module import OpModule
+from rastai_models.forward_context import ForwardContext
 
 
 class ClassifierHead(OpModule):
@@ -21,7 +22,7 @@ class ClassifierHead(OpModule):
         has_bias = DEFAULT_BIAS if parsed.bias is None else parsed.bias
         add_affine_parameters(self, parsed.in_features, parsed.class_count, has_bias, device, dtype)
 
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
+    def forward(self, features: torch.Tensor, context: ForwardContext | None = None) -> torch.Tensor:
         return functional.linear(features, self.weight, self.bias)
 
     def init_parameters(self, generator: torch.Generator) -> None:
