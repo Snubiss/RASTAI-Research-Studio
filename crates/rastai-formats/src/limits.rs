@@ -41,6 +41,7 @@ const DEFAULT_MAX_ZIP_ENTRIES: u64 = 200_000;
 const DEFAULT_MAX_ZIP_TOTAL_BYTES: u64 = 512 * 1024 * 1024 * 1024;
 
 /// Uncompressed ÷ compressed size of one deflate entry. JSON compresses about 10:1; far beyond that is a zip bomb.
+/// The reader applies it only to entries over its size floor, `RATIO_CHECK_MIN_BYTES` in `zip/reader.rs`.
 const DEFAULT_MAX_ZIP_COMPRESSION_RATIO: u64 = 200;
 
 /// The caps on untrusted input. Plain data: readers take `&ImportLimits` and compare before allocating.
@@ -60,7 +61,7 @@ pub struct ImportLimits {
     pub max_zip_entries: u64,
     /// Largest total uncompressed size of one zip (`RRS-E5002`).
     pub max_zip_total_bytes: u64,
-    /// Largest uncompressed ÷ compressed ratio of one entry (`RRS-E5002`).
+    /// Largest uncompressed ÷ compressed ratio of one entry over the reader's 1 MiB floor (`RRS-E5002`).
     pub max_zip_compression_ratio: u64,
 }
 

@@ -47,6 +47,12 @@ const INPUT_CHUNK_BYTES: usize = 64 * 1024;
 
 /// The name of the cap in `RRS-E5002` for the ratio of one entry.
 const RATIO_CAP: &str = "compression ratio";
+
+/// Only an entry declaring more than this many bytes is checked against the ratio cap. A zip bomb needs size to
+/// matter: a smaller entry inflates to at most this much, and the total-size cap and the shared-bytes check still
+/// bound the whole archive. Python's zipfile stores small repetitive files past 200:1 (a 13,000-byte JSON file in
+/// 61 bytes), and a cap that applied to them refused real archives.
+const RATIO_CHECK_MIN_BYTES: u64 = 1024 * 1024;
 /// The name of the cap in `RRS-E5002` for the total uncompressed size of the archive.
 const TOTAL_CAP: &str = "total uncompressed size";
 /// The name of the cap in `RRS-E5002` for the number of entries.
@@ -600,7 +606,8 @@ fn check_total(uncompressed_bytes: u64, limits: &ImportLimits, total_bytes: &mut
     Ok(())
 }
 
-/// A stored entry has the same size both ways. A deflate entry's ratio is checked against the cap.
+/// A stored entry has the same size both ways. A deflate entry's ratio is checked against the cap when it is large
+/// enough to matter (`RATIO_CHECK_MIN_BYTES`).
 fn check_method_sizes(record: &CentralRecord, limits: &ImportLimits) -> Result<(), FormatsError> {
     match record.method {
         ZipMethod::Stored => {
@@ -613,9 +620,12 @@ fn check_method_sizes(record: &CentralRecord, limits: &ImportLimits) -> Result<(
     }
 }
 
-/// A deflate entry may not expand past the ratio cap (zip bomb). The cap is checked on the declared sizes, before any
-/// of the entry's bytes are read.
+/// A deflate entry over `RATIO_CHECK_MIN_BYTES` may not expand past the ratio cap (zip bomb). The cap is checked on the
+/// declared sizes, before any of the entry's bytes are read.
 fn check_ratio(compressed_bytes: u64, uncompressed_bytes: u64, limits: &ImportLimits) -> Result<(), FormatsError> {
+    if uncompressed_bytes <= RATIO_CHECK_MIN_BYTES {
+        return Ok(());
+    }
     let allowed = compressed_bytes.saturating_mul(limits.max_zip_compression_ratio);
     if uncompressed_bytes > allowed {
         return Err(FormatsError::ZipLimit {
