@@ -1206,7 +1206,7 @@ Columns: **Scope**; **Undo** (U = undoable); **Kind**. Every command is `preview
 | `model.list` | local, HF-cache and API models | read | | sync |
 | `model.inspect` | config, family, size, license, replay twin, fits per GPU | read | | sync |
 | `model.vocabulary` (M3) | `BlobRef` of a model's token piece table, built by the gateway's tokenizer | read | | sync |
-| `model.download` | resumable HF download into the HF cache (or `url` + `hash` file entries, e.g. Neuronpedia labels); disk check first | inference.manage | | job |
+| `model.download` | resumable HF download into the HF cache (or `url` + `hash` file entries, e.g. Neuronpedia labels), at an optional `revision` (a branch, tag or commit; default the repository's default branch); disk check first | inference.manage | | job |
 | `model.load` (M3) | load on a node and GPU under a lease, runtime inspectable/fast | inference.manage | | job |
 | `model.unload` (M3) | unload and release the lease | inference.manage | | sync |
 | `model.twin.set` (M3) | map a quantized Fast model to its full-precision weights | inference.manage | | sync |
@@ -1382,7 +1382,7 @@ Types live in `rastai-formats/src/commands/`; this table lists the fields other 
 | `ChatRegenerateArgs` | `from_token_index`, `interventions`; any replacement text (`content`) |
 | `ChatSettingsSetArgs` | `lens`, `interventions` (plus the sampling fields) |
 | `ChatRuntimeSetArgs` | `model_ref` |
-| `ModelDownloadArgs` | `files` (optional list, e.g. SAE layers; entries may carry `url` and `hash`), `headers_only` |
+| `ModelDownloadArgs` | `revision` (optional: a branch, tag or commit; left out for the default branch), `files` (optional list, e.g. SAE layers; entries may carry `url` and `hash`), `headers_only` |
 | `ModelDownloadPlan`, `EnvironmentInstallPlan`, `PluginInstallPlan`, `StorageGcPlan`, `UpdatePlan` | returned in `result_json` by a dry run |
 | `ModelDownloadResult`, `SystemEnvInstallResult` | `plan` (`ModelDownloadPlan` or `EnvironmentInstallPlan`): a dry run returns only the plan; a real run also starts the job, whose id is in the response |
 | `ModelDownloadPlan` | `model_ref`, `files[]` (the names fetched, in order), `headers_only`, `size_bytes`, `free_bytes` (the disk check, first) |

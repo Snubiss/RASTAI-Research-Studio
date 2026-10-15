@@ -79,6 +79,10 @@
         "model_ref": {
           "description": "The model to download, a Hugging Face repository id.",
           "type": "string"
+        },
+        "revision": {
+          "description": "The branch, tag or commit to download; left out for the repository's default branch. A commit pins the files.",
+          "type": "string"
         }
       },
       "required": [

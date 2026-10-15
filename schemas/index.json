@@ -32,7 +32,7 @@
       "schema_id": "rastai.command.job.list/1"
     },
     {
-      "content_hash": "blake3:0bcfe6936c05f2cbf82d3665f4afbcb7fc9dfe224241cb720f891ae194711b52",
+      "content_hash": "blake3:9109799c177a4b1e4773a537922d5d0ed9620c60b93d9f3485a30b013f87cf84",
       "file": "commands/rastai.command.model.download/1.json",
       "schema_id": "rastai.command.model.download/1"
     },

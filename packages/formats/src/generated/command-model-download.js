@@ -5,6 +5,7 @@
  * Download a model into the Hugging Face cache.
  * @typedef {object} ModelDownloadArgs
  * @property {string} model_ref The model to download, a Hugging Face repository id.
+ * @property {string} [revision] The branch, tag or commit to download; left out for the repository's default branch. A commit pins the files.
  * @property {ModelDownloadFile[]} [files] Chosen files, such as SAE layers; left out for the whole repository.
  * @property {boolean} [headers_only] Fetch only the safetensors headers; left out for the whole files.
  */
