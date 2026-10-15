@@ -101,6 +101,8 @@ test-rust:
 # runner doesn't have, so they are #[ignore]d there (layout rust-node-gateway-proto.md 7.12). They need Linux: the
 # node signals process groups and reads /proc.
 # rastai-node's job, reattach and train-job tests that go through Register, Hello and Control, with the cpu environment.
+# --test downloads runs the Hugging Face cache-layout check too: it runs tests/support/hf_tools_read.py with the cpu
+# environment's Python, which needs only the standard library (no Hugging Face package), so it adds no dependency.
 test-node-jobs: env-cpu
     cargo test --locked -p rastai-node --test jobs --test reattach --test train_job --test downloads -- --ignored
 
