@@ -16,7 +16,9 @@ from rastai_models.observation import CAPTURE_FULL_ATTENTION, check_capture_mode
 
 # torch's fused kernel, which the runtime picks: the default.
 KERNEL_SDPA = "sdpa"
-# SDPA pinned to its plain math backend, for an exact replay.
+# SDPA pinned to its plain math backend, for an exact replay. Torch's math backend expands grouped key and value heads
+# to the query head count and copies them (a real copy per group), unlike the eager kernel and the grouped SDPA path.
+# That copy is torch's own code: the pin is for rounding, not for memory.
 KERNEL_MATH = "math"
 # softmax(q kᵀ / √d) v written out, for an exact replay and for captured maps.
 KERNEL_EAGER = "eager"

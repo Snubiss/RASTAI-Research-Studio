@@ -11,7 +11,7 @@ import pytest
 import torch
 from rastai_formats.generated.model import RopeSettings
 from rastai_models.attention_kernel import KERNEL_EAGER, KERNEL_MATH, KERNEL_SDPA, eager_attention
-from rastai_models.blocks.attention import Attention, attention_mask
+from rastai_models.blocks.attention import Attention, attention_mask, split_heads
 from rastai_models.blocks.embedding import Embedding
 from rastai_models.blocks.feed_forward import FeedForward
 from rastai_models.blocks.norms import LayerNorm, RmsNorm
@@ -286,14 +286,15 @@ def test_head_outputs_edit_reaches_the_output_projection() -> None:
 
 
 class CopyRecorder(TorchDispatchMode):
-    """Records each operation that reads a watched tensor's storage and writes a fresh storage, unless it is a matrix
-    product. A copy of a key or value head is such an operation (repeat, cat, clone, a copying reshape); a view and a
-    product are not."""
+    """Records each copy of a watched tensor: an operation that reads a watched storage and writes a fresh one,
+    unless it is a matrix product, which reads its operands by design. A copy of a key or value head is such an
+    operation (repeat, cat, clone, a copying reshape); a view is not. `copy_sizes` holds the element count of each
+    copy's largest result."""
 
     def __init__(self, watched: list[torch.Tensor]) -> None:
         super().__init__()
         self.watched_pointers = {tensor.untyped_storage().data_ptr() for tensor in watched}
-        self.copies: list[str] = []
+        self.copy_sizes: list[int] = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         result = func(*args, **(kwargs or {}))
@@ -302,29 +303,30 @@ class CopyRecorder(TorchDispatchMode):
             if isinstance(item, torch.Tensor):
                 read_pointers.add(item.untyped_storage().data_ptr())
         if read_pointers & self.watched_pointers:
-            written_pointers = set()
-            for item in tree_flatten(result)[0]:
-                if isinstance(item, torch.Tensor):
-                    written_pointers.add(item.untyped_storage().data_ptr())
-            fresh = written_pointers - read_pointers
+            written = [item for item in tree_flatten(result)[0] if isinstance(item, torch.Tensor)]
+            fresh = [item for item in written if item.untyped_storage().data_ptr() not in read_pointers]
             operation_name = str(func).split(".")[1]
             if fresh and operation_name not in MATRIX_PRODUCT_NAMES:
-                self.copies.append(str(func))
+                self.copy_sizes.append(max(item.numel() for item in fresh))
         return result
 
 
 def test_gqa_attention_copies_no_key_or_value_head() -> None:
-    """Grouped-query attention shares each key head among its query heads by reshaping the queries, so the eager kernel
-    never copies a key or value head: the only copy is of the queries."""
-    queries = random_tensor((BATCH_SIZE, HEAD_COUNT, LENGTH, HEAD_DIM), SEED)
-    keys = random_tensor((BATCH_SIZE, KV_HEAD_COUNT, LENGTH, HEAD_DIM), SEED + 1)
-    values = random_tensor((BATCH_SIZE, KV_HEAD_COUNT, LENGTH, HEAD_DIM), SEED + 2)
+    """Grouped-query attention shares each key and value head among its query heads, so nothing it does to the keys
+    or values allocates more than the key and value tensors hold. The keys and values are the transposed projections
+    that split_heads gives a real pass, not contiguous tensors, so the copies the matmuls make are the real pass's. A
+    copy of each head per query head (repeat_interleave) would be group_size times larger and fails the bound."""
+    queries = split_heads(random_tensor((BATCH_SIZE, LENGTH, HEAD_COUNT * HEAD_DIM), SEED), HEAD_DIM)
+    keys = split_heads(random_tensor((BATCH_SIZE, LENGTH, KV_HEAD_COUNT * HEAD_DIM), SEED + 1), HEAD_DIM)
+    values = split_heads(random_tensor((BATCH_SIZE, LENGTH, KV_HEAD_COUNT * HEAD_DIM), SEED + 2), HEAD_DIM)
+    assert not keys.is_contiguous()
     mask = attention_mask(LENGTH, None, "cpu", torch.float32)
     recorder = CopyRecorder([keys, values])
     with recorder:
         output = eager_attention(queries, keys, values, mask)
     assert output.shape == (BATCH_SIZE, HEAD_COUNT, LENGTH, HEAD_DIM)
-    assert recorder.copies == []
+    key_value_size = BATCH_SIZE * KV_HEAD_COUNT * LENGTH * HEAD_DIM
+    assert max(recorder.copy_sizes, default=0) <= key_value_size
 
 
 # ---- rope ----
@@ -370,6 +372,17 @@ def test_yarn_attention_factor_follows_the_published_scale() -> None:
     assert attention_factor == pytest.approx(0.1 * math.log(4.0) + 1.0)
     _, unscaled = rope_frequencies(RopeSettings(scaling="yarn", factor=1.0, original_max_position=4096), 64)
     assert unscaled == 1.0
+
+
+def test_casting_the_attention_module_keeps_the_inverse_frequencies_float32() -> None:
+    """The frequencies are float32 by design (rope.py). A cast of the module moves the weights to bf16 and leaves the
+    table exactly as it was computed."""
+    module = built_attention(gqa_attributes(rope={"base": ROPE_BASE}))
+    expected, _ = rope_frequencies(RopeSettings(base=ROPE_BASE), HEAD_DIM)
+    module.to(torch.bfloat16)
+    assert module.query_weight.dtype == torch.bfloat16
+    assert module.inverse_frequencies.dtype == torch.float32
+    assert torch.equal(module.inverse_frequencies, expected)
 
 
 # ---- the other blocks against plain references ----

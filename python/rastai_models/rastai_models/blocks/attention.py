@@ -74,8 +74,19 @@ class Attention(OpModule):
         self.attention_factor = 1.0
         if parsed.rope is not None:
             inverse_frequencies, self.attention_factor = rope_frequencies(parsed.rope, self.head_dim)
-            # A buffer, so the tables move with the module. It is not a parameter, so it is neither trained nor counted.
+            # The float32 table the buffer is copied from. Casting the module must not round the table, so _apply
+            # restores it from here (rope.py: the frequencies are float32).
+            self.inverse_frequency_master = inverse_frequencies
+            # A buffer, so the table moves with the module. It is not a parameter, so it is neither trained nor counted.
             self.register_buffer("inverse_frequencies", inverse_frequencies.to(device), persistent=False)
+
+    def _apply(self, function, recurse: bool = True):
+        """Module.to(dtype) and .half() cast every floating buffer, which would round the inverse frequencies. They stay
+        float32 on the module's device: only the device follows the module."""
+        module = super()._apply(function, recurse)
+        if self.has_rope:
+            self.inverse_frequencies = self.inverse_frequency_master.to(self.inverse_frequencies.device)
+        return module
 
     def forward(self, hidden: torch.Tensor, context: ForwardContext | None = None) -> torch.Tensor:
         batch_size, length, _ = hidden.shape
