@@ -30,7 +30,7 @@ Items 1–10 owner-approved on 2026-10-11.
 7. **`node-over-ssh` runs nightly** in `nightly.yml`, not as a required PR job (15.9; confirms section 16 row 44).
 8. **Theme token group key is `typography` everywhere**; no `type` group remains in any document, token file or example (5.2, 5.6, 15.11).
 9. **Small fixes so `check-names` can read this file:** the desktop crate is named by its Cargo package, `rastai-desktop` (2.1, 15.1, 15.11); `apps/web` rows lead with `@rastai/web` (15.3); 8.2 and 8.3 list every column, and 8.3 gains the vault's `schema_migrations`; the `archive.objects` settings cell is valid markup (11.2).
-10. **§27 approvals noted where this file lists them** (2.5): `@vitest/browser`, axe-core and the Tauri CLI as dev tooling, the Tauri updater plugin as foundation, MinIO as a test-only CI service, and named license entries in `deps/allowlist-python.json` for pillow (MIT-CMU/HPND) and torch (`Apache-2.0 WITH LLVM-exception`, owner approval of 2026-10-11, M1-04).
+10. **§27 approvals noted where this file lists them** (2.5): `@vitest/browser`, axe-core and the Tauri CLI as dev tooling, the Tauri updater plugin as foundation, MinIO as a test-only CI service, and named license entries in `deps/allowlist-python.json` for pillow (MIT-CMU/HPND) and torch (`Apache-2.0 WITH LLVM-exception`, owner approval of 2026-10-11, M1-04); a named license entry for numpy (`0BSD`) and NVIDIA's proprietary license on the CUDA runtime packages the PyTorch CUDA wheels depend on, downloaded by an explicit environment install and never bundled (owner approval of 2026-10-14, M2-15, spec v5.4.8).
 
 Every change after item 10 is in `docs/architecture/contracts-changes/`, one file per task named by its task id (for example `M1-25.md`), for the owner's review in its PR: each PR adds one new file for its own task (a task's later PR, such as its code after its contract PR, adds its entry at the end of that task's file) and never edits another task's file.
 
@@ -400,7 +400,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | PyTorch (`torch`) | Foundation | Python engines | direct (its compound license includes `Apache-2.0 WITH LLVM-exception`, from vendored LLVM code, which has a named license entry in `deps/allowlist-python.json`) |
 | `torch.onnx` with `onnx`, `onnxscript` | Foundation | `rastai_models` | `onnx_export.py` (export jobs only) |
 | `torch.distributed` | Foundation | `rastai_train`, `rastai_worker` | `rastai_train/distributed.py`, `rastai_worker/distributed.py` |
-| torchvision (`torchvision.io.decode_image`) | Foundation: PyTorch row | `rastai_data` | `image_decode.py` (PNG and JPEG instead of in-house decoders, ADR-0037; brings pillow and numpy into each lock as transitive packages; pillow has a named license entry, MIT-CMU/HPND, in `deps/allowlist-python.json`) |
+| torchvision (`torchvision.io.decode_image`) | Foundation: PyTorch row | `rastai_data` | `image_decode.py` (PNG and JPEG instead of in-house decoders, ADR-0037; brings pillow and numpy into each lock as transitive packages; pillow (MIT-CMU/HPND) and numpy (0BSD) have named license entries in `deps/allowlist-python.json`) |
 | HF `transformers` (optional) | Engine (optional) | `rastai_models`, tests | `compat/transformers_runtime.py`; `tests/parity/hf_reference.py` |
 | HF `tokenizers` (Python) | Compatibility | `rastai_data` | `tokenization.py` |
 | bitsandbytes (optional) | Kernel | `rastai_train` | `kernels/four_bit_linear.py` |
