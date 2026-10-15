@@ -1675,6 +1675,7 @@ Source: `catalog/errors/RRS-N.json`.
 - **Message:** {repository} is gated: its license isn't accepted, or this account has no access.
 - **In plain words:** This model needs you to accept its license first.
 - **Fix:** Accept the license on the model's Hugging Face page, then try again.
+- **Fix command:** `hf.license.check`
 
 <a id="rrs-n3006"></a>
 

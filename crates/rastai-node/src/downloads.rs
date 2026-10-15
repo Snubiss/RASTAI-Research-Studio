@@ -5,16 +5,17 @@
 //! huggingface_hub's, so a Rastai job and a notebook downloading the same file take turns instead of writing one
 //! `.incomplete` together.
 //!
-//! The Hub's HTTP comes through rastai-transport's `http_client`, the one HTTP wrapper; an HTTPS request there carries
-//! its egress tag, so the UI shows the download. Nothing here reads the token from a store: `HfTokenSource` is the seam
-//! M2-18 fills from `NodeHubService.GetSecret`.
+//! The Hub's HTTP comes through rastai-transport's `http_client`, the one HTTP wrapper. A file's answer may redirect to a
+//! CDN host (the Hub does for LFS files); the CDN request has its own egress tag and never carries the token. The token
+//! comes in through `HfTokenSource`, the seam M2-18 fills from `NodeHubService.GetSecret`; this module never stores it.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use rastai_core::paths::hf_lock_path;
 use rastai_core::time::now_unix_ms;
 use rastai_proto::events::v1::DownloadProgress;
 use rastai_proto::node::v1::{LiveEvent, live_event};
@@ -22,7 +23,7 @@ use rastai_store::disk_space::check_free_space;
 use rastai_store::error::StoreError;
 use rastai_transport::error::TransportError;
 use rastai_transport::http_client::{
-    EgressTag, HttpRequest, HttpTarget, Sha256, next_body_chunk, open_response_stream, send_request,
+    EgressTag, HttpRequest, HttpStream, HttpTarget, Sha256, next_body_chunk, open_response_stream, send_request,
 };
 use serde::Deserialize;
 
@@ -42,32 +43,49 @@ pub const HF_LOCK_POLL_SECONDS: u64 = 1;
 /// The Hub's production address: the one host a node's Hugging Face download reaches.
 pub const HF_HUB_HOST: &str = "huggingface.co";
 pub const HF_HUB_PORT: u16 = 443;
-/// The purpose every Hub request reports its egress under; the node's `GetSecret` purpose for the token is the same.
+/// The purpose every request to the Hub reports its egress under; the node's `GetSecret` purpose for the token is the
+/// same.
 pub const HF_DOWNLOAD_EGRESS_PURPOSE: &str = "hf_download";
+/// The purpose a redirected file request reports under: the CDN host a file's answer names, which never gets the token.
+pub const HF_CDN_EGRESS_PURPOSE: &str = "hf_cdn_download";
 /// The environment variable huggingface_hub reads for offline mode.
 pub const HF_HUB_OFFLINE_VARIABLE: &str = "HF_HUB_OFFLINE";
 /// The words huggingface_hub accepts as "on" in HF_HUB_OFFLINE.
 const OFFLINE_WORDS: &[&str] = &["1", "on", "yes", "true"];
+/// The most redirects one request follows. The Hub answers a file with one redirect to its CDN, so this is generous.
+const HF_REDIRECT_LIMIT: u32 = 5;
+/// Progress is published at the start, at the end, and once per this many bytes between them. One event per HTTP
+/// chunk would be hundreds of thousands for a multi-gigabyte file.
+const HF_PROGRESS_STEP_BYTES: u64 = 1024 * 1024;
 /// The listing is small, so a slow answer within this time is a failed connection.
 const HUB_LISTING_TIMEOUT_MS: u64 = 30_000;
 /// The longest wait for the next piece of a file before its connection counts as failed.
 const HUB_CHUNK_TIMEOUT_MS: u64 = 60_000;
 /// Read size when a finished file is hashed: large enough to keep the reads few, small enough to keep memory flat.
 const HASH_READ_BYTES: usize = 1024 * 1024;
-/// The branch a download without a revision means (huggingface_hub's default ref name).
+/// The branch a download without a revision means (huggingface_hub's default ref name). The listing asks for it by
+/// name too, so the listing and the ref name the same revision.
 const MAIN_BRANCH: &str = "main";
 const BEARER_PREFIX: &str = "Bearer ";
+const HTTPS_PREFIX: &str = "https://";
+/// A loopback redirect target, which only the tests' fake Hub and its CDN use.
+const LOOPBACK_HTTP_PREFIX: &str = "http://127.0.0.1:";
+const HTTPS_DEFAULT_PORT: u16 = 443;
 const HTTP_OK: u16 = 200;
 const HTTP_PARTIAL_CONTENT: u16 = 206;
+const HTTP_MOVED_PERMANENTLY: u16 = 301;
+const HTTP_FOUND: u16 = 302;
+const HTTP_SEE_OTHER: u16 = 303;
+const HTTP_TEMPORARY_REDIRECT: u16 = 307;
+const HTTP_PERMANENT_REDIRECT: u16 = 308;
 const HTTP_UNAUTHORIZED: u16 = 401;
 const HTTP_FORBIDDEN: u16 = 403;
 const HTTP_NOT_FOUND: u16 = 404;
 const HTTP_RANGE_NOT_SATISFIABLE: u16 = 416;
 
-/// What a download asks for: the repository, the revision, the files and the job it runs for.
+/// What a download asks for: the repository, the revision and the files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadRequest {
-    pub job_id: String,
     /// A Hugging Face repository id, `<org>/<name>` (or `<name>` alone).
     pub model_ref: String,
     /// A branch, tag or commit; empty for the repository's default branch.
@@ -94,8 +112,8 @@ pub fn production_retry_policy() -> RetryPolicy {
     }
 }
 
-/// Everything a download needs that is not the request: where the Hub is, where the cache is, the token, the settings
-/// and the retry and lock waits.
+/// Everything a download needs that is not the request: where the Hub is, where the cache is, the settings and the retry
+/// and lock waits. The token is not here: it comes from the `HfTokenSource` each download is given.
 #[derive(Debug, Clone)]
 pub struct DownloadOptions {
     /// Where the Hub answers: `production_hub()` in a running node, a loopback fake in tests.
@@ -104,8 +122,6 @@ pub struct DownloadOptions {
     pub egress: Option<EgressTag>,
     /// The hub cache folder (`hf_cache_dir`, or the `hf.cache_dir` setting).
     pub cache_root: PathBuf,
-    /// The Hugging Face token for this download, when the source has one.
-    pub token: Option<String>,
     /// Offline mode: refuse before any request (`offline_requested` reads HF_HUB_OFFLINE and the setting).
     pub offline: bool,
     /// `storage.free_space_margin_bytes`: the disk must keep this much free after the download.
@@ -143,19 +159,51 @@ impl DownloadObserver for SilentObserver {
     fn waiting_for_lock(&self, _file_name: &str) {}
 }
 
-/// Puts each progress call on the node's live queue for the job, which WatchLive streams (contracts 7.3).
+/// Puts progress on the node's live queue for the job, which WatchLive streams (contracts 7.3). It publishes the first
+/// report, the last one, and one per `HF_PROGRESS_STEP_BYTES` between them.
 pub struct LiveDownloadObserver {
-    pub hub: Arc<LiveHub>,
-    pub job_id: String,
+    hub: Arc<LiveHub>,
+    job_id: String,
+    /// The bytes of the last report published; None before the first one.
+    last_published: Mutex<Option<u64>>,
+}
+
+impl LiveDownloadObserver {
+    pub fn new(hub: Arc<LiveHub>, job_id: &str) -> LiveDownloadObserver {
+        LiveDownloadObserver {
+            hub,
+            job_id: job_id.to_string(),
+            last_published: Mutex::new(None),
+        }
+    }
 }
 
 impl DownloadObserver for LiveDownloadObserver {
     fn progress(&self, model_ref: &str, bytes_done: u64, bytes_total: u64) {
+        let mut last = self
+            .last_published
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !progress_due(*last, bytes_done, bytes_total) {
+            return;
+        }
+        *last = Some(bytes_done);
+        drop(last);
         let event = live_download_progress(&self.job_id, model_ref, bytes_done, bytes_total);
         publish_live_event(&self.hub, event);
     }
 
     fn waiting_for_lock(&self, _file_name: &str) {}
+}
+
+/// Whether a progress report goes out: the first one, the last one, and one per step of bytes in between. A value
+/// already published is never sent again: the last chunk and the end of its file reach the same total.
+fn progress_due(last_published: Option<u64>, bytes_done: u64, bytes_total: u64) -> bool {
+    match last_published {
+        None => true,
+        Some(previous) if previous == bytes_done => false,
+        Some(previous) => bytes_done >= bytes_total || bytes_done.saturating_sub(previous) >= HF_PROGRESS_STEP_BYTES,
+    }
 }
 
 /// One `download.progress` as a live event of the job.
@@ -255,6 +303,7 @@ pub async fn download_model(
     request: &DownloadRequest,
     options: &DownloadOptions,
     observer: &dyn DownloadObserver,
+    tokens: &dyn HfTokenSource,
 ) -> Result<DownloadOutcome, NodeError> {
     check_request_names(request)?;
     if options.offline {
@@ -262,12 +311,17 @@ pub async fn download_model(
             repository: request.model_ref.clone(),
         });
     }
-    let listing = fetch_listing(request, options).await?;
+    let access = HubAccess {
+        hub: options.hub.clone(),
+        egress: options.egress.clone(),
+        token: tokens.hf_token(),
+    };
+    let listing = fetch_listing(request, &access).await?;
     let files = select_files(&listing, &request.only_files, &request.model_ref)?;
     let repo_dir = hf_cache::repo_dir(&options.cache_root, &request.model_ref);
     fs::create_dir_all(&repo_dir).map_err(|error| cache_error(&repo_dir, error))?;
     check_disk(&repo_dir, &files, options)?;
-    download_files(request, options, observer, &listing, &files, &repo_dir).await
+    download_files(request, options, &access, observer, &listing, &files).await
 }
 
 /// Refuses a repository id or revision that would leave the cache folder. The Hub's names are checked when listed.
@@ -331,11 +385,13 @@ fn bytes_still_needed(repo_dir: &Path, files: &[RepoFile]) -> io::Result<u64> {
 async fn download_files(
     request: &DownloadRequest,
     options: &DownloadOptions,
+    access: &HubAccess,
     observer: &dyn DownloadObserver,
     listing: &RepoListing,
     files: &[RepoFile],
-    repo_dir: &Path,
 ) -> Result<DownloadOutcome, NodeError> {
+    let repo_dir = hf_cache::repo_dir(&options.cache_root, &request.model_ref);
+    let repo_dir = repo_dir.as_path();
     let bytes_total = files.iter().fold(0u64, |total, file| total.saturating_add(file.size));
     let mut outcome = DownloadOutcome {
         model_ref: request.model_ref.clone(),
@@ -348,6 +404,7 @@ async fn download_files(
     for file in files {
         let job = FileJob {
             options,
+            access,
             observer,
             model_ref: &request.model_ref,
             commit: &listing.commit,
@@ -379,20 +436,38 @@ fn record_file(outcome: &mut DownloadOutcome, file: &RepoFile, status: BlobStatu
 
 /// Records the commit under the revision's name, unless the revision is the commit itself.
 fn write_revision_ref(repo_dir: &Path, request: &DownloadRequest, commit: &str) -> Result<(), NodeError> {
-    let revision = if request.revision.is_empty() {
-        MAIN_BRANCH
-    } else {
-        request.revision.as_str()
-    };
+    let revision = revision_or_main(&request.revision);
     if revision == commit {
         return Ok(());
     }
     hf_cache::write_ref(repo_dir, revision, commit).map_err(|error| cache_error(repo_dir, error))
 }
 
+/// The revision a request names, or the default branch when it names none.
+fn revision_or_main(revision: &str) -> &str {
+    if revision.is_empty() { MAIN_BRANCH } else { revision }
+}
+
+/// Who the Hub is for this download: its address, the egress tag its requests report under, and the token. The token
+/// is sent to the Hub only, never to another host a redirect names. The struct has no Debug, so a log can't print it.
+struct HubAccess {
+    hub: HttpTarget,
+    egress: Option<EgressTag>,
+    token: Option<String>,
+}
+
+/// One request's destination: where it goes, its path, and the egress tag that reports it.
+#[derive(Clone)]
+struct Route {
+    target: HttpTarget,
+    path: String,
+    egress: Option<EgressTag>,
+}
+
 /// What one file's download needs, in one value so the helpers take two arguments, not nine.
 struct FileJob<'a> {
     options: &'a DownloadOptions,
+    access: &'a HubAccess,
     observer: &'a dyn DownloadObserver,
     model_ref: &'a str,
     commit: &'a str,
@@ -420,7 +495,8 @@ async fn ensure_blob(job: &FileJob<'_>) -> Result<BlobStatus, NodeError> {
             waited: false,
         });
     }
-    let lock_file = hf_cache::lock_path(&job.options.cache_root, job.model_ref, &job.file.blob_name);
+    let repository_folder = hf_cache::repo_folder_name(job.model_ref);
+    let lock_file = hf_lock_path(&job.options.cache_root, &repository_folder, &job.file.blob_name);
     let (lock, waited) = take_file_lock(&lock_file, &job.file.name, job.options, job.observer).await?;
     let fetched = if blob.exists() {
         false
@@ -472,20 +548,30 @@ async fn take_file_lock(
 }
 
 /// Fetches one file into `blobs/`: retries the connection, checks an LFS file's SHA-256, and renames the partial file
-/// to its blob name. The caller holds the file's lock throughout.
+/// to its blob name. A hash mismatch removes the partial file, so the file is fetched once more from zero; a second
+/// mismatch is RRS-N3003 (layout flow 1.5). The caller holds the file's lock throughout.
 async fn fetch_blob(job: &FileJob<'_>) -> Result<(), NodeError> {
     let incomplete = hf_cache::incomplete_path(job.repo_dir, &job.file.blob_name);
     if let Some(folder) = incomplete.parent() {
         fs::create_dir_all(folder).map_err(|error| cache_error(folder, error))?;
     }
-    fetch_with_retries(job, &incomplete).await?;
-    verify_sha256(&incomplete, job.file).await?;
+    let checked = match fetch_and_check(job, &incomplete).await {
+        Err(NodeError::DownloadHashMismatch { .. }) => fetch_and_check(job, &incomplete).await,
+        result => result,
+    };
+    checked?;
     let blob = hf_cache::blob_path(job.repo_dir, &job.file.blob_name);
     fs::rename(&incomplete, &blob).map_err(|error| cache_error(&blob, error))
 }
 
+/// One fetch of the file's rest, with its retries, then the SHA-256 check.
+async fn fetch_and_check(job: &FileJob<'_>, incomplete: &Path) -> Result<(), NodeError> {
+    fetch_with_retries(job, incomplete).await?;
+    verify_sha256(incomplete, job.file).await
+}
+
 /// Tries the fetch again after a failed connection, waiting longer each time, until the retry limit. Any other failure
-/// (gated, not found, a refused egress tag) stops at once.
+/// (gated, not found, a refused egress tag, a full disk) stops at once.
 async fn fetch_with_retries(job: &FileJob<'_>, incomplete: &Path) -> Result<(), NodeError> {
     let retry = &job.options.retry;
     let mut attempt: u32 = 0;
@@ -516,8 +602,10 @@ async fn fetch_attempt(job: &FileJob<'_>, incomplete: &Path) -> Result<(), NodeE
     }
     let offset = if have > 0 { Some(have) } else { None };
     let path = resolve_path(job.model_ref, job.commit, &job.file.name);
-    let mut stream = open_response_stream(hub_request(job.options, path, offset, HUB_CHUNK_TIMEOUT_MS)).await?;
+    let route = hub_route(job.access, path);
+    let mut stream = open_hub_stream(job.access, route, offset, HUB_CHUNK_TIMEOUT_MS).await?;
     check_file_status(job, incomplete, stream.status)?;
+    check_range_start(stream.status, &stream.headers, offset)?;
     // A server that ignored the Range header sends the whole file again: the partial file starts over.
     let restart = stream.status == HTTP_OK && have > 0;
     let mut output = open_output(incomplete, restart).map_err(|error| cache_error(incomplete, error))?;
@@ -568,6 +656,28 @@ fn check_file_status(job: &FileJob<'_>, incomplete: &Path, status: u16) -> Resul
     }
 }
 
+/// A 206 answer must start where the request asked. Appending from another byte would write the wrong bytes into the
+/// partial file, and only the SHA-256 check would notice, which a file the listing doesn't hash never gets.
+fn check_range_start(status: u16, headers: &[(String, String)], offset: Option<u64>) -> Result<(), NodeError> {
+    if status != HTTP_PARTIAL_CONTENT {
+        return Ok(());
+    }
+    let requested = offset.unwrap_or(0);
+    match header_value(headers, "content-range").and_then(content_range_start) {
+        Some(start) if start == requested => Ok(()),
+        _ => Err(connection_refused(format!(
+            "the Hub's range doesn't start at byte {requested}"
+        ))),
+    }
+}
+
+/// The first byte of a `Content-Range: bytes <start>-<end>/<total>` value, or None when it has another form.
+fn content_range_start(value: &str) -> Option<u64> {
+    let rest = value.trim().strip_prefix("bytes ")?;
+    let (start, _) = rest.split_once('-')?;
+    start.trim().parse().ok()
+}
+
 /// Checks an LFS file's SHA-256 against the listing and removes the partial file when it doesn't match. A file the
 /// listing doesn't hash is not checked: rustls's SHA-256 is the only hash the node has, and git's SHA-1 blob ids are
 /// not checked here.
@@ -603,10 +713,25 @@ fn hash_file(path: &Path) -> io::Result<String> {
     }
 }
 
-/// The request for a file or the listing: the token, the Range for a resumed file and the egress tag.
-fn hub_request(options: &DownloadOptions, path: String, range_from: Option<u64>, timeout_ms: u64) -> HttpRequest {
+/// The route to a path on the Hub.
+fn hub_route(access: &HubAccess, path: String) -> Route {
+    Route {
+        target: access.hub.clone(),
+        path,
+        egress: access.egress.clone(),
+    }
+}
+
+/// The request for a route: the token only when the route is the Hub itself, the Range for a resumed file, and the
+/// route's egress tag.
+fn request_for_route(access: &HubAccess, route: &Route, range_from: Option<u64>, timeout_ms: u64) -> HttpRequest {
     let mut headers = Vec::new();
-    if let Some(token) = &options.token {
+    let token = if route.target == access.hub {
+        access.token.as_ref()
+    } else {
+        None
+    };
+    if let Some(token) = token {
         headers.push(("Authorization".to_string(), format!("{BEARER_PREFIX}{token}")));
     }
     if let Some(offset) = range_from {
@@ -614,18 +739,181 @@ fn hub_request(options: &DownloadOptions, path: String, range_from: Option<u64>,
     }
     HttpRequest {
         method: "GET".to_string(),
-        target: options.hub.clone(),
-        path,
+        target: route.target.clone(),
+        path: route.path.clone(),
         headers,
         body: Vec::new(),
         timeout_ms,
-        egress: options.egress.clone(),
+        egress: route.egress.clone(),
     }
 }
 
-async fn fetch_listing(request: &DownloadRequest, options: &DownloadOptions) -> Result<RepoListing, NodeError> {
+/// Opens a file's answer and follows its redirects (the Hub redirects an LFS file to its CDN), up to HF_REDIRECT_LIMIT.
+/// Each hop keeps the Range. The stream returned is the first answer that isn't a redirect.
+async fn open_hub_stream(
+    access: &HubAccess,
+    first: Route,
+    range_from: Option<u64>,
+    timeout_ms: u64,
+) -> Result<HttpStream, NodeError> {
+    let mut route = first;
+    for _ in 0..=HF_REDIRECT_LIMIT {
+        let stream = open_response_stream(request_for_route(access, &route, range_from, timeout_ms)).await?;
+        if !is_redirect(stream.status) {
+            return Ok(stream);
+        }
+        let Some(location) = header_value(&stream.headers, "location") else {
+            return Err(connection_refused(format!(
+                "the Hub redirected with status {} and no location",
+                stream.status
+            )));
+        };
+        route = route_for_location(access, &route, location)?;
+    }
+    Err(connection_refused(format!(
+        "the Hub redirected more than {HF_REDIRECT_LIMIT} times"
+    )))
+}
+
+fn is_redirect(status: u16) -> bool {
+    matches!(
+        status,
+        HTTP_MOVED_PERMANENTLY | HTTP_FOUND | HTTP_SEE_OTHER | HTTP_TEMPORARY_REDIRECT | HTTP_PERMANENT_REDIRECT
+    )
+}
+
+/// The route a redirect names. A path alone stays on the same host; an absolute https URL goes to its host, with the CDN
+/// egress tag when that host isn't the Hub. An address Rastai doesn't follow is refused.
+fn route_for_location(access: &HubAccess, current: &Route, location: &str) -> Result<Route, NodeError> {
+    if location.starts_with('/') {
+        return Ok(Route {
+            target: current.target.clone(),
+            path: location.to_string(),
+            egress: current.egress.clone(),
+        });
+    }
+    let Some((target, path)) = absolute_location(location) else {
+        return Err(connection_refused(
+            "the Hub redirected to an address Rastai doesn't follow".to_string(),
+        ));
+    };
+    let egress = if target == access.hub {
+        access.egress.clone()
+    } else {
+        cdn_egress(access)
+    };
+    Ok(Route { target, path, egress })
+}
+
+/// The egress tag for a host other than the Hub: the same job and subject, under the CDN's own purpose, so the egress
+/// badge shows the CDN transfer as its own line.
+fn cdn_egress(access: &HubAccess) -> Option<EgressTag> {
+    access.egress.as_ref().map(|tag| EgressTag {
+        purpose: HF_CDN_EGRESS_PURPOSE.to_string(),
+        subject_id: tag.subject_id.clone(),
+        reports: tag.reports.clone(),
+    })
+}
+
+/// The target and path of an absolute URL: `https://host[:port]/path`, or `http://127.0.0.1:port/path` for the tests'
+/// loopback fake. Any other form is None, which the caller refuses.
+fn absolute_location(location: &str) -> Option<(HttpTarget, String)> {
+    if let Some(rest) = location.strip_prefix(HTTPS_PREFIX) {
+        let (authority, path) = split_authority(rest);
+        if authority.contains('@') {
+            return None;
+        }
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => (host, port.parse::<u16>().ok()?),
+            None => (authority, HTTPS_DEFAULT_PORT),
+        };
+        if host.is_empty() {
+            return None;
+        }
+        let target = HttpTarget::Https {
+            host: host.to_string(),
+            port,
+        };
+        return Some((target, path));
+    }
+    let rest = location.strip_prefix(LOOPBACK_HTTP_PREFIX)?;
+    let (port_text, path) = split_authority(rest);
+    let port = port_text.parse::<u16>().ok()?;
+    Some((HttpTarget::LoopbackHttp { port }, path))
+}
+
+/// Splits `authority/path` at the first slash; a URL with no path is the root.
+fn split_authority(rest: &str) -> (&str, String) {
+    match rest.find('/') {
+        Some(index) => (&rest[..index], rest[index..].to_string()),
+        None => (rest, "/".to_string()),
+    }
+}
+
+/// The value of the first header with this name, whatever the case of the name.
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+/// Opens a partial file for writing: appended to when the request resumed it, emptied when the server sent the whole
+/// file again.
+fn open_output(path: &Path, restart: bool) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true);
+    if restart {
+        options.truncate(true);
+    } else {
+        options.append(true);
+    }
+    options.open(path)
+}
+
+fn file_length(path: &Path) -> io::Result<u64> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error),
+    }
+}
+
+/// Only a connection that dropped or stalled is tried again; the Hub's answers and a refused tag are not.
+fn is_interruption(error: &NodeError) -> bool {
+    matches!(
+        error,
+        NodeError::Transport(TransportError::ConnectionFailed { .. } | TransportError::TimedOut { .. })
+    )
+}
+
+fn interruption_reason(error: &NodeError) -> String {
+    match error {
+        NodeError::Transport(TransportError::ConnectionFailed { reason }) => reason.clone(),
+        NodeError::Transport(TransportError::TimedOut { timeout_ms }) => format!("no answer within {timeout_ms} ms"),
+        other => other.code().to_string(),
+    }
+}
+
+/// The wait before try `attempt + 1`: the first delay, doubled for each try before, and never more than the maximum.
+fn backoff_delay(retry: &RetryPolicy, attempt: u32) -> Duration {
+    let doubling = 1u32.checked_shl(attempt - 1).unwrap_or(u32::MAX);
+    retry.first_delay.saturating_mul(doubling).min(retry.max_delay)
+}
+
+fn connection_refused(reason: String) -> NodeError {
+    NodeError::Transport(TransportError::ConnectionFailed { reason })
+}
+
+fn hub_status_refused(status: u16, what: &str) -> NodeError {
+    connection_refused(format!("the Hub answered {status} to {what}"))
+}
+
+/// The listing: the commit and the file list at the revision, with the default branch named as `main`.
+async fn fetch_listing(request: &DownloadRequest, access: &HubAccess) -> Result<RepoListing, NodeError> {
     let path = listing_path(&request.model_ref, &request.revision);
-    let response = send_request(hub_request(options, path, None, HUB_LISTING_TIMEOUT_MS)).await?;
+    let route = hub_route(access, path);
+    let response = send_request(request_for_route(access, &route, None, HUB_LISTING_TIMEOUT_MS)).await?;
     match response.status {
         HTTP_OK => parse_listing(&response.body),
         HTTP_UNAUTHORIZED | HTTP_FORBIDDEN => Err(NodeError::ModelGated {
@@ -688,15 +976,12 @@ fn is_plain_id(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|character| character.is_ascii_alphanumeric())
 }
 
-/// `/api/models/<repo>?blobs=true` for the default branch, else the same at `/revision/<revision>`.
+/// `/api/models/<repo>/revision/<revision>?blobs=true`, where an empty revision is the default branch, `main`.
 fn listing_path(repo_id: &str, revision: &str) -> String {
-    if revision.is_empty() {
-        return format!("/api/models/{}?blobs=true", percent_encode(repo_id, true));
-    }
     format!(
         "/api/models/{}/revision/{}?blobs=true",
         percent_encode(repo_id, true),
-        percent_encode(revision, false)
+        percent_encode(revision_or_main(revision), false)
     )
 }
 
@@ -725,58 +1010,14 @@ fn percent_encode(text: &str, keep_slash: bool) -> String {
     encoded
 }
 
-/// Opens a partial file for writing: appended to when the request resumed it, emptied when the server sent the whole
-/// file again.
-fn open_output(path: &Path, restart: bool) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.create(true).write(true);
-    if restart {
-        options.truncate(true);
-    } else {
-        options.append(true);
-    }
-    options.open(path)
-}
-
-fn file_length(path: &Path) -> io::Result<u64> {
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.len()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
-        Err(error) => Err(error),
-    }
-}
-
-/// Only a connection that dropped or stalled is tried again; the Hub's answers and a refused tag are not.
-fn is_interruption(error: &NodeError) -> bool {
-    matches!(
-        error,
-        NodeError::Transport(TransportError::ConnectionFailed { .. } | TransportError::TimedOut { .. })
-    )
-}
-
-fn interruption_reason(error: &NodeError) -> String {
-    match error {
-        NodeError::Transport(TransportError::ConnectionFailed { reason }) => reason.clone(),
-        NodeError::Transport(TransportError::TimedOut { timeout_ms }) => format!("no answer within {timeout_ms} ms"),
-        other => other.code().to_string(),
-    }
-}
-
-/// The wait before try `attempt + 1`: the first delay, doubled for each try before, and never more than the maximum.
-fn backoff_delay(retry: &RetryPolicy, attempt: u32) -> Duration {
-    let doubling = 1u32.checked_shl(attempt - 1).unwrap_or(u32::MAX);
-    retry.first_delay.saturating_mul(doubling).min(retry.max_delay)
-}
-
-fn connection_refused(reason: String) -> NodeError {
-    NodeError::Transport(TransportError::ConnectionFailed { reason })
-}
-
-fn hub_status_refused(status: u16, what: &str) -> NodeError {
-    connection_refused(format!("the Hub answered {status} to {what}"))
-}
-
+/// A full disk (the operating system's StorageFull) gets its own code, RRS-S3002; the partial file stays, so a later job
+/// resumes it once space is freed. Any other failure keeps the cache folder's code.
 fn cache_error(path: &Path, error: io::Error) -> NodeError {
+    if error.kind() == io::ErrorKind::StorageFull {
+        return NodeError::Store(StoreError::DiskFull {
+            reason: format!("{}: {error}", path.display()),
+        });
+    }
     NodeError::Store(StoreError::DataDirectoryNotWritable {
         path: path.to_path_buf(),
         reason: error.to_string(),
@@ -810,5 +1051,103 @@ mod tests {
             "layers/0/sae.safetensors"
         );
         assert_eq!(percent_encode("a b", true), "a%20b");
+    }
+
+    #[test]
+    fn the_listing_names_the_default_branch_as_main() {
+        assert_eq!(
+            listing_path("org/name", ""),
+            "/api/models/org/name/revision/main?blobs=true"
+        );
+        assert_eq!(
+            listing_path("org/name", "refs/pr/1"),
+            "/api/models/org/name/revision/refs%2Fpr%2F1?blobs=true"
+        );
+    }
+
+    #[test]
+    fn progress_is_published_first_last_and_once_per_step() {
+        let step = HF_PROGRESS_STEP_BYTES;
+        assert!(progress_due(None, 0, 10 * step));
+        assert!(!progress_due(Some(0), step / 2, 10 * step));
+        assert!(progress_due(Some(0), step, 10 * step));
+        assert!(
+            progress_due(Some(step), 10 * step, 10 * step),
+            "the last report always goes out"
+        );
+        assert!(
+            !progress_due(Some(10 * step), 10 * step, 10 * step),
+            "a value already published is not sent twice"
+        );
+    }
+
+    #[test]
+    fn a_redirect_location_names_its_host_and_path() {
+        assert_eq!(
+            absolute_location("https://us.aws.cdn.hf.co/xet/file?sig=1"),
+            Some((
+                HttpTarget::Https {
+                    host: "us.aws.cdn.hf.co".to_string(),
+                    port: 443,
+                },
+                "/xet/file?sig=1".to_string()
+            ))
+        );
+        assert_eq!(
+            absolute_location("http://127.0.0.1:8080/cdn/x"),
+            Some((HttpTarget::LoopbackHttp { port: 8080 }, "/cdn/x".to_string()))
+        );
+        assert_eq!(absolute_location("ftp://example.com/x"), None);
+        assert_eq!(
+            absolute_location("https://user@evil.example/x"),
+            None,
+            "userinfo is refused"
+        );
+        assert_eq!(
+            absolute_location("http://example.com/x"),
+            None,
+            "plain http is only the loopback fake"
+        );
+    }
+
+    #[test]
+    fn a_cdn_request_reports_under_its_own_purpose_and_never_carries_the_token() {
+        let (reports, _receiver) = tokio::sync::mpsc::channel(1);
+        let access = HubAccess {
+            hub: production_hub(),
+            egress: Some(EgressTag {
+                purpose: HF_DOWNLOAD_EGRESS_PURPOSE.to_string(),
+                subject_id: "job_1".to_string(),
+                reports,
+            }),
+            token: Some("hf_secret".to_string()),
+        };
+        let current = hub_route(&access, "/repo/resolve/c/file".to_string());
+        let route = route_for_location(&access, &current, "https://us.aws.cdn.hf.co/xet/file").unwrap();
+        let tag = route.egress.clone().unwrap();
+        assert_eq!(tag.purpose, HF_CDN_EGRESS_PURPOSE);
+        assert_eq!(tag.subject_id, "job_1");
+        let request = request_for_route(&access, &route, Some(10), 1_000);
+        assert!(
+            request.headers.iter().all(|(name, _)| name != "Authorization"),
+            "the token stays with the Hub"
+        );
+        assert!(
+            request
+                .headers
+                .contains(&("Range".to_string(), "bytes=10-".to_string()))
+        );
+        let hub_request = request_for_route(&access, &current, None, 1_000);
+        assert!(
+            hub_request.headers.iter().any(|(name, _)| name == "Authorization"),
+            "the Hub itself gets the token"
+        );
+    }
+
+    #[test]
+    fn a_content_range_names_the_byte_it_starts_at() {
+        assert_eq!(content_range_start("bytes 8000-19999/20000"), Some(8000));
+        assert_eq!(content_range_start("items 8000-19999/20000"), None);
+        assert_eq!(content_range_start("bytes x-1/2"), None);
     }
 }

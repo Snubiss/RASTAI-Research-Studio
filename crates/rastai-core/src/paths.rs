@@ -427,10 +427,12 @@ pub fn command_help_cache_path(paths: &DataPaths, app_version: &str) -> PathBuf 
     paths.cache.join(help_file)
 }
 
-/// `<cache>/.locks/<repo folder>/<etag>.lock`: huggingface_hub's own per-file download lock, shared with HF tools.
-pub fn hf_lock_path(paths: &DataPaths, repository_folder: &str, etag: &str) -> PathBuf {
+/// `<hub cache>/.locks/<repo folder>/<etag>.lock`: huggingface_hub's own per-file download lock. It sits under the
+/// Hugging Face hub cache (`hf_cache_dir`), not under Rastai's cache, so the other HF tools take the same lock.
+/// The one function that builds this path (contracts 8.1; the node's downloads.rs calls it).
+pub fn hf_lock_path(hub_root: &Path, repository_folder: &str, etag: &str) -> PathBuf {
     let lock_file = format!("{etag}.{LOCK_EXTENSION}");
-    let repository_locks = paths.cache.join(HF_LOCKS_FOLDER).join(repository_folder);
+    let repository_locks = hub_root.join(HF_LOCKS_FOLDER).join(repository_folder);
     repository_locks.join(lock_file)
 }
 
@@ -818,8 +820,8 @@ mod tests {
                 "/r/cache/hf-headers/org--tiny/main/model.safetensors.json",
             ),
             (
-                hf_lock_path(&paths, "models--org--tiny", "e1"),
-                "/r/cache/.locks/models--org--tiny/e1.lock",
+                hf_lock_path(Path::new("/r/hub"), "models--org--tiny", "e1"),
+                "/r/hub/.locks/models--org--tiny/e1.lock",
             ),
             (command_help_cache_path(&paths, "0.1.0"), "/r/cache/commands-0.1.0.json"),
         ]);

@@ -102,7 +102,7 @@ test-rust:
 # node signals process groups and reads /proc.
 # rastai-node's job, reattach and train-job tests that go through Register, Hello and Control, with the cpu environment.
 test-node-jobs: env-cpu
-    cargo test --locked -p rastai-node --test jobs --test reattach --test train_job -- --ignored
+    cargo test --locked -p rastai-node --test jobs --test reattach --test train_job --test downloads -- --ignored
 
 # The real TextCNN train job through the daemon: train.start, the embedded node, the run tail, job.cancel and a
 # restart mid-run (plan M1-47), and `rastai storage rebuild-index` after a trained run, compared row by row with the
