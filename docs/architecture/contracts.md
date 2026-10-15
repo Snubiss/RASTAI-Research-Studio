@@ -383,7 +383,7 @@ Every §27 dependency (spec v5.4) and the one place that imports it. "Direct" me
 | http-body | Foundation: HTTP (axum's body trait, which axum re-exports as `axum::body::HttpBody` without its frame type) | `rastai-server` | `http/connect.rs`: the frames of `EventService.Subscribe`'s streamed body |
 | prost, tonic (with `tonic-prost`, tonic 0.14's prost codec, which the generated code calls) | Compatibility: protobuf | the crates in 2.1 (`tonic-prost`: `rastai-proto` only) | direct |
 | hyper, hyper-util | Foundation: HTTP | `rastai-transport`, `rastai-sandbox` | `rastai-transport/src/http_client.rs`; `rastai-sandbox/src/engine_http.rs` |
-| rustls, tokio-rustls, webpki-roots | Security: TLS | `rastai-transport` | `http_client.rs`. SHA-256 and HMAC for HF files, llama-server builds and (later) SigV4 come from the rustls crypto provider through this file; no new crate. |
+| rustls, tokio-rustls, webpki-roots | Security: TLS | `rastai-transport` | `http_client.rs`. The crypto provider is `ring` (owner approval of 2026-10-14, spec v5.4.7; aws-lc-rs stays out). SHA-256 and HMAC for HF files, llama-server builds and (later) SigV4 come from the rustls crypto provider through this file; no new crate. |
 | tower | Foundation: HTTP | `rastai-transport` | `grpc_channel.rs` (the connector tonic needs on Unix sockets) |
 | rusqlite (bundled SQLite) | Foundation | `rastai-store` | `sqlite.rs` |
 | libc | Foundation | `rastai-store` | `disk_space.rs`: one `statvfs` call, the only `unsafe` in the workspace (ADR-0033). `rastai_store::free_bytes` serves the store and the node. |

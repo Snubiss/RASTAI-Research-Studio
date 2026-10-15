@@ -911,7 +911,7 @@ Thin utility libraries are written in-house when it's cheap to do so. Every exte
 | Foundation | the Tauri updater plugin (`tauri-plugin-updater`) | Signed updates for the desktop shell; ships with the desktop shell (approved 2026-10-11). **Deferred** with the shell (ADR-0040, owner 2026-10-14) | The browser is already a full client |
 | Foundation | SQLite (rusqlite) | Embedded database, the live store on every machine | — |
 | Foundation | Docker / Podman engine, OpenSSH | Containers and remote access | — |
-| Security | blake3, ed25519-dalek, rustls, keyring (OS keychain bindings) | Crypto, identity, TLS, secrets | — |
+| Security | blake3, ed25519-dalek, rustls (crypto provider `ring`, with `untrusted` and `getrandom` 0.2 under it; owner approval of 2026-10-14), keyring (OS keychain bindings) | Crypto, identity, TLS, secrets | — |
 | Security (later) | SQLCipher, iroh / quinn, wasmtime, Sigstore | Encryption at rest, QUIC/NAT traversal, WASM sandbox, signing | — |
 | Compatibility | miniz_oxide | DEFLATE for zip files from untrusted sources, only in `rastai-formats/src/zip/inflate.rs`. A hand-written decompressor is parser risk for no gain; the zip container stays in-house and fuzzed | — |
 | Compatibility | HF `tokenizers` | Exact token IDs for every model | — |
@@ -1345,6 +1345,9 @@ Under Apache-2.0, anyone (companies included) may use the core for free, so ther
 | Better-funded competitors | Depth (the in-house engine), ecosystem and file formats; VC funding is an option, not a requirement |
 
 ## 37. Changes From v4.1
+**v5.4.7 (owner approval of 2026-10-14, M2-14; the status line stays v5.4)**
+- §27: `ring` is rustls's crypto provider, approved by the owner on 2026-10-14 ("all of those are fine as long as the recommendations are headed"). It comes in through rustls's `ring` feature, with `untrusted` and `getrandom` 0.2 under it, and only `rastai-transport/src/http_client.rs` imports rustls. `ring` builds with a C compiler alone, and the approved `mysql_async` feature `default-rustls-ring` already uses it. `aws-lc-rs`, the alternative, needs cmake and stays out of `Cargo.lock` (rustls's default features are off). Replacement path: switch rustls's provider feature in the one wrapper file.
+
 **v5.4.6 (owner decision of 2026-10-14, DOCS-02; the status line stays v5.4)**
 - The browser is the client for now: "browser only for now. desktop shell later is acceptable" (ADR-0040). The daemon serves the web app, and `rastai open` opens the user's browser, already signed in. The desktop shell is deferred to M6, beside packaging (M1-55, which M6-E05 depends on). M1-55 moved out of M1.
 - §27: the Tauri 2, `tauri-build`, `tauri-plugin-updater` and Tauri CLI rows are marked deferred: the shell choice is reopened, decided when M6 starts (Electron, or Tauri once a release ships the GTK4 port). The reason is the archived GTK3 bindings Tauri 2 uses on Linux (RUSTSEC-2024-0411 and related, RUSTSEC-2024-0429 for glib; tauri #14684 and wry #1767 track the GTK4 port). Replacement path: the shell rules of ADR-0034 and ADR-0006 hold for any shell; nothing else changes.
