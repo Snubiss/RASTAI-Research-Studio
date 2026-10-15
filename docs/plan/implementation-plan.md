@@ -1546,8 +1546,8 @@ Lane A · size M · type task · depends on M1-41, M1-02
 #### M2-15 Locked environments for every backend
 Lane A · size M · type ci · depends on M1-04
 
-- **Goal:** One uv project and hash-pinned lock per backend (cuda13, cuda126, rocm) beside cpu, the selection table with supported AMD gfx targets and the measured download sizes from spike 05, and the `env-locks` CI job that resolves every lock (§28 risk 11). Each lock pins torchvision beside the matching torch, for `rastai_data/image_decode.py` (ADR-0037); `pillow` and `numpy` come in as transitive packages and get named entries in `deps/allowlist-python.json`.
-- **Files:** `python/envs/{cuda13, cuda126, rocm}/{pyproject.toml, uv.lock}`; `python/envs/environments.json`; `python/envs/README.md`; `deps/allowlist-python.json`; `ci.yml`: env-locks
+- **Goal:** One uv project and hash-pinned lock per backend (cuda13, cuda126) beside cpu; the rocm lock lands with follow-up #311 (M10), next to the AMD work (owner decision of 2026-10-15), the selection table with supported AMD gfx targets and the measured download sizes from spike 05, and the `env-locks` CI job that resolves every lock (§28 risk 11). Each lock pins torchvision beside the matching torch, for `rastai_data/image_decode.py` (ADR-0037); `pillow` and `numpy` come in as transitive packages and get named entries in `deps/allowlist-python.json`.
+- **Files:** `python/envs/{cuda13, cuda126}/{pyproject.toml, uv.lock}`; `python/envs/environments.json`; `python/envs/README.md`; `deps/allowlist-python.json`; `ci.yml`: env-locks
 - **Test:** CI resolves every lockfile and fails on an unexpected hash change; every package in every lock is in deps/allowlist-python.json; each lock's torchvision matches its torch.
 - **Docs:** [Layout: Python §11](../architecture/layout/python.md), [Contracts §2.5](../architecture/contracts.md), [Spike 05](../../spike/README.md)
 

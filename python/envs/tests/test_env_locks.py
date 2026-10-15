@@ -175,3 +175,20 @@ def test_versions_by_lock_names_only_locks_the_allowlist_lists(repo_root: Path) 
     for name, entry in allowlist["packages"].items():
         for lock_path in entry.get("versions_by_lock", {}):
             assert lock_path in allowlist["locks"], f"{name}: versions_by_lock names {lock_path}, which isn't a lock"
+
+
+def test_allowlist_locks_are_the_non_null_locks_of_environments(repo_root: Path) -> None:
+    """check-deps checks only the locks the allowlist's `locks` names, so the two lists must agree. rocm has no lock
+    yet (follow-up #311), so it is in neither list until its lock lands."""
+    allowlist_locks = set(read_allowlist(repo_root)["locks"])
+    environment_locks = {entry["lock"] for entry in read_environments(repo_root).values() if entry["lock"]}
+    assert allowlist_locks == environment_locks
+
+
+def test_environments_about_names_the_pending_rocm_lock_and_the_unmeasured_sizes(repo_root: Path) -> None:
+    """A null lock or size is pending on purpose, so the about text must say where it is tracked and what null means."""
+    environments_file = json.loads((repo_root / ENVIRONMENTS_FILE).read_text(encoding="utf-8"))
+    about = environments_file["about"]
+    assert read_environments(repo_root)[ROCM]["lock"] is None
+    assert "#311" in about
+    assert "null means not measured yet" in about
