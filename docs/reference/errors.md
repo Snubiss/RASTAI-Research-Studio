@@ -2453,6 +2453,15 @@ Source: `catalog/errors/RRS-M.json`.
 - **In plain words:** This feature is planned but not built yet in this version of Rastai.
 - **Fix:** Nothing to fix on your side: the feature arrives in a later version.
 
+<a id="rrs-m0005"></a>
+
+### RRS-M0005: A tied output layer ran before its embedding weight was bound
+
+- **Severity:** error
+- **Message:** The output layer of this design ran before it was linked to the embedding's weight.
+- **In plain words:** The design's output layer has no weights yet, so the model can't compute its answers.
+- **Fix:** Report this as a bug; the design itself is fine.
+
 <a id="rrs-m0601"></a>
 
 ### RRS-M0601: Graph nodes without Eject or ONNX support

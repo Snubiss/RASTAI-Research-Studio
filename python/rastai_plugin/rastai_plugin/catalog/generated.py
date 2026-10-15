@@ -212,6 +212,7 @@ RRS_M0001 = "RRS-M0001"
 RRS_M0002 = "RRS-M0002"
 RRS_M0003 = "RRS-M0003"
 RRS_M0004 = "RRS-M0004"
+RRS_M0005 = "RRS-M0005"
 RRS_M0601 = "RRS-M0601"
 RRS_M0602 = "RRS-M0602"
 RRS_M0603 = "RRS-M0603"
@@ -2376,6 +2377,17 @@ CATALOG: tuple[CatalogEntry, ...] = (
         fix_text="Nothing to fix on your side: the feature arrives in a later version.",
         fix_command_id="",
         docs_anchor="rrs-m0004",
+        retired=False,
+    ),
+    CatalogEntry(
+        code=RRS_M0005,
+        severity="error",
+        title="A tied output layer ran before its embedding weight was bound",
+        message="The output layer of this design ran before it was linked to the embedding's weight.",
+        basic_text="The design's output layer has no weights yet, so the model can't compute its answers.",
+        fix_text="Report this as a bug; the design itself is fine.",
+        fix_command_id="",
+        docs_anchor="rrs-m0005",
         retired=False,
     ),
     CatalogEntry(

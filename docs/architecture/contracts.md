@@ -2325,6 +2325,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-M0002` | error | Smoke forward shape differs from the inferred shape (compiler bug) |
 | `RRS-M0003` | warning | Compiled parameter count differs from live stats (stats bug) |
 | `RRS-M0004` | error | Designer command not available yet (L0 stub, ADR-0017) |
+| `RRS-M0005` | error | A tied output layer ran before its embedding weight was bound (compiler bug) |
 | `RRS-M0601` | error | Graph nodes without Eject or ONNX support |
 | `RRS-M0602` | error | ONNX lowering failed for a graph node |
 | `RRS-M0603` | warning | ONNX round trip differs beyond tolerance; file kept as unverified |

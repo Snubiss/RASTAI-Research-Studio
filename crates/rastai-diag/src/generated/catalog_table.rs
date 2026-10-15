@@ -1975,6 +1975,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-M0005",
+        severity: Severity::Error,
+        title: "A tied output layer ran before its embedding weight was bound",
+        message: "The output layer of this design ran before it was linked to the embedding's weight.",
+        basic_text: "The design's output layer has no weights yet, so the model can't compute its answers.",
+        fix_text: "Report this as a bug; the design itself is fine.",
+        fix_command_id: "",
+        docs_anchor: "rrs-m0005",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-M0601",
         severity: Severity::Error,
         title: "Graph nodes without Eject or ONNX support",
