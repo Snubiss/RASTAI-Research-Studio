@@ -150,7 +150,9 @@ fn metadata_text(metadata: &[(String, String)]) -> String {
     format!("{{{}}}", members.join(","))
 }
 
-fn shape_text(shape: &[u64]) -> String {
+/// The dimensions as compact JSON: `[2,3]`, and `[]` for a scalar. The header and the model hash listing (8.6) both
+/// write shapes this way, so there is one copy.
+pub(crate) fn shape_text(shape: &[u64]) -> String {
     let sizes: Vec<String> = shape.iter().map(u64::to_string).collect();
     format!("[{}]", sizes.join(","))
 }
@@ -238,6 +240,12 @@ mod tests {
         assert_eq!(names, ["Head", "bias", "weight"]);
         let offsets: Vec<(u64, u64)> = layout.entries.iter().map(|entry| (entry.start, entry.end)).collect();
         assert_eq!(offsets, [(0, 0), (0, 6), (6, 30)]);
+    }
+
+    #[test]
+    fn shape_text_is_compact_json() {
+        assert_eq!(shape_text(&[2, 3]), "[2,3]");
+        assert_eq!(shape_text(&[]), "[]");
     }
 
     #[test]

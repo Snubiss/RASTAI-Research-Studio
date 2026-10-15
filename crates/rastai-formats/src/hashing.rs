@@ -17,6 +17,7 @@ use crate::json::canonical::canonical_json;
 use crate::safetensors::dtypes::{SafetensorsDtype, dtype_name};
 use crate::safetensors::header_check::{SafetensorsHeader, TensorEntry};
 use crate::safetensors::reader::{read_safetensors_header, read_tensor_range, tensor_span};
+use crate::safetensors::writer::shape_text;
 
 const HASH_PREFIX: &str = "blake3:";
 /// The shared-header field that holds the hash, so it is left out of what it hashes (contracts 5.1).
@@ -105,7 +106,8 @@ fn tensor_data_hash(
 ) -> Result<String, Diagnostic> {
     let span = tensor_span(source, header, entry)?;
     let mut hasher = new_stream_hasher();
-    let mut chunk = vec![0u8; HASH_CHUNK_BYTES];
+    // A small tensor (a 4-byte bias) gets a buffer its own size, not a full chunk.
+    let mut chunk = vec![0u8; span.length.min(HASH_CHUNK_BYTES as u64) as usize];
     let mut done: u64 = 0;
     while done < span.length {
         let size = (span.length - done).min(HASH_CHUNK_BYTES as u64) as usize;
@@ -142,12 +144,6 @@ fn tensor_line(digest: &TensorDigest) -> String {
         shape_text(&digest.shape),
         digest.data_hash
     )
-}
-
-/// The dimensions as compact JSON: `[2,3]`, and `[]` for a scalar.
-fn shape_text(shape: &[u64]) -> String {
-    let sizes: Vec<String> = shape.iter().map(u64::to_string).collect();
-    format!("[{}]", sizes.join(","))
 }
 
 fn format_hash(hash: &blake3::Hash) -> String {
@@ -200,11 +196,5 @@ mod tests {
     #[test]
     fn model_hash_of_no_files_is_the_hash_of_the_empty_listing() {
         assert_eq!(model_hash(&[]).unwrap(), EMPTY_HASH);
-    }
-
-    #[test]
-    fn shape_text_is_compact_json() {
-        assert_eq!(shape_text(&[2, 3]), "[2,3]");
-        assert_eq!(shape_text(&[]), "[]");
     }
 }
