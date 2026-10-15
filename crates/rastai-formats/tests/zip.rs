@@ -16,6 +16,14 @@ use rastai_formats::zip::reader::{ZipEntry, ZipMethod, copy_zip_entry, list_zip_
 const HELLO: &[u8] = b"hello hello hello hello";
 /// `HELLO` as raw DEFLATE, from Python: `zlib.compressobj(9, zlib.DEFLATED, -15)`.
 const DEFLATED_HELLO: &[u8] = &[0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x57, 0xc8, 0x40, 0x27, 0x01];
+/// `b"{\"ok\": true}\n" * 1000` (13,000 bytes) as raw DEFLATE, from Python: `zlib.compressobj(9, zlib.DEFLATED, -15)`.
+/// It compresses 213:1, past the 200:1 cap, the way real repetitive JSON files do.
+const REPETITIVE_JSON_DEFLATED: &[u8] = &[
+    0xed, 0xc7, 0xb1, 0x0d, 0x00, 0x10, 0x10, 0x00, 0xc0, 0xde, 0x14, 0xf2, 0x63, 0xd8, 0x47, 0xa5, 0x90, 0x08, 0xd5,
+    0xc7, 0xee, 0xa6, 0xd0, 0xdd, 0x75, 0x97, 0x31, 0x47, 0xb4, 0xba, 0xd7, 0xe9, 0xb7, 0xa4, 0x88, 0x88, 0x88, 0x88,
+    0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88,
+    0x88, 0xc8, 0x9f, 0x3c,
+];
 
 const STORED: u16 = 0;
 const DEFLATE: u16 = 8;
@@ -58,6 +66,18 @@ fn deflated(name: &str) -> Part {
         data: DEFLATED_HELLO.to_vec(),
         declared_uncompressed: HELLO.len() as u64,
         declared_crc: crc32(HELLO),
+    }
+}
+
+/// A deflate entry whose stored bytes are `compressed` and whose declared content is `content`.
+fn deflated_content(name: &str, compressed: &[u8], content: &[u8]) -> Part {
+    Part {
+        name: name.to_string(),
+        method: DEFLATE,
+        flags: 0,
+        data: compressed.to_vec(),
+        declared_uncompressed: content.len() as u64,
+        declared_crc: crc32(content),
     }
 }
 
@@ -317,6 +337,36 @@ fn a_copy_re_checks_the_ratio_of_an_entry_built_by_hand() {
     let error = copy_zip_entry(&source, &entry, &mut sink, &limits).unwrap_err();
     assert_eq!(error.code(), "RRS-E5002");
     assert!(sink.bytes.is_empty());
+}
+
+#[test]
+fn a_small_repetitive_deflate_entry_over_the_ratio_cap_reads() {
+    // 13,000 bytes in 61 compressed bytes is 213:1, past the 200:1 cap. Under the 1 MiB floor the cap doesn't apply, so
+    // the archive lists and the entry copies out whole.
+    let content = b"{\"ok\": true}\n".repeat(1000);
+    assert!(
+        content.len() as u64
+            > ImportLimits::default().max_zip_compression_ratio * REPETITIVE_JSON_DEFLATED.len() as u64
+    );
+    let bytes = build_zip(
+        &[deflated_content("rows.json", REPETITIVE_JSON_DEFLATED, &content)],
+        false,
+    );
+    let entries = list_zip_entries(&SliceSource { bytes: &bytes }, &ImportLimits::default()).unwrap();
+    assert_eq!(entries[0].uncompressed_bytes, content.len() as u64);
+    assert_eq!(copy_named(&bytes, "rows.json").unwrap(), content);
+}
+
+#[test]
+fn the_same_ratio_above_the_floor_is_refused_when_listed() {
+    // Declared 1 MiB plus one byte at 213:1, so the compressed size is 4,924 bytes. The listing refuses on the declared
+    // sizes before it reads the entry's data, so the data's bytes don't matter here.
+    let declared: u64 = 1024 * 1024 + 1;
+    let compressed_bytes = (declared / 213 + 1) as usize;
+    let mut part = deflated_content("rows.json", &vec![0u8; compressed_bytes], HELLO);
+    part.declared_uncompressed = declared;
+    let bytes = build_zip(&[part], false);
+    assert_eq!(list_code(&bytes, &ImportLimits::default()), "RRS-E5002");
 }
 
 #[test]

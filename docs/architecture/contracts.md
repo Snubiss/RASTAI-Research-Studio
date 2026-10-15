@@ -2040,7 +2040,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-E4001` | info | File from a newer schema version; opened read-only |
 | `RRS-E4002` | error | Migration step failed |
 | `RRS-E5001` | error | Zip entry escapes its folder (zip slip) |
-| `RRS-E5002` | error | Zip exceeds size or ratio caps (zip bomb), or a deflate stream holds more output than its entry declares |
+| `RRS-E5002` | error | Zip exceeds size or ratio caps (zip bomb), or a deflate stream holds more output than its entry declares. The ratio cap (200:1) applies only to an entry declaring more than 1 MiB (layout 4.5 says why); the entry count, total size and shared-bytes checks apply to every entry |
 | `RRS-E5003` | error | File is larger than the import limit |
 | `RRS-E5004` | error | JSON nested deeper than the import limit |
 | `RRS-E5005` | error | Graph has more nodes or parameters than the import limit |
