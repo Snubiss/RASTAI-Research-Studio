@@ -4,8 +4,9 @@
 //! - a `repeat` of 0, or one on an op other than `block`: `RRS-E2006`;
 //! - a block instance's input: `to_input` past 0 is `RRS-E2006`, and an instance fed by nothing or by two things is
 //!   `RRS-E2007` (the instance's one input is checked in model_graph.rs with every other op's inputs);
-//! - inside a block body: an op that isn't in the vocabulary (`RRS-E2001`), an id used twice (`RRS-E2005`), or a
-//!   block instance, which would let a block contain itself (`RRS-E2006`);
+//! - inside a block body: an op that isn't in the vocabulary (`RRS-E2001`), an id used twice (`RRS-E2005`), a
+//!   block instance, which would let a block contain itself (`RRS-E2006`), or a `block_ref` or `repeat` on any node
+//!   (`RRS-E2006`);
 //! - a body node's attributes, checked as any graph node's are (`RRS-E2006`, model_graph.rs `check_attributes`);
 //! - an edge that names a node of another graph, or no node (`RRS-E2001`); a `to_input` the op doesn't have
 //!   (`RRS-E2006`); an input of a body node fed by two body edges (`RRS-E2007`, at the second edge);
@@ -130,7 +131,8 @@ fn check_block_body(
     check_body_output(&body_pointer, graph, &edge_ends, source, diagnostics);
 }
 
-/// Each body node's id and op.
+/// Each body node's id, op, and block fields. A body node is never a block instance, so `block_ref` and `repeat` have
+/// no meaning on it and any of them is `RRS-E2006`.
 fn check_body_nodes(body_pointer: &str, graph: &ModelGraph, source: &MeaningSource, diagnostics: &mut Vec<Diagnostic>) {
     let nodes_pointer = join_pointer(body_pointer, NODES_KEY);
     let mut seen_ids = BTreeSet::new();
@@ -149,11 +151,32 @@ fn check_body_nodes(body_pointer: &str, graph: &ModelGraph, source: &MeaningSour
             let values = [("found", BLOCK_OP), ("expected", EXPECTED_OP_IN_BLOCK)];
             diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &op_pointer));
         }
+        check_body_block_fields(&node_pointer, node, source, diagnostics);
     }
 }
 
-/// Each body node's attributes, against its op's description, exactly as a top-level node's are. A node whose op has
-/// no attributes yet, or whose attributes are reported, gives no typed value here, and nothing reads one.
+/// A body node's `block_ref` and `repeat`, each refused when set: `RRS-E2006` at the field.
+fn check_body_block_fields(
+    node_pointer: &str,
+    node: &GraphNode,
+    source: &MeaningSource,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(block_ref) = &node.block_ref {
+        let ref_pointer = join_pointer(node_pointer, BLOCK_REF_KEY);
+        let values = [("found", shown_value(block_ref)), ("expected", EXPECTED_NO_BLOCK_REF)];
+        diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &ref_pointer));
+    }
+    if let Some(repeat) = node.repeat {
+        let repeat_pointer = join_pointer(node_pointer, REPEAT_KEY);
+        let found = repeat.to_string();
+        let values = [("found", found.as_str()), ("expected", EXPECTED_NO_REPEAT)];
+        diagnostics.push(meaning_diagnostic(CODE_VALUE_FORM, &values, source, &repeat_pointer));
+    }
+}
+
+/// Checks each body node's attributes against its op, the same check every top-level node gets (`check_attributes`).
+/// The typed values aren't used here, so a node whose attributes are reported is simply left out.
 fn check_body_attributes(
     body_pointer: &str,
     graph: &ModelGraph,
@@ -271,10 +294,11 @@ fn check_body_feeds(
     }
 }
 
-/// How many inputs a body node's op takes, when the number is fixed: a concat takes as many as are connected, so it
-/// has no fixed count and any `to_input` is taken as it comes.
+/// How many inputs a body node's op takes, when the number is fixed. A concat takes as many as are connected, so it
+/// has no fixed count and any `to_input` is taken as it comes. An op outside the vocabulary has no count either: its
+/// `RRS-E2001` is the one finding, and an edge into it isn't checked against a guessed count.
 fn body_input_count(op: &str) -> Option<usize> {
-    if op == MANY_INPUTS_OP {
+    if op == MANY_INPUTS_OP || !MODEL_OPS.contains(&op) {
         return None;
     }
     Some(fixed_input_count(op))

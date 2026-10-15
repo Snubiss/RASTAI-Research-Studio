@@ -1,0 +1,8 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2001",
+      "path": "block_body_unknown_op.rrsmodel:89:11#/blocks/decoder_layer/nodes/2/op"
+    }
+  ]
+}

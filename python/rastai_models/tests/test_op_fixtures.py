@@ -3,7 +3,8 @@
 For each `fixtures/ops/<op>.json` case, the op module the compiler builds from the case's attributes gives the
 golden output shapes, parameter count and FLOPs (counted by torch.utils.flop_counter.FlopCounterMode, the convention
 each file states). Rust live stats match the same files. The test walks the compiler's op table, so an op added to
-the table without a golden file fails, and so does a golden file for an op the table lacks.
+the table without a golden file fails, and so does a golden file for an op the table lacks, unless the op is on the
+pending list below.
 """
 
 import json
@@ -17,6 +18,11 @@ from torch.utils.flop_counter import FlopCounterMode
 
 OPS_FOLDER_NAME = "ops"
 SEED = 35
+# The six decoder ops whose golden files came with M2-01 and whose compiler OpModules come with M2-03 (owner decision
+# of 2026-10-14, issue #57). Until then their goldens are skipped and no OpModule may exist for them. M2-03 gives each
+# one a module, empties this list and deletes it with the two tests that read it. The list can only shrink: a listed
+# op that already has a module fails, and so does a golden file that has neither a module nor a place here.
+PENDING_OPS = frozenset({"attention", "feed_forward", "layer_norm", "residual_add", "rms_norm", "unembed"})
 # The op whose input holds token ids rather than values.
 TOKEN_ID_OPS = {"embedding"}
 # The FLOP convention every golden file states word for word (fixtures/ops/README.md).
@@ -32,16 +38,16 @@ def golden_files(fixtures_folder: Path) -> dict[str, Path]:
 
 
 def golden_cases() -> list:
-    """(op, case) for every case of every golden file of an op in the table, named `<op>-<case name>`. Collected at
-    import time, so each case is its own test."""
+    """(op, case) for every case of every golden file, named `<op>-<case name>`. A case of an op on the pending list
+    is skipped; every other case runs and fails if its op has no module. Collected at import time, so each case is its
+    own test."""
     fixtures_folder = Path(__file__).resolve().parents[3] / "fixtures"
-    files = golden_files(fixtures_folder)
     cases = []
-    for op in implemented_ops():
-        if op in files:
-            golden = json.loads(files[op].read_text(encoding="utf-8"))
-            for case in golden["cases"]:
-                cases.append(pytest.param(op, case, id=f"{op}-{case['name']}"))
+    for op, path in golden_files(fixtures_folder).items():
+        golden = json.loads(path.read_text(encoding="utf-8"))
+        marks = [pytest.mark.skip(reason=f"{op} has no OpModule until M2-03")] if op in PENDING_OPS else []
+        for case in golden["cases"]:
+            cases.append(pytest.param(op, case, id=f"{op}-{case['name']}", marks=marks))
     return cases
 
 
@@ -58,9 +64,17 @@ def test_every_op_in_the_table_has_a_golden_file(fixtures_folder: Path) -> None:
     assert without_file == [], f"ops in op_table.py without fixtures/ops/<op>.json: {without_file}"
 
 
-def test_every_golden_file_names_an_op_in_the_table(fixtures_folder: Path) -> None:
-    without_module = [op for op in golden_files(fixtures_folder) if op not in implemented_ops()]
-    assert without_module == [], f"golden files for ops op_table.py can't run: {without_module}"
+def test_the_pending_list_holds_only_golden_ops_without_a_module(fixtures_folder: Path) -> None:
+    files = golden_files(fixtures_folder)
+    without_module = [op for op in files if op not in implemented_ops() and op not in PENDING_OPS]
+    assert without_module == [], f"golden files for ops op_table.py can't run, and not on PENDING_OPS: {without_module}"
+    without_file = sorted(op for op in PENDING_OPS if op not in files)
+    assert without_file == [], f"PENDING_OPS names ops without fixtures/ops/<op>.json: {without_file}"
+
+
+def test_no_pending_op_already_has_an_op_module() -> None:
+    with_module = sorted(op for op in PENDING_OPS if op in implemented_ops())
+    assert with_module == [], f"ops on PENDING_OPS that have an OpModule, so take them off the list: {with_module}"
 
 
 def test_every_golden_file_states_the_flop_convention(fixtures_folder: Path) -> None:

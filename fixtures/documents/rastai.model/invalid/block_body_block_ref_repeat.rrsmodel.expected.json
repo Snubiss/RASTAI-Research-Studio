@@ -1,0 +1,12 @@
+{
+  "diagnostics": [
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_block_ref_repeat.rrsmodel:75:11#/blocks/decoder_layer/nodes/0/block_ref"
+    },
+    {
+      "code": "RRS-E2006",
+      "path": "block_body_block_ref_repeat.rrsmodel:76:11#/blocks/decoder_layer/nodes/0/repeat"
+    }
+  ]
+}
