@@ -2104,7 +2104,7 @@ pub struct McpTool { pub name: String, pub title: String, pub description: Strin
 /// What the caller must do next. Plain data out, so rastai-mcp needs no callback into the daemon.
 pub enum McpStep {
     Reply(JsonRpcMessage),
-    ExecuteTool { request_id: JsonRpcId, command_id: String, arguments_json: String },
+    ExecuteTool { request_id: JsonRpcId, command_id: String, arguments_json: String, idempotency_key: String },
     NoReply,                                                  // notifications
 }
 pub struct ToolOutcome { pub ok: bool, pub result_json: String, pub job_id: String, pub diagnostics: Vec<Diagnostic> }
@@ -2141,6 +2141,7 @@ pub async fn run_bridge(daemon: &DaemonEndpoint, token: &str, input: impl AsyncB
 ```
 
 - **Server methods:** `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Anything else gets JSON-RPC error `-32601`. `resources/*` for `ui://` panels comes with two-way MCP Apps, which is deferred (§33).
+- **Retry key (#268, contracts 4.7):** `params._meta.idempotencyKey` of a `tools/call` is `ExecuteTool.idempotency_key`, and `handle_message` refuses a present value that isn't a string with `RRS-C0002` (JSON-RPC `-32602`, the diagnostic in `data`), before anything runs. Missing or empty means no key. The endpoint sets it as `ExecuteRequest.idempotency_key`, so a retry with the same key replays the first answer, as HTTP and the CLI do.
 - **Tool list:** one tool per command the session's principal may run (`tools_for_principal`, through `check_scope`), named by `mcp_tool_name`. A `tools/call` isn't checked against the list: any name becomes `ExecuteTool` with `command_id_from_mcp_tool_name`, and `execute_command` decides (7.5; flows/platform.md 3.2), so a missing scope is `RRS-C1005` and an unknown command `RRS-C0001`, each replied as `isError`. `inputSchema` is the command's `arguments_schema_json`; `outputSchema` its `result_schema_json` when that schema has `"type": "object"` (MCP's rule; left out otherwise); `annotations.readOnlyHint` is true for `read`-scope commands. Experimental commands are listed only when `plugins.experimental_apis` is on.
 - **Tool results:** `structuredContent` is the command's result object and `content` holds the same JSON as one text item. A `job` command returns `{job_id}` at once, with a text note to poll `job.get`. A failed command returns `isError: true` with each diagnostic rendered by `render_basic` and its code, so an agent can act on the code.
 - **Errors:** every JSON-RPC error carries its diagnostic (`render_json`) as `data`: `-32700` and `-32600` for a malformed message, `-32601` for an unknown method, `-32602` for `tools/call` params without a string `name` or with `arguments` that aren't an object, `-32000` for a Rastai diagnostic (`RRS-C3002`, the daemon unreachable, a refusal from the request gate).
@@ -2209,10 +2210,11 @@ pub async fn handle_mcp_post(server: &Server, principal: &Principal, session_id:
 |---|---|---|
 | Unit | bottom of `jsonrpc.rs`, `protocol_versions.rs` | ids as numbers and strings; batch arrays refused (removed from MCP); revision negotiation picks the client's if supported, else ours |
 | Server transcripts | `tests/server_transcripts.rs`, `fixtures/mcp/server/` (new) | initialize, tools/list for `mcp-default` scopes, a successful call, a call outside the scopes, a malformed line |
+| Idempotency key | bottom of `server/handle.rs` | `_meta.idempotencyKey` reaches `ExecuteTool`; missing or empty is no key; null, a number, an array or an object is refused with `RRS-C0002` and never runs |
 | Client | `tests/client_protocol.rs`, `tests/stdio_process.rs` | handshake, listing, call with timeout, server crash mid-call gives a typed error, stderr noise ignored |
 | Bridge | `tests/bridge.rs` | lines in order; a 404 session after a daemon restart replays `initialize` once and retries |
 | Fuzz | `fuzz/fuzz_targets/jsonrpc_decode.rs` | nightly, 10 minutes (contracts §12.5) |
-| End to end | `tests/e2e/` (flows/platform.md 4.3) | a golden transcript through the real `rastai mcp` against a running daemon |
+| End to end | `tests/e2e/` (flows/platform.md 4.3) | a golden transcript through the real `rastai mcp` against a running daemon; a `train__start` retried with the same `_meta.idempotencyKey` returns its first job (`tests/e2e/three_surfaces/`) |
 
 ### 7.7 Ported from the spike
 

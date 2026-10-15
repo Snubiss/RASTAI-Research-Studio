@@ -14,7 +14,8 @@ What differs between the surfaces by design, and is not compared:
   how plan M1-49's Test line words its chat-only criterion.
 - A job command's answer: the job id on all three, and the result (`run_id`, the plan) only over HTTP; the CLI and
   MCP leave the run to `job.get`, which shows it the same on all three.
-- An MCP tools/call carries no idempotency key (none is defined for MCP), so keys are checked on HTTP and the CLI.
+- An MCP tools/call carries its key in `params._meta.idempotencyKey` (contracts 4.7), so keys are checked on all
+  three. A key is kept per principal, so the MCP token and the owner may each use the same key text.
 - The rendering of a diagnostic: MCP shows the code, message and fix as text, HTTP and the CLI as fields.
 - Arguments that don't match the command's schema: the CLI refuses them before sending, worded in flags
   (layout 9.3 step 4), so only the code and the exit code are compared with it."""
@@ -90,8 +91,10 @@ class ThreeSurfacesRun:
     job_reads: dict
     http_replay: Outcome
     cli_replay: Outcome
+    mcp_replay: Outcome
     http_conflict: Outcome
     cli_conflict: Outcome
+    mcp_conflict: Outcome
     train_jobs_listed: list
 
 
@@ -131,8 +134,10 @@ class JobStarts:
     failing_start: Outcome
     http_replay: Outcome
     cli_replay: Outcome
+    mcp_replay: Outcome
     http_conflict: Outcome
     cli_conflict: Outcome
+    mcp_conflict: Outcome
 
 
 def start_jobs(owner_http: HttpSurface, cli: CliSurface, train_mcp: McpSurface, repo_root: Path) -> JobStarts:
@@ -143,23 +148,27 @@ def start_jobs(owner_http: HttpSurface, cli: CliSurface, train_mcp: McpSurface, 
     started = {
         "http": owner_http.execute("train.start", train_arguments, IDEMPOTENCY_KEY),
         "cli": cli.execute("train.start", train_arguments),
-        "mcp": train_mcp.execute("train.start", train_arguments),
+        "mcp": train_mcp.execute("train.start", train_arguments, IDEMPOTENCY_KEY),
     }
     failing_start = owner_http.execute("train.start", missing_dataset_arguments)
     job_ids = {name: outcome.job_id for name, outcome in started.items()}
     job_ids["failing"] = failing_start.job_id
     http_replay = owner_http.execute("train.start", train_arguments, IDEMPOTENCY_KEY)
     cli_replay = cli.execute("train.start", train_arguments, IDEMPOTENCY_KEY)
+    mcp_replay = train_mcp.execute("train.start", train_arguments, IDEMPOTENCY_KEY)
     http_conflict = owner_http.execute("train.start", missing_dataset_arguments, IDEMPOTENCY_KEY)
     cli_conflict = cli.execute("train.start", missing_dataset_arguments, IDEMPOTENCY_KEY)
+    mcp_conflict = train_mcp.execute("train.start", missing_dataset_arguments, IDEMPOTENCY_KEY)
     return JobStarts(
         started=started,
         job_ids=job_ids,
         failing_start=failing_start,
         http_replay=http_replay,
         cli_replay=cli_replay,
+        mcp_replay=mcp_replay,
         http_conflict=http_conflict,
         cli_conflict=cli_conflict,
+        mcp_conflict=mcp_conflict,
     )
 
 
@@ -197,8 +206,10 @@ def three_surfaces_run(
         job_reads=job_reads,
         http_replay=starts.http_replay,
         cli_replay=starts.cli_replay,
+        mcp_replay=starts.mcp_replay,
         http_conflict=starts.http_conflict,
         cli_conflict=starts.cli_conflict,
+        mcp_conflict=starts.mcp_conflict,
         train_jobs_listed=train_jobs_listed(owner_http),
     )
 
@@ -381,15 +392,23 @@ def journal_rows_of_job(home: Path, job_id: str) -> list[tuple]:
         connection.close()
 
 
-def test_an_idempotency_key_is_honoured_the_same_over_http_and_the_cli(three_surfaces_run: ThreeSurfacesRun):
-    """The CLI and HTTP with the owner token are one principal, so a key one of them used replays on the other."""
+def test_an_idempotency_key_is_honoured_the_same_over_http_the_cli_and_mcp(three_surfaces_run: ThreeSurfacesRun):
+    """A retry with the key a surface sent answers with that surface's first job, so train.start never starts a
+    second run. The CLI and HTTP with the owner token are one principal, so a key one of them used replays on the
+    other; the MCP token keeps its own keys (a principal's keys are its own)."""
     first = three_surfaces_run.started["http"]
-    replays = [three_surfaces_run.http_replay, three_surfaces_run.cli_replay]
-    for replay in replays:
-        assert replay.ok and replay.job_id == first.job_id, replay
+    assert three_surfaces_run.http_replay.ok and three_surfaces_run.http_replay.job_id == first.job_id
     assert three_surfaces_run.http_replay.result == first.result
+    assert three_surfaces_run.cli_replay.ok and three_surfaces_run.cli_replay.job_id == first.job_id
     assert three_surfaces_run.cli_replay.exit_code == EXIT_OK
-    conflicts = {"http": three_surfaces_run.http_conflict, "cli": three_surfaces_run.cli_conflict}
+    mcp_first = three_surfaces_run.started["mcp"]
+    assert three_surfaces_run.mcp_replay.ok and three_surfaces_run.mcp_replay.job_id == mcp_first.job_id
+    assert mcp_first.job_id != first.job_id, "the MCP token's key is its own, so it started a job of its own"
+    conflicts = {
+        "http": three_surfaces_run.http_conflict,
+        "cli": three_surfaces_run.cli_conflict,
+        "mcp": three_surfaces_run.mcp_conflict,
+    }
     assert_same_refusal(conflicts)
     assert [item["code"] for item in conflicts["http"].diagnostics] == [CODE_IDEMPOTENCY_CONFLICT]
     listed_ids = sorted(job["job_id"] for job in three_surfaces_run.train_jobs_listed)

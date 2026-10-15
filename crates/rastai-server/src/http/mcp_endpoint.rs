@@ -125,8 +125,9 @@ pub async fn handle_mcp_post(
             request_id,
             command_id,
             arguments_json,
+            idempotency_key,
         } => {
-            let outcome = execute_tool(server, principal, &command_id, &arguments_json).await;
+            let outcome = execute_tool(server, principal, &command_id, &arguments_json, &idempotency_key).await;
             json_http_reply(&tool_call_reply(request_id, &outcome), new_session_id)
         }
     }
@@ -215,8 +216,15 @@ fn principal_tools(server: &Server, principal: &Principal) -> Vec<McpTool> {
     tools_for_principal(&registry, principal, include_experimental)
 }
 
-/// Runs the tool's command as `principal` through `execute_command`, and hands back what MCP shows of it.
-async fn execute_tool(server: &Server, principal: &Principal, command_id: &str, arguments_json: &str) -> ToolOutcome {
+/// Runs the tool's command as `principal` through `execute_command`, and hands back what MCP shows of it. The
+/// `_meta.idempotencyKey` of the call is the request's key, so a retry with it replays the first answer (flows 3.1).
+async fn execute_tool(
+    server: &Server,
+    principal: &Principal,
+    command_id: &str,
+    arguments_json: &str,
+    idempotency_key: &str,
+) -> ToolOutcome {
     if is_hidden_experimental(server, command_id) {
         let refusal = diagnostic(CODE_UNKNOWN_COMMAND, &[("command_id", command_id)]);
         return ToolOutcome {
@@ -229,6 +237,7 @@ async fn execute_tool(server: &Server, principal: &Principal, command_id: &str, 
     let request = ExecuteRequest {
         command_id: command_id.to_string(),
         arguments_json: arguments_json.to_string(),
+        idempotency_key: idempotency_key.to_string(),
         ..ExecuteRequest::default()
     };
     let response = execute_command(server, principal, request).await;

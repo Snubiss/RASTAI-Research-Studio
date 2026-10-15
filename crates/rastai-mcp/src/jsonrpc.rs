@@ -113,6 +113,7 @@ pub fn error_reply(id: Option<JsonRpcId>, error: &McpError) -> JsonRpcMessage {
             ..
         } => (Some(own_id.clone()), *json_rpc_code),
         McpError::MalformedMessage { json_rpc_code, .. } => (id, *json_rpc_code),
+        McpError::InvalidIdempotencyKey { .. } => (id, INVALID_PARAMS),
         McpError::NoToken | McpError::RandomUnavailable { .. } => (id, RASTAI_ERROR),
     };
     diagnostic_reply(reply_id, json_rpc_code, &error_diagnostic(error))

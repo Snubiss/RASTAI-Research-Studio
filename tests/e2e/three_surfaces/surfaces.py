@@ -36,6 +36,7 @@ SEGMENT_WORD_SEPARATOR = "_"
 MCP_TOOL_SEPARATOR = "__"
 TOKEN_VARIABLE = "RASTAI_TOKEN"
 MCP_PROTOCOL_VERSION = "2025-06-18"
+MCP_IDEMPOTENCY_KEY_MEMBER = "idempotencyKey"
 MCP_CLIENT = {"name": "three-surfaces-test", "version": "1"}
 # An MCP error item is `<code>: <message>`, the Basic text, then `Fix: <fix_text>` when there is a fix
 # (rastai-mcp's diagnostic_text, rastai-diag's render_basic).
@@ -219,10 +220,12 @@ class McpSurface:
             self.process.wait()
 
     def execute(self, command_id: str, arguments: dict, idempotency_key: str = "") -> Outcome:
-        if idempotency_key:
-            raise ValueError("an MCP tools/call has no idempotency key to send")
         tool_name = command_id.replace(COMMAND_ID_SEPARATOR, MCP_TOOL_SEPARATOR)
-        reply = self.request("tools/call", {"name": tool_name, "arguments": arguments})
+        params = {"name": tool_name, "arguments": arguments}
+        if idempotency_key:
+            # The retry key travels in `_meta` (contracts 4.7), as MCP keeps protocol metadata there.
+            params["_meta"] = {MCP_IDEMPOTENCY_KEY_MEMBER: idempotency_key}
+        reply = self.request("tools/call", params)
         return mcp_outcome(command_id, reply)
 
     def list_tools(self) -> list[dict]:

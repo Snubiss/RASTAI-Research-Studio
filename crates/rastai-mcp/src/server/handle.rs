@@ -15,16 +15,23 @@ use crate::jsonrpc::{INVALID_PARAMS, JsonRpcId, JsonRpcMessage, METHOD_NOT_FOUND
 use crate::server::session::{McpSession, initialize_session, mark_initialized, require_initialize};
 use crate::server::tools::{McpTool, tools_list_result};
 
+/// The MCP member that carries the retry key of a `tools/call` (contracts 4.7). MCP keeps `_meta` for protocol
+/// metadata; the name is unprefixed, as #268 names it.
+const IDEMPOTENCY_KEY_MEMBER: &str = "idempotencyKey";
+const META_MEMBER: &str = "_meta";
+
 /// What the caller must do next. Plain data out, so rastai-mcp needs no callback into the daemon.
 #[derive(Debug, Clone, PartialEq)]
 pub enum McpStep {
     /// Send this reply.
     Reply(JsonRpcMessage),
     /// Run this command as the session's principal, then reply with `tool_call_reply(request_id, &outcome)`.
+    /// `idempotency_key` is `params._meta.idempotencyKey` (contracts 4.7), empty when the call sent none.
     ExecuteTool {
         request_id: JsonRpcId,
         command_id: String,
         arguments_json: String,
+        idempotency_key: String,
     },
     /// Nothing to send: the message was a notification, or a reply to nothing this server asked.
     NoReply,
@@ -90,11 +97,40 @@ fn call_tool(id: &JsonRpcId, params: &Value) -> Result<McpStep, McpError> {
             ));
         }
     };
+    let idempotency_key = idempotency_key_of(params)?;
     Ok(McpStep::ExecuteTool {
         request_id: id.clone(),
         command_id: command_id_from_mcp_tool_name(name),
         arguments_json: arguments.to_string(),
+        idempotency_key,
     })
+}
+
+/// `params._meta.idempotencyKey`: absent or empty means no key. A value that isn't a string is refused here, before
+/// any command runs, with `RRS-C0002` (contracts 4.7).
+fn idempotency_key_of(params: &Value) -> Result<String, McpError> {
+    match params
+        .get(META_MEMBER)
+        .and_then(|meta| meta.get(IDEMPOTENCY_KEY_MEMBER))
+    {
+        None => Ok(String::new()),
+        Some(Value::String(key)) => Ok(key.clone()),
+        Some(other) => Err(McpError::InvalidIdempotencyKey {
+            found: json_kind(other).to_string(),
+        }),
+    }
+}
+
+/// What a JSON value is, in words a refusal can use.
+fn json_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
 }
 
 fn reply(id: &JsonRpcId, result: Value) -> McpStep {
@@ -190,8 +226,58 @@ mod tests {
                 request_id: JsonRpcId::Number(4),
                 command_id: "train.start".to_string(),
                 arguments_json: r#"{"recipe":"textcnn"}"#.to_string(),
+                idempotency_key: String::new(),
             }
         );
+    }
+
+    fn tool_call_with_meta(meta: Value) -> JsonRpcMessage {
+        let params = json!({"name": "train__start", "arguments": {"recipe": "textcnn"}, "_meta": meta});
+        request(6, "tools/call", params)
+    }
+
+    fn key_sent_with(meta: Value) -> String {
+        let mut session = initialized_session();
+        match handle_message(&mut session, tool_call_with_meta(meta), &[]) {
+            McpStep::ExecuteTool { idempotency_key, .. } => idempotency_key,
+            other => panic!("expected ExecuteTool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn meta_idempotency_key_is_the_key_the_command_runs_with() {
+        assert_eq!(key_sent_with(json!({"idempotencyKey": "retry-7"})), "retry-7");
+    }
+
+    #[test]
+    fn a_missing_or_empty_idempotency_key_means_no_key() {
+        assert_eq!(key_sent_with(json!({})), "");
+        assert_eq!(key_sent_with(json!({"idempotencyKey": ""})), "");
+        let mut session = initialized_session();
+        let params = json!({"name": "system__status", "arguments": {}});
+        let step = handle_message(&mut session, request(7, "tools/call", params), &[]);
+        assert!(matches!(step, McpStep::ExecuteTool { ref idempotency_key, .. } if idempotency_key.is_empty()));
+    }
+
+    #[test]
+    fn a_non_string_idempotency_key_is_refused_before_the_command_runs() {
+        for (meta, kind) in [
+            (json!({"idempotencyKey": 7}), "a number"),
+            (json!({"idempotencyKey": null}), "null"),
+            (json!({"idempotencyKey": ["k"]}), "an array"),
+            (json!({"idempotencyKey": {"key": "k"}}), "an object"),
+        ] {
+            let mut session = initialized_session();
+            let McpStep::Reply(JsonRpcMessage::Error { id, code, data, .. }) =
+                handle_message(&mut session, tool_call_with_meta(meta), &[])
+            else {
+                panic!("a non-string key is answered with an error, not run");
+            };
+            assert_eq!(id, Some(JsonRpcId::Number(6)));
+            assert_eq!(code, INVALID_PARAMS);
+            assert_eq!(data["code"], "RRS-C0002");
+            assert!(data["message"].as_str().unwrap().contains(kind), "{data}");
+        }
     }
 
     #[test]

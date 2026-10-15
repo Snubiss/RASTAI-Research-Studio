@@ -13,6 +13,7 @@ use crate::jsonrpc::JsonRpcId;
 const CODE_MALFORMED_MESSAGE: &str = "RRS-C3001";
 const CODE_NO_TOKEN: &str = "RRS-C3002";
 const CODE_RANDOM_SOURCE_UNREADABLE: &str = "RRS-C0502";
+const CODE_INVALID_ARGUMENTS: &str = "RRS-C0002";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpError {
@@ -29,6 +30,9 @@ pub enum McpError {
     NoToken,
     /// A session id couldn't be made: the operating system's random source failed. `reason` keeps its words.
     RandomUnavailable { reason: String },
+    /// `params._meta.idempotencyKey` is present but isn't a string (contracts 4.7). `found` says what it is, such as
+    /// "a number". The refusal comes before any command runs.
+    InvalidIdempotencyKey { found: String },
 }
 
 impl McpError {
@@ -38,6 +42,7 @@ impl McpError {
             McpError::MalformedMessage { .. } => CODE_MALFORMED_MESSAGE,
             McpError::NoToken => CODE_NO_TOKEN,
             McpError::RandomUnavailable { .. } => CODE_RANDOM_SOURCE_UNREADABLE,
+            McpError::InvalidIdempotencyKey { .. } => CODE_INVALID_ARGUMENTS,
         }
     }
 }
@@ -58,6 +63,13 @@ pub fn error_diagnostic(error: &McpError) -> Diagnostic {
         McpError::MalformedMessage { reason, .. } => diagnostic(error.code(), &[("reason", reason)]),
         McpError::NoToken => diagnostic(error.code(), &[]),
         McpError::RandomUnavailable { reason } => diagnostic(error.code(), &[("reason", reason)]),
+        McpError::InvalidIdempotencyKey { found } => diagnostic(
+            error.code(),
+            &[
+                ("found", &format!("_meta.idempotencyKey as {found}")),
+                ("expected", "a string"),
+            ],
+        ),
     }
 }
 
@@ -77,6 +89,21 @@ mod tests {
         assert_eq!(malformed().code(), "RRS-C3001");
         assert_eq!(McpError::NoToken.code(), "RRS-C3002");
         assert_eq!(random.code(), "RRS-C0502");
+        let key = McpError::InvalidIdempotencyKey {
+            found: "a number".to_string(),
+        };
+        assert_eq!(key.code(), "RRS-C0002");
+    }
+
+    #[test]
+    fn a_non_string_idempotency_key_names_what_it_was() {
+        let key = McpError::InvalidIdempotencyKey {
+            found: "a number".to_string(),
+        };
+        assert_eq!(
+            error_diagnostic(&key).message,
+            "Invalid arguments: got _meta.idempotencyKey as a number; expected a string."
+        );
     }
 
     #[test]
