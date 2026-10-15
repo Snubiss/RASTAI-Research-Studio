@@ -45,14 +45,14 @@ const COPY_CHUNK_BYTES: usize = 32 * 1024;
 /// Compressed bytes read from the archive at a time for a deflate entry.
 const INPUT_CHUNK_BYTES: usize = 64 * 1024;
 
-/// The name of the cap in `RRS-E5002` for the ratio of one entry.
-const RATIO_CAP: &str = "compression ratio";
-
 /// Only an entry declaring more than this many bytes is checked against the ratio cap. A zip bomb needs size to
 /// matter: a smaller entry inflates to at most this much, and the total-size cap and the shared-bytes check still
 /// bound the whole archive. Python's zipfile stores small repetitive files past 200:1 (a 13,000-byte JSON file in
 /// 61 bytes), and a cap that applied to them refused real archives.
 const RATIO_CHECK_MIN_BYTES: u64 = 1024 * 1024;
+
+/// The name of the cap in `RRS-E5002` for the ratio of one entry.
+const RATIO_CAP: &str = "compression ratio";
 /// The name of the cap in `RRS-E5002` for the total uncompressed size of the archive.
 const TOTAL_CAP: &str = "total uncompressed size";
 /// The name of the cap in `RRS-E5002` for the number of entries.
