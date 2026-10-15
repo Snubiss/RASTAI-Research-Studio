@@ -17,6 +17,10 @@
       "CDLA-Permissive-2.0"
     ],
     "named_entries": {
+      "numpy": {
+        "license": "0BSD",
+        "reason": "One part of numpy's compound license (BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0); the others are already allowed. 0BSD is more permissive than MIT (no attribution needed). numpy is a transitive package of torch and torchvision (spec §27, owner approval of 2026-10-14)."
+      },
       "pillow": {
         "license": "MIT-CMU",
         "also_known_as": "HPND",
