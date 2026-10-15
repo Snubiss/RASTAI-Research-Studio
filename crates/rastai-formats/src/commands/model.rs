@@ -93,6 +93,10 @@ pub struct ModelDownloadResult {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelDownloadArgs {
     pub model_ref: String,
+    /// The branch, tag or commit to fetch; empty for the repository's default branch. A commit pins the files, so a
+    /// run that names one gets the same weights every time.
+    #[serde(default)]
+    pub revision: String,
     /// Chosen files, such as SAE layers. Empty means the whole repository.
     #[serde(default)]
     pub files: Vec<ModelDownloadFile>,
@@ -229,6 +233,12 @@ pub fn describe_model_download_args() -> TypeDescription {
             FieldKind::String,
             REQUIRED,
             "The model to download, a Hugging Face repository id.",
+        ),
+        field(
+            "revision",
+            FieldKind::String,
+            OPTIONAL,
+            "The branch, tag or commit to download; left out for the repository's default branch. A commit pins the files.",
         ),
         field(
             "files",

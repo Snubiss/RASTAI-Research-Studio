@@ -15,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rastai_core::commands::table::COMMANDS;
-use rastai_formats::commands::model::describe_model_download_file;
+use rastai_formats::commands::model::{ModelDownloadArgs, describe_model_download_args, describe_model_download_file};
 use rastai_formats::commands::system::describe_system_bundle_args;
 use rastai_formats::commands::token::{
     describe_token_create_result, describe_token_login_code_create_result, describe_token_summary,
@@ -222,6 +222,31 @@ fn a_token_summary_always_names_its_creator() {
         required_names.contains(&TOKEN_CREATOR_FIELD),
         "the checked-in token.list schema requires created_by; run `just codegen`"
     );
+}
+
+/// `model.download` takes an optional `revision` (contracts 6.4, M2-17): the description says it is optional and the
+/// default is the repository's default branch, and a request without it still reads, with the field empty.
+#[test]
+fn the_download_revision_is_optional_and_described() {
+    let args = describe_model_download_args();
+    let revision = args
+        .fields
+        .iter()
+        .find(|field| field.name == "revision")
+        .expect("ModelDownloadArgs.revision is described");
+    assert!(
+        !revision.required,
+        "revision is optional: a download without it is the default branch"
+    );
+    assert!(
+        revision.doc.contains("default branch"),
+        "ModelDownloadArgs.revision must say the default is the repository's default branch"
+    );
+
+    let without: ModelDownloadArgs = serde_json::from_str(r#"{"model_ref":"org/model"}"#).unwrap();
+    assert_eq!(without.revision, "", "a request without revision reads with it empty");
+    let pinned: ModelDownloadArgs = serde_json::from_str(r#"{"model_ref":"org/model","revision":"0123abcd"}"#).unwrap();
+    assert_eq!(pinned.revision, "0123abcd");
 }
 
 /// The rules a handler checks but the schema must state: a download file's `hash` is required with a `url` (contracts

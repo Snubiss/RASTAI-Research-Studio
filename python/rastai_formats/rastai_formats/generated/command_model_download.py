@@ -19,6 +19,8 @@ class ModelDownloadArgs:
 
     # The model to download, a Hugging Face repository id.
     model_ref: str
+    # The branch, tag or commit to download; left out for the repository's default branch. A commit pins the files.
+    revision: str | None = None
     # Chosen files, such as SAE layers; left out for the whole repository.
     files: list[ModelDownloadFile] | None = None
     # Fetch only the safetensors headers; left out for the whole files.
@@ -29,6 +31,7 @@ def model_download_args_from_json(data: dict[str, Any]) -> ModelDownloadArgs:
     """A ModelDownloadArgs from its JSON object."""
     return ModelDownloadArgs(
         model_ref=data["model_ref"],
+        revision=None if "revision" not in data else data["revision"],
         files=None if "files" not in data else [model_download_file_from_json(item) for item in data["files"]],
         headers_only=None if "headers_only" not in data else data["headers_only"],
     )
@@ -38,6 +41,8 @@ def model_download_args_to_json(value: ModelDownloadArgs) -> dict[str, Any]:
     """The JSON object of a ModelDownloadArgs; optional fields that are None are left out."""
     data: dict[str, Any] = {}
     data["model_ref"] = value.model_ref
+    if value.revision is not None:
+        data["revision"] = value.revision
     if value.files is not None:
         data["files"] = [model_download_file_to_json(item) for item in value.files]
     if value.headers_only is not None:
