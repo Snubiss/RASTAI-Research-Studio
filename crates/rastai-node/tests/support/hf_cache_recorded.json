@@ -5,7 +5,8 @@
     "<commit>": "the commit the revision resolves to",
     "<blob>": "a blob name: a 40-hex git id, or a 64-hex SHA-256 for an LFS file",
     "<name>": "a file name in the snapshot",
-    "<nested>": "a file name with folders in it, such as layers/0/sae.safetensors"
+    "<nested>": "a file name with folders in it, such as layers/0/sae.safetensors",
+    "<up>": "the ../ steps from the link's folder up to the repository folder: two for a file in the snapshot's top folder, and one more for each folder below it (four for layers/0/sae.safetensors). It follows from the file's path, so the same entry covers every depth"
   },
   "entries": [
     {
@@ -17,13 +18,13 @@
     {
       "path": "<repo>/snapshots/<commit>/<name>",
       "kind": "symlink",
-      "target": "../../blobs/<blob>",
+      "target": "<up>blobs/<blob>",
       "required": true
     },
     {
       "path": "<repo>/snapshots/<commit>/<nested>",
       "kind": "symlink",
-      "target": "../../../../blobs/<blob>",
+      "target": "<up>blobs/<blob>",
       "required": false
     },
     {

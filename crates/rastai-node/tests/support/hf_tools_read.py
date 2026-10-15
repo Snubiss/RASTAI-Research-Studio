@@ -15,6 +15,7 @@ FIXTURE_NAME = "hf_cache_recorded.json"
 USAGE = "usage: hf_tools_read.py <hub cache> <repo id> <commit> <config file name>"
 BLOB_PATTERN = "(?:[0-9a-f]{40}|[0-9a-f]{64})"
 PLACEHOLDER_SPLIT = re.compile(r"(<[a-z]+>)")
+UP_PLACEHOLDER = "<up>"
 FILE_KIND = "file"
 SYMLINK_KIND = "symlink"
 
@@ -38,6 +39,23 @@ def placeholder_values(repo_folder, commit):
         "<name>": "[^/]+",
         "<nested>": "(?:[^/]+/)+[^/]+",
     }
+
+
+def levels_up(relative):
+    """How many ../ steps climb from a file's folder to its repository folder.
+
+    The path starts with the repository folder, so the folders below it are the slashes minus that first one. A link in
+    the snapshot's top folder climbs two levels (snapshots/<commit>), and each folder below adds one.
+    """
+    return relative.count("/") - 1
+
+
+def values_for_file(values, relative):
+    """The placeholder values for one file, with <up> set from the file's depth: huggingface_hub writes each link as a
+    relative path from its own folder to blobs/, so the climb follows the folder count."""
+    file_values = dict(values)
+    file_values[UP_PLACEHOLDER] = re.escape("../" * levels_up(relative))
+    return file_values
 
 
 def pattern_for(template, values):
@@ -75,28 +93,27 @@ def matching_entries(relative, kind, entries, values):
     return hits
 
 
-def check_unrecorded_files(cache, entries, values):
-    """Every file the node wrote is one huggingface_hub writes too: a recorded template, with the right kind."""
+def check_cache_files(cache, entries, values):
+    """Every file the node wrote is one huggingface_hub writes too: a recorded template of its kind, and its content and
+    link target hold for every recorded entry it matches (not only the required ones)."""
     for relative, kind in cache_files(cache):
-        if not matching_entries(relative, kind, entries, values):
+        file_values = values_for_file(values, relative)
+        hits = matching_entries(relative, kind, entries, file_values)
+        if not hits:
             refuse(f"{relative} ({kind}) is not in the recorded huggingface_hub layout")
+        for entry in hits:
+            check_entry_content(cache, relative, entry, file_values)
 
 
 def check_required_entries(cache, entries, values):
-    """Each required template has a file of its kind; a symlink names a blob that exists, under the recorded target."""
+    """Each required template has a file of its kind in the cache."""
+    found_files = cache_files(cache)
     for entry in entries:
         if not entry["required"]:
             continue
         pattern = pattern_for(entry["path"], values)
-        found = [
-            (relative, kind)
-            for relative, kind in cache_files(cache)
-            if kind == entry["kind"] and pattern.match(relative)
-        ]
-        if not found:
+        if not any(kind == entry["kind"] and pattern.match(relative) for relative, kind in found_files):
             refuse(f"no {entry['kind']} matches the recorded {entry['path']}")
-        for relative, _ in found:
-            check_entry_content(cache, relative, entry, values)
 
 
 def check_entry_content(cache, relative, entry, values):
@@ -111,6 +128,7 @@ def check_entry_content(cache, relative, entry, values):
         target = os.readlink(full)
         if not pattern_for(entry["target"], values).match(target):
             refuse(f"{relative} links to {target!r}, not the recorded {entry['target']}")
+        # The link must reach a blob that exists: a dangling link has the right text and no file behind it.
         if not os.path.isfile(full):
             refuse(f"{relative} links to a blob that does not exist")
 
@@ -132,7 +150,7 @@ def main(arguments):
     repo_folder = "models--" + repo_id.replace("/", "--")
     entries = load_fixture()
     values = placeholder_values(repo_folder, commit)
-    check_unrecorded_files(cache, entries, values)
+    check_cache_files(cache, entries, values)
     check_required_entries(cache, entries, values)
     check_config(cache, repo_folder, commit, config_name)
 
