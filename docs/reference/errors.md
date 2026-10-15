@@ -1742,8 +1742,9 @@ Source: `catalog/errors/RRS-N.json`.
 ### RRS-N3013: Redirect refused: no target, or more than 5 hops
 
 - **Severity:** error
-- **Message:** The download of {file_name} was refused a redirect: {reason}.
+- **Message:** The download of {file_name} stopped at a redirect Rastai won't follow: {reason}.
 - **In plain words:** The server sent the file to an address Rastai won't follow. Trying again gets the same answer, so the download stopped at once.
+- **Fix:** Try again later or report the repository.
 
 <a id="rrs-n4001"></a>
 
