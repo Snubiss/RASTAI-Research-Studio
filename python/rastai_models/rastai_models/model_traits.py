@@ -62,7 +62,10 @@ def all_graph_nodes(spec: ModelSpec) -> list[GraphNode]:
     graphs = [spec.graph]
     if spec.blocks:
         graphs.extend(spec.blocks.values())
-    return [node for graph in graphs for node in graph.nodes]
+    nodes = []
+    for graph in graphs:
+        nodes.extend(graph.nodes)
+    return nodes
 
 
 def is_attention_variant(node: GraphNode, variant: str) -> bool:
