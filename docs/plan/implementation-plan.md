@@ -251,7 +251,7 @@ Agents write most of the code. They invent plausible names when the registry isn
 - **Before M1-57 and M1-58 land,** the reviewer's naming lens does their job by hand against contracts.md.
 - **One agent never reviews its own work.** A reviewer may be the same model, but it runs as a separate agent with its own prompt (the diff, the issue, contracts.md and the layout section), not with the author's context.
 - **What is persisted:** nothing new. The brief is built from files that already exist (the issue body, contracts.md, `schemas/`, the layout doc). Review findings live on the PR and the verification evidence on the issue.
-- **Follow-up issues get a size label when they are filed** (M2-23's process rule, for the owner to confirm). A FU, DESIGN, DOCS, PROC or SEC issue that the work adds to the plan carries its size (4.5 units) from the day it is filed, so the next measurement (3.7, M6-E06) counts it. The 23 unplanned PRs in 3.7 have no size label today.
+- **Follow-up issues get a size label when they are filed** (M2-23's process rule, confirmed by the owner on 2026-10-14, issue #151). A FU, DESIGN, DOCS, PROC or SEC issue that the work adds to the plan carries its size label (S, M or L, 2.1) from the day it is filed, so the next measurement (3.7, M6-E06) counts it. The 23 unplanned PRs in 3.7 have no size label today.
 
 ### 3.6 Closing an issue: independent verification
 
