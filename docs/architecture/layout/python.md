@@ -2025,8 +2025,7 @@ python/envs/
   README.md                   which backend gets which environment, how to update a lock, CI checks
   environments.json           per environment: selection rule, supported AMD gfx targets, expected download size, the lock
                               (`lock`, null while pending) and the PyTorch build (`pytorch_build`); with `format_version`
-                              and `about`, these keys go beyond contracts.md 15.8's description, which M2-16's reader
-                              follows
+                              and `about`, the keys contracts.md 15.8 lists, which M2-16's reader follows
   cpu/
     pyproject.toml
     uv.lock
@@ -2100,6 +2099,7 @@ Warm reinstall from the uv cache took under 1 s for every backend (spike). The c
 - The installer shows the download size per backend before starting. It reads `expected_download_gib` from `environments.json` (contracts.md 15.8), which holds the spike's measured cold size; M2-16 re-measures it with torchvision, numpy, pillow and PyMySQL included (open point 1).
 - Extras are synced from the same lock by `system.env.install` with an extras list; this is a locked sync, not a runtime install. Installed extras go in the hardware fingerprint.
 - Plugin environments layer on top through a `.pth` file (contracts.md §8.1), each from its own lockfile.
+- The CUDA runtime packages (`nvidia-*`) are pinned directly in the CUDA pyprojects, each with `sys_platform == 'linux'`, and `cuda-toolkit` is excluded (`exclude-dependencies`): torch's Windows wheel declares no CUDA runtime, and cuda-toolkit has no license on PyPI. Each CUDA lock's `required-environments` names the platforms a wheel must exist for, so `uv lock` refuses a pin that a supported platform can't install.
 - The node sets `TORCHINDUCTOR_CACHE_DIR` to `<cache>/torch/` and never sets `HSA_OVERRIDE_GFX_VERSION` (§22; the spike's integrated GPU returned silently wrong matmuls with it).
 
 ### 11.4 Build order

@@ -34,6 +34,10 @@ ALLOWLIST_FILE = "deps/allowlist-python.json"
 NVIDIA_PACKAGE_PREFIXES = ("nvidia-", "cuda-")
 NVIDIA_LICENSE = "LicenseRef-NVIDIA-Proprietary"
 NVIDIA_REASON_MARKERS = ("spec §27", "never vendors")
+# Each NVIDIA pin in a CUDA lock carries this marker. torch's own metadata gates its CUDA runtime behind Linux (its
+# Windows wheel declares none), so an unmarked pin would fail the Windows lock with no wheel for the platform.
+LINUX_ONLY_MARKER = "sys_platform == 'linux'"
+PROJECT_PACKAGE_PREFIX = "rastai-env-"
 
 
 def read_environments(repo_root: Path) -> dict:
@@ -142,6 +146,27 @@ def test_each_nvidia_proprietary_package_has_a_named_entry_citing_its_condition(
         assert named_entries[name]["license"] == NVIDIA_LICENSE, name
         for marker in NVIDIA_REASON_MARKERS:
             assert marker in named_entries[name]["reason"], f"{name}: its reason doesn't contain {marker!r}"
+
+
+def read_environment_requirements(lock: dict, environment_id: str) -> list[dict]:
+    """The direct requirements the environment's own project lists in its lock (its [package.metadata])."""
+    for package in lock["package"]:
+        if package["name"] == PROJECT_PACKAGE_PREFIX + environment_id:
+            return package.get("metadata", {}).get("requires-dist", [])
+    raise AssertionError(f"{environment_id}: its lock holds no {PROJECT_PACKAGE_PREFIX}{environment_id} project")
+
+
+def test_each_nvidia_pin_in_a_cuda_lock_is_linux_only(repo_root: Path) -> None:
+    """Every nvidia-* requirement of a CUDA lock carries the Linux marker, so the Windows lock resolves without them
+    (the M2-15 review: `uv sync --python-platform x86_64-pc-windows-msvc` failed on an unmarked nvidia-cufile pin)."""
+    for environment_id, lock_file in locked_environments(repo_root).items():
+        requirements = read_environment_requirements(read_lock(lock_file), environment_id)
+        nvidia_requirements = [req for req in requirements if req["name"].startswith(NVIDIA_PACKAGE_PREFIXES)]
+        for requirement in nvidia_requirements:
+            assert requirement.get("marker") == LINUX_ONLY_MARKER, (
+                f"{environment_id}: {requirement['name']} has marker {requirement.get('marker')!r}, "
+                f"not {LINUX_ONLY_MARKER!r}"
+            )
 
 
 def test_versions_by_lock_names_only_locks_the_allowlist_lists(repo_root: Path) -> None:

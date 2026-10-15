@@ -20,17 +20,19 @@ dependencies = [
     # The CUDA runtime libraries torch needs, pinned directly (NVIDIA proprietary license, spec §27). torch's
     # cuda-toolkit meta package would bring the same packages, but PyPI declares no license for it, so it is
     # left out of the graph (exclude-dependencies below) and these pins name what its extras gave.
-    "nvidia-cublas==13.1.1.3",
-    "nvidia-cuda-cupti==13.0.85",
-    "nvidia-cuda-nvrtc==13.0.88",
-    "nvidia-cuda-runtime==13.0.96",
-    "nvidia-cufft==12.0.0.61",
-    "nvidia-cufile==1.15.1.6",
-    "nvidia-curand==10.4.0.35",
-    "nvidia-cusolver==12.0.4.66",
-    "nvidia-cusparse==12.6.3.3",
-    "nvidia-nvjitlink==13.4.92",
-    "nvidia-nvtx==13.0.85",
+    # Linux only (sys_platform marker): torch's own metadata gates its CUDA runtime behind platform_system == "Linux",
+    # and its Windows wheel declares none, so on Windows these packages would have no wheel to install.
+    "nvidia-cublas==13.1.1.3; sys_platform == 'linux'",
+    "nvidia-cuda-cupti==13.0.85; sys_platform == 'linux'",
+    "nvidia-cuda-nvrtc==13.0.88; sys_platform == 'linux'",
+    "nvidia-cuda-runtime==13.0.96; sys_platform == 'linux'",
+    "nvidia-cufft==12.0.0.61; sys_platform == 'linux'",
+    "nvidia-cufile==1.15.1.6; sys_platform == 'linux'",
+    "nvidia-curand==10.4.0.35; sys_platform == 'linux'",
+    "nvidia-cusolver==12.0.4.66; sys_platform == 'linux'",
+    "nvidia-cusparse==12.6.3.3; sys_platform == 'linux'",
+    "nvidia-nvjitlink==13.4.92; sys_platform == 'linux'",
+    "nvidia-nvtx==13.0.85; sys_platform == 'linux'",
     "rastai-proto",        # the generated protobuf and grpcio code (python/rastai_proto)
     "rastai-formats",      # the generated document and command dataclasses (python/rastai_formats)
     "rastai-models",       # the Inspectable runtime: safetensors I/O so far (python/rastai_models)
@@ -53,6 +55,14 @@ dev = [
 required-version = "==0.13.0"
 # Not a package: this folder only describes an environment, so uv installs its dependencies and nothing else.
 package = false
+# The platforms the lock must have a wheel for: uv refuses a pin with no wheel for one of them, so a package a
+# platform can't install fails the lock instead of the user's sync. Linux x86_64 and aarch64 and Windows x86_64 are
+# the ones with a CUDA build of torch and torchvision.
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
 # Supply-chain guard: the same window as the cpu environment (two weeks of releases stay out of the lock).
 exclude-newer = "2026-09-27T00:00:00Z"
 # torch and torchvision 0.29.1 are the builds the cpu environment and environments.json already use (2026-10-01).
