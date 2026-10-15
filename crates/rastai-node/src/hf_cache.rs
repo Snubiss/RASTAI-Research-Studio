@@ -3,11 +3,16 @@
 //! `models--<org>--<name>/` holds `blobs/<name>` (a file's content, named by its hash), `snapshots/<commit>/<file>`
 //! (relative symlinks into `blobs/`) and `refs/<revision>` (the commit a branch or tag names). Weights are never
 //! copied (contracts section 19). `.locks/<repo folder>/<name>.lock` in the same cache is huggingface_hub's per-file
-//! lock, which downloads.rs takes before it writes a blob.
+//! lock, which downloads.rs takes before it writes a blob; its path is `rastai_core::paths::hf_lock_path`, the one
+//! function that builds it.
+//!
+//! Snapshot links and refs are written under a temporary name and renamed into place, so a reader or a second
+//! download never sees the link missing, and two downloads that link at once both succeed.
 
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The folder-name prefix huggingface_hub gives a model repository.
 const MODEL_FOLDER_PREFIX: &str = "models--";
@@ -16,10 +21,10 @@ const REPOSITORY_SEPARATOR: &str = "--";
 const BLOBS_FOLDER: &str = "blobs";
 const SNAPSHOTS_FOLDER: &str = "snapshots";
 const REFS_FOLDER: &str = "refs";
-const LOCKS_FOLDER: &str = ".locks";
 /// A blob being downloaded has this suffix until its hash is checked and it is renamed to its name.
 const INCOMPLETE_SUFFIX: &str = ".incomplete";
-const LOCK_SUFFIX: &str = ".lock";
+/// The suffix of a link or ref being written, before it is renamed to its name.
+const TEMPORARY_SUFFIX: &str = "tmp";
 /// Snapshot links climb from `snapshots/<commit>/` to the repository folder (two levels) and then down into `blobs/`.
 const SNAPSHOT_TO_REPOSITORY_LEVELS: usize = 2;
 
@@ -67,16 +72,6 @@ pub fn ref_path(repo_dir: &Path, revision: &str) -> PathBuf {
     repo_dir.join(REFS_FOLDER).join(revision)
 }
 
-/// `<hub cache>/.locks/<repo folder>/<name>.lock`: the lock file huggingface_hub uses for one blob. The path is under
-/// the hub cache, not under Rastai's own cache, so the other HF tools take the same lock.
-pub fn lock_path(hub_root: &Path, repo_id: &str, blob_name: &str) -> PathBuf {
-    let lock_name = format!("{blob_name}{LOCK_SUFFIX}");
-    hub_root
-        .join(LOCKS_FOLDER)
-        .join(repo_folder_name(repo_id))
-        .join(lock_name)
-}
-
 /// Whether a name from the Hub, or from a caller, can be joined under a folder: relative, with no `..`, no `.`, no
 /// root and no empty part. A name that fails it would write outside the cache.
 pub fn is_safe_relative_name(name: &str) -> bool {
@@ -92,24 +87,55 @@ pub fn is_safe_relative_name(name: &str) -> bool {
 }
 
 /// Points `snapshots/<commit>/<file>` at its blob, replacing a link from an earlier download. The link is relative, so
-/// the cache can move with its repository folder.
+/// the cache can move with its repository folder. It is made under a temporary name and renamed over the old link, so
+/// the link is never missing and two downloads of one file, linking at once, both succeed.
 pub fn link_snapshot(repo_dir: &Path, commit: &str, file_name: &str, blob_name: &str) -> io::Result<()> {
     let link = snapshot_path(repo_dir, commit, file_name);
     if let Some(folder) = link.parent() {
         fs::create_dir_all(folder)?;
     }
-    remove_existing_link(&link)?;
-    create_symlink(&snapshot_link_target(file_name, blob_name), &link)
+    let temporary = temporary_sibling(&link);
+    remove_existing_link(&temporary)?;
+    create_symlink(&snapshot_link_target(file_name, blob_name), &temporary)?;
+    rename_into_place(&temporary, &link)
 }
 
-/// Writes `refs/<revision>` holding the commit. The file is replaced, so a branch that moved is read again.
+/// Writes `refs/<revision>` holding the commit. The file is written under a temporary name and renamed over the old one,
+/// so a branch that moved is read again and a reader never sees a half-written commit.
 pub fn write_ref(repo_dir: &Path, revision: &str, commit: &str) -> io::Result<()> {
     let ref_file = ref_path(repo_dir, revision);
     if let Some(folder) = ref_file.parent() {
         fs::create_dir_all(folder)?;
     }
-    fs::write(ref_file, commit)
+    let temporary = temporary_sibling(&ref_file);
+    fs::write(&temporary, commit)?;
+    rename_into_place(&temporary, &ref_file)
 }
+
+/// A name in the same folder as `path` that no other write in this process uses, so each link or ref is written
+/// beside its final name and the rename stays within one folder.
+fn temporary_sibling(path: &Path) -> PathBuf {
+    let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!(".{name}.{}.{sequence}.{TEMPORARY_SUFFIX}", std::process::id()))
+}
+
+/// Gives a written link or ref its name. A failed rename removes the temporary name, so no half-made file is left.
+fn rename_into_place(temporary: &Path, path: &Path) -> io::Result<()> {
+    match fs::rename(temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(temporary);
+            Err(error)
+        }
+    }
+}
+
+/// Counts the temporary names this process has handed out, so two writes at once never share one.
+static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn remove_existing_link(link: &Path) -> io::Result<()> {
     match fs::remove_file(link) {
@@ -157,12 +183,6 @@ mod tests {
     }
 
     #[test]
-    fn lock_paths_sit_under_the_hub_cache_where_huggingface_hub_looks() {
-        let path = lock_path(Path::new("/cache/hub"), "org/name", "etag1");
-        assert_eq!(path, PathBuf::from("/cache/hub/.locks/models--org--name/etag1.lock"));
-    }
-
-    #[test]
     fn names_that_could_leave_the_cache_are_refused() {
         assert!(is_safe_relative_name("config.json"));
         assert!(is_safe_relative_name("refs/pr/1"));
@@ -172,6 +192,34 @@ mod tests {
         assert!(!is_safe_relative_name("./config.json"));
         assert!(!is_safe_relative_name(""));
         assert!(!is_safe_relative_name("a\\b"));
+    }
+
+    /// Eight threads link the same file of one snapshot 200 times each. Every call must succeed, the link must end at
+    /// its blob, and no temporary name may be left behind. Before the rename, one thread could remove a link that
+    /// another had just made and then fail to create it again.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_links_of_one_file_all_succeed_and_leave_no_temporary_name() {
+        let folder = std::env::temp_dir().join(format!("rastai-hf-link-race-{}", std::process::id()));
+        let repo = folder.join("models--org--name");
+        let blob_name = "etag1";
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for _ in 0..200 {
+                        link_snapshot(&repo, "commit1", "model.safetensors", blob_name).unwrap();
+                    }
+                });
+            }
+        });
+        let link = snapshot_path(&repo, "commit1", "model.safetensors");
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            snapshot_link_target("model.safetensors", blob_name)
+        );
+        let folder_entries = fs::read_dir(link.parent().unwrap()).unwrap().count();
+        assert_eq!(folder_entries, 1, "no temporary link is left next to the snapshot");
+        fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]

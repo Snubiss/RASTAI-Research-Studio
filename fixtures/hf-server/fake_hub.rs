@@ -2,7 +2,8 @@
 //! served over plain HTTP on 127.0.0.1 so no test reaches the network. It answers the file listing
 //! (`GET /api/models/<repo>` and `GET /api/models/<repo>/revision/<revision>`) and file bytes
 //! (`GET /<repo>/resolve/<commit>/<file>`, with a Range request resumed as 206). Every request is recorded, so a test
-//! can check what was asked for and what was not.
+//! can check what was asked for and what was not. A file can answer with a redirect to a second fake, standing in for
+//! the CDN host the Hub sends LFS files to; that fake serves the same files under `/fake-cdn/`.
 //!
 //! The tests include this file with `#[path]` (see tests/downloads.rs): it is test code, not part of the node. Names
 //! are plain ASCII, so there is no percent-decoding here.
@@ -22,6 +23,8 @@ const MAX_HEAD_BYTES: usize = 16 * 1024;
 /// The length of a git blob id as the listing gives it for a plain file.
 const GIT_BLOB_ID_HEX_DIGITS: usize = 40;
 const MAIN_BRANCH: &str = "main";
+/// The path prefix a redirected file request lands on: the CDN fake serves the same files under it.
+const CDN_PATH_PREFIX: &str = "/fake-cdn";
 
 /// One file a repository serves.
 #[derive(Clone)]
@@ -36,6 +39,12 @@ pub struct FakeFile {
     pub drop_every_time: bool,
     /// Whether the file answers a Range request with the whole file (200) instead of the rest (206).
     pub ignores_range: bool,
+    /// Whether a 206 names a Content-Range that starts one byte after the one it sent. The body is still the rest of the
+    /// file, so a client that trusts the range appends the wrong bytes.
+    pub wrong_content_range: bool,
+    /// Whether the file redirects (302) to the CDN fake, as the Hub does for an LFS file. Only a fake built with
+    /// `FakeHub::start_with_cdn` redirects; otherwise the file answers itself.
+    pub redirect_to_cdn: bool,
 }
 
 impl FakeFile {
@@ -49,6 +58,8 @@ impl FakeFile {
             drop_after: None,
             drop_every_time: false,
             ignores_range: false,
+            wrong_content_range: false,
+            redirect_to_cdn: false,
         }
     }
 
@@ -62,11 +73,13 @@ impl FakeFile {
 }
 
 /// How a gated repository answers an account without access: `status` (401 or 403) unless the request carries
-/// `Authorization: Bearer <granted_token>`.
+/// `Authorization: Bearer <granted_token>`. The real Hub lists a gated repository to anyone, so `resolve_only` gates
+/// the file requests alone and the listing answers 200.
 #[derive(Clone)]
 pub struct GatedAccess {
     pub status: u16,
     pub granted_token: String,
+    pub resolve_only: bool,
 }
 
 /// One repository the fake serves at one commit. `main` names the commit as well.
@@ -89,6 +102,8 @@ pub struct RecordedRequest {
 
 struct FakeState {
     repos: Vec<FakeRepo>,
+    /// The port of the CDN fake that redirected files go to, when this fake redirects at all.
+    cdn_port: Option<u16>,
     requests: Mutex<Vec<RecordedRequest>>,
     /// The files whose one dropped answer has already been sent, keyed by repository and file name.
     dropped_once: Mutex<HashSet<String>>,
@@ -103,10 +118,22 @@ pub struct FakeHub {
 impl FakeHub {
     /// Starts the fake on a free loopback port.
     pub async fn start(repos: Vec<FakeRepo>) -> FakeHub {
+        FakeHub::start_with(repos, None).await
+    }
+
+    /// Starts a fake that redirects each file marked `redirect_to_cdn` to `cdn`, on its own port. The CDN is an
+    /// ordinary fake that serves the same files; a request to it is a different origin, so a test can check that the
+    /// token and the Range travel there as the client should send them.
+    pub async fn start_with_cdn(repos: Vec<FakeRepo>, cdn: &FakeHub) -> FakeHub {
+        FakeHub::start_with(repos, Some(cdn.port())).await
+    }
+
+    async fn start_with(repos: Vec<FakeRepo>, cdn_port: Option<u16>) -> FakeHub {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let state = Arc::new(FakeState {
             repos,
+            cdn_port,
             requests: Mutex::new(Vec::new()),
             dropped_once: Mutex::new(HashSet::new()),
         });
@@ -221,6 +248,10 @@ fn answer_for(request: &RecordedRequest, state: &FakeState) -> Answer {
         return status_only(405);
     }
     let path = request.path.split('?').next().unwrap_or("");
+    let path = match path.strip_prefix(CDN_PATH_PREFIX) {
+        Some(rest) if rest.starts_with('/') => rest,
+        _ => path,
+    };
     if let Some(listing) = path.strip_prefix("/api/models/") {
         return listing_answer(listing, request, state);
     }
@@ -241,7 +272,7 @@ fn listing_answer(listing: &str, request: &RecordedRequest, state: &FakeState) -
     if !revision_is_known(repo, revision) {
         return status_only(404);
     }
-    if let Some(refused) = gate_status(repo, request) {
+    if let Some(refused) = gate_status(repo, request, GateScope::Listing) {
         return status_only(refused);
     }
     let body = listing_json(repo).to_string().into_bytes();
@@ -288,13 +319,33 @@ fn file_answer(repo_name: &str, rest: &str, request: &RecordedRequest, state: &F
     if commit != repo.commit {
         return status_only(404);
     }
-    if let Some(refused) = gate_status(repo, request) {
+    if let Some(refused) = gate_status(repo, request, GateScope::File) {
         return status_only(refused);
     }
     let Some(file) = repo.files.iter().find(|file| file.name == file_name) else {
         return status_only(404);
     };
+    if let (true, Some(cdn_port)) = (file.redirect_to_cdn, state.cdn_port) {
+        return redirect_answer(cdn_port, repo_name, commit, file);
+    }
     file_body_answer(repo_name, file, request, state)
+}
+
+/// The Hub's 302 for an LFS file: the CDN fake's address for the same file, on the CDN's own port.
+fn redirect_answer(cdn_port: u16, repo_name: &str, commit: &str, file: &FakeFile) -> Answer {
+    let location = format!(
+        "http://127.0.0.1:{cdn_port}{CDN_PATH_PREFIX}/{repo_name}/resolve/{commit}/{}",
+        file.name
+    );
+    Answer {
+        status: 302,
+        headers: vec![
+            ("Location".to_string(), location),
+            ("Content-Length".to_string(), "0".to_string()),
+        ],
+        body: Vec::new(),
+        send_body_bytes: 0,
+    }
 }
 
 fn file_body_answer(repo_name: &str, file: &FakeFile, request: &RecordedRequest, state: &FakeState) -> Answer {
@@ -315,7 +366,8 @@ fn file_body_answer(repo_name: &str, file: &FakeFile, request: &RecordedRequest,
     ];
     if offset > 0 {
         let last = total - 1;
-        headers.push(("Content-Range".to_string(), format!("bytes {offset}-{last}/{total}")));
+        let start = if file.wrong_content_range { offset + 1 } else { offset };
+        headers.push(("Content-Range".to_string(), format!("bytes {start}-{last}/{total}")));
     }
     let send_body_bytes = drop_point(repo_name, file, state, body.len());
     Answer {
@@ -358,9 +410,19 @@ fn parse_range_start(range: &str) -> Option<usize> {
     start.parse().ok()
 }
 
+/// Which requests a gate covers: the listing, or the file requests (`resolve_only` gates the files alone).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GateScope {
+    Listing,
+    File,
+}
+
 /// 401 or 403 when the repository is gated and the request doesn't carry the granted token; None otherwise.
-fn gate_status(repo: &FakeRepo, request: &RecordedRequest) -> Option<u16> {
+fn gate_status(repo: &FakeRepo, request: &RecordedRequest, scope: GateScope) -> Option<u16> {
     let access = repo.gated.as_ref()?;
+    if scope == GateScope::Listing && access.resolve_only {
+        return None;
+    }
     let granted = format!("Bearer {}", access.granted_token);
     if request.authorization.as_deref() == Some(granted.as_str()) {
         None
@@ -411,6 +473,7 @@ fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
         206 => "Partial Content",
+        302 => "Found",
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",

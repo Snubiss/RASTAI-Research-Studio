@@ -2575,7 +2575,7 @@ export const CATALOG = [
     message: "{repository} is gated: its license isn't accepted, or this account has no access.",
     basic_text: "This model needs you to accept its license first.",
     fix_text: "Accept the license on the model's Hugging Face page, then try again.",
-    fix_command_id: "",
+    fix_command_id: "hf.license.check",
     docs_anchor: "rrs-n3005",
     retired: false,
   },

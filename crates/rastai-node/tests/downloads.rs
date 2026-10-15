@@ -99,7 +99,6 @@ fn options_for(hub: &FakeHub, cache_root: &Path) -> DownloadOptions {
         hub: HttpTarget::LoopbackHttp { port: hub.port() },
         egress: None,
         cache_root: cache_root.to_path_buf(),
-        token: None,
         offline: false,
         free_space_margin_bytes: 0,
         lock_wait: Duration::ZERO,
@@ -110,7 +109,6 @@ fn options_for(hub: &FakeHub, cache_root: &Path) -> DownloadOptions {
 
 fn request_for(model: &str, revision: &str, only_files: &[&str]) -> DownloadRequest {
     DownloadRequest {
-        job_id: "job_test".to_string(),
         model_ref: model.to_string(),
         revision: revision.to_string(),
         only_files: only_files.iter().map(|name| name.to_string()).collect(),
@@ -130,7 +128,7 @@ fn download_error(result: Result<DownloadOutcome, NodeError>) -> NodeError {
 
 async fn download_all(hub: &FakeHub, cache: &Path) -> DownloadOutcome {
     let request = request_for(MODEL, "", &[]);
-    download_model(&request, &options_for(hub, cache), &SilentObserver)
+    download_model(&request, &options_for(hub, cache), &SilentObserver, &NoHfToken)
         .await
         .unwrap()
 }
@@ -283,7 +281,8 @@ async fn retries_stop_at_the_limit_and_keep_what_arrived() {
     let mut options = options_for(&hub, &cache);
     options.retry.limit = 3;
 
-    let error = download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver).await);
+    let error =
+        download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver, &NoHfToken).await);
 
     assert_eq!(error.code(), "RRS-N3009");
     assert_eq!(hub.file_requests(WEIGHTS_NAME).len(), 3, "three tries in all");
@@ -303,6 +302,7 @@ async fn a_gated_repository_is_refused_with_the_gated_code_for_401_and_403() {
         let gated = Some(GatedAccess {
             status,
             granted_token: GRANTED_TOKEN.to_string(),
+            resolve_only: false,
         });
         let hub = FakeHub::start(vec![tiny_repo(gated)]).await;
 
@@ -311,6 +311,7 @@ async fn a_gated_repository_is_refused_with_the_gated_code_for_401_and_403() {
                 &request_for(MODEL, "", &[]),
                 &options_for(&hub, &cache),
                 &SilentObserver,
+                &NoHfToken,
             )
             .await,
         );
@@ -337,6 +338,7 @@ async fn a_missing_repository_or_file_is_not_found() {
             &request_for("acme/nope", "", &[]),
             &options_for(&hub, &cache),
             &SilentObserver,
+            &NoHfToken,
         )
         .await,
     );
@@ -345,6 +347,7 @@ async fn a_missing_repository_or_file_is_not_found() {
             &request_for(MODEL, "", &["nope.bin"]),
             &options_for(&hub, &cache),
             &SilentObserver,
+            &NoHfToken,
         )
         .await,
     );
@@ -361,7 +364,8 @@ async fn offline_mode_refuses_before_any_request() {
     let mut options = options_for(&hub, &cache);
     options.offline = true;
 
-    let error = download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver).await);
+    let error =
+        download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver, &NoHfToken).await);
 
     assert_eq!(error.code(), "RRS-N3006");
     assert!(hub.requests().is_empty(), "offline means no network call at all");
@@ -394,11 +398,22 @@ async fn a_hash_mismatch_removes_the_partial_file_and_refuses() {
             &request_for(MODEL, "", &[]),
             &options_for(&hub, &cache),
             &SilentObserver,
+            &NoHfToken,
         )
         .await,
     );
 
     assert_eq!(error.code(), "RRS-N3003");
+    let requests = hub.file_requests(WEIGHTS_NAME);
+    assert_eq!(
+        requests.len(),
+        2,
+        "one more try after the first mismatch, the second mismatch is the refusal"
+    );
+    assert_eq!(
+        requests[1].range, None,
+        "the partial file was removed, so the second try starts from zero"
+    );
     let repo_dir = hf_cache::repo_dir(&cache, MODEL);
     assert!(!hf_cache::incomplete_path(&repo_dir, &"00".repeat(32)).exists());
     assert!(
@@ -415,7 +430,8 @@ async fn the_disk_check_refuses_before_any_file_is_fetched() {
     let mut options = options_for(&hub, &cache);
     options.free_space_margin_bytes = u64::MAX / 2;
 
-    let error = download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver).await);
+    let error =
+        download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver, &NoHfToken).await);
 
     assert_eq!(error.code(), "RRS-S3001");
     assert!(hub.file_requests(WEIGHTS_NAME).is_empty(), "no file was requested");
@@ -432,8 +448,8 @@ async fn two_jobs_for_one_file_fetch_it_once_and_both_finish() {
     let request = request_for(MODEL, "", &[WEIGHTS_NAME]);
 
     let (first, second) = tokio::join!(
-        download_model(&request, &options, &SilentObserver),
-        download_model(&request, &options, &SilentObserver)
+        download_model(&request, &options, &SilentObserver, &NoHfToken),
+        download_model(&request, &options, &SilentObserver, &NoHfToken)
     );
 
     first.unwrap();
@@ -452,7 +468,7 @@ async fn a_lock_another_program_holds_times_out_with_its_code_and_is_announced()
     let folder = new_test_folder("hf-lock");
     let cache = cache_in(&folder);
     let hub = FakeHub::start(vec![tiny_repo(None)]).await;
-    let lock_file = hf_cache::lock_path(&cache, MODEL, &weights_blob());
+    let lock_file = rastai_core::paths::hf_lock_path(&cache, &hf_cache::repo_folder_name(MODEL), &weights_blob());
     fs::create_dir_all(lock_file.parent().unwrap()).unwrap();
     let holder = OpenOptions::new()
         .create(true)
@@ -468,6 +484,7 @@ async fn a_lock_another_program_holds_times_out_with_its_code_and_is_announced()
             &request_for(MODEL, "", &[WEIGHTS_NAME]),
             &options_for(&hub, &cache),
             &observer,
+            &NoHfToken,
         )
         .await,
     );
@@ -491,14 +508,16 @@ async fn progress_reaches_the_live_queue_as_download_progress() {
     let cache = cache_in(&folder);
     let hub = FakeHub::start(vec![tiny_repo(None)]).await;
     let live = std::sync::Arc::new(LiveHub::default());
-    let observer = LiveDownloadObserver {
-        hub: live.clone(),
-        job_id: "job_live".to_string(),
-    };
+    let observer = LiveDownloadObserver::new(live.clone(), "job_live");
 
-    let outcome = download_model(&request_for(MODEL, "", &[]), &options_for(&hub, &cache), &observer)
-        .await
-        .unwrap();
+    let outcome = download_model(
+        &request_for(MODEL, "", &[]),
+        &options_for(&hub, &cache),
+        &observer,
+        &NoHfToken,
+    )
+    .await
+    .unwrap();
 
     let mut reported = Vec::new();
     while let Some(event) = take_live_event(&live) {
@@ -511,9 +530,9 @@ async fn progress_reaches_the_live_queue_as_download_progress() {
     }
     assert!(!reported.is_empty(), "download.progress reaches WatchLive");
     assert_eq!(
-        reported.last(),
-        Some(&outcome.bytes_total),
-        "the last report is the whole download"
+        reported,
+        vec![0, outcome.bytes_total],
+        "the start and the end are reported, and the chunks and files between them are not: a file under one step adds no event"
     );
 }
 
@@ -524,14 +543,19 @@ async fn a_token_from_the_source_authorises_a_gated_download() {
     let gated = Some(GatedAccess {
         status: 403,
         granted_token: GRANTED_TOKEN.to_string(),
+        resolve_only: false,
     });
     let hub = FakeHub::start(vec![tiny_repo(gated)]).await;
-    let mut options = options_for(&hub, &cache);
-    options.token = FixedToken(Some(GRANTED_TOKEN.to_string())).hf_token();
+    let options = options_for(&hub, &cache);
 
-    download_model(&request_for(MODEL, "", &[WEIGHTS_NAME]), &options, &SilentObserver)
-        .await
-        .unwrap();
+    download_model(
+        &request_for(MODEL, "", &[WEIGHTS_NAME]),
+        &options,
+        &SilentObserver,
+        &FixedToken(Some(GRANTED_TOKEN.to_string())),
+    )
+    .await
+    .unwrap();
 
     let listing = hub.requests()[0].clone();
     assert_eq!(listing.authorization.as_deref(), Some("Bearer hf_granted"));
@@ -544,12 +568,13 @@ async fn without_a_token_a_gated_download_is_refused() {
     let gated = Some(GatedAccess {
         status: 401,
         granted_token: GRANTED_TOKEN.to_string(),
+        resolve_only: false,
     });
     let hub = FakeHub::start(vec![tiny_repo(gated)]).await;
-    let mut options = options_for(&hub, &cache);
-    options.token = NoHfToken.hf_token();
+    let options = options_for(&hub, &cache);
 
-    let error = download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver).await);
+    let error =
+        download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver, &NoHfToken).await);
 
     assert_eq!(error.code(), "RRS-N3005");
     assert_eq!(
@@ -569,6 +594,7 @@ async fn only_the_chosen_files_are_fetched() {
         &request_for(MODEL, "", &[CONFIG_NAME]),
         &options_for(&hub, &cache),
         &SilentObserver,
+        &NoHfToken,
     )
     .await
     .unwrap();
@@ -588,6 +614,7 @@ async fn a_revision_names_its_ref_and_a_commit_names_none() {
         &request_for(MODEL, "main", &[CONFIG_NAME]),
         &options_for(&hub, &cache),
         &SilentObserver,
+        &NoHfToken,
     )
     .await
     .unwrap();
@@ -600,6 +627,7 @@ async fn a_revision_names_its_ref_and_a_commit_names_none() {
         &request_for(MODEL, COMMIT, &[CONFIG_NAME]),
         &options_for(&hub, &cache),
         &SilentObserver,
+        &NoHfToken,
     )
     .await
     .unwrap();
@@ -620,6 +648,7 @@ async fn a_name_that_would_leave_the_cache_is_refused_before_any_request() {
             &request_for("../escape", "", &[]),
             &options_for(&hub, &cache),
             &SilentObserver,
+            &NoHfToken,
         )
         .await,
     );
@@ -646,6 +675,7 @@ async fn a_listed_file_name_that_would_leave_the_cache_is_refused() {
             &request_for(MODEL, "", &[]),
             &options_for(&hub, &cache),
             &SilentObserver,
+            &NoHfToken,
         )
         .await,
     );
@@ -661,7 +691,8 @@ async fn a_download_to_the_hub_without_an_egress_tag_is_refused_before_connectin
     let mut options = options_for(&FakeHub::start(Vec::new()).await, &cache);
     options.hub = production_hub();
 
-    let error = download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver).await);
+    let error =
+        download_error(download_model(&request_for(MODEL, "", &[]), &options, &SilentObserver, &NoHfToken).await);
 
     assert_eq!(
         error.code(),
@@ -677,12 +708,195 @@ async fn the_observer_hears_each_file_as_it_completes() {
     let hub = FakeHub::start(vec![tiny_repo(None)]).await;
     let observer = RecordingObserver::default();
 
-    let outcome = download_model(&request_for(MODEL, "", &[]), &options_for(&hub, &cache), &observer)
-        .await
-        .unwrap();
+    let outcome = download_model(
+        &request_for(MODEL, "", &[]),
+        &options_for(&hub, &cache),
+        &observer,
+        &NoHfToken,
+    )
+    .await
+    .unwrap();
 
     let progress = observer.progress.lock().unwrap().clone();
     assert_eq!(progress.first(), Some(&(0, outcome.bytes_total)));
     assert_eq!(progress.last(), Some(&(outcome.bytes_total, outcome.bytes_total)));
     assert!(observer.waiting.lock().unwrap().is_empty(), "no lock was waited for");
+}
+
+/// The gated-model test for a repository whose listing is open and whose files are gated: the Hub lists such a
+/// repository to anyone and answers the file with 401. The download must still stop with RRS-N3005 and its fix.
+#[tokio::test]
+async fn a_gate_on_the_files_alone_is_the_gated_code_with_its_license_fix() {
+    let folder = new_test_folder("hf-gated-files");
+    let cache = cache_in(&folder);
+    let gated = Some(GatedAccess {
+        status: 401,
+        granted_token: GRANTED_TOKEN.to_string(),
+        resolve_only: true,
+    });
+    let hub = FakeHub::start(vec![tiny_repo(gated)]).await;
+
+    let error = download_error(
+        download_model(
+            &request_for(MODEL, "", &[]),
+            &options_for(&hub, &cache),
+            &SilentObserver,
+            &NoHfToken,
+        )
+        .await,
+    );
+
+    assert_eq!(error.code(), "RRS-N3005");
+    let diagnostic = rastai_node::error::node_error_diagnostic(&error);
+    assert_eq!(
+        diagnostic.fix_command_id, "hf.license.check",
+        "the gated code offers the license check as its fix"
+    );
+    assert_eq!(
+        hub.file_requests(CONFIG_NAME).len(),
+        1,
+        "the listing answered, and the first file was refused"
+    );
+}
+
+/// A file that the Hub sends to its CDN: the client follows the 302 with its Range, the CDN request carries no token,
+/// and the bytes arrive whole. The partial file here is 8,000 bytes, so the CDN sees a Range from there.
+#[tokio::test]
+async fn a_file_redirected_to_the_cdn_resumes_there_without_the_token() {
+    let folder = new_test_folder("hf-cdn");
+    let cache = cache_in(&folder);
+    let cdn = FakeHub::start(vec![tiny_repo(None)]).await;
+    let mut hub_repo = tiny_repo(None);
+    hub_repo.files[1].redirect_to_cdn = true;
+    let hub = FakeHub::start_with_cdn(vec![hub_repo], &cdn).await;
+    let repo_dir = hf_cache::repo_dir(&cache, MODEL);
+    let incomplete = hf_cache::incomplete_path(&repo_dir, &weights_blob());
+    fs::create_dir_all(incomplete.parent().unwrap()).unwrap();
+    fs::write(&incomplete, &weights_content()[..8_000]).unwrap();
+
+    download_model(
+        &request_for(MODEL, "", &[WEIGHTS_NAME]),
+        &options_for(&hub, &cache),
+        &SilentObserver,
+        &FixedToken(Some(GRANTED_TOKEN.to_string())),
+    )
+    .await
+    .unwrap();
+
+    let hub_file = hub.file_requests(WEIGHTS_NAME);
+    assert_eq!(hub_file.len(), 1, "the Hub answered the file with a redirect");
+    assert_eq!(
+        hub_file[0].authorization.as_deref(),
+        Some("Bearer hf_granted"),
+        "the Hub gets the token"
+    );
+    let cdn_file = cdn.file_requests(WEIGHTS_NAME);
+    assert_eq!(cdn_file.len(), 1, "the CDN answered the rest of the file");
+    assert_eq!(
+        cdn_file[0].range.as_deref(),
+        Some("bytes=8000-"),
+        "the Range travels to the CDN"
+    );
+    assert_eq!(cdn_file[0].authorization, None, "the token never reaches the CDN host");
+    let blob = hf_cache::blob_path(&repo_dir, &weights_blob());
+    assert_eq!(fs::read(blob).unwrap(), weights_content());
+}
+
+/// A 206 whose Content-Range starts at another byte than the one asked for is a connection that went wrong. The client
+/// must not append its bytes to the partial file, so the partial file keeps its 8,000 bytes.
+#[tokio::test]
+async fn a_range_that_starts_at_the_wrong_byte_is_refused_and_nothing_is_appended() {
+    let folder = new_test_folder("hf-range-start");
+    let cache = cache_in(&folder);
+    let mut repo = tiny_repo(None);
+    repo.files[1].wrong_content_range = true;
+    let hub = FakeHub::start(vec![repo]).await;
+    let repo_dir = hf_cache::repo_dir(&cache, MODEL);
+    let incomplete = hf_cache::incomplete_path(&repo_dir, &weights_blob());
+    fs::create_dir_all(incomplete.parent().unwrap()).unwrap();
+    fs::write(&incomplete, &weights_content()[..8_000]).unwrap();
+    let mut options = options_for(&hub, &cache);
+    options.retry.limit = 3;
+
+    let error = download_error(
+        download_model(
+            &request_for(MODEL, "", &[WEIGHTS_NAME]),
+            &options,
+            &SilentObserver,
+            &NoHfToken,
+        )
+        .await,
+    );
+
+    assert_eq!(
+        error.code(),
+        "RRS-N3009",
+        "the wrong range is retried like a dropped connection"
+    );
+    assert_eq!(
+        fs::metadata(&incomplete).unwrap().len(),
+        8_000,
+        "no byte of the wrong answer was written"
+    );
+}
+
+/// A disk that fills while the file is written is RRS-S3002, and the partial file stays for a later job. `/dev/full`
+/// opens for writing and fails every write with ENOSPC, which is a full disk, so the partial file is that device.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_full_disk_while_writing_is_rrs_s3002_and_the_partial_file_is_kept() {
+    let folder = new_test_folder("hf-full-disk");
+    let cache = cache_in(&folder);
+    let hub = FakeHub::start(vec![tiny_repo(None)]).await;
+    let repo_dir = hf_cache::repo_dir(&cache, MODEL);
+    let incomplete = hf_cache::incomplete_path(&repo_dir, &weights_blob());
+    fs::create_dir_all(incomplete.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink("/dev/full", &incomplete).unwrap();
+
+    let error = download_error(
+        download_model(
+            &request_for(MODEL, "", &[WEIGHTS_NAME]),
+            &options_for(&hub, &cache),
+            &SilentObserver,
+            &NoHfToken,
+        )
+        .await,
+    );
+
+    assert_eq!(error.code(), "RRS-S3002");
+    assert!(
+        fs::symlink_metadata(&incomplete).is_ok(),
+        "the partial file is kept, so a later job resumes it"
+    );
+}
+
+/// huggingface_hub reads what the node wrote: `snapshot_download`, `hf_hub_download` and `scan_cache_dir`, offline,
+/// from the cpu environment's huggingface_hub (python/envs/cpu/uv.lock). It is #[ignore]d, so `just test-node-jobs` runs
+/// it with the cpu environment in place.
+#[tokio::test]
+#[ignore]
+async fn huggingface_hub_reads_the_snapshot_the_node_wrote() {
+    const CPU_PYTHON: &str = "../../.dev/envs/cpu/bin/python";
+    const READER: &str = "tests/support/hf_tools_read.py";
+    let folder = new_test_folder("hf-tools-read");
+    let cache = cache_in(&folder);
+    let hub = FakeHub::start(vec![tiny_repo(None)]).await;
+    download_all(&hub, &cache).await;
+
+    let output = std::process::Command::new(CPU_PYTHON)
+        .arg("-I")
+        .arg(READER)
+        .arg(&cache)
+        .arg(MODEL)
+        .arg(COMMIT)
+        .arg(CONFIG_NAME)
+        .env("HF_HUB_OFFLINE", "1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "huggingface_hub read the cache: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
