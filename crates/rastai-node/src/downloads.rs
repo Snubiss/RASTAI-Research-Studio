@@ -1,5 +1,5 @@
-//! The in-house Hugging Face Hub client (contracts 2.5; layout rust-node-gateway-proto.md 7.9): the node-native
-//! `download` job. It lists a repository at a revision, then fetches each file into the cache's `blobs/` as
+//! The in-house Hugging Face Hub client (contracts 2.5; layout rust-node-gateway-proto.md 7.9): the downloader core of
+//! M2-17, part 1. `download_model` lists a repository at a revision, then fetches each file into the cache's `blobs/` as
 //! `<name>.incomplete`, resuming from that file's length with a Range request after an interruption. An LFS file is
 //! checked against its SHA-256 and renamed to its blob name, and the snapshot link is made. The per-file lock is
 //! huggingface_hub's, so a Rastai job and a notebook downloading the same file take turns instead of writing one
@@ -7,7 +7,12 @@
 //!
 //! The Hub's HTTP comes through rastai-transport's `http_client`, the one HTTP wrapper. A file's answer may redirect to a
 //! CDN host (the Hub does for LFS files); the CDN request has its own egress tag and never carries the token. The token
-//! comes in through `HfTokenSource`, the seam M2-18 fills from `NodeHubService.GetSecret`; this module never stores it.
+//! comes in through `HfTokenSource`; this module never stores it.
+//!
+//! Not in this module yet (M2-17 part 2, after M2-18): the node-native `download` job (`JobKind::Download`), the
+//! production `HF_HUB_OFFLINE` reader that job uses, the `download.progress` the job publishes on WatchLive (the observer
+//! below is built and not yet driven by a job), the RRS-N3010 note on a job, `download.finished`, and `GetSecret` filling
+//! `HfTokenSource` (until then `NoHfToken` answers none).
 
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Read, Write};
@@ -78,12 +83,12 @@ const HTTP_FOUND: u16 = 302;
 const HTTP_SEE_OTHER: u16 = 303;
 const HTTP_TEMPORARY_REDIRECT: u16 = 307;
 const HTTP_PERMANENT_REDIRECT: u16 = 308;
-/// How many readers `check_hub_answer` picks from: the file list, the Content-Range, the redirect and the plain id.
-const HUB_ANSWER_READERS: u8 = 4;
 const HTTP_UNAUTHORIZED: u16 = 401;
 const HTTP_FORBIDDEN: u16 = 403;
 const HTTP_NOT_FOUND: u16 = 404;
 const HTTP_RANGE_NOT_SATISFIABLE: u16 = 416;
+/// How many readers `check_hub_answer` picks from: the file list, the Content-Range, the redirect and the plain id.
+const HUB_ANSWER_READERS: u8 = 4;
 
 /// What a download asks for: the repository, the revision and the files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -669,7 +674,7 @@ async fn fetch_attempt(job: &FileJob<'_>, incomplete: &Path) -> Result<(), NodeE
     let offset = if have > 0 { Some(have) } else { None };
     let path = resolve_path(job.model_ref, job.commit, &job.file.name);
     let route = hub_route(job.access, path);
-    let mut stream = open_hub_stream(job.access, route, offset, HUB_CHUNK_TIMEOUT_MS).await?;
+    let mut stream = open_hub_stream(job.access, route, offset, HUB_CHUNK_TIMEOUT_MS, &job.file.name).await?;
     check_file_status(job, incomplete, stream.status)?;
     check_range_start(stream.status, &stream.headers, offset)?;
     // A server that ignored the Range header sends the whole file again: the partial file starts over.
@@ -821,6 +826,7 @@ async fn open_hub_stream(
     first: Route,
     range_from: Option<u64>,
     timeout_ms: u64,
+    file_name: &str,
 ) -> Result<HttpStream, NodeError> {
     let mut route = first;
     for _ in 0..=HF_REDIRECT_LIMIT {
@@ -829,16 +835,25 @@ async fn open_hub_stream(
             return Ok(stream);
         }
         let Some(location) = header_value(&stream.headers, "location") else {
-            return Err(connection_refused(format!(
-                "the Hub redirected with status {} and no location",
-                stream.status
-            )));
+            return Err(redirect_refused(
+                file_name,
+                format!("the answer redirected with status {} and no location", stream.status),
+            ));
         };
         route = route_for_location(access, &route, location)?;
     }
-    Err(connection_refused(format!(
-        "the Hub redirected more than {HF_REDIRECT_LIMIT} times"
-    )))
+    Err(redirect_refused(
+        file_name,
+        format!("the answer redirected more than {HF_REDIRECT_LIMIT} times"),
+    ))
+}
+
+/// A redirect that can't be followed. It is not an interruption, so the retry loop stops at once (RRS-N3013).
+fn redirect_refused(file_name: &str, reason: String) -> NodeError {
+    NodeError::RedirectRefused {
+        file_name: file_name.to_string(),
+        reason,
+    }
 }
 
 fn is_redirect(status: u16) -> bool {
