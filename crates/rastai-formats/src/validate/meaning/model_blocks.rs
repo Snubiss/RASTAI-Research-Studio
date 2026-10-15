@@ -26,7 +26,9 @@ use rastai_diag::diagnostic::Diagnostic;
 
 use crate::describe::types::TypeDescription;
 use crate::documents::model::{GraphNode, ModelGraph, ModelSpec};
-use crate::documents::model_ops::{MANY_INPUTS_OP, MODEL_OPS, describe_model_op_types, fixed_input_count};
+use crate::documents::model_ops::{
+    MANY_INPUTS_OP, MODEL_OPS, describe_model_op_types, fixed_input_count, op_attributes_name,
+};
 use crate::json::pointer::join_pointer;
 use crate::validate::meaning::model_graph::{check_attributes, check_loops};
 use crate::validate::meaning::{MeaningSource, meaning_diagnostic, shown_value};
@@ -175,8 +177,8 @@ fn check_body_block_fields(
     }
 }
 
-/// Checks each body node's attributes against its op, the same check every top-level node gets (`check_attributes`).
-/// The typed values aren't used here, so a node whose attributes are reported is simply left out.
+/// Checks each body node's attributes against its op, as the top-level check does for every graph node
+/// (`check_attributes`). Only the findings are kept: nothing later reads the typed values.
 fn check_body_attributes(
     body_pointer: &str,
     graph: &ModelGraph,
@@ -295,10 +297,11 @@ fn check_body_feeds(
 }
 
 /// How many inputs a body node's op takes, when the number is fixed. A concat takes as many as are connected, so it
-/// has no fixed count and any `to_input` is taken as it comes. An op outside the vocabulary has no count either: its
-/// `RRS-E2001` is the one finding, and an edge into it isn't checked against a guessed count.
+/// has no fixed count and any `to_input` is taken as it comes. An op with no shapes has no count either, the same as
+/// in the main graph (model_graph.rs `connects_inputs`): an op outside the vocabulary gets its `RRS-E2001` and nothing
+/// more, and a vocabulary op without shapes is accepted with any `to_input`.
 fn body_input_count(op: &str) -> Option<usize> {
-    if op == MANY_INPUTS_OP || !MODEL_OPS.contains(&op) {
+    if op == MANY_INPUTS_OP || op_attributes_name(op).is_none() {
         return None;
     }
     Some(fixed_input_count(op))
