@@ -12,6 +12,7 @@ from rastai_formats.generated.model import conv1d_attributes_from_json, pool_att
 from torch.nn import functional
 
 from rastai_models.blocks.op_module import OpModule, fill_uniform, new_parameter
+from rastai_models.forward_context import ForwardContext
 
 DEFAULT_STRIDE = 1
 DEFAULT_PADDING = 0
@@ -40,7 +41,7 @@ class Conv1d(OpModule):
         else:
             self.register_parameter("bias", None)
 
-    def forward(self, sequence: torch.Tensor) -> torch.Tensor:
+    def forward(self, sequence: torch.Tensor, context: ForwardContext | None = None) -> torch.Tensor:
         channels_first = sequence.transpose(1, 2)
         convolved = functional.conv1d(channels_first, self.weight, self.bias, self.stride, self.padding, self.dilation)
         return convolved.transpose(1, 2)
@@ -66,7 +67,7 @@ class Pool(OpModule):
         self.kernel_size = parsed.kernel_size
         self.stride = parsed.kernel_size if parsed.stride is None else parsed.stride
 
-    def forward(self, sequence: torch.Tensor) -> torch.Tensor:
+    def forward(self, sequence: torch.Tensor, context: ForwardContext | None = None) -> torch.Tensor:
         if self.kernel_size is None:
             return pool_whole_length(sequence, self.mode)
         return pool_windows(sequence, self.mode, self.kernel_size, self.stride)

@@ -33,4 +33,7 @@ def compile_model(spec: ModelSpec, device: str | torch.device, dtype: torch.dtyp
 def build_op_module(
     node: GraphNode, op_class: type[OpModule], device: str | torch.device, dtype: torch.dtype
 ) -> OpModule:
-    return op_class(node.attributes or {}, device, dtype)
+    """The op module of `node`. Its node path is set here, so the module can name its sibling observation points."""
+    op_module = op_class(node.attributes or {}, device, dtype)
+    op_module.node_path = node.node_id
+    return op_module

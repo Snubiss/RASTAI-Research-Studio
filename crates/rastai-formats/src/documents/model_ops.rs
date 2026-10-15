@@ -106,7 +106,8 @@ const MIN_CLASS_COUNT: u64 = 2;
 /// The RMSNorm epsilon of Gemma 3; Llama uses 1e-5 with its own, which a design sets.
 const DEFAULT_RMS_EPSILON: f64 = 1e-6;
 const DEFAULT_LAYER_EPSILON: f64 = 1e-5;
-/// The RoPE base frequency of Llama and Gemma 3's global layers.
+/// The RoPE base frequency of Llama 2 and of Gemma 3's sliding (local) layers. Gemma 3's global layers use 1,000,000
+/// and Llama 3 uses 500,000, so a design that means either sets its own base.
 const DEFAULT_ROPE_BASE: f64 = 10_000.0;
 /// Llama 3's frequency bands: wavelengths longer than the low band's are scaled, shorter than the high band's are
 /// not, and the bands between blend. These are its published defaults.

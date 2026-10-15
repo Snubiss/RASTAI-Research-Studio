@@ -51,7 +51,8 @@ def sdpa_backend_pin(kernel: str) -> list[SDPBackend] | None:
 def run_attention(
     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, kernel: str, mask: torch.Tensor | None = None
 ) -> torch.Tensor:
-    """Attention over [..., length, head_size] tensors with the chosen kernel.
+    """Attention over [batch, heads, length, head_size] tensors with the chosen kernel. The key and value heads may be
+    fewer than the query heads (grouped-query attention); the query heads of one group share a key head.
 
     `mask` is an additive float mask broadcast to the score matrix (a causal mask, or ALiBi's bias), so a masked
     position holds negative infinity. The eager path and the SDPA paths compute the same function; they differ in
@@ -62,26 +63,48 @@ def run_attention(
         return eager_attention(query, key, value, mask)
     backends = sdpa_backend_pin(kernel)
     if backends is None:
-        return functional.scaled_dot_product_attention(query, key, value, attn_mask=mask)
+        return functional.scaled_dot_product_attention(query, key, value, attn_mask=mask, enable_gqa=True)
     with sdpa_kernel(backends):
-        return functional.scaled_dot_product_attention(query, key, value, attn_mask=mask)
+        return functional.scaled_dot_product_attention(query, key, value, attn_mask=mask, enable_gqa=True)
 
 
 def eager_attention(
     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, mask: torch.Tensor | None = None
 ) -> torch.Tensor:
-    """The attention output of the eager kernel: the weights from `eager_attention_weights` times the values."""
-    return eager_attention_weights(query, key, mask) @ value
+    """The attention output of the eager kernel: the weights from `eager_attention_weights`, times the values."""
+    return apply_attention_weights(eager_attention_weights(query, key, mask), value)
 
 
 def eager_attention_weights(query: torch.Tensor, key: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
-    """Each query's attention pattern, [..., length, length]: the softmax of the scaled scores.
+    """Each query's attention pattern, [batch, query_heads, query_length, key_length]: the softmax of the scaled scores.
 
     The softmax runs in float32 and casts back, as the Gemma 3 precision details require (layout 2.8), so a bf16 pass
     rounds once, after the normalization.
     """
     head_size = query.shape[-1]
-    scores = (query @ key.transpose(-2, -1)) / math.sqrt(head_size)
+    batch_size, query_head_count, query_length, _ = query.shape
+    grouped_query = group_query_heads(query, key.shape[1])
+    scores = grouped_query @ key.transpose(-2, -1) / math.sqrt(head_size)
+    scores = scores.reshape(batch_size, query_head_count, query_length, key.shape[2])
     if mask is not None:
         scores = scores + mask
     return torch.softmax(scores.float(), dim=-1).to(query.dtype)
+
+
+def apply_attention_weights(weights: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+    """The weighted sum of the values: [batch, query_heads, query_length, head_size]. Grouped like the scores, so the
+    shared value heads are never copied."""
+    batch_size, query_head_count, query_length, key_length = weights.shape
+    value_head_count = value.shape[1]
+    grouped_weights = weights.reshape(batch_size, value_head_count, -1, key_length)
+    mixed = grouped_weights @ value
+    return mixed.reshape(batch_size, query_head_count, query_length, value.shape[-1])
+
+
+def group_query_heads(query: torch.Tensor, key_head_count: int) -> torch.Tensor:
+    """The query heads that share one key head stacked along the length axis, so one matmul per key head does the
+    group. The query heads of a group are consecutive, as repeat_interleave would have them. A view when the query is
+    contiguous; no key or value head is copied."""
+    batch_size, query_head_count, query_length, head_size = query.shape
+    group_size = query_head_count // key_head_count
+    return query.reshape(batch_size, key_head_count, group_size * query_length, head_size)

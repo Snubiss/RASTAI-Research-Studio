@@ -26,9 +26,11 @@ class ForwardContext:
     attention_capture: str = CAPTURE_NO_ATTENTION
     # Sees every observation point in graph order and returns the tensor the model continues with. None: no hook.
     hook: PointHook | None = None
-    # The output head reads only the last position (decode and last-token readouts). Read by the decoder heads (M2-03).
+    # The output head reads only the last position (decode and last-token readouts). Read by the decoder graph's
+    # output (M2-05).
     last_position_only: bool = False
-    # False: return the final normalized hidden state, not the logits (the fused logit lens). Read by unembed (M2-03).
+    # False: return the final normalized hidden state, not the logits (the fused logit lens). Read by the decoder
+    # graph's output (M2-05).
     unembed_output: bool = True
     # Extra losses an op adds during the pass, such as the MoE load-balancing loss. The trainer adds them to the loss.
     auxiliary_losses: list[torch.Tensor] = field(default_factory=list)
