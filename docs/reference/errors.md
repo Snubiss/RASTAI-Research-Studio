@@ -1737,6 +1737,14 @@ Source: `catalog/errors/RRS-N.json`.
 - **Message:** The transfer of {file_name} was cancelled; the partial file is kept.
 - **In plain words:** The copy was cancelled. What was copied is kept so it can resume.
 
+<a id="rrs-n3013"></a>
+
+### RRS-N3013: Redirect refused: no target, or more than 5 hops
+
+- **Severity:** error
+- **Message:** The download of {file_name} was refused a redirect: {reason}.
+- **In plain words:** The server sent the file to an address Rastai won't follow. Trying again gets the same answer, so the download stopped at once.
+
 <a id="rrs-n4001"></a>
 
 ### RRS-N4001: Update signature or hash invalid

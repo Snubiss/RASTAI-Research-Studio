@@ -2227,6 +2227,7 @@ The seed for `catalog/errors/` (M1-13 wrote the JSON files from this list). Ever
 | `RRS-N3010` | info | Waiting for another program's download of this file |
 | `RRS-N3011` | error | Another program held this file's download lock for 10 minutes |
 | `RRS-N3012` | info | Transfer cancelled; partial file kept |
+| `RRS-N3013` | error | Redirect refused: no target, or more than 5 hops (not retried) |
 | `RRS-N4001` | error | Update signature or hash invalid |
 | `RRS-N4002` | error | Update download failed |
 | `RRS-N4003` | warning | Update would make installed plugins incompatible |

@@ -2635,6 +2635,17 @@ pub const CATALOG: &[CatalogEntry] = &[
         retired: false,
     },
     CatalogEntry {
+        code: "RRS-N3013",
+        severity: Severity::Error,
+        title: "Redirect refused: no target, or more than 5 hops",
+        message: "The download of {file_name} was refused a redirect: {reason}.",
+        basic_text: "The server sent the file to an address Rastai won't follow. Trying again gets the same answer, so the download stopped at once.",
+        fix_text: "",
+        fix_command_id: "",
+        docs_anchor: "rrs-n3013",
+        retired: false,
+    },
+    CatalogEntry {
         code: "RRS-N4001",
         severity: Severity::Error,
         title: "Update signature or hash invalid",
