@@ -356,13 +356,18 @@ fn redirect_for(file: &FakeFile, repo_name: &str, commit: &str, state: &FakeStat
             .cdn_port
             .map(|cdn_port| redirect_with_location(cdn_location(cdn_port, repo_name, commit, file))),
         Redirect::NoLocation => Some(redirect_answer(None)),
-        Redirect::LoopsToItself => Some(redirect_with_location(own_location(state.port, repo_name, commit, file))),
+        Redirect::LoopsToItself => Some(redirect_with_location(own_location(
+            state.port, repo_name, commit, file,
+        ))),
     }
 }
 
 /// The CDN fake's address for the file, on the CDN's own port.
 fn cdn_location(cdn_port: u16, repo_name: &str, commit: &str, file: &FakeFile) -> String {
-    format!("http://127.0.0.1:{cdn_port}{CDN_PATH_PREFIX}/{repo_name}/resolve/{commit}/{}", file.name)
+    format!(
+        "http://127.0.0.1:{cdn_port}{CDN_PATH_PREFIX}/{repo_name}/resolve/{commit}/{}",
+        file.name
+    )
 }
 
 /// The file's own address on this fake, which a looping redirect names again.
