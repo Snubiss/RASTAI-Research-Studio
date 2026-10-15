@@ -545,13 +545,13 @@
       "version": "13.0.85",
       "category": "foundation",
       "license": "Apache-2.0",
-      "reason": "NVIDIA's nvtx marker library, pinned directly beside torch's CUDA build (spec §27 PyTorch row); its PyPI License field says Apache 2.0, so no proprietary license applies"
+      "reason": "NVIDIA's nvtx marker library, pinned directly beside torch's CUDA build (spec §27 PyTorch row); its wheel's dist-info License.txt is the Apache-2.0 text, which matches its PyPI License field (Apache 2.0); PyPI's classifier says Other/Proprietary License, but the shipped text is Apache-2.0, so no proprietary license applies"
     },
     "nvidia-nvtx-cu12": {
       "version": "12.6.77",
       "category": "foundation",
       "license": "Apache-2.0",
-      "reason": "NVIDIA's nvtx marker library, pinned directly beside torch's CUDA build (spec §27 PyTorch row); its PyPI License field says Apache 2.0, so no proprietary license applies"
+      "reason": "NVIDIA's nvtx marker library, pinned directly beside torch's CUDA build (spec §27 PyTorch row); its wheel's dist-info License.txt is the Apache-2.0 text, which matches its PyPI License field (Apache 2.0); PyPI's classifier says Other/Proprietary License, but the shipped text is Apache-2.0, so no proprietary license applies"
     },
     "cuda-bindings": {
       "version": "13.4.3",
