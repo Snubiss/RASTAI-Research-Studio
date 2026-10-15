@@ -283,7 +283,7 @@ class DecodeReadout:
         """Returns (logits [vocabulary], packet [packet_size] float32), both still on the GPU."""
 ```
 
-Point names follow contracts.md §5.3. A point name is the graph node's path. Families name their nodes so the standard names fall out (`embedding`, `blocks.<i>.attention_out`, `blocks.<i>.feedforward_out`, `blocks.<i>.residual_out`, `final_norm_out`). Ops with extra outputs emit sibling names in the same block: `attention_pattern`, `last_token_attention`, `head_outputs`, `router_logits`, `expert_choice`, `expert_gate_weights`, `latent_cache`, `depth_attention`. Designer nodes without a family name use their node path.
+Point names follow contracts.md §5.3 (M2-03): a node's main output is the point under the node's bare path, and each other output of a node is `<node path>.<output>`. A family names its nodes so the standard names fall out (`embedding`, `blocks.<i>.attention_out`, `blocks.<i>.feedforward_out`, `blocks.<i>.residual_out`, `final_norm_out`); the attention node `blocks.<i>.attention` adds `.attention_pattern`, `.last_token_attention` and `.head_outputs`. Designer nodes without a family name use their node path.
 
 Compile and run:
 
