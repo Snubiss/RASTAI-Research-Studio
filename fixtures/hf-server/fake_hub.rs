@@ -2,8 +2,8 @@
 //! served over plain HTTP on 127.0.0.1 so no test reaches the network. It answers the file listing
 //! (`GET /api/models/<repo>` and `GET /api/models/<repo>/revision/<revision>`) and file bytes
 //! (`GET /<repo>/resolve/<commit>/<file>`, with a Range request resumed as 206). Every request is recorded, so a test
-//! can check what was asked for and what was not. A file can answer with a redirect to a second fake, standing in for
-//! the CDN host the Hub sends LFS files to; that fake serves the same files under `/fake-cdn/`.
+//! can check what was asked for and what was not. A file can answer with a redirect (a CDN, no Location, or a loop), as
+//! the Hub does for an LFS file; the CDN a redirect names is a second fake that serves the same files under `/fake-cdn/`.
 //!
 //! The tests include this file with `#[path]` (see tests/downloads.rs): it is test code, not part of the node. Names
 //! are plain ASCII, so there is no percent-decoding here.
@@ -26,6 +26,20 @@ const MAIN_BRANCH: &str = "main";
 /// The path prefix a redirected file request lands on: the CDN fake serves the same files under it.
 const CDN_PATH_PREFIX: &str = "/fake-cdn";
 
+/// How a file answers instead of with its bytes: with a 302, as the Hub does for an LFS file.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Redirect {
+    /// The file answers itself.
+    None,
+    /// A 302 to the same file on the CDN fake. Only a fake built with `FakeHub::start_with_cdn` redirects this way;
+    /// otherwise the file answers itself.
+    ToCdn,
+    /// A 302 with no Location header, which the client can't follow.
+    NoLocation,
+    /// A 302 whose Location is the file's own address again, so a chain of redirects never ends.
+    LoopsToItself,
+}
+
 /// One file a repository serves.
 #[derive(Clone)]
 pub struct FakeFile {
@@ -42,9 +56,8 @@ pub struct FakeFile {
     /// Whether a 206 names a Content-Range that starts one byte after the one it sent. The body is still the rest of the
     /// file, so a client that trusts the range appends the wrong bytes.
     pub wrong_content_range: bool,
-    /// Whether the file redirects (302) to the CDN fake, as the Hub does for an LFS file. Only a fake built with
-    /// `FakeHub::start_with_cdn` redirects; otherwise the file answers itself.
-    pub redirect_to_cdn: bool,
+    /// Whether the file redirects instead of answering with its bytes.
+    pub redirect: Redirect,
 }
 
 impl FakeFile {
@@ -59,7 +72,7 @@ impl FakeFile {
             drop_every_time: false,
             ignores_range: false,
             wrong_content_range: false,
-            redirect_to_cdn: false,
+            redirect: Redirect::None,
         }
     }
 
@@ -102,6 +115,8 @@ pub struct RecordedRequest {
 
 struct FakeState {
     repos: Vec<FakeRepo>,
+    /// This fake's own port, which a looping redirect names.
+    port: u16,
     /// The port of the CDN fake that redirected files go to, when this fake redirects at all.
     cdn_port: Option<u16>,
     requests: Mutex<Vec<RecordedRequest>>,
@@ -121,7 +136,7 @@ impl FakeHub {
         FakeHub::start_with(repos, None).await
     }
 
-    /// Starts a fake that redirects each file marked `redirect_to_cdn` to `cdn`, on its own port. The CDN is an
+    /// Starts a fake whose files marked `Redirect::ToCdn` redirect to `cdn`, on its own port. The CDN is an
     /// ordinary fake that serves the same files; a request to it is a different origin, so a test can check that the
     /// token and the Range travel there as the client should send them.
     pub async fn start_with_cdn(repos: Vec<FakeRepo>, cdn: &FakeHub) -> FakeHub {
@@ -133,6 +148,7 @@ impl FakeHub {
         let address = listener.local_addr().unwrap();
         let state = Arc::new(FakeState {
             repos,
+            port: address.port(),
             cdn_port,
             requests: Mutex::new(Vec::new()),
             dropped_once: Mutex::new(HashSet::new()),
@@ -325,24 +341,49 @@ fn file_answer(repo_name: &str, rest: &str, request: &RecordedRequest, state: &F
     let Some(file) = repo.files.iter().find(|file| file.name == file_name) else {
         return status_only(404);
     };
-    if let (true, Some(cdn_port)) = (file.redirect_to_cdn, state.cdn_port) {
-        return redirect_answer(cdn_port, repo_name, commit, file);
+    if let Some(redirect) = redirect_for(file, repo_name, commit, state) {
+        return redirect;
     }
     file_body_answer(repo_name, file, request, state)
 }
 
-/// The Hub's 302 for an LFS file: the CDN fake's address for the same file, on the CDN's own port.
-fn redirect_answer(cdn_port: u16, repo_name: &str, commit: &str, file: &FakeFile) -> Answer {
-    let location = format!(
-        "http://127.0.0.1:{cdn_port}{CDN_PATH_PREFIX}/{repo_name}/resolve/{commit}/{}",
-        file.name
-    );
+/// The 302 a file answers with when it redirects, or None when it answers itself. A file that redirects to the CDN
+/// answers itself when this fake has no CDN.
+fn redirect_for(file: &FakeFile, repo_name: &str, commit: &str, state: &FakeState) -> Option<Answer> {
+    match file.redirect {
+        Redirect::None => None,
+        Redirect::ToCdn => state
+            .cdn_port
+            .map(|cdn_port| redirect_with_location(cdn_location(cdn_port, repo_name, commit, file))),
+        Redirect::NoLocation => Some(redirect_answer(None)),
+        Redirect::LoopsToItself => Some(redirect_with_location(own_location(state.port, repo_name, commit, file))),
+    }
+}
+
+/// The CDN fake's address for the file, on the CDN's own port.
+fn cdn_location(cdn_port: u16, repo_name: &str, commit: &str, file: &FakeFile) -> String {
+    format!("http://127.0.0.1:{cdn_port}{CDN_PATH_PREFIX}/{repo_name}/resolve/{commit}/{}", file.name)
+}
+
+/// The file's own address on this fake, which a looping redirect names again.
+fn own_location(port: u16, repo_name: &str, commit: &str, file: &FakeFile) -> String {
+    format!("http://127.0.0.1:{port}/{repo_name}/resolve/{commit}/{}", file.name)
+}
+
+fn redirect_with_location(location: String) -> Answer {
+    redirect_answer(Some(location))
+}
+
+/// A 302, with a Location header when one is given.
+fn redirect_answer(location: Option<String>) -> Answer {
+    let mut headers = Vec::new();
+    if let Some(location) = location {
+        headers.push(("Location".to_string(), location));
+    }
+    headers.push(("Content-Length".to_string(), "0".to_string()));
     Answer {
         status: 302,
-        headers: vec![
-            ("Location".to_string(), location),
-            ("Content-Length".to_string(), "0".to_string()),
-        ],
+        headers,
         body: Vec::new(),
         send_body_bytes: 0,
     }

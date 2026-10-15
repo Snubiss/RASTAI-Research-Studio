@@ -17,8 +17,10 @@ What the fake can do, per file or per repository:
 - **List a wrong SHA-256** (`listed_sha256`): the client's hash check must refuse the file.
 - **Gate a repository** (`gated`): 401 or 403 unless the request carries the granted bearer token. With `resolve_only`
   the listing answers 200 and only the file requests are gated, as the real Hub does for a gated repository.
-- **Redirect a file to a CDN** (`redirect_to_cdn`, built with `FakeHub::start_with_cdn`): the file answers 302 to a second
-  fake on its own port, which serves the same files under `/fake-cdn/`. The CDN fake records its own requests.
+- **Redirect a file** (`redirect`, one of `Redirect::None`, `ToCdn`, `NoLocation`, `LoopsToItself`): `ToCdn` answers 302
+  to a second fake on its own port (built with `FakeHub::start_with_cdn`), which serves the same files under
+  `/fake-cdn/`; the CDN fake records its own requests. `NoLocation` answers 302 with no Location header, and
+  `LoopsToItself` answers 302 to the file's own address, so a client that follows redirects never ends.
 - **Send a wrong Content-Range** (`wrong_content_range`): a 206 whose range starts one byte late.
 
 Every request is recorded (method, path, Range, Authorization), so a test can check what was asked for and what was not.

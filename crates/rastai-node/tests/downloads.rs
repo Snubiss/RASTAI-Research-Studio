@@ -11,15 +11,12 @@ mod common;
 mod fake_hub;
 
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use common::{TestFolder, new_test_folder};
-use fake_hub::{FakeFile, FakeHub, FakeRepo, GatedAccess, patterned_bytes, sha256_hex};
+use fake_hub::{FakeFile, FakeHub, FakeRepo, GatedAccess, Redirect, patterned_bytes, sha256_hex};
 use rastai_node::downloads::{
     DOWNLOAD_RETRY_LIMIT, DownloadObserver, DownloadOptions, DownloadOutcome, DownloadRequest, HfTokenSource,
     LiveDownloadObserver, NoHfToken, RetryPolicy, SilentObserver, download_model, offline_requested, production_hub,
@@ -787,7 +784,7 @@ async fn a_file_redirected_to_the_cdn_resumes_there_without_the_token() {
     let cache = cache_in(&folder);
     let cdn = FakeHub::start(vec![tiny_repo(None)]).await;
     let mut hub_repo = tiny_repo(None);
-    hub_repo.files[1].redirect_to_cdn = true;
+    hub_repo.files[1].redirect = Redirect::ToCdn;
     let hub = FakeHub::start_with_cdn(vec![hub_repo], &cdn).await;
     let repo_dir = hf_cache::repo_dir(&cache, MODEL);
     let incomplete = hf_cache::incomplete_path(&repo_dir, &weights_blob());
@@ -989,91 +986,18 @@ fn run_layout_reader(cache: &Path) -> std::process::Output {
         .unwrap()
 }
 
-/// A Hub that lists one file and answers that file with the redirect the test picks. It counts the file requests, so
-/// a test can see how many times the node asked.
-struct RedirectingHub {
-    port: u16,
-    file_requests: Arc<AtomicUsize>,
-}
-
-#[derive(Clone, Copy)]
-enum RedirectAnswer {
-    /// A 302 with no Location header.
-    NoLocation,
-    /// A 302 whose Location is the same address again, so the chain never ends.
-    LoopsToItself,
-}
-
-/// Starts the redirecting Hub on loopback, on a thread of its own. Requests are served one at a time, which is all a
-/// download needs.
-fn start_redirecting_hub(answer: RedirectAnswer) -> RedirectingHub {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let file_requests = Arc::new(AtomicUsize::new(0));
-    let counter = Arc::clone(&file_requests);
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            serve_redirect_request(stream, port, answer, &counter);
-        }
-    });
-    RedirectingHub { port, file_requests }
-}
-
-fn serve_redirect_request(mut stream: TcpStream, port: u16, answer: RedirectAnswer, counter: &AtomicUsize) {
-    let Some(head) = read_request_head(&mut stream) else {
-        return;
-    };
-    let path = head.split_whitespace().nth(1).unwrap_or("");
-    let response = if path.starts_with("/api/models/") {
-        listing_response()
-    } else {
-        counter.fetch_add(1, Ordering::SeqCst);
-        redirect_response(answer, port)
-    };
-    let _ = stream.write_all(response.as_bytes());
-}
-
-/// The request line and headers, read byte by byte so the body (none for a GET) is never consumed.
-fn read_request_head(stream: &mut TcpStream) -> Option<String> {
-    let mut head = Vec::new();
-    let mut byte = [0u8; 1];
-    while !head.ends_with(b"\r\n\r\n") {
-        match stream.read(&mut byte) {
-            Ok(1) => head.push(byte[0]),
-            _ => return None,
-        }
-    }
-    Some(String::from_utf8_lossy(&head).into_owned())
-}
-
-fn listing_response() -> String {
-    let body = format!(r#"{{"sha":"{COMMIT}","siblings":[{{"rfilename":"{CONFIG_NAME}","blobId":"{COMMIT}"}}]}}"#);
-    format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )
-}
-
-fn redirect_response(answer: RedirectAnswer, port: u16) -> String {
-    let location = match answer {
-        RedirectAnswer::NoLocation => String::new(),
-        RedirectAnswer::LoopsToItself => format!("Location: http://127.0.0.1:{port}/again\r\n"),
-    };
-    format!("HTTP/1.1 302 Found\r\n{location}Content-Length: 0\r\nConnection: close\r\n\r\n")
-}
-
 /// A redirect with no Location is refused at once. The node asks once: a retry would get the same answer, so the code
 /// is RRS-N3013 and not the connection's retries running out.
 #[tokio::test]
 async fn a_redirect_with_no_location_is_refused_at_once() {
     let folder = new_test_folder("hf-redirect-no-location");
     let cache = cache_in(&folder);
-    let hub = start_redirecting_hub(RedirectAnswer::NoLocation);
+    let hub = FakeHub::start(vec![redirecting_repo(Redirect::NoLocation)]).await;
 
     let error = download_error(
         download_model(
             &request_for(MODEL, "", &[CONFIG_NAME]),
-            &options_for_port(hub.port, &cache),
+            &options_for(&hub, &cache),
             &SilentObserver,
             &NoHfToken,
         )
@@ -1081,11 +1005,7 @@ async fn a_redirect_with_no_location_is_refused_at_once() {
     );
 
     assert_eq!(error.code(), "RRS-N3013");
-    assert_eq!(
-        hub.file_requests.load(Ordering::SeqCst),
-        1,
-        "a refused redirect is not retried"
-    );
+    assert_eq!(hub.file_requests(CONFIG_NAME).len(), 1, "a refused redirect is not retried");
 }
 
 /// Five redirects are followed; the sixth answer is a redirect too, so the chain is refused after six requests, at once.
@@ -1093,12 +1013,12 @@ async fn a_redirect_with_no_location_is_refused_at_once() {
 async fn a_redirect_chain_past_five_hops_is_refused_at_once() {
     let folder = new_test_folder("hf-redirect-loop");
     let cache = cache_in(&folder);
-    let hub = start_redirecting_hub(RedirectAnswer::LoopsToItself);
+    let hub = FakeHub::start(vec![redirecting_repo(Redirect::LoopsToItself)]).await;
 
     let error = download_error(
         download_model(
             &request_for(MODEL, "", &[CONFIG_NAME]),
-            &options_for_port(hub.port, &cache),
+            &options_for(&hub, &cache),
             &SilentObserver,
             &NoHfToken,
         )
@@ -1107,8 +1027,20 @@ async fn a_redirect_chain_past_five_hops_is_refused_at_once() {
 
     assert_eq!(error.code(), "RRS-N3013");
     assert_eq!(
-        hub.file_requests.load(Ordering::SeqCst),
+        hub.file_requests(CONFIG_NAME).len(),
         6,
         "five hops are followed, then the sixth redirect is refused"
     );
+}
+
+/// The tiny repository with only its config, which redirects as the test says.
+fn redirecting_repo(redirect: Redirect) -> FakeRepo {
+    let mut config = FakeFile::plain(CONFIG_NAME, patterned_bytes(CONFIG_BYTES, 1));
+    config.redirect = redirect;
+    FakeRepo {
+        name: MODEL.to_string(),
+        commit: COMMIT.to_string(),
+        files: vec![config],
+        gated: None,
+    }
 }
