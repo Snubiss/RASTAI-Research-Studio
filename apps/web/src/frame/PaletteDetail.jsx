@@ -66,7 +66,7 @@ export function PaletteDetail({
   }
 
   const command = item.command;
-  const formats = copyAsFormats(command.commandId, argumentsOfItem);
+  const formats = copyAsFormats(command.commandId, argumentsOfItem, command.argumentsSchemaJson);
   return (
     <section className="rr-palette-detail" aria-label={command.title}>
       <h3 className="rr-palette-detail__title">{command.title}</h3>
