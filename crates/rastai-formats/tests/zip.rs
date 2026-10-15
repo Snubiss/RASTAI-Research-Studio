@@ -419,8 +419,8 @@ fn a_small_repetitive_deflate_entry_over_the_ratio_cap_reads() {
 
 #[test]
 fn the_same_ratio_above_the_floor_is_refused_when_listed() {
-    // Declared 1 MiB plus one byte at 213:1, so the compressed size is 4,924 bytes. The listing refuses on the declared
-    // sizes before it reads the entry's data, so the data's bytes don't matter here.
+    // Declared 1 MiB plus one byte at about 212.9:1 (past 200:1), so the compressed size is 4,924 bytes. The listing
+    // refuses on the declared sizes before it reads the entry's data, so the data's bytes don't matter here.
     let declared: u64 = 1024 * 1024 + 1;
     let compressed_bytes = (declared / 213 + 1) as usize;
     let mut part = deflated_content("rows.json", &vec![0u8; compressed_bytes], HELLO);
