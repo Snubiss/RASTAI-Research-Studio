@@ -16,7 +16,7 @@ const CODE_VALUE_NOT_ALLOWED: &str = "RRS-E1004";
 const CODE_NOT_SERIALIZABLE: &str = "RRS-E1006";
 /// The planner's and model hash's caller-misuse refusals (contracts 10.3). `hashing.rs` builds its refusal with it too,
 /// so the code string has one owner.
-pub const CODE_UNPLANNABLE_LAYOUT: &str = "RRS-E1007";
+pub(crate) const CODE_UNPLANNABLE_LAYOUT: &str = "RRS-E1007";
 const CODE_REFERENCE_UNRESOLVED: &str = "RRS-E2001";
 const CODE_FILE_TOO_LARGE: &str = "RRS-E5003";
 const CODE_TOO_DEEP: &str = "RRS-E5004";

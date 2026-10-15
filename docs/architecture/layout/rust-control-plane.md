@@ -706,6 +706,7 @@ crates/rastai-formats/
   tests/
     documents_corpus.rs       fixtures/documents/<type>/{valid,invalid}: verdicts, codes and paths
     safetensors_corpus.rs     fixtures/safetensors/: the 33 files and their expected codes
+    model_hash.rs            the model hash over safetensors bytes: the same tensors in one file and in shards give one hash; a changed byte, name, dtype or shape changes it; big tensors are hashed in bounded reads
     round_trip.rs             read, write, read: equal values and a stable content hash; seeded random documents
     describe_matches_struct.rs every description lists exactly the struct's serde fields, with matching kinds
     migrations.rs             every fixture of an old version opens and upgrades to the current one
@@ -1250,6 +1251,8 @@ Order inside `just codegen`: proto first (`buf generate`), then the catalog (ras
 | Unit | bottom of each file | JSON reader positions; canonical JSON key order and number output; semver ranges; JSON Patch apply and diff; inflate against known streams |
 | Document corpus | `tests/documents_corpus.rs` + `fixtures/documents/<type>/{valid,invalid}/` | each invalid file has `<name>.expected.json` with the expected codes and paths (contracts §12.5); all are reported in one pass |
 | Safetensors corpus | `tests/safetensors_corpus.rs` + `fixtures/safetensors/` | 6 valid, 27 malformed; the code for each from `expected.json` |
+| Safetensors writer layout | `safetensors/writer.rs` tests + `fixtures/safetensors-writer/planned_layout.safetensors` | the planner's header equals the Python writer's header byte for byte; a planned layout reads back with the same offsets; the fixture file is the layout of `planned_layout_tensors()` (not in the corpus: it has no verdict) |
+| Model hash | `tests/model_hash.rs` | the re-shard test: the same tensors in one file and in shards give one `model_hash`; metadata and file order don't change it; a changed tensor byte, name, dtype or shape does; two files with one name give `RRS-E1007` |
 | Round trip | `tests/round_trip.rs` | read, write, read: equal; content hash stable across runs; random documents from a seeded in-house generator (no property-testing crate) |
 | Descriptions | `tests/describe_matches_struct.rs` | for each type, a filled fixture serialized by serde has exactly the described fields |
 | Migrations | `tests/migrations.rs` | every `fixtures/documents/<type>/v<n>/` file opens and upgrades; newer files open read-only |
