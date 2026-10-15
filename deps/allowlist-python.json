@@ -1,7 +1,7 @@
 {
   "format_version": 1,
-  "about": "The Python packages spec §27 allows, as data (contracts §1 and §2.5; layout python.md section 11.3). Every package in every lock below is listed with the version the lock holds: a direct package with its §27 category and reason, a transitive one with the packages that bring it in. A build variant such as 2.14.1+cpu is the listed version 2.14.1. check-deps (M1-05) fails a lock that holds a package or version not listed here, and a license outside `licenses`.",
-  "locks": ["python/envs/cpu/uv.lock"],
+  "about": "The Python packages spec §27 allows, as data (contracts §1 and §2.5; layout python.md section 11.3). Every package in every lock below is listed with the version the lock holds: a direct package with its §27 category and reason, a transitive one with the packages that bring it in. A build variant such as 2.14.1+cpu is the listed version 2.14.1. check-deps (M1-05) fails a lock that holds a package or version not listed here, and a license outside `licenses`. A package one lock pins at another version names that version in `versions_by_lock`, keyed by the lock's path.",
+  "locks": ["python/envs/cpu/uv.lock", "python/envs/cuda13/uv.lock", "python/envs/cuda126/uv.lock"],
   "licenses": {
     "allowed": [
       "Apache-2.0",
@@ -33,6 +33,118 @@
       "torch": {
         "license": "Apache-2.0 WITH LLVM-exception",
         "reason": "Part of PyTorch's compound license (it vendors LLVM code). The exception only widens Apache-2.0. torch is a direct foundation package (spec §27 PyTorch row), so ADR-0012 decision 5 does not cover it; this entry is the explicit exception (spec §27, owner approval of 2026-10-11)."
+      },
+      "nvidia-cublas": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cuda-cupti": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cuda-nvrtc": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cuda-runtime": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cufft": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cufile": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-curand": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cusolver": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cusparse": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-nvjitlink": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cudnn-cu13": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cusparselt-cu13": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-nccl-cu13": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-nvshmem-cu13": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cublas-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cuda-cupti-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cuda-nvrtc-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cuda-runtime-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cufft-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cufile-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-curand-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cusolver-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-cusparse-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-nvjitlink-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cudnn-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-cusparselt-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+      },
+      "nvidia-nccl-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+      },
+      "nvidia-nvshmem-cu12": {
+        "license": "LicenseRef-NVIDIA-Proprietary",
+        "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
       }
     }
   },
@@ -85,7 +197,12 @@
       "license": "MIT OR Apache-2.0",
       "reason": "builds rastai-formats' PyO3 module: the editable install in the cpu environment and `just wheel` (spec §27 dev tooling; layout rust-control-plane.md 4.7); dev group only, never on a user's machine"
     },
-    "anyio": { "version": "4.15.1", "category": "transitive", "license": "MIT", "brought_by": ["httpx"] },
+    "anyio": {
+      "version": "4.15.1",
+      "category": "transitive",
+      "license": "MIT",
+      "brought_by": ["httpx"]
+    },
     "certifi": {
       "version": "2026.7.22",
       "category": "transitive",
@@ -116,14 +233,24 @@
       "license": "BSD-3-Clause",
       "brought_by": ["huggingface-hub", "torch"]
     },
-    "h11": { "version": "0.16.0", "category": "transitive", "license": "MIT", "brought_by": ["httpcore"] },
+    "h11": {
+      "version": "0.16.0",
+      "category": "transitive",
+      "license": "MIT",
+      "brought_by": ["httpcore"]
+    },
     "hf-xet": {
       "version": "1.6.0",
       "category": "transitive",
       "license": "Apache-2.0",
       "brought_by": ["huggingface-hub"]
     },
-    "httpcore": { "version": "1.0.9", "category": "transitive", "license": "BSD-3-Clause", "brought_by": ["httpx"] },
+    "httpcore": {
+      "version": "1.0.9",
+      "category": "transitive",
+      "license": "BSD-3-Clause",
+      "brought_by": ["httpx"]
+    },
     "httpx": {
       "version": "0.28.1",
       "category": "transitive",
@@ -142,11 +269,36 @@
       "license": "BSD-3-Clause",
       "brought_by": ["anyio", "httpx"]
     },
-    "iniconfig": { "version": "2.3.0", "category": "transitive", "license": "MIT", "brought_by": ["pytest"] },
-    "jinja2": { "version": "3.1.6", "category": "transitive", "license": "BSD-3-Clause", "brought_by": ["torch"] },
-    "markupsafe": { "version": "3.0.3", "category": "transitive", "license": "BSD-3-Clause", "brought_by": ["jinja2"] },
-    "mpmath": { "version": "1.3.0", "category": "transitive", "license": "BSD-3-Clause", "brought_by": ["sympy"] },
-    "networkx": { "version": "3.7", "category": "transitive", "license": "BSD-3-Clause", "brought_by": ["torch"] },
+    "iniconfig": {
+      "version": "2.3.0",
+      "category": "transitive",
+      "license": "MIT",
+      "brought_by": ["pytest"]
+    },
+    "jinja2": {
+      "version": "3.1.6",
+      "category": "transitive",
+      "license": "BSD-3-Clause",
+      "brought_by": ["torch"]
+    },
+    "markupsafe": {
+      "version": "3.0.3",
+      "category": "transitive",
+      "license": "BSD-3-Clause",
+      "brought_by": ["jinja2"]
+    },
+    "mpmath": {
+      "version": "1.3.0",
+      "category": "transitive",
+      "license": "BSD-3-Clause",
+      "brought_by": ["sympy"]
+    },
+    "networkx": {
+      "version": "3.7",
+      "category": "transitive",
+      "license": "BSD-3-Clause",
+      "brought_by": ["torch"]
+    },
     "numpy": {
       "version": "2.5.3",
       "category": "transitive",
@@ -159,17 +311,42 @@
       "license": "Apache-2.0 OR BSD-2-Clause",
       "brought_by": ["huggingface-hub", "pytest"]
     },
-    "pillow": { "version": "12.3.0", "category": "transitive", "license": "MIT-CMU", "brought_by": ["torchvision"] },
-    "pluggy": { "version": "1.6.0", "category": "transitive", "license": "MIT", "brought_by": ["pytest"] },
-    "pygments": { "version": "2.21.0", "category": "transitive", "license": "BSD-2-Clause", "brought_by": ["pytest"] },
-    "pyyaml": { "version": "6.0.3", "category": "transitive", "license": "MIT", "brought_by": ["huggingface-hub"] },
+    "pillow": {
+      "version": "12.3.0",
+      "category": "transitive",
+      "license": "MIT-CMU",
+      "brought_by": ["torchvision"]
+    },
+    "pluggy": {
+      "version": "1.6.0",
+      "category": "transitive",
+      "license": "MIT",
+      "brought_by": ["pytest"]
+    },
+    "pygments": {
+      "version": "2.21.0",
+      "category": "transitive",
+      "license": "BSD-2-Clause",
+      "brought_by": ["pytest"]
+    },
+    "pyyaml": {
+      "version": "6.0.3",
+      "category": "transitive",
+      "license": "MIT",
+      "brought_by": ["huggingface-hub"]
+    },
     "setuptools": {
       "version": "84.0.0",
       "category": "transitive",
       "license": "MIT",
       "brought_by": ["grpcio-tools", "torch"]
     },
-    "sympy": { "version": "1.14.0", "category": "transitive", "license": "BSD-3-Clause", "brought_by": ["torch"] },
+    "sympy": {
+      "version": "1.14.0",
+      "category": "transitive",
+      "license": "BSD-3-Clause",
+      "brought_by": ["torch"]
+    },
     "tqdm": {
       "version": "4.70.1",
       "category": "transitive",
@@ -187,6 +364,217 @@
       "category": "transitive",
       "license": "PSF-2.0",
       "brought_by": ["anyio", "grpcio", "huggingface-hub", "torch"]
+    },
+    "nvidia-cublas": {
+      "version": "13.1.1.3",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cuda-cupti": {
+      "version": "13.0.85",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cuda-nvrtc": {
+      "version": "13.0.88",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cuda-runtime": {
+      "version": "13.0.96",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cufft": {
+      "version": "12.0.0.61",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cufile": {
+      "version": "1.15.1.6",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-curand": {
+      "version": "10.4.0.35",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cusolver": {
+      "version": "12.0.4.66",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cusparse": {
+      "version": "12.6.3.3",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-nvjitlink": {
+      "version": "13.4.92",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cudnn-cu13": {
+      "version": "9.24.0.43",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cusparselt-cu13": {
+      "version": "0.8.1",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-nccl-cu13": {
+      "version": "2.30.7",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-nvshmem-cu13": {
+      "version": "3.4.5",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cublas-cu12": {
+      "version": "12.6.4.1",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cuda-cupti-cu12": {
+      "version": "12.6.80",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cuda-nvrtc-cu12": {
+      "version": "12.6.85",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cuda-runtime-cu12": {
+      "version": "12.6.77",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cufft-cu12": {
+      "version": "11.3.0.4",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cufile-cu12": {
+      "version": "1.11.1.6",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-curand-cu12": {
+      "version": "10.3.7.77",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cusolver-cu12": {
+      "version": "11.7.1.2",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-cusparse-cu12": {
+      "version": "12.5.4.2",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-nvjitlink-cu12": {
+      "version": "12.9.86",
+      "category": "foundation",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "reason": "NVIDIA CUDA runtime library, pinned directly by the environment's pyproject, beside torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cudnn-cu12": {
+      "version": "9.10.2.21",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-cusparselt-cu12": {
+      "version": "0.7.1",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"NVIDIA Proprietary Software\"."
+    },
+    "nvidia-nccl-cu12": {
+      "version": "2.29.3",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-nvshmem-cu12": {
+      "version": "3.4.5",
+      "category": "transitive",
+      "license": "LicenseRef-NVIDIA-Proprietary",
+      "brought_by": ["torch"],
+      "reason": "NVIDIA CUDA runtime library, brought in by torch's CUDA build (spec §27 PyTorch and NVIDIA license rows). Allowed on the owner's condition of 2026-10-14 (spec §27, the NVIDIA license row): the user's machine downloads it from PyPI during an explicit environment install (system.env.install), and Rastai never vendors, bundles or redistributes it. PyPI spells its license \"LicenseRef-NVIDIA-Proprietary\"."
+    },
+    "nvidia-nvtx": {
+      "version": "13.0.85",
+      "category": "foundation",
+      "license": "Apache-2.0",
+      "reason": "NVIDIA's nvtx marker library, pinned directly beside torch's CUDA build (spec §27 PyTorch row); its PyPI License field says Apache 2.0, so no proprietary license applies"
+    },
+    "nvidia-nvtx-cu12": {
+      "version": "12.6.77",
+      "category": "foundation",
+      "license": "Apache-2.0",
+      "reason": "NVIDIA's nvtx marker library, pinned directly beside torch's CUDA build (spec §27 PyTorch row); its PyPI License field says Apache 2.0, so no proprietary license applies"
+    },
+    "cuda-bindings": {
+      "version": "13.4.3",
+      "versions_by_lock": {
+        "python/envs/cuda126/uv.lock": "12.9.9"
+      },
+      "category": "transitive",
+      "license": "Apache-2.0",
+      "brought_by": ["torch"],
+      "reason": "CUDA Python bindings that torch's CUDA builds declare (spec §27 PyTorch row). The CUDA 13 lock holds 13.4.3 and the CUDA 12.6 lock holds 12.9.9, which is the build for that CUDA line."
+    },
+    "cuda-pathfinder": {
+      "version": "1.8.2",
+      "category": "transitive",
+      "license": "Apache-2.0",
+      "brought_by": ["cuda-bindings"]
+    },
+    "triton": {
+      "version": "3.8.0",
+      "category": "transitive",
+      "license": "MIT",
+      "brought_by": ["torch"],
+      "reason": "torch's compiler backend for CUDA (spec §27 PyTorch row); in-house kernels come later (contracts §2.5)"
     }
   }
 }
