@@ -6,6 +6,10 @@ import { CommandKind } from "@rastai/proto";
 
 /** @typedef {import("@rastai/proto").CommandDescriptor} CommandDescriptor */
 
+// The schema keyword the daemon writes on a credential field (contracts 5.1). Copy-as reads it, so a new secret
+// argument is left out without a change here.
+const SECRET_MARK = "x-rastai-secret";
+
 /** @type {Object<string, string>} keyed by the CommandKind value, as text */
 const KIND_WORDS = {
   [String(CommandKind.SYNC)]: "Runs now",
@@ -49,6 +53,16 @@ export function argumentNames(argumentsSchemaJson) {
 export function requiredArgumentNames(argumentsSchemaJson) {
   const schema = parseSchema(argumentsSchemaJson);
   return schema.required.filter((/** @type {string} */ name) => Object.hasOwn(schema.properties, name));
+}
+
+/**
+ * The names of the arguments the schema marks secret: a credential passed once, which copy-as leaves out.
+ * @param {string} argumentsSchemaJson
+ * @returns {string[]}
+ */
+export function secretArgumentNames(argumentsSchemaJson) {
+  const properties = parseSchema(argumentsSchemaJson).properties;
+  return Object.keys(properties).filter((name) => properties[name]?.[SECRET_MARK] === true);
 }
 
 /**

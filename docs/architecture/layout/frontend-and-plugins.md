@@ -449,6 +449,8 @@ JS      await client.execute("eval.test", { suite: "evals/facts.rrseval", model:
 MCP     {"name": "eval__test", "arguments": {"suite": "evals/facts.rrseval", "model": "ckpt:ckpt_01JA..."}}
 ```
 
+A secret argument (the `x-rastai-secret` mark of its schema, contracts 5.1) is left out of all four lines, in `copyAsFormats`, the one place the UI writes a call: the copied call has no key for it, and no placeholder, because a placeholder pasted into `secret.set` would be stored as the value. The palette's detail pane shows the same lines.
+
 The exact CLI flag syntax belongs to `rastai-cli`'s generated verbs. Both sides read the golden file `fixtures/command-golden/copy-as.json`, so they can't drift. `rastai.connect()` is the Python SDK client (contracts §15.2). The JavaScript line uses a `DaemonClient` from `connectToDaemon` with a bearer credential (2.11); it works with any `CommandExecutor`.
 
 What's persisted: nothing new. Descriptors live in the daemon's registry, keybindings in `<config>/keybindings.json`, recent entries in localStorage (losing them only changes the ranking).

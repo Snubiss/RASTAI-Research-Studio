@@ -3,6 +3,8 @@
 // golden file against them, so the UI, the CLI's parser and the naming rules can't drift apart. Pure, so it is tested
 // in Node.
 
+import { secretArgumentNames } from "./command-index.js";
+
 // The CLI words of an id are its segments with "_" written as "-"; the MCP tool name writes each "." as "__".
 const ID_SEPARATOR = ".";
 const CLI_PREFIX = "rastai";
@@ -67,18 +69,42 @@ export function formatMcp(commandId, args) {
 }
 
 /**
- * The four formats of one call, keyed by the names the palette shows (cli, python, javascript, mcp).
+ * The four formats of one call, keyed by the names the palette shows (cli, python, javascript, mcp). This is the one
+ * place a call is written for the UI, so the secret arguments are left out here, in every format, before any of them
+ * is written.
  * @param {string} commandId
  * @param {CallArguments} args
+ * @param {string} argumentsSchemaJson   the command's arguments_schema_json, which marks the secret fields; "" when none
  * @returns {Object<string, string>}
  */
-export function copyAsFormats(commandId, args) {
+export function copyAsFormats(commandId, args, argumentsSchemaJson) {
+  const shown = withoutSecrets(args, argumentsSchemaJson);
   return {
-    cli: formatCli(commandId, args),
-    python: formatPython(commandId, args),
-    javascript: formatJavaScript(commandId, args),
-    mcp: formatMcp(commandId, args),
+    cli: formatCli(commandId, shown),
+    python: formatPython(commandId, shown),
+    javascript: formatJavaScript(commandId, shown),
+    mcp: formatMcp(commandId, shown),
   };
+}
+
+/**
+ * The arguments without the secret ones. A placeholder would not do: pasted into a call, "<secret>" would be stored as
+ * the credential (secret.set would keep that text as the value). Left out, the copied call is missing the argument and
+ * the daemon refuses it instead.
+ * @param {CallArguments} args
+ * @param {string} argumentsSchemaJson
+ * @returns {CallArguments}
+ */
+function withoutSecrets(args, argumentsSchemaJson) {
+  const secretNames = secretArgumentNames(argumentsSchemaJson);
+  /** @type {CallArguments} */
+  const shown = {};
+  for (const [name, value] of Object.entries(args)) {
+    if (!secretNames.includes(name)) {
+      shown[name] = value;
+    }
+  }
+  return shown;
 }
 
 /**

@@ -10,11 +10,25 @@ import { copyAsFormats, formatCli, formatJavaScript, formatMcp, formatPython } f
 
 const GOLDEN_PATH = new URL("../../../../fixtures/command-golden/copy-as.json", import.meta.url);
 const golden = JSON.parse(readFileSync(GOLDEN_PATH, "utf8"));
+const COMMAND_SCHEMAS = new URL("../../../../schemas/commands/", import.meta.url);
+// A value that appears nowhere else, so finding it in a copied line means the secret leaked.
+const TYPED_SECRET = "hf_live_TYPED_SECRET_31415";
+
+/**
+ * The arguments schema of a checked-in command schema, as the daemon sends it in arguments_schema_json.
+ * @param {string} commandId
+ * @returns {string}
+ */
+function argumentsSchemaJson(commandId) {
+  const file = new URL(`rastai.command.${commandId}/1.json`, COMMAND_SCHEMAS);
+  return JSON.stringify(JSON.parse(readFileSync(file, "utf8")).$defs.arguments);
+}
 
 describe("copy as, against the golden file", () => {
   for (const example of golden.examples) {
     test(`${example.command_id} is written as the golden file has it`, () => {
-      const formats = copyAsFormats(example.command_id, example.arguments);
+      // The golden commands have no secret argument, so no schema is read for them.
+      const formats = copyAsFormats(example.command_id, example.arguments, "");
       expect(formats.cli).toBe(example.cli);
       expect(formats.python).toBe(example.python);
       expect(formats.javascript).toBe(example.javascript);
@@ -48,5 +62,45 @@ describe("the rules behind the golden lines", () => {
 
   test("the MCP name writes each dot as two underscores", () => {
     expect(JSON.parse(formatMcp("token.login_code.create", {})).name).toBe("token__login_code__create");
+  });
+});
+
+describe("secret arguments are left out, in every format", () => {
+  test("secret.set never copies the typed value, and keeps its name", () => {
+    const formats = copyAsFormats(
+      "secret.set",
+      { name: "hf_token", value: TYPED_SECRET },
+      argumentsSchemaJson("secret.set"),
+    );
+    for (const text of Object.values(formats)) {
+      expect(text).not.toContain(TYPED_SECRET);
+    }
+    expect(formats.cli).toBe("rastai secret set --name hf_token");
+    expect(formats.python).toBe('rastai.connect().execute("secret.set", {"name": "hf_token"})');
+    expect(formats.javascript).toBe('await client.execute("secret.set", { name: "hf_token" })');
+    expect(JSON.parse(formats.mcp)).toEqual({ name: "secret__set", arguments: { name: "hf_token" } });
+  });
+
+  test("hf.login never copies the typed token", () => {
+    const formats = copyAsFormats("hf.login", { token: TYPED_SECRET }, argumentsSchemaJson("hf.login"));
+    for (const text of Object.values(formats)) {
+      expect(text).not.toContain(TYPED_SECRET);
+    }
+    expect(formats.cli).toBe("rastai hf login");
+    expect(formats.python).toBe('rastai.connect().execute("hf.login", {})');
+    expect(JSON.parse(formats.mcp)).toEqual({ name: "hf__login", arguments: {} });
+  });
+
+  test("a secret that is not typed yet leaves no key behind", () => {
+    const formats = copyAsFormats("hf.login", {}, argumentsSchemaJson("hf.login"));
+    expect(formats.cli).toBe("rastai hf login");
+    expect(formats.javascript).toBe('await client.execute("hf.login", {})');
+  });
+
+  test("the marking in the schema decides which arguments are left out, not a list of names", () => {
+    const schema = JSON.stringify({
+      properties: { note: { type: "string", "x-rastai-secret": true }, name: { type: "string" } },
+    });
+    expect(copyAsFormats("x.y", { note: TYPED_SECRET, name: "n" }, schema).cli).toBe("rastai x y --name n");
   });
 });

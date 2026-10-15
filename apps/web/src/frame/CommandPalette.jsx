@@ -131,7 +131,8 @@ export function CommandPalette() {
    */
   async function copySelected(format, doneText) {
     if (selected && !selected.isView) {
-      await copyText(copyAsFormats(selected.id, argumentsOf(selected))[format], doneText);
+      const formats = copyAsFormats(selected.id, argumentsOf(selected), selected.command.argumentsSchemaJson);
+      await copyText(formats[format], doneText);
     }
   }
 
