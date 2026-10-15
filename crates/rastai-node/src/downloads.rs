@@ -78,6 +78,8 @@ const HTTP_FOUND: u16 = 302;
 const HTTP_SEE_OTHER: u16 = 303;
 const HTTP_TEMPORARY_REDIRECT: u16 = 307;
 const HTTP_PERMANENT_REDIRECT: u16 = 308;
+/// How many readers `check_hub_answer` picks from: the file list, the Content-Range, the redirect and the plain id.
+const HUB_ANSWER_READERS: u8 = 4;
 const HTTP_UNAUTHORIZED: u16 = 401;
 const HTTP_FORBIDDEN: u16 = 403;
 const HTTP_NOT_FOUND: u16 = 404;
@@ -295,6 +297,70 @@ struct LfsJson {
     sha256: String,
     #[serde(default)]
     size: u64,
+}
+
+/// The readers of the Hub's and the CDN's answers, as one entry point for the fuzz target (contracts 12.5, ADR-0037).
+/// The first byte picks a reader and the rest is its input: a file list, a Content-Range value, a redirect's Location,
+/// or a name that becomes part of a path. Whatever arrives must never panic a reader; what a reader accepts must be
+/// safe to use, and a redirect from the production Hub never reaches loopback. Returns the first broken promise.
+pub fn check_hub_answer(input: &[u8]) -> Result<(), String> {
+    let Some((reader, body)) = input.split_first() else {
+        return Ok(());
+    };
+    let text = String::from_utf8_lossy(body);
+    match reader % HUB_ANSWER_READERS {
+        0 => check_listing_answer(body),
+        // The readers below return a value the caller checks; here only that they return at all matters.
+        1 => {
+            let _ = content_range_start(&text);
+            Ok(())
+        }
+        2 => check_location_answer(&text),
+        _ => {
+            let _ = is_plain_id(&text);
+            Ok(())
+        }
+    }
+}
+
+/// A file list the reader accepts names only safe files and plain ids, so each can become a path part.
+fn check_listing_answer(body: &[u8]) -> Result<(), String> {
+    let Ok(listing) = parse_listing(body) else {
+        return Ok(());
+    };
+    if !is_plain_id(&listing.commit) {
+        return Err(format!("accepted the commit {:?}", listing.commit));
+    }
+    for file in &listing.files {
+        if !hf_cache::is_safe_relative_name(&file.name) || !is_plain_id(&file.blob_name) {
+            return Err(format!("accepted the file {:?}", file.name));
+        }
+    }
+    Ok(())
+}
+
+/// A redirect from the production Hub that Rastai follows never names loopback, and its path starts at the root.
+fn check_location_answer(location: &str) -> Result<(), String> {
+    let access = HubAccess {
+        hub: production_hub(),
+        egress: None,
+        token: None,
+    };
+    let current = Route {
+        target: production_hub(),
+        path: "/".to_string(),
+        egress: None,
+    };
+    let Ok(route) = route_for_location(&access, &current, location) else {
+        return Ok(());
+    };
+    if matches!(route.target, HttpTarget::LoopbackHttp { .. }) {
+        return Err(format!("followed {location:?} to loopback"));
+    }
+    if !route.path.starts_with('/') {
+        return Err(format!("followed {location:?} to the path {:?}", route.path));
+    }
+    Ok(())
 }
 
 /// Downloads a model into the hub cache: lists it, checks the disk, then fetches each file under its lock and links
@@ -783,7 +849,8 @@ fn is_redirect(status: u16) -> bool {
 }
 
 /// The route a redirect names. A path alone stays on the same host; an absolute https URL goes to its host, with the CDN
-/// egress tag when that host isn't the Hub. An address Rastai doesn't follow is refused.
+/// egress tag when that host isn't the Hub. An address Rastai doesn't follow is refused as RRS-N3001, which the retry
+/// loop doesn't try again: the Hub would name the same address next time.
 fn route_for_location(access: &HubAccess, current: &Route, location: &str) -> Result<Route, NodeError> {
     if location.starts_with('/') {
         return Ok(Route {
@@ -793,10 +860,17 @@ fn route_for_location(access: &HubAccess, current: &Route, location: &str) -> Re
         });
     }
     let Some((target, path)) = absolute_location(location) else {
-        return Err(connection_refused(
-            "the Hub redirected to an address Rastai doesn't follow".to_string(),
-        ));
+        return Err(NodeError::UnsafeHubPath {
+            path: location.to_string(),
+        });
     };
+    // A plain-HTTP loopback address is the tests' fake Hub. A production Hub that names one could make the node fetch a
+    // local service and take its bytes as the file, so loopback is followed only when the Hub itself is loopback.
+    if matches!(target, HttpTarget::LoopbackHttp { .. }) && !matches!(access.hub, HttpTarget::LoopbackHttp { .. }) {
+        return Err(NodeError::UnsafeHubPath {
+            path: location.to_string(),
+        });
+    }
     let egress = if target == access.hub {
         access.egress.clone()
     } else {
@@ -1028,6 +1102,76 @@ fn cache_error(path: &Path, error: io::Error) -> NodeError {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn access_to(hub: HttpTarget) -> HubAccess {
+        HubAccess {
+            hub,
+            egress: None,
+            token: None,
+        }
+    }
+
+    fn route_at(target: HttpTarget) -> Route {
+        Route {
+            target,
+            path: "/first".to_string(),
+            egress: None,
+        }
+    }
+
+    /// A production Hub that redirects to a loopback address would make the node fetch a local service. The redirect is
+    /// refused, and the refusal is not retried.
+    #[test]
+    fn a_production_hub_never_follows_a_redirect_to_loopback() {
+        let access = access_to(production_hub());
+        let current = route_at(production_hub());
+        let error = route_for_location(&access, &current, "http://127.0.0.1:9/secret")
+            .err()
+            .unwrap();
+        assert!(matches!(error, NodeError::UnsafeHubPath { .. }), "{error:?}");
+        assert!(!is_interruption(&error));
+    }
+
+    /// The test fake is loopback itself, so its redirect to its loopback CDN is followed.
+    #[test]
+    fn a_loopback_hub_follows_a_redirect_to_loopback() {
+        let hub = HttpTarget::LoopbackHttp { port: 8000 };
+        let route = route_for_location(&access_to(hub.clone()), &route_at(hub), "http://127.0.0.1:8001/x").unwrap();
+        assert_eq!(route.target, HttpTarget::LoopbackHttp { port: 8001 });
+        assert_eq!(route.path, "/x");
+    }
+
+    /// An address that is neither a path nor https or loopback http is refused, and a refusal is never retried: the
+    /// Hub gives the same answer each time.
+    #[test]
+    fn an_address_rastai_doesnt_follow_is_refused_without_a_retry() {
+        let access = access_to(production_hub());
+        let current = route_at(production_hub());
+        let error = route_for_location(&access, &current, "ftp://files.example/model")
+            .err()
+            .unwrap();
+        assert!(matches!(error, NodeError::UnsafeHubPath { .. }), "{error:?}");
+        assert!(!is_interruption(&error));
+    }
+
+    /// The fuzz target's entry point accepts an honest file list and refuses nothing it should follow.
+    #[test]
+    fn the_hub_answer_check_passes_an_honest_listing_and_a_refused_redirect() {
+        let listing = br#"{"sha":"0123abcd","siblings":[{"rfilename":"config.json","blobId":"ab12"}]}"#;
+        let mut honest = vec![0u8];
+        honest.extend_from_slice(listing);
+        assert_eq!(check_hub_answer(&honest), Ok(()));
+        let mut loopback = vec![2u8];
+        loopback.extend_from_slice(b"http://127.0.0.1:9/secret");
+        assert_eq!(check_hub_answer(&loopback), Ok(()));
+    }
+
+    /// A dropped or stalled connection is still tried again.
+    #[test]
+    fn a_dropped_connection_is_still_retried() {
+        let error = connection_refused("reset by peer".to_string());
+        assert!(is_interruption(&error));
+    }
 
     #[test]
     fn each_wait_doubles_up_to_the_maximum() {

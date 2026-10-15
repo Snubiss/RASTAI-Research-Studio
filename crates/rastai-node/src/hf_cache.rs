@@ -164,6 +164,23 @@ fn create_symlink(_target: &Path, _link: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    /// A folder under the system temp directory, removed when the test ends, pass or fail.
+    struct TestFolder {
+        path: PathBuf,
+    }
+
+    impl Drop for TestFolder {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn test_folder(name: &str) -> TestFolder {
+        let path = std::env::temp_dir().join(format!("rastai-hf-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        TestFolder { path }
+    }
+
     #[test]
     fn repository_folders_follow_huggingface_hub() {
         assert_eq!(repo_folder_name("google/gemma-2b"), "models--google--gemma-2b");
@@ -200,8 +217,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn concurrent_links_of_one_file_all_succeed_and_leave_no_temporary_name() {
-        let folder = std::env::temp_dir().join(format!("rastai-hf-link-race-{}", std::process::id()));
-        let repo = folder.join("models--org--name");
+        let folder = test_folder("link-race");
+        let repo = folder.path.join("models--org--name");
         let blob_name = "etag1";
         std::thread::scope(|scope| {
             for _ in 0..8 {
@@ -219,7 +236,23 @@ mod tests {
         );
         let folder_entries = fs::read_dir(link.parent().unwrap()).unwrap().count();
         assert_eq!(folder_entries, 1, "no temporary link is left next to the snapshot");
-        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    /// `write_ref` writes under a temporary name and renames it, so once it returns the ref holds the commit and no
+    /// temporary name is left in the refs folder.
+    #[test]
+    fn a_written_ref_holds_the_commit_and_leaves_no_temporary_name() {
+        let folder = test_folder("write-ref");
+        let repo = folder.path.join("models--org--name");
+        write_ref(&repo, "main", "commit1").unwrap();
+        write_ref(&repo, "main", "commit2").unwrap();
+        assert_eq!(fs::read_to_string(ref_path(&repo, "main")).unwrap(), "commit2");
+        let refs_folder = ref_path(&repo, "main").parent().unwrap().to_path_buf();
+        let names: Vec<String> = fs::read_dir(&refs_folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["main".to_string()], "only the ref is in the refs folder");
     }
 
     #[test]

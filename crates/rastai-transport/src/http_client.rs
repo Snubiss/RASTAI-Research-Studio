@@ -33,6 +33,10 @@ use tokio_rustls::client::TlsStream;
 use crate::error::{TransportError, connection_failed};
 use crate::local_socket::{LocalStream, connect_local_socket};
 
+/// The header whose value is a secret token; its value never shows in a log form of a request.
+const AUTHORIZATION_HEADER: &str = "authorization";
+/// What a log form of a request shows in place of a secret header's value.
+const REDACTED_VALUE: &str = "<redacted>";
 /// Loopback targets are always this address: this crate never talks plain HTTP to another machine (section 4.6).
 const LOOPBACK_ADDRESS: &str = "127.0.0.1";
 /// The Host header over a local socket. The daemon's request gate accepts any loopback host name (contracts 3.3).
@@ -75,7 +79,7 @@ pub struct EgressReport {
     pub subject_id: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HttpRequest {
     pub method: String,
     pub target: HttpTarget,
@@ -88,6 +92,35 @@ pub struct HttpRequest {
     pub timeout_ms: u64,
     /// Required for an Https target (RRS-N3008 without it). Local targets ignore it.
     pub egress: Option<EgressTag>,
+}
+
+/// A request's log form never shows an Authorization value: the token is a secret, and a request is printed by a
+/// debug log or an error's reason.
+impl std::fmt::Debug for HttpRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let headers: Vec<(&str, &str)> = self
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                let shown = if name.eq_ignore_ascii_case(AUTHORIZATION_HEADER) {
+                    REDACTED_VALUE
+                } else {
+                    value.as_str()
+                };
+                (name.as_str(), shown)
+            })
+            .collect();
+        formatter
+            .debug_struct("HttpRequest")
+            .field("method", &self.method)
+            .field("target", &self.target)
+            .field("path", &self.path)
+            .field("headers", &headers)
+            .field("body_bytes", &self.body.len())
+            .field("timeout_ms", &self.timeout_ms)
+            .field("egress", &self.egress)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,11 +405,12 @@ fn build_http_request(request: &HttpRequest, host: &str) -> Result<Request<Reque
         .parse::<Uri>()
         .map_err(|_| connection_failed(format!("invalid request path {:?}", request.path)))?;
     let headers = http_request.headers_mut();
-    headers.insert(HOST, header_value(host)?);
+    headers.insert(HOST, header_value("Host", host)?);
     for (name, value) in &request.headers {
         let header_name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| connection_failed(format!("invalid header name {name:?}")))?;
-        let value = header_value(value)?;
+        // The value itself stays out of the error: an Authorization value is a token.
+        let value = header_value(name, value)?;
         if header_name == HOST {
             headers.insert(header_name, value);
         } else {
@@ -386,8 +420,8 @@ fn build_http_request(request: &HttpRequest, host: &str) -> Result<Request<Reque
     Ok(http_request)
 }
 
-fn header_value(value: &str) -> Result<HeaderValue, TransportError> {
-    HeaderValue::from_str(value).map_err(|_| connection_failed(format!("invalid header value {value:?}")))
+fn header_value(name: &str, value: &str) -> Result<HeaderValue, TransportError> {
+    HeaderValue::from_str(value).map_err(|_| connection_failed(format!("invalid value for the {name} header")))
 }
 
 fn stream_from_response(response: Response<Incoming>, timeout_ms: u64, egress: Option<EgressReporting>) -> HttpStream {
@@ -508,6 +542,24 @@ impl Body for RequestBody {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// A bad token must not reach the error or the log form of the request: both name only the header.
+    #[test]
+    fn a_rejected_authorization_value_never_reaches_an_error_or_a_log() {
+        let token = "hf_secret\ntoken";
+        let request = HttpRequest {
+            headers: vec![("Authorization".to_string(), format!("Bearer {token}"))],
+            ..request("GET", "/api/whoami", Vec::new())
+        };
+        let error = match build_http_request(&request, "huggingface.co") {
+            Err(error) => error,
+            Ok(_) => panic!("a value with a line break must be refused"),
+        };
+        assert!(!format!("{error:?}").contains("hf_secret"), "{error:?}");
+        assert!(format!("{error:?}").contains("Authorization"), "{error:?}");
+        assert!(!format!("{request:?}").contains("hf_secret"), "{request:?}");
+        assert!(format!("{request:?}").contains(REDACTED_VALUE), "{request:?}");
+    }
 
     fn request(method: &str, path: &str, headers: Vec<(String, String)>) -> HttpRequest {
         HttpRequest {

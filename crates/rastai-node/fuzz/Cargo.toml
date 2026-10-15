@@ -1,0 +1,31 @@
+# The cargo-fuzz crate for rastai-node (contracts 12.5, ADR-0037): one target for the in-house readers of the Hugging
+# Face Hub's and the CDN's answers (`hub_answer`): the file list whose names become cache paths, the Content-Range of a
+# resumed file, and the Location of a redirect. Those bytes come from the network, so they are untrusted. It is its own
+# workspace (the root Cargo.toml excludes this folder) because it builds only on the nightly toolchain `just fuzz` pins.
+# Run the target with: just fuzz rastai-node hub_answer 60
+[package]
+name = "rastai-node-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Pinned exactly, like every external crate (root Cargo.toml); a dev dependency of the fuzz crates only.
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.rastai-node]
+path = ".."
+
+# An independent workspace for the fuzz targets.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "hub_answer"
+path = "fuzz_targets/hub_answer.rs"
+test = false
+doc = false
+bench = false
