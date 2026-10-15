@@ -1117,7 +1117,7 @@ Not obvious:
 - **Identity at zero:** a hooked point at strength 0 leaves the logits unchanged (Python layout `test_interventions.py`).
 - **Sampling inside the graph:** temperature, top-k, top-p and the repetition penalty live in GPU buffers; the penalty keeps a per-slot token-count vector. The session's `torch.Generator` is registered with the graph, so a seed replays the same tokens.
 - **MoE:** single-token decode gathers the k chosen experts' weights by index, which keeps the shape static (§17). The chosen experts and gate weights go into the packet as `LivePacket.expert_choices`.
-- **MLA:** attention patterns are computed from the compressed keys in the absorbed form. `blocks.<i>.latent_cache` is an observation point for zoom (6.3).
+- **MLA:** attention patterns are computed from the compressed keys in the absorbed form. `blocks.<i>.attention.latent_cache` is an observation point for zoom (6.3).
 - **The CPU side** turns the float packet into `TokenEvent{token_id, logprob, top_alternatives}` and `LivePacket`. Then it checks the stop IDs, `max_new_tokens`, and a cancel flag set by `chat.stop` or a dropped stream, so cancellation takes effect within one token.
 
 ```python
@@ -1387,8 +1387,8 @@ Not obvious:
 - **`chat.tensor.fetch`** is the only path to `FetchTensor`. It writes the result as a safetensors blob, because a command result is JSON and a tensor isn't.
 - **Recompute, don't store.** Full activations are never kept during chat. Prefill runs at ~36k tok/s (spike 04), so recomputing up to the range end is cheaper than storing activations for every token.
 - **Points:** any observation point from contracts §5.3, such as:
-  - `blocks.<i>.attention_pattern` (the full eager pattern for the range);
-  - `blocks.<i>.residual_out`, `blocks.<i>.router_logits`, `blocks.<i>.latent_cache`.
+  - `blocks.<i>.attention.attention_pattern` (the full eager pattern for the range);
+  - `blocks.<i>.residual_out`, `blocks.<i>.moe.router_logits`, `blocks.<i>.attention.latent_cache`.
 - **The 3D data-flow view** draws one value per (layer, token) from packets or the summary when zoomed out. Zoomed in on a window of tokens, it asks for heads and top features in that window, and Psychology answers with `psychology.tensor.fetch`. This is the level-of-detail rule of §9 (frontend layout §6.2).
 - **The 64 MiB cap** (`TENSOR_FETCH_CAP_BYTES`) applies locally too, so local and remote behave the same.
 
@@ -1570,7 +1570,7 @@ Not obvious:
 - **Points in v1:**
   - steering and feature edits at `blocks.<i>.residual_out`;
   - ablation per head of `blocks.<i>` attention;
-  - expert overrides at `blocks.<i>.router_logits`.
+  - expert overrides at `blocks.<i>.moe.router_logits`.
   - Anything else gives `RRS-L3001`.
 - **Cost:** the first intervention at a new point recaptures that slot's graph once (5.2). After that, every strength change is a buffer write.
 - **During generation** a change applies from the next token, because the graph reads the buffers every step. The row is then flagged as changed mid-answer, and its replay is labeled approximate (2.2).
